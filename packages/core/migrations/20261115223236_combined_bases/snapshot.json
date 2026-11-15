@@ -3,8 +3,7 @@
   "dialect": "sqlite",
   "id": "7c376719-def9-45da-a3cd-f234e07afeb2",
   "prevIds": [
-    "585f87ed-464d-46f0-91b8-f907e0c8a43e",
-    "d5d7390b-0166-418d-81cf-26d9fb81eb5f"
+    "d2d1487b-851d-49b0-9073-10162f2dd38e"
   ],
   "ddl": [
     {
@@ -1808,6 +1807,16 @@
       "notNull": true,
       "autoincrement": false,
       "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "model_prices",
+      "name": "above_prompt_tokens",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
       "generated": null,
       "entityType": "columns"
     },
@@ -4355,7 +4364,8 @@
       "name": "model_prices_pk",
       "columns": [
         "model",
-        "valid_from"
+        "valid_from",
+        "above_prompt_tokens"
       ],
       "nameExplicit": false,
       "entityType": "pks"

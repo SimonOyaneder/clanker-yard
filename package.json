@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint . && npm run depcheck",
+    "lint": "eslint . && npm run depcheck && npm run -s db:check -w @clanker/core",
     "test": "vitest run",
     "depcheck": "depcruise apps packages --config .dependency-cruiser.mjs",
     "e2e": "npm run e2e -w @clanker/desktop"

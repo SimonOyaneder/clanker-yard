@@ -61,7 +61,7 @@ packages/testkit  runtime fake, fixtures, repos git temporales
 
 ## Base de datos
 
-El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run db:generate -w @clanker/core` deja una carpeta nueva en `packages/core/migrations/` (se commitea). Para triggers u otro SQL que drizzle-kit no modela: `npx drizzle-kit generate --custom --name <x>` desde `packages/core` y escribe el SQL a mano. No edites una migración ya mergeada.
+El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run db:generate -w @clanker/core` deja una carpeta nueva en `packages/core/migrations/` (se commitea). Para triggers u otro SQL que drizzle-kit no modela: `npx drizzle-kit generate --custom --name <x>` desde `packages/core` y escribe el SQL a mano. No edites una migración ya mergeada. Una migración nueva cuelga de la última de `main` (`prevIds` de su `snapshot.json`): si al rebasear entró otra, borra tu carpeta y vuelve a correr `db:generate`, nunca parches `prevIds` a mano; `npm run lint` corre `drizzle-kit check` (`db:check`) y falla con dos migraciones en conflicto.
 
 Lo que ya define `@clanker/api` (ids con prefijo, `EventType`, `Origin`, `SubjectRef`, `Event`, `EventFilter`) se importa de ahí, no se redeclara en el core: en el schema con `.$type<...>()`, que no cambia la migración.
 

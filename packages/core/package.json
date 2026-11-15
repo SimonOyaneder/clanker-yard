@@ -9,6 +9,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
     "build": "node scripts/build.ts"
   },
   "dependencies": {
