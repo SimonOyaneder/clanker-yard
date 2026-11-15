@@ -34,8 +34,8 @@ export interface Store {
    */
   tx<T>(fn: (tx: Tx) => T): T;
   events: {
-    /** Eventos con `seq` mayor que `seq`, en orden. */
-    since(seq: number, filter?: EventFilter): Event[];
+    /** Eventos con `seq` mayor que `seq`, en orden; con `limit`, solo los primeros. */
+    since(seq: number, filter?: EventFilter, limit?: number): Event[];
     /** Llama a `listener` por cada evento confirmado que cumpla el filtro. Devuelve cómo cancelar. */
     subscribe(listener: (event: Event) => void, filter?: EventFilter): () => void;
   };
@@ -142,8 +142,8 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
       return result;
     },
     events: {
-      since(seq, filter = {}) {
-        const rows = db
+      since(seq, filter = {}, limit) {
+        const query = db
           .select()
           .from(events)
           .where(
@@ -154,9 +154,8 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
               filter.types === undefined ? undefined : inArray(events.type, filter.types),
             ),
           )
-          .orderBy(asc(events.seq))
-          .all();
-        return rows.map(toEvent);
+          .orderBy(asc(events.seq));
+        return (limit === undefined ? query : query.limit(limit)).all().map(toEvent);
       },
       subscribe(listener, filter = {}) {
         const entry = { listener, filter };

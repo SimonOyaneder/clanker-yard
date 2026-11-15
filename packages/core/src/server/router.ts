@@ -66,7 +66,7 @@ export function createRouter(deps: RouterDeps) {
     },
     events: {
       list: os.events.list.handler(({ input }) =>
-        store.events.since(input.after, input.filter).slice(0, input.limit),
+        store.events.since(input.after, input.filter, input.limit),
       ),
       stream: os.events.stream.handler(async function* ({ input, lastEventId, signal }) {
         for await (const event of eventsAfter(
