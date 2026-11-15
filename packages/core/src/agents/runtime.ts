@@ -142,7 +142,10 @@ export interface RunResult {
   status: RunStatus;
   /** El mensaje final del agente. */
   text: string;
-  /** El reporte, sin validar. */
+  /**
+   * El reporte, sin validar. Con `error_max_budget_usd`, solo si el agente ya lo había entregado
+   * cuando cayó el tope: el core lo valida y, si cumple, lo usa.
+   */
   structured?: unknown;
   usage: Usage;
   /** Con `error`, `login_expired` o `quota_exhausted`: qué pasó, accionable. */

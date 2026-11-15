@@ -12,6 +12,8 @@ export interface TurnTokens {
   tokensCacheWrite1h: number;
 }
 
+const ZERO_TOKENS: TurnTokens = { tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0, tokensCacheWrite1h: 0 };
+
 const TOKENS_PER_PRICE_UNIT = 1_000_000;
 
 /**
@@ -52,4 +54,24 @@ export function estimateCostMicros(
     write5m * price.cacheWrite5m +
     tokens.tokensCacheWrite1h * price.cacheWrite1h;
   return Math.round(total / TOKENS_PER_PRICE_UNIT);
+}
+
+/** Lo que una sesión de Claude Code escribe en la caché antes de su primera respuesta (herramientas, prompt de sistema y contexto): 30 a 50k tokens. */
+export const PREFIX_TOKENS = 50_000;
+
+/**
+ * El tope de gasto por debajo del cual una sesión no llega a entregar un reporte: escribir el prefijo
+ * en la caché de `cacheTtl`. `undefined` si el modelo no tiene precio.
+ */
+export function minUsefulBudgetMicros(
+  db: StoreDb,
+  model: string,
+  ts: number,
+  cacheTtl: "5m" | "1h",
+): number | undefined {
+  return estimateCostMicros(db, model, ts, {
+    ...ZERO_TOKENS,
+    tokensCacheWrite: PREFIX_TOKENS,
+    tokensCacheWrite1h: cacheTtl === "1h" ? PREFIX_TOKENS : 0,
+  });
 }

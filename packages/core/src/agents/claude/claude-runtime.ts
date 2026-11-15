@@ -29,6 +29,9 @@ import { credentialMismatch, noteSignals, outcomeOf, type Signals } from "./outc
 import { skillDirs, watchDirs } from "./skills-watch";
 import { transcriptFile } from "./transcript";
 
+/** La herramienta con la que Claude Code entrega el reporte cuando se le pide `outputFormat`. */
+const STRUCTURED_OUTPUT_TOOL = "StructuredOutput";
+
 /** Lo único que el adapter usa de `query`: los tests inyectan uno falso. Sin `reloadSkills` no se recargan skills a media sesión. */
 export type QueryFn = (params: {
   prompt: string;
@@ -215,6 +218,8 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     const tally = emptyUsage(credentials);
     const signals: Signals = { loginFailed: false };
     const toolNames = new Map<string, string>();
+    // El último reporte que el agente intentó entregar: si el tope de gasto cae justo después, el `result` no lo trae.
+    let deliveredReport: unknown;
     let turn: { id: string; model: string; usage: SDKUsage } | undefined;
     let firstToken = false;
     const counted = new Set<string>();
@@ -282,6 +287,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
             events.push({ type: "text", text: block.text });
           } else if (block.type === "tool_use") {
             toolNames.set(block.id, block.name);
+            if (block.name === STRUCTURED_OUTPUT_TOOL) deliveredReport = block.input;
             const detail = detailOf(block.input);
             events.push({
               type: "tool_start",
@@ -334,7 +340,9 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         text: final?.subtype === "success" ? final.result : "",
         ...(final?.subtype === "success" && final.structured_output !== undefined
           ? { structured: final.structured_output }
-          : {}),
+          : outcome.status === "error_max_budget_usd" && deliveredReport !== undefined
+            ? { structured: deliveredReport }
+            : {}),
         usage: final === undefined ? tally : spentThisRun(final, previous, tally, credentials),
         ...(outcome.message === undefined ? {} : { message: outcome.message }),
         ...(outcome.resetsAt === undefined ? {} : { resetsAt: outcome.resetsAt }),

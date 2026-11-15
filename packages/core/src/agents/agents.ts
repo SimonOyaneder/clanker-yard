@@ -19,7 +19,7 @@ import { newId } from "../store/conventions";
 import { agentSessions, agentTurns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import { createContextResolver, type ContextResolver } from "./context";
-import { estimateCostMicros, type TurnTokens } from "./pricing";
+import { estimateCostMicros, minUsefulBudgetMicros, PREFIX_TOKENS, type TurnTokens } from "./pricing";
 import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
 
 /** Una diferencia mayor a este porcentaje entre la suma de los turnos y el total del runtime queda como evento `error`. */
@@ -488,7 +488,9 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     }
     lastActivity.delete(sessionId);
 
-    if (result.status !== "success") {
+    // Un tope de gasto que cae justo después de entregar el reporte no lo invalida: si cumple el esquema, se usa.
+    const capped = result.status === "error_max_budget_usd" ? validateReport(c.mode, result.structured) : undefined;
+    if (result.status !== "success" && !capped?.ok) {
       const message = result.message ?? `El runtime terminó con ${result.status}.`;
       end(c, sessionId, result.status, result.usage, turns, { error: message });
       return {
@@ -502,13 +504,46 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       };
     }
 
-    const checked = validateReport(c.mode, result.structured);
+    const checked = capped ?? validateReport(c.mode, result.structured);
     if (!checked.ok) {
       end(c, sessionId, "report_invalid", result.usage, turns, { error: checked.problem });
       return { kind: "invalid", sessionId, problem: checked.problem };
     }
+    if (capped) {
+      store.tx((tx) =>
+        tx.emit({
+          type: "error",
+          origin: "core",
+          ...scope(c),
+          payload: {
+            scope: "agent.budget",
+            message: `La sesión ${sessionId} cruzó el tope de USD ${c.settings.maxBudgetUsd} del rol "${c.roleSlug}" después de entregar su reporte: se usó el reporte. Sube el tope si pasa seguido.`,
+          },
+        }),
+      );
+    }
     end(c, sessionId, "success", result.usage, turns, { report: checked.report });
     return { kind: "done", result: { status: "success", sessionId, report: checked.report } };
+  }
+
+  /**
+   * Un tope por rol menor que lo que cuesta escribir el prefijo en la caché corta a la sesión antes de
+   * que responda: se avisa al lanzarla (una vez, no en cada retoma) para que el perfil lo suba.
+   */
+  function warnIfBudgetBelowFloor(tx: Tx, c: Conversation): void {
+    const cap = c.settings.maxBudgetUsd;
+    if (cap === undefined) return;
+    const floorMicros = minUsefulBudgetMicros(tx.db, c.model, now(), c.settings.cacheTtl ?? "5m");
+    if (floorMicros === undefined || cap * 1_000_000 >= floorMicros) return;
+    tx.emit({
+      type: "error",
+      origin: "core",
+      ...scope(c),
+      payload: {
+        scope: "agent.budget",
+        message: `El tope de USD ${cap} del rol "${c.roleSlug}" (modelo ${c.model}) es menor que el mínimo útil de USD ${(floorMicros / 1_000_000).toFixed(2)}: escribir el prefijo en la caché (${PREFIX_TOKENS / 1000}k tokens) ya lo gasta y la sesión corta sin reporte. Súbelo en el perfil.`,
+      },
+    });
   }
 
   /** Crea la fila (o reabre la existente si el runtime retoma con el mismo id) y emite `agent.started`. */
@@ -554,6 +589,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
         ...scope(c),
         payload: { sessionId: id, role: c.roleSlug, model: c.model },
       });
+      if (resumedFrom === undefined) warnIfBudgetBelowFloor(tx, c);
       return id;
     });
   }

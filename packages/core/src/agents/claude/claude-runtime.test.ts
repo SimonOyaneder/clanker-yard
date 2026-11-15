@@ -525,6 +525,20 @@ describe("estados de fallo", () => {
     expect(turns.usage.costMicros).toBe(100_000);
   });
 
+  test("un tope de gasto justo después de entregar el reporte trae el reporte entregado", async () => {
+    const budget = message({ type: "result", subtype: "error_max_budget_usd", is_error: true, errors: [], total_cost_usd: 0.2, modelUsage: {} });
+    const delivered = { outcome: "done", summary: "ok", payload: {} };
+    const withReport = await resultOf([
+      init(),
+      assistant("m1", [{ type: "tool_use", id: "t1", name: "StructuredOutput", input: delivered }]),
+      budget,
+    ]);
+    const without = await resultOf([init(), assistant("m1", [{ type: "tool_use", id: "t1", name: "Read", input: {} }]), budget]);
+
+    expect(withReport).toMatchObject({ status: "error_max_budget_usd", structured: delivered });
+    expect(without).not.toHaveProperty("structured");
+  });
+
   test("otro error conserva el texto del SDK", async () => {
     const result = await resultOf([
       init(),

@@ -321,6 +321,63 @@ describe("run", () => {
     expect(calls.starts[0]).toMatchObject({ maxTurns: 40, maxBudgetUsd: 0.5 });
   });
 
+  describe("tope de gasto", () => {
+    const eventsOf = (store: Store, scope: string) =>
+      store.events.since(0).filter((e) => e.type === "error" && e.payload.scope === scope);
+
+    test("un reporte entregado antes de cruzar el tope se usa y deja un aviso", async () => {
+      const { store, agents } = setup([
+        { result: { status: "error_max_budget_usd", message: "El agente llegó al tope de gasto.", structured: validReport } },
+      ]);
+
+      const result = await agents.run(request());
+
+      expect(result).toMatchObject({ status: "success", report: validReport });
+      expect(store.db.select().from(agentSessions).get()).toMatchObject({ status: "success", report: validReport, error: null });
+      expect(eventsOf(store, "agent.budget")).toMatchObject([
+        { payload: { message: expect.stringContaining("después de entregar su reporte") } },
+      ]);
+    });
+
+    test("sin reporte, o con uno que no cumple el esquema, sigue siendo error_max_budget_usd", async () => {
+      const bare = setup([{ result: { status: "error_max_budget_usd", message: "tope" } }]);
+      expect(await bare.agents.run(request())).toMatchObject({ status: "error_max_budget_usd", message: "tope" });
+
+      const invalid = setup([{ result: { status: "error_max_budget_usd", message: "tope", structured: { outcome: "nope" } } }]);
+      expect(await invalid.agents.run(request())).toMatchObject({ status: "error_max_budget_usd", message: "tope" });
+      expect(eventsOf(invalid.store, "agent.budget")).toEqual([]);
+    });
+
+    test("un tope menor que escribir el prefijo en la caché avisa al lanzar, una sola vez por run", async () => {
+      const { store, defs, agents } = setup([
+        { result: { structured: validReport } },
+        { result: { structured: { outcome: "done", summary: "ok", payload: { done: true } } } },
+      ]);
+      defs.save({
+        kind: "profile",
+        slug: "default",
+        scope: "user",
+        body: { roles: { analyst: { model: "sonnet", budget: { maxUsd: 0.05 } } } },
+        source: "ui",
+      });
+
+      const first = await agents.run(request());
+      await agents.resume({ sessionId: first.sessionId, profile: "default", mode: "followup", brief: brief("followup") });
+
+      expect(eventsOf(store, "agent.budget")).toMatchObject([
+        { payload: { message: expect.stringMatching(/USD 0\.05.*"analyst".*sonnet.*mínimo útil de USD 0\.13/) } },
+      ]);
+    });
+
+    test("un tope suficiente no avisa", async () => {
+      const { store, agents } = setup([{ result: { structured: validReport } }]);
+
+      await agents.run(request());
+
+      expect(eventsOf(store, "agent.budget")).toEqual([]);
+    });
+  });
+
   test("falla con un mensaje accionable si falta el rol, el modo, el perfil o el payload es inválido", async () => {
     const { agents } = setup([]);
 
