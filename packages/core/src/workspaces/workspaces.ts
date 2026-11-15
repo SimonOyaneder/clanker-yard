@@ -33,6 +33,8 @@ export interface RepoConfig {
   remote?: {
     /** `https://github.com/<owner>/<repo>.git`: explícita, aunque `origin` sea SSH. */
     url: string;
+    /** `owner/repo` en GitHub: donde `pr.publish` abre el PR. */
+    repo: string;
     /** La cuenta de GitHub conectada cuyo token autentica. */
     account: string;
   };
@@ -125,7 +127,7 @@ export interface Workspaces {
    * revocada. Con `council` (el PR tuvo threads `[clanker-council]`) el push nunca fuerza: si el
    * `remote_sha` no es ancestro de `HEAD` lanza sin pushear.
    */
-  push(lease: WorkspaceLease, opts?: { council?: boolean }): Promise<PushOutcome>;
+  push(lease: WorkspaceRef, opts?: { council?: boolean }): Promise<PushOutcome>;
   /** Trae las branches del remoto a `refs/remotes/origin/*` con el mismo mecanismo que `push`. */
   fetch(repo: string): Promise<FetchOutcome>;
   /**
@@ -527,7 +529,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return { remote, ...target };
   }
 
-  async function push(lease: WorkspaceLease, { council = false } = {}): Promise<PushOutcome> {
+  async function push(lease: WorkspaceRef, { council = false } = {}): Promise<PushOutcome> {
     validate(lease);
     const row = store.db.select().from(workspaces).where(eq(workspaces.id, lease.workspaceId)).get()!;
     const { remote, url, account } = remoteOf(row.repoId);

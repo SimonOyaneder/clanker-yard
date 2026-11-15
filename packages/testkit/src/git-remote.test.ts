@@ -141,7 +141,7 @@ async function setup(password = TOKEN, branches: Parameters<typeof tempGitRepo>[
     repos: () => ({
       path: repo.dir,
       defaultBranch: "main",
-      remote: { url: server!.url, account: ACCOUNT },
+      remote: { url: server!.url, repo: "octocat/secret-project", account: ACCOUNT },
     }),
     identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
     remote: createGitRemote({ askpass, connections }),

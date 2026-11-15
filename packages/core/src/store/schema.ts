@@ -685,3 +685,30 @@ export const decisions = sqliteTable(
     check("decisions_resolution_json", sql`${t.resolution} IS NULL OR json_valid(${t.resolution})`),
   ],
 );
+
+export const PR_STATES = ["open", "closed", "merged"] as const;
+
+/**
+ * Un PR de GitHub que el core conoce (`docs/design.html#d-data`). Hoy solo lo escribe `pr.publish`; las
+ * columnas que lee el polling (`review`, `ci`, `mergeable`, `signals`...) llegan con Watch. `owned` es
+ * 1 si lo abrió el sistema: solo esos se restackean, rebasean o responden. `repo_id` e `issue_id` no
+ * tienen FK, como `runs.subject_id`. `state` es el de GitHub y `is_draft` va aparte.
+ */
+export const pullRequests = sqliteTable(
+  "pull_requests",
+  {
+    id: text().primaryKey(),
+    repoId: text("repo_id").notNull(),
+    number: integer().notNull(),
+    nodeId: text("node_id").notNull(),
+    headRef: text("head_ref").notNull(),
+    baseRef: text("base_ref").notNull(),
+    headSha: text("head_sha").notNull(),
+    state: text({ enum: PR_STATES }).notNull(),
+    isDraft: integer("is_draft", { mode: "boolean" }).notNull(),
+    issueId: text("issue_id"),
+    runId: text("run_id").$type<RunId>(),
+    owned: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (t) => [uniqueIndex("pull_requests_repo_number").on(t.repoId, t.number)],
+);

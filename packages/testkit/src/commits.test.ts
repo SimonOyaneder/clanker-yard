@@ -296,6 +296,19 @@ describe("un plan que no se puede aplicar da replan", () => {
     await expect(run([{ message: "feat: uno", hunks: [id!] }])).rejects.toThrow(/ya está en/);
   });
 
+  test("un reintento con los commits del plan ya hechos (el corte llegó antes de guardar la etapa) devuelve esos commits", async () => {
+    await setup();
+    write("b.txt", "b2\n");
+    const [id] = Object.values(await hunkIds());
+    const first = await run([{ message: "feat: uno", hunks: [id!] }]);
+
+    const retry = await run([{ message: "feat: uno", hunks: [id!] }]);
+
+    expect(first.outcome).toBe("ok");
+    expect(retry).toEqual(first);
+    expect(subjects()).toEqual(["feat: uno"]);
+  });
+
   test("con una receta inválida lanza sin reintentos y no toca nada", async () => {
     await setup({}, { version: 1, commands: { test: "sh {{nope}}" }, checks: [] });
     write("b.txt", "b2\n");

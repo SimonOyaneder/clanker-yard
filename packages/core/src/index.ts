@@ -83,6 +83,8 @@ export type {
 export { LinearAuthError } from "./linear/oauth";
 export { GitHubPatError } from "./github/pat";
 export { PrNotFoundError } from "./github/pr-query";
+export { healthyGitHub, pullsApi, startFakeGitHub } from "./github/fake-github";
+export type { FakeGitHub, FakePull, FakePullsApi, FakeRequest, RecordedResponse } from "./github/fake-github";
 export { buildPrState } from "./github/pr-state";
 export type { PrStateContext } from "./github/pr-state";
 export { createPrs } from "./github/prs";
@@ -156,5 +158,7 @@ export { createRecipeTester, RecipeTestError } from "./recipe/recipe-test";
 export type { RecipeTester, RecipeTesterOptions } from "./recipe/recipe-test";
 
 export { commitsApplyAction } from "./commits/apply";
+export { prPublishAction } from "./github/publish";
+export type { PrPublishDeps } from "./github/publish";
 export { preparePush } from "./commits/prepare-push";
 export type { PreparePushOptions, PreparePushResult } from "./commits/prepare-push";

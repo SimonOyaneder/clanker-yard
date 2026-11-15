@@ -16,7 +16,7 @@ const CONVENTIONAL_COMMIT = /^(feat|fix|refactor|docs|test|chore|perf|ci|build|s
 const AI_ATTRIBUTION =
   /^(co-authored-by:.*\b(claude|anthropic|openai|copilot|gemini)\b|claude-session:|.*\bgenerated (with|by)\b.*\b(claude|anthropic|ai)\b).*$/i;
 
-const ApplyArgs = z.object({
+export const ApplyArgs = z.object({
   /** El output de `workspace.acquire` (`$ws`). */
   ws: WorkspaceOutput,
   /**
@@ -73,14 +73,16 @@ export function commitsApplyAction({
     // La vigente: `workspace.syncBase` pudo mover la base después de `workspace.acquire`.
     const baseSha = workspaces.baseSha(ws);
     const head = await workspaces.git(ws, "rev-parse", "HEAD");
+    const saved = await snapshotTree(ws.path);
     // Reintentar no mueve la branch de vuelta a la base.
     if (head !== baseSha) {
+      const made = await madeByPreviousRun(workspaces, ws, baseSha, plan.commits.map((c) => cleanMessage(c.message)), saved);
+      if (made) return { outcome: "ok", output: { commits: made, tree: saved } };
       throw new PermanentActionError(
         `commits.apply parte de la base ${baseSha.slice(0, 9)}, pero ${ws.branch} ya está en ${head.slice(0, 9)}: ` +
           `el plan se hizo sobre hunks.json, que es el diff contra esa base.`,
       );
     }
-    const saved = await snapshotTree(ws.path);
     const hunks = listHunks(await diffBetween(ws.path, baseSha, saved));
 
     const messages = plan.commits.map((commit) => cleanMessage(commit.message));
@@ -157,12 +159,36 @@ export function commitsApplyAction({
   };
 }
 
+/**
+ * Si el proceso cayó después de mover la branch y antes de guardar la etapa, el reintento llega con
+ * los commits del plan ya hechos: los mismos mensajes, en orden, y el árbol del worktree. Entonces el
+ * resultado es ese, no un error.
+ */
+async function madeByPreviousRun(
+  workspaces: Workspaces,
+  ws: WorkspaceRef,
+  baseSha: string,
+  messages: string[],
+  tree: string,
+): Promise<{ sha: string; message: string }[] | undefined> {
+  if ((await workspaces.git(ws, "rev-parse", "HEAD^{tree}")) !== tree) return undefined;
+  const log = await workspaces.git(ws, "log", "--reverse", "--format=%H%x00%B%x01", `${baseSha}..HEAD`);
+  const made = log
+    .split("\x01")
+    .filter((entry) => entry.trim() !== "")
+    .map((entry) => {
+      const [sha = "", message = ""] = entry.split("\x00");
+      return { sha: sha.trim(), message: message.trim() };
+    });
+  return made.length === messages.length && made.every((c, i) => c.message === messages[i]) ? made : undefined;
+}
+
 function fail(outcome: "replan" | "hook-failed", failures: string): ActionResult {
   return { outcome, output: { failures } };
 }
 
-/** Sin las líneas que firman un commit como hecho por una IA. */
-function cleanMessage(message: string): string {
+/** Sin las líneas que firman un commit (o un PR) como hecho por una IA. */
+export function cleanMessage(message: string): string {
   return message
     .split("\n")
     .filter((line) => !AI_ATTRIBUTION.test(line.trim()))
