@@ -143,10 +143,14 @@ export interface Connections {
    * El token de una cuenta, solo para el core. Lanza si la cuenta no está conectada. El de Linear se
    * refresca solo si le quedan menos de `LINEAR_REFRESH_MARGIN_MS`; si Linear rechaza el refresh, deja la
    * cuenta `revoked` (`connection.changed`) y lanza `LinearAuthError`, y mientras siga revocada lanza sin
-   * llamar a Linear. Un fallo transitorio (red, 5xx) lanza sin cambiar el estado.
+   * llamar a Linear. Un fallo transitorio (red, 5xx) lanza sin cambiar el estado. Si `Secrets` no puede
+   * guardar los tokens rotados, los usa desde memoria y reintenta guardarlos en el próximo uso.
    */
   token(provider: ConnectionProvider, account: string): Promise<string>;
-  /** Borra el token y la cuenta y emite `connection.changed`. No hace nada si no estaba conectada. */
+  /**
+   * Borra el token y la cuenta y emite `connection.changed`. No hace nada si no estaba conectada. Con
+   * Linear, espera a que termine un refresh en vuelo.
+   */
   disconnect(provider: ConnectionProvider, account: string, origin: Origin): Promise<void>;
 }
 
@@ -158,6 +162,9 @@ export function createConnections(
   const githubClients = new Map<string, GitHubClient>();
   const endpoints = linear.endpoints ?? LINEAR_ENDPOINTS;
   const linearRefreshes = new Map<string, Promise<string>>();
+  const linearLocks = new Map<string, Promise<unknown>>();
+  /** Tokens que Linear ya rotó y `Secrets` no pudo guardar: valen más que los del almacén, que Linear invalidó. */
+  const unsavedLinear = new Map<string, LinearSession>();
   let pendingLogin: { cancel(reason: string): Promise<void> } | undefined;
 
   function find(provider: ConnectionProvider, account: string) {
@@ -269,20 +276,60 @@ export function createConnections(
     return { accessToken, refreshToken, accessExpiresAt };
   }
 
+  /**
+   * Lo que escribe o borra los tokens de una cuenta de Linear va de a uno: un refresh que termina
+   * después de un `disconnect` volvería a escribir el secreto de una cuenta que ya no existe.
+   */
+  function withLinearLock<T>(account: string, fn: () => Promise<T>): Promise<T> {
+    const result = (linearLocks.get(account) ?? Promise.resolve()).then(fn);
+    const tail = result.catch(() => undefined);
+    linearLocks.set(account, tail);
+    void tail.then(() => {
+      if (linearLocks.get(account) === tail) linearLocks.delete(account);
+    });
+    return result;
+  }
+
+  /** La sesión vigente: la que no se pudo guardar si la hay (y se reintenta guardarla), si no la del almacén. */
+  async function linearSession(account: string, secretRef: string): Promise<LinearSession> {
+    if (unsavedLinear.has(account)) {
+      await withLinearLock(account, async () => {
+        const unsaved = unsavedLinear.get(account);
+        if (unsaved) await persistLinear(account, secretRef, unsaved);
+      });
+    }
+    return unsavedLinear.get(account) ?? readLinearSession(secretRef);
+  }
+
+  /**
+   * Guarda los tokens rotados. Si `Secrets` falla, Linear ya invalidó el refresh token anterior: los
+   * nuevos quedan en memoria (`unsavedLinear`) y el próximo `token()` vuelve a intentar guardarlos.
+   */
+  async function persistLinear(account: string, secretRef: string, session: LinearSession): Promise<void> {
+    try {
+      await secrets.set(secretRef, JSON.stringify(session));
+      unsavedLinear.delete(account);
+    } catch (error) {
+      unsavedLinear.set(account, session);
+      console.error(`No se pudieron guardar los tokens nuevos de Linear "${account}"; se reintenta en el próximo uso:`, error);
+    }
+  }
+
   /** Un solo refresh por cuenta a la vez: el refresh token rota, usar el viejo dos veces lo pierde. */
   function refreshLinear(account: string): Promise<string> {
     let refresh = linearRefreshes.get(account);
     if (!refresh) {
-      refresh = doRefreshLinear(account).finally(() => linearRefreshes.delete(account));
+      refresh = withLinearLock(account, () => doRefreshLinear(account)).finally(() => linearRefreshes.delete(account));
       linearRefreshes.set(account, refresh);
     }
     return refresh;
   }
 
   async function doRefreshLinear(account: string): Promise<string> {
-    const row = find("linear", account)!;
+    const row = find("linear", account);
+    if (!row) throw new Error(`La cuenta de Linear "${account}" se desconectó.`);
     // Otro refresh pudo terminar mientras este esperaba su turno.
-    const session = await readLinearSession(row.secretRef);
+    const session = unsavedLinear.get(account) ?? (await readLinearSession(row.secretRef));
     if (session.accessExpiresAt - now() > LINEAR_REFRESH_MARGIN_MS) return session.accessToken;
 
     const { clientId } = linearConfig();
@@ -293,7 +340,7 @@ export function createConnections(
       if (error instanceof LinearAuthError) self.markRevoked("linear", account, "core");
       throw error;
     }
-    await secrets.set(row.secretRef, JSON.stringify(toSession(tokens)));
+    await persistLinear(account, row.secretRef, toSession(tokens));
     store.db
       .update(connections)
       .set({ expiresAt: now() + LINEAR_REFRESH_TTL_MS })
@@ -304,6 +351,7 @@ export function createConnections(
 
   async function finishLinearLogin(tokens: LinearTokens, origin: Origin): Promise<Connection> {
     const account = await fetchWorkspaceKey(endpoints, tokens.accessToken);
+    unsavedLinear.delete(account);
     return save(
       {
         provider: "linear",
@@ -437,7 +485,7 @@ export function createConnections(
             `La conexión con Linear "${account}" fue revocada: vuelve a conectarla.`,
           );
         }
-        const session = await readLinearSession(row.secretRef);
+        const session = await linearSession(account, row.secretRef);
         if (session.accessExpiresAt - now() > LINEAR_REFRESH_MARGIN_MS) return session.accessToken;
         return refreshLinear(account);
       }
@@ -454,25 +502,37 @@ export function createConnections(
     },
 
     async disconnect(provider, account, origin) {
-      const row = find(provider, account);
-      if (!row) return;
-      // El token primero: si falla, la cuenta sigue a la vista y se puede reintentar. Al revés
-      // quedaría un token vivo en el almacén sin que nadie lo vea.
-      if (row.secretRef !== "") await secrets.delete(row.secretRef);
-      if (provider === "github") githubClients.delete(account);
-      store.tx((tx) => {
-        tx.db
-          .delete(connections)
-          .where(and(eq(connections.provider, provider), eq(connections.account, account)))
-          .run();
-        tx.emit({
-          type: "connection.changed",
-          origin,
-          payload: { provider, account, status: "disconnected" },
+      if (provider === "linear") {
+        // Después de un refresh en vuelo, no antes: si no, escribiría el secreto recién borrado.
+        return withLinearLock(account, async () => {
+          await remove(provider, account, origin);
+          unsavedLinear.delete(account);
         });
-      });
+      }
+      return remove(provider, account, origin);
     },
   };
+
+  async function remove(provider: ConnectionProvider, account: string, origin: Origin): Promise<void> {
+    const row = find(provider, account);
+    if (!row) return;
+    // El token primero: si falla, la cuenta sigue a la vista y se puede reintentar. Al revés
+    // quedaría un token vivo en el almacén sin que nadie lo vea.
+    if (row.secretRef !== "") await secrets.delete(row.secretRef);
+    if (provider === "github") githubClients.delete(account);
+    store.tx((tx) => {
+      tx.db
+        .delete(connections)
+        .where(and(eq(connections.provider, provider), eq(connections.account, account)))
+        .run();
+      tx.emit({
+        type: "connection.changed",
+        origin,
+        payload: { provider, account, status: "disconnected" },
+      });
+    });
+  }
+
   return self;
 }
 

@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createConnections,
   LINEAR_REFRESH_MARGIN_MS,
@@ -258,6 +258,27 @@ describe("refresh", () => {
     expect(await connections.token("linear", "clanker-yard")).toBe(linear.latest().accessToken);
   });
 
+  test("si no se pueden guardar los tokens rotados, los sigue usando y los guarda en el próximo uso", async () => {
+    await connectLinear();
+    clock += DAY_MS;
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(secrets, "set").mockRejectedValueOnce(new Error("Keychain bloqueado"));
+    const stored = async () => JSON.parse((await secrets.get("connection:linear:clanker-yard"))!) as { refreshToken: string };
+
+    expect(await connections.token("linear", "clanker-yard")).toBe(linear.latest().accessToken);
+    expect(log).toHaveBeenCalledOnce();
+    log.mockRestore();
+    // Linear ya invalidó el refresh token guardado.
+    expect((await stored()).refreshToken).not.toBe(linear.latest().refreshToken);
+
+    expect(await connections.token("linear", "clanker-yard")).toBe(linear.latest().accessToken);
+    expect((await stored()).refreshToken).toBe(linear.latest().refreshToken);
+
+    clock += DAY_MS;
+    expect(await connections.token("linear", "clanker-yard")).toBe(linear.latest().accessToken);
+    expect(connections.list()[0]?.status).toBe("active");
+  });
+
   test("si falta o está dañado el secreto, dice cómo repararlo", async () => {
     await connectLinear();
     await secrets.set("connection:linear:clanker-yard", "no es json");
@@ -280,6 +301,30 @@ describe("disconnect", () => {
       origin: "cli",
       payload: { provider: "linear", account: "clanker-yard", status: "disconnected" },
     });
+  });
+  test("con un refresh en vuelo espera a que termine y no queda ningún token guardado", async () => {
+    await connectLinear();
+    clock += DAY_MS;
+    const set = secrets.set.bind(secrets);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const saving = new Promise<void>((resolve) => (reached = resolve));
+    vi.spyOn(secrets, "set").mockImplementationOnce(async (ref, value) => {
+      reached();
+      await gate;
+      return set(ref, value);
+    });
+
+    const refreshing = connections.token("linear", "clanker-yard");
+    await saving;
+    const disconnecting = connections.disconnect("linear", "clanker-yard", "cli");
+    release();
+    await refreshing;
+    await disconnecting;
+
+    expect(connections.list()).toEqual([]);
+    expect(await secrets.get("connection:linear:clanker-yard")).toBeUndefined();
   });
 });
 
