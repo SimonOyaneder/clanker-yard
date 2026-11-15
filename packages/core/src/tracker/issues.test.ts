@@ -5,6 +5,7 @@ import type { Connections } from "../connections/connections";
 import { createRouter } from "../server/router";
 import { apiDeps } from "../server/testing";
 import { newId } from "../store/conventions";
+import { issues as issuesTable } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues, type Issues } from "./issues";
 import { createLocalTracker, type LocalTracker } from "./local";
@@ -79,6 +80,46 @@ describe("sync", () => {
       status: "done",
       rawStatus: "Done",
     });
+  });
+
+  test("adopta por key la issue que importó el loop viejo en vez de duplicarla", async () => {
+    // `clanker import legacy` guarda la key como `tracker_id`: el loop viejo no conocía el id del tracker.
+    const imported = newId("iss");
+    store.tx((tx) =>
+      tx.db
+        .insert(issuesTable)
+        .values({
+          id: imported,
+          tracker: "linear",
+          trackerId: "DEMO-1",
+          key: "DEMO-1",
+          url: "https://linear.app/acme/issue/DEMO-1",
+          projectId: newId("prj"),
+          trackerProject: "placeholder",
+          title: "DEMO-1",
+          body: "",
+          status: "done",
+          rawStatus: "mergeado",
+          priority: 0,
+          labels: [],
+          relations: { blocks: [], blockedBy: [], related: [] },
+          remoteUpdatedAt: 0,
+        })
+        .run(),
+    );
+    const { ref } = await local.createIssue("demo", { title: "Título real", priority: 2 });
+    const asLinear: Tracker = {
+      ...local,
+      id: "linear",
+      listIssues: async (project, filter) =>
+        (await local.listIssues(project, filter)).map((issue) => ({ ...issue, ref: { tracker: "linear", id: "uuid-1", key: ref.key, url: ref.url } })),
+    };
+
+    expect(await issues.sync(asLinear, { projectId, project: { tracker: "linear", id: "demo" } })).toBe(1);
+
+    const rows = store.db.select().from(issuesTable).all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: imported, trackerId: "uuid-1", key: ref.key, projectId, title: "Título real", priority: 2 });
   });
 
   test("las relaciones y los sub-issues llegan al caché", async () => {

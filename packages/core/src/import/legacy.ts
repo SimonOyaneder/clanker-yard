@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type ArtifactKind,
   type FlowBody,
   type IssueId,
   type LegacyImportCounts,
@@ -10,21 +11,58 @@ import {
   type RepoId,
   type RunId,
   type StatusCategory,
+  type SubjectRef,
+  Profile,
   parseLegacyMetrics,
 } from "@clanker/api";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
-import type * as z from "zod";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import * as z from "zod";
+import { type Artifacts, hashOf } from "../artifacts/artifacts";
 import type { Defs } from "../defs/defs";
+import { proposeLearning } from "../learnings/learnings";
 import { newId, usdToMicros } from "../store/conventions";
-import { issues, projectRepos, projects, pullRequests, repos, runMetrics, runRoleCosts, runs } from "../store/schema";
+import {
+  artifactRefs,
+  decisions,
+  issues,
+  learnings,
+  modelPrices,
+  projectRepos,
+  projects,
+  pullRequests,
+  repos,
+  runMetrics,
+  runRoleCosts,
+  runs,
+} from "../store/schema";
 import type { Store } from "../store/store";
+import { type LegacyPrice, type LegacyProfile, parseLegacyProfiles } from "./legacy-profiles";
 import { type LegacyHistoryRow, type LegacyState, parseLegacyState } from "./legacy-state";
 
 /** La carpeta no es el estado de un clanker-loop o una fila no cumple su formato: el mensaje dice cuál. Nada se escribió. */
 export class LegacyImportError extends Error {}
 
+/**
+ * `clanker import legacy`: lee la carpeta del clanker-loop (`~/.local/share/clanker-loop`) sin tocarla y escribe lo que falte;
+ * con `dryRun`, solo cuenta. Repetirlo no duplica nada.
+ *
+ * Importa (`docs/design.html#d-data`, "Migración desde el clanker-loop"):
+ * - de `metrics.jsonl` y el `## Historial` de cada `state.md`: proyectos, issues, PRs, corridas y sus métricas;
+ * - de `## Decisiones y aprendizajes`: un learning `proposed` por viñeta (decisión 19: muchos hablan del CLI y el guard del
+ *   loop viejo y hay que triarlos en la bandeja antes de que lleguen a un brief);
+ * - de `## Decisiones a revisar`: una `review_note` pendiente por viñeta, y de `## Omitidas`: una `note` aceptada. Si la viñeta
+ *   nombra un PR (`ENG-9105 (#4193): ...`) la decisión cuelga de él (`subject`) y Watch la expira cuando se mergea;
+ *   si no, de su issue. El PR de una viñeta que el historial no tiene entra como `open` sin detalle hasta que Watch lo lea;
+ * - de `issues/*.md`: `<KEY>.md` es el checkpoint (`legacy`) y `<KEY>-pr*.md` el body del PR (`pr_body`); el resto de los
+ *   `.md` es `legacy`. Cuelgan de la última corrida importada de la issue (role `legacy:<sufijo>`), y de la issue si no tiene
+ *   corrida; sin ninguna de las dos se omiten. El `## Brief` de cada proyecto es un artefacto `legacy` suyo (role `legacy:brief`);
+ * - de `profiles.json`: una def `profile` de usuario por perfil que aún no la tenga, sin el rol `techlead` y sobre los roles del
+ *   perfil de la plantilla con ese slug (así `triage` y `plan-check` no se pierden), y los precios que falten en `model_prices`.
+ *
+ * No importa `queue.json`, `watch.json`, `control.json`, `sessions/`, las secciones vivas (`## En curso`, `## Council pendiente`,
+ * `## Rebase pendiente`, `## Bot pendiente`), el brief como `conventions` del proyecto, ni `default` y `judge` de `profiles.json`.
+ */
 export interface LegacyImporter {
-  /** Lee `from` (`~/.local/share/clanker-loop`) sin tocarlo y escribe lo que falte; con `dryRun`, solo cuenta. */
   run(input: { from: string; dryRun: boolean }): LegacyImportResult;
 }
 
@@ -60,23 +98,49 @@ interface Plan {
   runMetrics: (typeof runMetrics.$inferInsert)[];
   runRoleCosts: (typeof runRoleCosts.$inferInsert)[];
   pullRequests: (typeof pullRequests.$inferInsert)[];
+  learnings: { projectId: ProjectId; text: string }[];
+  decisions: (typeof decisions.$inferInsert)[];
+  /** Solo los que cambian algo: un archivo que el loop no tocó desde la última importación no está. */
+  artifacts: PlannedArtifact[];
+  profiles: { slug: string; body: Profile }[];
+  modelPrices: (typeof modelPrices.$inferInsert)[];
   unresolvedRepos: Set<string>;
   /** Por proyecto, lo que `run_metrics` debe sumar al terminar (también lo de importaciones anteriores). */
   expected: Map<string, { runs: number; costMicros: number }>;
+}
+
+/** Un artefacto por escribir con su dueño: el contenido va a `artifacts.put` y el dueño a `artifact_refs`. */
+interface PlannedArtifact {
+  owner: { type: "run" | "issue" | "project"; id: string; role: string };
+  kind: ArtifactKind;
+  content: string;
+  hash: string;
 }
 
 interface Source {
   metrics: LegacyMetricsRow[];
   /** Por la carpeta del proyecto (que es el `project` de `metrics.jsonl`). */
   states: Map<string, LegacyState>;
+  /** Los `.md` de `issues/` de cada proyecto, por su carpeta. */
+  issueFiles: Map<string, { name: string; content: string }[]>;
+  /** `undefined` si la carpeta no tiene `profiles.json`. */
+  profiles?: { profiles: LegacyProfile[]; prices: LegacyPrice[] };
 }
 
-export function createLegacyImporter({ store, defs }: { store: Store; defs: Pick<Defs, "save" | "list" | "archive"> }): LegacyImporter {
+export function createLegacyImporter({
+  store,
+  defs,
+  artifacts,
+}: {
+  store: Store;
+  defs: Pick<Defs, "save" | "list" | "archive" | "resolve">;
+  artifacts: Pick<Artifacts, "put">;
+}): LegacyImporter {
   return {
     run({ from, dryRun }) {
-      const plan = planImport(store, readSource(from));
+      const plan = planImport(store, defs, readSource(from));
       const created = countOf(plan);
-      if (!dryRun) apply(store, legacyFlow(defs), plan, from, created);
+      if (!dryRun) apply({ store, defs, artifacts }, plan, from, created);
       return { dryRun, created, unresolvedRepos: [...plan.unresolvedRepos].sort() };
     },
   };
@@ -89,6 +153,7 @@ function readSource(from: string): Source {
   }
   try {
     const states = new Map<string, LegacyState>();
+    const issueFiles = new Map<string, { name: string; content: string }[]>();
     const projectsDir = join(from, "projects");
     const dirs = existsSync(projectsDir) ? readdirSync(projectsDir, { withFileTypes: true }) : [];
     for (const dir of dirs.filter((d) => d.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -99,8 +164,22 @@ function readSource(from: string): Source {
       } catch (error) {
         throw new Error(`${statePath}: ${(error as Error).message}`);
       }
+      const issuesDir = join(projectsDir, dir.name, "issues");
+      if (existsSync(issuesDir)) {
+        const files = readdirSync(issuesDir).filter((name) => name.endsWith(".md")).sort();
+        issueFiles.set(dir.name, files.map((name) => ({ name, content: readFileSync(join(issuesDir, name), "utf8") })));
+      }
     }
-    return { metrics: parseLegacyMetrics(readFileSync(metricsPath, "utf8")), states };
+    const profilesPath = join(from, "profiles.json");
+    let profiles: Source["profiles"];
+    if (existsSync(profilesPath)) {
+      try {
+        profiles = parseLegacyProfiles(readFileSync(profilesPath, "utf8"));
+      } catch (error) {
+        throw new Error(`${profilesPath}: ${(error as Error).message}`);
+      }
+    }
+    return { metrics: parseLegacyMetrics(readFileSync(metricsPath, "utf8")), states, issueFiles, profiles };
   } catch (error) {
     throw new LegacyImportError((error as Error).message);
   }
@@ -130,7 +209,7 @@ function outcomeOf(result: string): "done" | "blocked" | "failed" {
 /** `https://linear.app/acme/project/soporte-0ab` → `soporte-0ab`: lo que `trackerRef` guarda hasta que el sync lo cambie por el id de Linear. */
 const trackerRefOf = (state: LegacyState | undefined, slug: string) => state?.trackerUrl?.split("/project/")[1]?.split(/[/?#]/)[0] || slug;
 
-function planImport(store: Store, { metrics, states }: Source): Plan {
+function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metrics, states, issueFiles, profiles }: Source): Plan {
   const { db } = store;
   const plan: Plan = {
     projects: [],
@@ -140,9 +219,15 @@ function planImport(store: Store, { metrics, states }: Source): Plan {
     runMetrics: [],
     runRoleCosts: [],
     pullRequests: [],
+    learnings: [],
+    decisions: [],
+    artifacts: [],
+    profiles: [],
+    modelPrices: [],
     unresolvedRepos: new Set(),
     expected: new Map(),
   };
+  const at = Date.now();
 
   const knownProjects = new Map(db.select({ slug: projects.slug, id: projects.id }).from(projects).all().map((p) => [p.slug, p.id]));
   const knownRepos = db.select().from(repos).all();
@@ -153,7 +238,14 @@ function planImport(store: Store, { metrics, states }: Source): Plan {
     db.select({ key: issues.trackerId, id: issues.id }).from(issues).where(eq(issues.tracker, "linear")).all().map((i) => [i.key, i.id]),
   );
   const knownRuns = new Map(db.select({ key: runs.sourceKey, id: runs.id }).from(runs).where(isNotNull(runs.sourceKey)).all().map((r) => [r.key!, r.id]));
-  const knownPulls = new Set(db.select({ repoId: pullRequests.repoId, number: pullRequests.number }).from(pullRequests).all().map((p) => `${p.repoId}#${p.number}`));
+  /** `repoId#número` → id de la fila de `pull_requests`, la que ya estaba o la que este plan agrega. */
+  const pullIds = new Map(db.select({ id: pullRequests.id, repoId: pullRequests.repoId, number: pullRequests.number }).from(pullRequests).all().map((p) => [`${p.repoId}#${p.number}`, p.id]));
+  const knownLearnings = new Set(db.select({ projectId: learnings.projectId, text: learnings.text }).from(learnings).where(isNotNull(learnings.projectId)).all().map((l) => `${l.projectId}\0${l.text}`));
+  const knownNotes = new Set(
+    db.select({ projectId: decisions.projectId, kind: decisions.kind, body: decisions.body }).from(decisions).where(isNotNull(decisions.projectId)).all().map((d) => `${d.projectId}\0${d.kind}\0${d.body}`),
+  );
+  const artifactCandidates: PlannedArtifact[] = [];
+  const afterProjects: (() => void)[] = [];
 
   const slugOf = (row: LegacyMetricsRow) => row.project ?? NO_PROJECT_SLUG;
   const slugs = [...new Set([...states.keys(), ...metrics.map(slugOf)])];
@@ -335,15 +427,16 @@ function planImport(store: Store, { metrics, states }: Source): Plan {
       if (!h.pr) continue;
       const repoName = h.pr.repo ?? defaultRepo;
       const repoId = repoName === undefined ? undefined : repoIds.get(repoName);
-      if (!repoId || knownPulls.has(`${repoId}#${h.pr.number}`)) continue;
-      knownPulls.add(`${repoId}#${h.pr.number}`);
+      if (!repoId || pullIds.has(`${repoId}#${h.pr.number}`)) continue;
+      const pullId = newId("pr");
+      pullIds.set(`${repoId}#${h.pr.number}`, pullId);
       const candidates = plannedRuns.get(`${slug}:${h.key}`) ?? [];
       const run =
         candidates.find((c) => c.pr?.number === h.pr!.number && c.pr.repo === repoName) ??
         candidates.reduce<(typeof candidates)[number] | undefined>((last, c) => (!last || c.endedAt >= last.endedAt ? c : last), undefined);
       // Lo que GitHub sabe (nodo, SHA, base) queda vacío hasta que Watch sincronice el PR. `owned` es falso: no lo abrió Clanker Yard.
       plan.pullRequests.push({
-        id: newId("pr"),
+        id: pullId,
         repoId,
         number: h.pr.number,
         nodeId: "",
@@ -357,8 +450,163 @@ function planImport(store: Store, { metrics, states }: Source): Plan {
         owned: false,
       });
     }
+
+    // Los PRs de una viñeta que el historial no tiene entran abiertos y sin detalle: Watch los lee y fija su estado.
+    const prRepo = prRepoByNumber(state, rows);
+    const onlyRepo = repoIds.size === 1 ? [...repoIds.values()][0] : undefined;
+    const subjectOf = (text: string): SubjectRef | undefined => {
+      const head = noteHead(text);
+      const key = /^([A-Z][A-Z0-9]*-\d+)\b/.exec(head)?.[1];
+      const number = /#(\d+)/.exec(head)?.[1];
+      // Sin repo conocido para el número, solo hay a quién atribuírselo si el proyecto tiene un único repo.
+      const repoName = number === undefined ? undefined : prRepo.get(Number(number));
+      const repoId = number === undefined || repoName === null ? undefined : repoName === undefined ? onlyRepo : repoIds.get(repoName);
+      if (number !== undefined && repoId !== undefined) {
+        const pullKey = `${repoId}#${number}`;
+        if (!pullIds.has(pullKey)) {
+          const id = newId("pr");
+          pullIds.set(pullKey, id);
+          plan.pullRequests.push({
+            id,
+            repoId,
+            number: Number(number),
+            nodeId: "",
+            headRef: "",
+            baseRef: "",
+            headSha: "",
+            state: "open",
+            isDraft: false,
+            issueId: key === undefined ? null : (knownIssues.get(key) ?? null),
+            runId: null,
+            owned: false,
+          });
+        }
+        return { type: "pr", id: pullIds.get(pullKey)! };
+      }
+      const issueId = key === undefined ? undefined : knownIssues.get(key);
+      return issueId === undefined ? undefined : { type: "issue", id: issueId };
+    };
+
+    for (const text of state.learnings) {
+      const learningKey = `${projectId}\0${text}`;
+      if (knownLearnings.has(learningKey)) continue;
+      knownLearnings.add(learningKey);
+      plan.learnings.push({ projectId, text });
+    }
+    const notes = [
+      { kind: "review_note", status: "pending", texts: state.reviewNotes },
+      { kind: "note", status: "accepted", texts: state.skipped },
+    ] as const;
+    // Una viñeta puede nombrar una issue que otro proyecto creó después: el sujeto se busca cuando ya están todas.
+    afterProjects.push(() => {
+      for (const { kind, status, texts } of notes) {
+        for (const text of texts) {
+          const noteKey = `${projectId}\0${kind}\0${text}`;
+          if (knownNotes.has(noteKey)) continue;
+          knownNotes.add(noteKey);
+          const subject = subjectOf(text);
+          plan.decisions.push({
+            id: newId("dec"),
+            projectId,
+            ...(subject && { subject }),
+            kind,
+            title: titleOf(text),
+            body: text,
+            options: [],
+            status,
+            ...(status === "accepted" && { resolvedBy: "import", resolvedAt: at }),
+            createdAt: at,
+          });
+        }
+      }
+    });
+
+    if (state.brief !== undefined) artifactCandidates.push(artifactOf({ type: "project", id: projectId, role: "legacy:brief" }, "legacy", state.brief));
+  }
+
+  for (const resolve of afterProjects) resolve();
+
+  // Los archivos de issues/ cuelgan de la última corrida importada de la issue o, sin corrida, de la issue. Va después de
+  // todos los proyectos por lo mismo: una issue que otro proyecto creó tiene que estar antes de buscarle dueño.
+  for (const [slug, files] of issueFiles) {
+    for (const { name, content } of files) {
+      const file = /^([A-Z][A-Z0-9]*-\d+)(?:-(.+))?\.md$/.exec(name);
+      if (!file) continue;
+      const key = file[1]!;
+      const suffix = file[2];
+      const lastRun = (plannedRuns.get(`${slug}:${key}`) ?? []).reduce<{ id: RunId; endedAt: number } | undefined>((last, r) => (!last || r.endedAt >= last.endedAt ? r : last), undefined);
+      const issueId = knownIssues.get(key);
+      const owner = lastRun ? { type: "run" as const, id: lastRun.id } : issueId ? { type: "issue" as const, id: issueId } : undefined;
+      if (!owner) continue;
+      const kind: ArtifactKind = suffix?.startsWith("pr") ? "pr_body" : "legacy";
+      artifactCandidates.push(artifactOf({ ...owner, role: `legacy:${suffix ?? "checkpoint"}` }, kind, content));
+    }
+  }
+
+  // Un artefacto cuyo dueño ya tiene ese contenido en ese role no cambia nada; uno que cambió reemplaza al anterior.
+  const owners = [...new Set(artifactCandidates.map((a) => a.owner.id))];
+  const existingRefs = new Map(
+    owners.length === 0
+      ? []
+      : db
+          .select()
+          .from(artifactRefs)
+          .where(inArray(artifactRefs.ownerId, owners))
+          .all()
+          .map((r) => [`${r.ownerType}:${r.ownerId}:${r.role}`, r.hash]),
+  );
+  plan.artifacts = artifactCandidates.filter((a) => existingRefs.get(`${a.owner.type}:${a.owner.id}:${a.owner.role}`) !== a.hash);
+
+  if (profiles) {
+    const existing = new Set(defs.list("profile", { includeArchived: true }).filter((d) => d.scope === "user").map((d) => d.slug));
+    for (const { slug, roles } of profiles.profiles) {
+      // Un perfil que la persona ya tiene (o editó) no se pisa.
+      if (existing.has(slug)) continue;
+      // La def de usuario tapa a la de la plantilla entera: los roles que el loop viejo no conocía (`triage`) se heredan de ella.
+      const inherited = defs.resolve("profile", slug);
+      const parsed = Profile.safeParse({ roles: { ...(inherited ? Profile.parse(inherited.body).roles : {}), ...roles } });
+      if (!parsed.success) throw new LegacyImportError(`profiles.json: el perfil "${slug}" no es válido:\n${z.prettifyError(parsed.error)}`);
+      plan.profiles.push({ slug, body: parsed.data });
+    }
+    const priced = new Set(db.select({ model: modelPrices.model }).from(modelPrices).where(eq(modelPrices.validFrom, 0)).all().map((p) => p.model));
+    plan.modelPrices = profiles.prices.filter((p) => !priced.has(p.model)).map((p) => ({ ...p, validFrom: 0 }));
   }
   return plan;
+}
+
+const artifactOf = (owner: PlannedArtifact["owner"], kind: ArtifactKind, content: string): PlannedArtifact => ({
+  owner,
+  kind,
+  content,
+  hash: hashOf(Buffer.from(content, "utf8")),
+});
+
+/** Lo que una viñeta dice de sí antes del `:` (`ENG-9105 (#4193)`), o sus primeros 80 caracteres si no hay. */
+function noteHead(text: string): string {
+  const colon = text.indexOf(":");
+  return text.slice(0, colon > 0 && colon <= 80 ? colon : 80);
+}
+
+/** El título de una decisión importada: la viñeta, cortada en una palabra si pasa de 100 caracteres. */
+function titleOf(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ");
+  if (oneLine.length <= 100) return oneLine;
+  return `${oneLine.slice(0, 100).replace(/\s+\S*$/, "")}…`;
+}
+
+/** De qué repo es cada número de PR que el proyecto conoce (historial y `metrics.jsonl`); `null` si dos repos lo usan. */
+function prRepoByNumber(state: LegacyState, rows: LegacyMetricsRow[]): Map<number, string | null> {
+  const found = new Map<number, string | null>();
+  const add = (number: number, repo: string | undefined) => {
+    if (repo === undefined) return;
+    found.set(number, found.has(number) && found.get(number) !== repo ? null : repo);
+  };
+  for (const h of state.history) if (h.pr) add(h.pr.number, h.pr.repo ?? state.repos[0]?.name);
+  for (const { pr } of rows) {
+    const match = pr && /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(pr);
+    if (match) add(Number(match[2]), match[1]);
+  }
+  return found;
 }
 
 /** `review`, `bot` y `ci` son los contadores del flujo `techlead-clasico`: así `projects.summary` suma lo importado con lo nuevo. */
@@ -389,6 +637,11 @@ function countOf(plan: Plan): LegacyImportCounts {
     pullRequests: plan.pullRequests.length,
     runs: plan.runs.length,
     runRoleCosts: plan.runRoleCosts.length,
+    learnings: plan.learnings.length,
+    decisions: plan.decisions.length,
+    artifacts: plan.artifacts.length,
+    profiles: plan.profiles.length,
+    modelPrices: plan.modelPrices.length,
   };
 }
 
@@ -400,8 +653,20 @@ function legacyFlow(defs: Pick<Defs, "save" | "list" | "archive">): { id: string
   return { id, version };
 }
 
-/** Inserta el plan en una sola tx. Si los totales de algún proyecto no cuadran con `metrics.jsonl`, la tx se deshace. */
-function apply(store: Store, flow: { id: string; version: number }, plan: Plan, from: string, created: LegacyImportCounts): void {
+/**
+ * Inserta el plan en una sola tx. Si los totales de algún proyecto no cuadran con `metrics.jsonl`, la tx se deshace.
+ * Lo que abre su propia tx (el flujo histórico, el contenido de los artefactos y las defs de perfil) va fuera: el flujo
+ * antes, porque las corridas lo necesitan, y los perfiles después, para que una importación que falla no deje nada.
+ */
+function apply(
+  { store, defs, artifacts }: { store: Store; defs: Pick<Defs, "save" | "list" | "archive">; artifacts: Pick<Artifacts, "put"> },
+  plan: Plan,
+  from: string,
+  created: LegacyImportCounts,
+): void {
+  const flow = legacyFlow(defs);
+  // Sin refs, el GC se lleva el contenido de un artefacto si la tx falla.
+  for (const { content, kind } of plan.artifacts) artifacts.put(content, kind, { mime: "text/markdown; charset=utf-8" });
   store.tx((tx) => {
     const { db } = tx;
     if (plan.projects.length > 0) db.insert(projects).values(plan.projects).run();
@@ -411,6 +676,15 @@ function apply(store: Store, flow: { id: string; version: number }, plan: Plan, 
     if (plan.runMetrics.length > 0) db.insert(runMetrics).values(plan.runMetrics).run();
     if (plan.runRoleCosts.length > 0) db.insert(runRoleCosts).values(plan.runRoleCosts).run();
     if (plan.pullRequests.length > 0) db.insert(pullRequests).values(plan.pullRequests).run();
+    // Los learnings entran `proposed` (decisión 19) y `proposeLearning` no repite un texto del mismo alcance.
+    for (const { projectId, text } of plan.learnings) proposeLearning(tx, { projectId, text, source: "import", origin: "import" });
+    if (plan.decisions.length > 0) db.insert(decisions).values(plan.decisions).run();
+    if (plan.modelPrices.length > 0) db.insert(modelPrices).values(plan.modelPrices).onConflictDoNothing().run();
+    for (const { owner, hash } of plan.artifacts) {
+      // Lo que el loop reescribió desde la última importación reemplaza a lo anterior en ese role.
+      db.delete(artifactRefs).where(and(eq(artifactRefs.ownerType, owner.type), eq(artifactRefs.ownerId, owner.id), eq(artifactRefs.role, owner.role))).run();
+      db.insert(artifactRefs).values({ hash, ownerType: owner.type, ownerId: owner.id, role: owner.role }).run();
+    }
 
     // Paridad (`docs/design.html#d-data`): lo que quedó en la base suma lo mismo que el archivo de origen.
     for (const [slug, expected] of plan.expected) {
@@ -429,4 +703,5 @@ function apply(store: Store, flow: { id: string; version: number }, plan: Plan, 
     }
     tx.emit({ type: "import.completed", origin: "import", payload: { source: from, counts: created } });
   });
+  for (const { slug, body } of plan.profiles) defs.save({ kind: "profile", slug, scope: "user", body, source: "import" });
 }

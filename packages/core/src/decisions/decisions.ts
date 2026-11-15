@@ -1,7 +1,7 @@
 import type { Decision, DecisionFilter, DecisionId } from "@clanker/api";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { newId } from "../store/conventions";
-import { decisions } from "../store/schema";
+import { decisions, pullRequests } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 
 export interface Decisions {
@@ -101,4 +101,20 @@ export function closeDecision(
     .where(eq(decisions.id, id))
     .returning()
     .get();
+}
+
+/**
+ * Una `review_note` sobre un PR que ya se mergeó no tiene nada que revisar: las pendientes cuyo
+ * `subject` es ese PR quedan `expired` (decisión 20, `docs/design.html#decisiones`). Devuelve cuántas.
+ * Watch lo corre en cada despertar, así también cae lo que llegó con el PR ya mergeado (la importación del loop).
+ */
+export function expireMergedReviewNotes(store: Store): number {
+  const stale = store.db
+    .select({ id: decisions.id })
+    .from(decisions)
+    .innerJoin(pullRequests, sql`${pullRequests.id} = json_extract(${decisions.subject}, '$.id')`)
+    .where(and(eq(decisions.status, "pending"), eq(decisions.kind, "review_note"), sql`json_extract(${decisions.subject}, '$.type') = 'pr'`, eq(pullRequests.state, "merged")))
+    .all();
+  if (stale.length === 0) return 0;
+  return store.tx((tx) => stale.filter(({ id }) => closeDecision(tx, id, { status: "expired", resolution: { reason: "pr_merged" }, by: "watch" })).length);
 }

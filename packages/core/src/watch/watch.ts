@@ -2,6 +2,7 @@ import type { PrRef } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
+import { expireMergedReviewNotes } from "../decisions/decisions";
 import type { GitRemote } from "../git/remote";
 import { RestPull, type PrCache, type PrRow } from "../github/pr-cache";
 import { prOfWaitKey } from "../github/pr-waits";
@@ -323,6 +324,8 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
       });
     }
 
+    // Después de las visitas, que son las que se enteran de un merge; también cae lo que ya llegó mergeado (la importación del loop).
+    expireMergedReviewNotes(store);
     await events.flush(at);
     if (!stopping) await trackers?.poll(at);
   }

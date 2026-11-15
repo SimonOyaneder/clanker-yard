@@ -10,6 +10,9 @@ import type { Store } from "../store/store";
 export const INLINE_MAX_BYTES = 64 * 1024;
 export const GC_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
+/** El hash de un contenido: su identidad como artefacto. */
+export const hashOf = (bytes: Uint8Array): ArtifactHash => createHash("sha256").update(bytes).digest("hex");
+
 export interface Artifact {
   hash: ArtifactHash;
   kind: ArtifactKind;
@@ -53,7 +56,7 @@ export function createArtifacts({ store, dir, now = Date.now }: ArtifactsOptions
   return {
     put(content, kind, opts = {}) {
       const bytes = typeof content === "string" ? Buffer.from(content, "utf8") : content;
-      const hash = createHash("sha256").update(bytes).digest("hex");
+      const hash = hashOf(bytes);
       const inline = bytes.byteLength <= INLINE_MAX_BYTES;
       const mime =
         opts.mime ?? (typeof content === "string" ? "text/plain; charset=utf-8" : "application/octet-stream");

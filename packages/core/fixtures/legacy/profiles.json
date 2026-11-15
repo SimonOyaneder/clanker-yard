@@ -1,0 +1,22 @@
+{
+  "default": "medio",
+  "judge": "fable:high",
+  "precios": {
+    "_unidad": "USD por millón de tokens: [input, output, cache_read]. Cache write: 1.25x input (5m) y 2x input (1h).",
+    "opus": [4, 20, 0.20],
+    "sonnet": [2, 10, 0.20],
+    "mistral": [1, 3, 0.1]
+  },
+  "perfiles": {
+    "medio": {
+      "techlead": "opus:medium",
+      "dev": "opus:high",
+      "review-bugs": "sonnet:high",
+      "bot-reviewer": "sonnet:high"
+    },
+    "economico": {
+      "techlead": "sonnet:high",
+      "dev": "sonnet:high"
+    }
+  }
+}

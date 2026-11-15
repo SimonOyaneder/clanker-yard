@@ -285,7 +285,7 @@ describe("clanker events tail", () => {
 });
 
 describe("clanker import legacy", () => {
-  const result = { dryRun: false, created: { projects: 2, issues: 7, pullRequests: 5, runs: 9, runRoleCosts: 23 }, unresolvedRepos: ["infra"] };
+  const result = { dryRun: false, created: { projects: 2, issues: 7, pullRequests: 5, runs: 9, runRoleCosts: 23, learnings: 5, decisions: 9, artifacts: 12, profiles: 2, modelPrices: 1 }, unresolvedRepos: ["infra"] };
   const clientFor = (reply: unknown) => {
     const calls: unknown[] = [];
     return { calls, imports: { legacy: (input: unknown) => (calls.push(input), Promise.resolve(reply)) } };
@@ -305,6 +305,11 @@ describe("clanker import legacy", () => {
         "PRs                           5",
         "corridas (con sus métricas)   9",
         "costos por rol               23",
+        "learnings propuestos          5",
+        "decisiones y notas            9",
+        "artefactos                   12",
+        "perfiles                      2",
+        "precios de modelos            1",
         "Repos sin registrar (sus PRs quedaron fuera): infra.",
         "Regístralos en Clanker Yard y repite el comando: solo agrega lo que falte.",
       ].join("\n"),

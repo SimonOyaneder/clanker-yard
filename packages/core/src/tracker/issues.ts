@@ -123,16 +123,7 @@ export function createIssues(
         let synced = 0;
         for (const issue of fetched) {
           const values = toRow(issue, projectId);
-          const existing = tx.db
-            .select()
-            .from(issues)
-            .where(
-              and(
-                eq(issues.tracker, values.tracker),
-                eq(issues.trackerId, values.trackerId),
-              ),
-            )
-            .get();
+          const existing = findCached(tx.db, values);
           const changed =
             existing === undefined
               ? ["created"]
@@ -189,6 +180,27 @@ export function createIssues(
     },
   };
   return self;
+}
+
+/**
+ * La issue del caché que corresponde a la que trae el tracker. Una que importó `clanker import legacy`
+ * se guardó con su key como `tracker_id` (el loop viejo no sabía el id del tracker): el primer sync la
+ * adopta por key en vez de duplicarla, y desde ahí su `tracker_id` es el real.
+ */
+function findCached(db: Store["db"], values: Omit<IssueRow, "id">): IssueRow | undefined {
+  const byId = db
+    .select()
+    .from(issues)
+    .where(and(eq(issues.tracker, values.tracker), eq(issues.trackerId, values.trackerId)))
+    .get();
+  return (
+    byId ??
+    db
+      .select()
+      .from(issues)
+      .where(and(eq(issues.tracker, values.tracker), eq(issues.trackerId, values.key), eq(issues.key, values.key)))
+      .get()
+  );
 }
 
 function toRow(issue: Issue, projectId: ProjectId): Omit<IssueRow, "id"> {

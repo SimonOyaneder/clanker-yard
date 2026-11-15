@@ -85,6 +85,6 @@ export function apiDeps(
     decisions: createDecisions(store),
     learnings: createLearnings(store),
     defs,
-    legacyImport: createLegacyImporter({ store, defs }),
+    legacyImport: createLegacyImporter({ store, defs, artifacts }),
   };
 }

@@ -16,6 +16,15 @@ export const LegacyImportCounts = z.object({
   /** Con su `run_metrics`: una fila de cada una por corrida. */
   runs: z.int().nonnegative(),
   runRoleCosts: z.int().nonnegative(),
+  /** Las viñetas de "Decisiones y aprendizajes", `proposed` en la bandeja de learnings. */
+  learnings: z.int().nonnegative(),
+  /** Las notas de "Decisiones a revisar" (`review_note`, pendientes) y de "Omitidas" (`note`, aceptadas). */
+  decisions: z.int().nonnegative(),
+  /** Los archivos de `issues/*.md` y el brief de cada proyecto, ya enlazados a su corrida, issue o proyecto. */
+  artifacts: z.int().nonnegative(),
+  /** Los perfiles de `profiles.json` que no existían como def de usuario. */
+  profiles: z.int().nonnegative(),
+  modelPrices: z.int().nonnegative(),
 });
 export type LegacyImportCounts = z.infer<typeof LegacyImportCounts>;
 

@@ -337,7 +337,7 @@ Una issue bloqueada por PRs en cadenas distintas sale de una base sintética (`d
 `createLearnings(store)` (`packages/core/src/learnings/learnings.ts`, `docs/design.html#d-data`) guarda lo que un agente futuro necesita saber; solo los `approved` llegan a un brief. El alcance es un proyecto o un repo (nunca los dos) y `roles` vacío es todos los roles.
 
 - Un agente propone con `Report.learnings`: el motor los deja `proposed` (`source: "agent"`, con la corrida) en la tx que cierra el paso, en el proyecto de la corrida; una corrida sin proyecto no propone. Una persona propone con `learnings.propose`. Aprobar o rechazar no bloquea ni toca ninguna corrida. `learnings.approve`, y `learnings.update` de uno `approved`, solo con `origin: "ui"` (`FORBIDDEN` para CLI y MCP): lo aprobado entra a los briefs sin otra revisión.
-- El mismo texto en el mismo alcance no se repite, en cualquier estado (índice único): proponerlo otra vez devuelve el que había, no emite evento y no resucita lo rechazado. La importación del clanker-loop (CLA-89) debe proponer por `proposeLearning` para ser idempotente gratis.
+- El mismo texto en el mismo alcance no se repite, en cualquier estado (índice único): proponerlo otra vez devuelve el que había, no emite evento y no resucita lo rechazado. La importación del clanker-loop propone por `proposeLearning` (`source: "import"`, siempre `proposed`: decisión 19 del diseño) y por eso es idempotente sin clave de origen.
 - `reject` deja un `proposed` en `rejected` y retira un `approved` a `archived`; `approve` sirve desde cualquier estado menos `approved`. `update` cambia texto, roles y tags, no el alcance ni el estado.
 - `createStepBriefs` pide `learnings.forBrief({ projectId, repoId, role })` (proyecto de la corrida, repo del worktree, rol del nodo): los del repo primero, luego los más recientes; `createBriefs` corta en `MAX_LEARNINGS` (10). No hay tools MCP de learnings: el diseño no las lista.
 
@@ -358,7 +358,10 @@ Una issue bloqueada por PRs en cadenas distintas sale de una base sintética (`d
 `clanker import legacy --from <carpeta> [--dry-run]` corre `createLegacyImporter` (`packages/core/src/import/legacy.ts`) sobre la carpeta del loop viejo, que solo lee. En una prueba usa un `CLANKER_HOME` temporal; nunca importes al real sin que Simón lo pida.
 
 - Es idempotente (`runs.source_key` y claves naturales) y va en una sola tx que falla sin escribir si los totales de un proyecto no cuadran con `metrics.jsonl`. Un resultado desconocido del loop falla el import: agrégalo a `outcomeOf`.
-- Los proyectos entran `paused` con un `trackerRef` placeholder; nunca crea repos (los que no encuentra salen en `unresolvedRepos`). Lo que aún no importa está en el TSDoc del importador.
+- Los proyectos entran `paused` con un `trackerRef` placeholder; nunca crea repos (los que no encuentra salen en `unresolvedRepos`). Lo que importa y lo que no está en el TSDoc del importador.
+- Las issues importadas llevan su key como `tracker_id`; el primer `issues.sync` de Linear las adopta por key (`findCached` en `tracker/issues.ts`) en vez de duplicarlas.
+- Las decisiones importadas no tienen clave de origen: su identidad es (proyecto, kind, texto), y los artefactos (`legacy:<sufijo>` por dueño) se reemplazan si el archivo cambió. Un `review_note` cuyo `subject` es un PR mergeado se expira solo: Watch corre `expireMergedReviewNotes` en cada despertar, después de las visitas.
+- Los perfiles importados son defs de usuario que tapan a las de la plantilla con el mismo slug: heredan sus roles que el loop no conocía (`triage`, `plan-check`) y no pisan un perfil de usuario que ya exista. `model_prices` solo agrega los modelos que faltan.
 
 ## CLI
 

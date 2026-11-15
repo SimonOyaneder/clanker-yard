@@ -8,7 +8,15 @@ export interface LegacyState {
   repos: { name: string; path?: string }[];
   /** `parallel: N` de la cabecera; `undefined` si no lo fija. */
   parallel?: number;
+  /** El texto de `## Brief`; `undefined` si la sección falta o está vacía. */
+  brief?: string;
   history: LegacyHistoryRow[];
+  /** Las viñetas de `## Decisiones y aprendizajes`. */
+  learnings: string[];
+  /** Las viñetas de `## Decisiones a revisar`. */
+  reviewNotes: string[];
+  /** Las viñetas de `## Omitidas`: desvíos que ya se hicieron. */
+  skipped: string[];
 }
 
 /** Una fila de la tabla `## Historial`: una issue y su PR. */
@@ -40,6 +48,7 @@ export function parseLegacyState(text: string): LegacyState {
 
   const project = field("proyecto");
   const reposField = field("repos");
+  const brief = sectionOf(lines, "Brief").join("\n").trim();
   const parallel = /^parallel:\s*(\d+)/m.exec(header.join("\n"))?.[1];
 
   return {
@@ -47,8 +56,31 @@ export function parseLegacyState(text: string): LegacyState {
     ...(project?.startsWith("http") ? { trackerUrl: project.split(/\s/)[0] } : {}),
     repos: reposField === undefined ? [] : parseRepos(reposField),
     ...(parallel === undefined || Number(parallel) < 1 ? {} : { parallel: Number(parallel) }),
+    ...(brief === "" ? {} : { brief }),
     history: parseHistory(lines),
+    learnings: bulletsOf(lines, "Decisiones y aprendizajes"),
+    reviewNotes: bulletsOf(lines, "Decisiones a revisar"),
+    skipped: bulletsOf(lines, "Omitidas"),
   };
+}
+
+/** Las líneas de `## <heading>`, hasta la próxima sección. Vacío si la sección no está. */
+function sectionOf(lines: string[], heading: string): string[] {
+  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
+  if (start === -1) return [];
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("## "));
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** Cada `- ` de la sección es una viñeta; una línea con sangría la continúa. */
+function bulletsOf(lines: string[], heading: string): string[] {
+  const bullets: string[] = [];
+  for (const line of sectionOf(lines, heading)) {
+    if (line.startsWith("- ")) bullets.push(line.slice(2).trim());
+    else if (/^\s+\S/.test(line) && bullets.length > 0) bullets[bullets.length - 1] += `\n${line.trim()}`;
+  }
+  return bullets.filter((bullet) => bullet !== "");
 }
 
 /** `api (/ruta/api), dashboard, infra-tf (sub-issues de ENG-1)`: los paréntesis solo cuentan si empiezan con `/`. */

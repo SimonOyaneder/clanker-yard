@@ -13,6 +13,7 @@ import {
   createFileSecrets,
   createFlows,
   createGitRemote,
+  createLegacyImporter,
   createPacks,
   createPrCache,
   createPrEvents,
@@ -25,6 +26,7 @@ import {
   signalPr,
   startTriggers,
   type Connections,
+  type Defs,
   type Flows,
   type PrCache,
   type Store,
@@ -54,6 +56,8 @@ let sim: GitHubSim;
 let connections: Connections;
 let cache: PrCache;
 let watch: Watch;
+let defs: Defs;
+let repos: ReturnType<typeof createRepos>;
 let flows: Flows;
 let askpass: ReturnType<typeof createAskpass>;
 let stopTriggers: () => void;
@@ -80,10 +84,10 @@ beforeEach(async () => {
   connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
 
-  const repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
-  const defs = createDefs(store);
+  defs = createDefs(store);
   const packs = createPacks({ defs });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
@@ -366,6 +370,59 @@ describe("trackers", () => {
     await wake(5 * SECOND);
 
     expect(trackerPolls).toEqual([clock - 5 * SECOND, clock]);
+  });
+});
+
+describe("notas importadas del clanker-loop", () => {
+  /** Una carpeta del loop viejo con tres PRs del repo: el 1 y el 2 abiertos en el historial y el 3 ya mergeado. */
+  function legacyHome(): string {
+    const home = join(dir, "legacy");
+    const project = join(home, "projects", "demo");
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(home, "metrics.jsonl"), "");
+    writeFileSync(
+      join(project, "state.md"),
+      [
+        "# Demo · clanker-loop",
+        `proyecto: sin proyecto en Linear · repos: secret-project (${origin.dir})`,
+        "## Historial",
+        "| ID | estado | perfil | PR | branch | min | $ |",
+        "|---|---|---|---|---|---|---|",
+        "| DEMO-1 | listo | medio | #1 | one | - | - |",
+        "| DEMO-2 | listo | medio | #2 | two | - | - |",
+        "| DEMO-3 | mergeado | medio | #3 | three | - | - |",
+        "## Decisiones a revisar",
+        "- DEMO-1 (#1): el body quedó desactualizado.",
+        "- DEMO-2 (#2): el bot marcó un falso positivo.",
+        "- DEMO-3 (#3): quedó un TODO en el helper.",
+      ].join("\n"),
+    );
+    return home;
+  }
+  const noteStatuses = () =>
+    (store.db.$client.prepare("select substr(body, 1, 7) as note, status, resolved_by as by from decisions order by id").all() as { note: string; status: string; by: string | null }[]).map(
+      (d) => [d.note, d.status, d.by],
+    );
+
+  test("una review_note de un PR mergeado queda expired tras el primer sync, y la de uno que sigue abierto no", async () => {
+    sim.openPr({ head: "one" }).merge();
+    sim.openPr({ head: "two" });
+    createLegacyImporter({ store, defs, artifacts: createArtifacts({ store, dir: join(dir, "artifacts") }) }).run({ from: legacyHome(), dryRun: false });
+    expect(noteStatuses()).toEqual([
+      ["DEMO-1 ", "pending", null],
+      ["DEMO-2 ", "pending", null],
+      ["DEMO-3 ", "pending", null],
+    ]);
+
+    await wake();
+
+    // #1 se mergeó en GitHub desde el import y #3 ya llegó mergeado: Watch no lo visita, pero igual lo expira.
+    expect(noteStatuses()).toEqual([
+      ["DEMO-1 ", "expired", "watch"],
+      ["DEMO-2 ", "pending", null],
+      ["DEMO-3 ", "expired", "watch"],
+    ]);
+    expect(store.events.since(0, { types: ["decision.resolved"] }).map((e) => e.payload.status)).toEqual(["expired", "expired"]);
   });
 });
 

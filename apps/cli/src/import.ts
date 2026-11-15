@@ -12,6 +12,11 @@ const LABELS: [keyof LegacyImportResult["created"], string][] = [
   ["pullRequests", "PRs"],
   ["runs", "corridas (con sus métricas)"],
   ["runRoleCosts", "costos por rol"],
+  ["learnings", "learnings propuestos"],
+  ["decisions", "decisiones y notas"],
+  ["artifacts", "artefactos"],
+  ["profiles", "perfiles"],
+  ["modelPrices", "precios de modelos"],
 ];
 
 function describe(result: LegacyImportResult): string {

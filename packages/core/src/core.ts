@@ -324,7 +324,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     decisions: createDecisions(store),
     learnings,
     defs,
-    legacyImport: createLegacyImporter({ store, defs }),
+    legacyImport: createLegacyImporter({ store, defs, artifacts }),
     bootId,
     coreVersion: opts.coreVersion,
     dataDir,

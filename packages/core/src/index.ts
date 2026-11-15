@@ -13,6 +13,7 @@ export type { Artifact, ArtifactOwner, Artifacts, ArtifactsOptions } from "./art
 
 export { createDefs, DefValidationError } from "./defs/defs";
 export { closeDecision, openDecision } from "./decisions/decisions";
+export { createLegacyImporter } from "./import/legacy";
 export { createLearnings, proposeLearning } from "./learnings/learnings";
 export type { BriefScope, Learnings } from "./learnings/learnings";
 export type { Def, DefIssue, DefScope, DefVersion, Defs, SaveDef } from "./defs/defs";
