@@ -15,6 +15,7 @@ import { newId } from "../store/conventions";
 import { meta } from "../store/schema";
 import { openStore } from "../store/store";
 import { acquireCoreLock } from "./lock";
+import { readCoreConfig } from "./config";
 import { openCoreLog, routeConsoleTo } from "./logger";
 
 export interface RunCoreOptions {
@@ -74,7 +75,7 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
       })();
     };
 
-    const connections = createConnections(store, secretsFor(opts));
+    const connections = createConnections(store, secretsFor(opts), readCoreConfig(opts.dataDir));
     // Los procesos de los agentes se registran en `procs` desde el runtime, que se arma antes que el core.
     const procs = createProcs({ store, bootId: newId("boot") });
     const core = await startCore({

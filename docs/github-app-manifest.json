@@ -1,0 +1,14 @@
+{
+  "name": "Clanker Yard",
+  "url": "https://github.com/SimonOyaneder/clanker-yard",
+  "description": "Orquestador de agentes de código: actúa como tú en tus PRs.",
+  "redirect_url": "http://127.0.0.1:48722/github-app/created",
+  "public": false,
+  "request_oauth_on_install": false,
+  "default_permissions": {
+    "contents": "write",
+    "pull_requests": "write",
+    "issues": "write",
+    "checks": "read"
+  }
+}

@@ -77,6 +77,8 @@ export class ClaudeSetupError extends Error {}
 export interface ConnectionsOptions {
   /** Dónde está GitHub; en tests, un servidor local. */
   github?: GitHubApiOptions;
+  /** La GitHub App del device flow (`docs/github-app.md`); `startDeviceFlow` (CLA-100) usa su `clientId`. */
+  githubApp?: { clientId: string };
   linear?: LinearOptions;
   claude?: ClaudeOptions;
   /** Reloj en ms epoch, para el vencimiento. */
