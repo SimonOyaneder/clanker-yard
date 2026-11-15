@@ -183,6 +183,11 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
       .where(eq(agentSessions.id, req.sessionId))
       .get();
     if (!session) throw new Error(`No existe la sesión ${req.sessionId}.`);
+    if (session.runtime !== runtime.id) {
+      throw new Error(
+        `La sesión ${req.sessionId} es del runtime "${session.runtime}" y el core corre con "${runtime.id}" (CORE_RUNTIME): abre una sesión nueva.`,
+      );
+    }
     const roleDef = defs.get("role", session.roleDefId, session.roleVersion);
     if (!roleDef) throw new Error(`La sesión ${req.sessionId} apunta a un rol que ya no existe.`);
     const role = Role.parse(roleDef.body);

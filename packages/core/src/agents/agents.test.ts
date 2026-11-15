@@ -366,6 +366,22 @@ describe("resume", () => {
     expect(rows[0]).toMatchObject({ turns: 6, costMicros: 1000, status: "success" });
   });
 
+  test("una sesión de otro runtime no se retoma con el actual", async () => {
+    const { store, agents, calls } = setup([{ result: { structured: validReport } }]);
+    const first = await agents.run(request());
+    store.db.update(agentSessions).set({ runtime: "acp" }).run();
+
+    await expect(
+      agents.resume({
+        sessionId: first.sessionId,
+        profile: "default",
+        mode: "followup",
+        brief: brief("followup"),
+      }),
+    ).rejects.toThrow(`La sesión ${first.sessionId} es del runtime "acp"`);
+    expect(calls.resumes).toEqual([]);
+  });
+
   test("una sesión que no existe falla con su id", async () => {
     const { agents } = setup([]);
 
