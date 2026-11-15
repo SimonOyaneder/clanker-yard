@@ -53,7 +53,7 @@ async function setup(pack: "acme" | "none") {
     const packDir = join(dir, "pack");
     mkdirSync(packDir);
     const acme = JSON.parse(readFileSync(ACME_PACK, "utf8")) as Record<string, unknown>;
-    writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [] }));
+    writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
     await packs.load(packDir);
   }
   const prs = createPrs({ connections, packs, merge: createMergeScope({ store, repos, connections }) });

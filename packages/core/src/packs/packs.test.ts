@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { FlowDef, Role, type FlowDef as FlowDefType, type Role as RoleType } from "@clanker/api";
+import { ContextPackage, FlowDef, Role, type FlowDef as FlowDefType, type Role as RoleType } from "@clanker/api";
 import { createDefs, type Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
 import { openStore, type Store } from "../store/store";
@@ -22,6 +22,7 @@ function setup(): { defs: Defs; packs: Packs } {
   // Los kinds `flow` y `role` los registran Flows y Agents con estos mismos esquemas.
   defs.register("flow", FlowDef.omit({ version: true }));
   defs.register("role", Role);
+  defs.register("context", ContextPackage);
   return { defs, packs: createPacks({ defs }) };
 }
 
@@ -151,6 +152,36 @@ describe("load", () => {
     expect(defs.list("role").map((d) => [d.slug, d.scope, d.source])).toEqual([["review-lore", "pack", "pack:acme@1"]]);
     expect(defs.list("pack").map((d) => [d.slug, d.scope])).toEqual([["acme", "pack"]]);
     expect(defs.resolve("flow", "techlead")?.scope).toBe("pack");
+  });
+
+  test("los paquetes de contexto del pack entran como defs context con scope pack, y se archivan si el pack los deja", async () => {
+    const { defs, packs } = setup();
+    const withContext = (version: number, contexts: string[]): Files => ({
+      ...acme(),
+      "pack.json": { ...manifest, version, contexts },
+      "contexts/commits.json": { description: "cómo hago commits", refs: ["skill:commit", "rule:git-safety"] },
+    });
+
+    await packs.load(packDir(withContext(1, ["contexts/commits.json"])));
+    expect(defs.list("context").map((d) => [d.slug, d.scope, d.source])).toEqual([["commits", "pack", "pack:acme@1"]]);
+    expect(defs.resolve("context", "commits")?.body).toEqual({ description: "cómo hago commits", refs: ["skill:commit", "rule:git-safety"] });
+
+    await packs.load(packDir(withContext(2, [])));
+    expect(defs.resolve("context", "commits")).toBeUndefined();
+  });
+
+  test("un paquete de contexto con una referencia que no es de ningún tipo da error con su archivo", async () => {
+    const { packs } = setup();
+    const dir = packDir({
+      ...acme(),
+      "pack.json": { ...manifest, contexts: ["contexts/commits.json"] },
+      "contexts/commits.json": { refs: ["commit"] },
+    });
+
+    const error = await loadError(packs, dir);
+
+    expect(error.file).toBe("contexts/commits.json");
+    expect(error.issues[0]?.path.join(".")).toBe("refs.0");
   });
 
   test("un flujo del usuario con el mismo id le gana al del pack", async () => {

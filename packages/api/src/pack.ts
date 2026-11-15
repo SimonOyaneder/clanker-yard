@@ -195,7 +195,7 @@ const Activate = z
     message: "un pack sin alcance nunca se activaría: lista al menos una org de GitHub, un workspace del tracker o un proyecto",
   });
 
-/** El `pack.json`: el contenido del pack es JSON y los flujos y roles son archivos `.json` junto a él. */
+/** El `pack.json`: el contenido del pack es JSON y los flujos, roles y paquetes de contexto son archivos `.json` junto a él. */
 export const Pack = PackSettings.extend({
   id: z.string().regex(/^[a-z][a-z0-9-]*$/, "debe ser minúsculas, números y guiones, empezando por una letra"),
   /** Versión del pack: se sube a propósito cuando cambia algo. */
@@ -205,6 +205,8 @@ export const Pack = PackSettings.extend({
   flows: z.array(PackFile).default([]),
   /** Roles (`Role`) que el pack trae; el slug es el nombre del archivo sin `.json`. */
   roles: z.array(PackFile).default([]),
+  /** Paquetes de contexto (`ContextPackage`: referencias, nunca copias) que el pack trae; el slug es el nombre del archivo sin `.json`. */
+  contexts: z.array(PackFile).default([]),
 });
 export type Pack = z.infer<typeof Pack>;
 

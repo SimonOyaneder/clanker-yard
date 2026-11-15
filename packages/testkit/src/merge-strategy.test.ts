@@ -79,13 +79,13 @@ beforeEach(async () => {
   repoId = repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
   setMergeStrategy = (override) => repos.setMergeStrategy(repoId, override);
 
-  // El pack de ejemplo real, activado para la org del simulador y sin sus flujos ni roles (esos no son de este test).
+  // El pack de ejemplo real, activado para la org del simulador y sin sus flujos, roles ni contextos (esos no son de este test).
   const defs = createDefs(store);
   const packs = createPacks({ defs });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
   const acme = JSON.parse(readFileSync(ACME_PACK, "utf8")) as Record<string, unknown>;
-  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [] }));
+  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
   await packs.load(packDir);
 
   const prs = createPrs({ connections, packs, merge: createMergeScope({ store, repos, connections }) });

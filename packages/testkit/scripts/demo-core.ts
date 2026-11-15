@@ -71,11 +71,11 @@ const github = await startGitHubSim({
   ...(prsScenario && { repo: "octocat/demo" }),
 });
 if (prsScenario) {
-  // El pack de ejemplo tal cual, activado para la org del simulador y sin sus flujos ni roles (el escenario no los corre).
+  // El pack de ejemplo tal cual, activado para la org del simulador y sin sus flujos, roles ni contextos (el escenario no los corre).
   const packDir = join(home, "packs", "acme");
   mkdirSync(packDir, { recursive: true });
   const acme = JSON.parse(readFileSync(fileURLToPath(new URL("../../../packs/acme/pack.json", import.meta.url)), "utf8")) as Record<string, unknown>;
-  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [] }));
+  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
 }
 const linear = await startFakeLinear({ clientId: "demo-client" });
 const control = (): {

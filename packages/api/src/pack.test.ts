@@ -121,7 +121,7 @@ describe("packJsonSchema", () => {
   test("tiene cada clave del pack", () => {
     const properties = Object.keys((packJsonSchema as { properties: object }).properties);
     expect(properties.sort()).toEqual(
-      ["activate", "actors", "ciRules", "conventions", "flows", "id", "mergeStrategy", "reviewBot", "roles", "signals", "version"].sort(),
+      ["activate", "actors", "ciRules", "contexts", "conventions", "flows", "id", "mergeStrategy", "reviewBot", "roles", "signals", "version"].sort(),
     );
     expect((packJsonSchema as { required: string[] }).required.sort()).toEqual(["activate", "id", "version"]);
   });

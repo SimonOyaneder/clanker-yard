@@ -23,8 +23,8 @@ export class PackLoadError extends Error {
 
 export interface Packs {
   /**
-   * Lee `<dir>/pack.json` con los flujos y roles que lista y los guarda como defs: el pack con scope
-   * `pack` y cada flujo y rol con scope `pack` y source `pack:<id>@<version>`. Valida todo antes de
+   * Lee `<dir>/pack.json` con los flujos, roles y paquetes de contexto que lista y los guarda como defs: el pack con scope
+   * `pack` y cada flujo, rol y paquete de contexto con scope `pack` y source `pack:<id>@<version>`. Valida todo antes de
    * escribir, así que un pack inválido no deja nada a medias. Lo que una versión anterior del pack traía
    * y esta ya no, se archiva. Cargar dos veces el mismo contenido no crea versiones.
    */
@@ -41,9 +41,13 @@ export interface Packs {
   packFor(scope: PackScope): ResolvedPack;
 }
 
+/** Los kinds de def que un pack trae como archivos. */
+const PACKED_KINDS = ["role", "flow", "context"] as const;
+type PackedKind = (typeof PACKED_KINDS)[number];
+
 interface PackedDef {
   file: string;
-  kind: "flow" | "role";
+  kind: PackedKind;
   slug: string;
   body: unknown;
 }
@@ -81,7 +85,7 @@ export function createPacks({ defs }: { defs: Defs }): Packs {
 
   async function readPacked(dir: string, pack: Pack): Promise<PackedDef[]> {
     const out: PackedDef[] = [];
-    for (const [kind, files] of [["role", pack.roles], ["flow", pack.flows]] as const) {
+    for (const [kind, files] of [["role", pack.roles], ["flow", pack.flows], ["context", pack.contexts]] as const) {
       for (const file of files) {
         const body = await readJson(dir, file);
         const slug = basename(file, extname(file));
@@ -118,7 +122,7 @@ export function createPacks({ defs }: { defs: Defs }): Packs {
       const mine = (existingSource: string) => existingSource.startsWith(`pack:${pack.id}@`);
 
       const packed = await readPacked(dir, pack);
-      const existing = (["flow", "role"] as const).flatMap((kind) =>
+      const existing = PACKED_KINDS.flatMap((kind) =>
         defs.list(kind, { includeArchived: true }).filter((d) => d.scope === "pack"),
       );
       for (const def of packed) {
