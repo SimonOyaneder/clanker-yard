@@ -6,6 +6,7 @@ import type { RunId } from "@clanker/api";
 import { and, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
+import { execLogged, type ExecResult } from "./exec";
 import { newId } from "../store/conventions";
 import { workspaces } from "../store/schema";
 import type { Store } from "../store/store";
@@ -40,6 +41,8 @@ export interface WorkspacesOptions {
   store: Store;
   /** Directorio de datos de la app (D3): ahí viven `worktrees/<repo>/<branch>`. */
   dataDir: string;
+  /** Carpeta de los logs de comandos (`<logDir>/runs/<runId>/<stepId>.log`); por defecto `<dataDir>/logs`. */
+  logDir?: string;
   repos: (repoId: string) => RepoConfig;
   /** Autor y committer de todo lo que corre `git` en un worktree. */
   identity: { name: string; email: string };
@@ -71,6 +74,22 @@ export interface WorkspaceLease {
   lost: AbortSignal;
 }
 
+/**
+ * Lo mínimo para operar sobre un worktree ya tomado: un `WorkspaceLease`, o lo que de él viaja en el
+ * output de `workspace.acquire` (que no lleva `lost`).
+ */
+export type WorkspaceRef = Pick<WorkspaceLease, "workspaceId" | "path" | "branch" | "fencingToken">;
+
+export interface ExecOptions {
+  /** La salida completa va a `logs/runs/<runId>/<stepId>.log`. */
+  runId: RunId;
+  stepId: string;
+  /** Se suma al entorno mínimo del comando (`PATH`, `HOME`, `USER`, `LANG`, `TMPDIR`, `SHELL`). */
+  env?: Record<string, string>;
+  /** Abortarla mata el grupo de procesos del comando y lanza su razón. */
+  signal?: AbortSignal;
+}
+
 export interface Workspaces {
   /**
    * Toma el lease del worktree de `branch`, creándolo si no existe. Si otra corrida lo tiene
@@ -81,7 +100,7 @@ export interface Workspaces {
   /** Suelta el lease y deja el worktree `idle`. No hace nada si el token ya no es el vigente. */
   release(lease: WorkspaceLease): void;
   /** Lanza `StaleLeaseError` si `lease` ya no es el lease vigente del worktree. */
-  validate(lease: WorkspaceLease): void;
+  validate(lease: WorkspaceRef): void;
   /**
    * Pushea `HEAD` a `refs/heads/<branch>` con `--force-with-lease` contra el `remote_sha` guardado, tras
    * validar el lease. Con `ok` el nuevo `remote_sha` queda guardado (también si el remoto ya tenía
@@ -92,7 +111,13 @@ export interface Workspaces {
   /** Trae las branches del remoto a `refs/remotes/origin/*` con el mismo mecanismo que `push`. */
   fetch(repo: string): Promise<FetchOutcome>;
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
-  git(lease: WorkspaceLease, ...args: string[]): Promise<string>;
+  git(lease: WorkspaceRef, ...args: string[]): Promise<string>;
+  /**
+   * Corre `command` con `sh -c` en el worktree, después de validar el token. La salida completa se
+   * agrega al log del paso y `extract` trae las últimas 60 líneas. Un exit distinto de 0 es un
+   * resultado, no una excepción; solo falla si el comando no se pudo lanzar o se abortó.
+   */
+  exec(lease: WorkspaceRef, command: string, opts: ExecOptions): Promise<ExecResult>;
 }
 
 /** Otra corrida tiene el lease vigente de esa branch. */
@@ -106,6 +131,7 @@ export class BranchNotAllowedError extends Error {}
 
 export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   const { store, dataDir, repos, identity, remote, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
+  const logDir = opts.logDir ?? join(dataDir, "logs");
   const heartbeats = new Map<string, NodeJS.Timeout>();
   const repoLocks = new Map<string, Promise<unknown>>();
 
@@ -186,7 +212,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     heartbeats.delete(key);
   }
 
-  function validate(lease: WorkspaceLease): void {
+  function validate(lease: WorkspaceRef): void {
     const row = store.db
       .select({ id: workspaces.id })
       .from(workspaces)
@@ -504,6 +530,16 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         GIT_AUTHOR_EMAIL: identity.email,
         GIT_COMMITTER_NAME: identity.name,
         GIT_COMMITTER_EMAIL: identity.email,
+      });
+    },
+    async exec(lease, command, { runId, stepId, env = {}, signal = new AbortController().signal }) {
+      validate(lease);
+      return execLogged({
+        cwd: lease.path,
+        command,
+        env,
+        logPath: join(logDir, "runs", runId, `${stepId}.log`),
+        signal,
       });
     },
   };

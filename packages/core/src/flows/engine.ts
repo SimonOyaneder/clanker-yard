@@ -442,7 +442,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (!args.success) return permanent(`Los args de "${node.action}" no son válidos: ${formatIssues(args.error)}`);
 
     const key = `${run.id}:${step.nodeId}:${step.visit}`;
-    const ctx: ActionCtx = { runId: run.id, key, signal, once: (stage, fn) => once(key, stage, fn) };
+    const ctx: ActionCtx = { runId: run.id, stepId: step.id, key, signal, once: (stage, fn) => once(key, stage, fn) };
     let result;
     try {
       result = await raceAbort(action.run(args.data, ctx), signal);

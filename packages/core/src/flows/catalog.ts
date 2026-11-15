@@ -13,6 +13,8 @@ export interface RetryPolicy {
 
 export interface ActionCtx {
   runId: RunId;
+  /** El paso (`step_runs.id`): el mismo en todos los reintentos. Nombra sus logs y es el dueño de sus artefactos. */
+  stepId: string;
   /** `run:nodo:visita`. Los reintentos de una visita la comparten; una ronda nueva trae otra. */
   key: string;
   /** Se aborta al vencer `timeoutSec`. */

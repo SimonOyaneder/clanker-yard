@@ -98,10 +98,14 @@ export {
   WorkspaceBusyError,
   workspaceAcquireAction,
 } from "./workspaces/workspaces";
+export { EXCERPT_MAX_LINES } from "./workspaces/exec";
+export type { ExecResult } from "./workspaces/exec";
 export type {
   AcquireRequest,
+  ExecOptions,
   RepoConfig,
   WorkspaceLease,
+  WorkspaceRef,
   Workspaces,
   WorkspacesOptions,
 } from "./workspaces/workspaces";
@@ -112,3 +116,6 @@ export { createLocalTracker } from "./tracker/local";
 export type { LocalTracker, LocalTrackerOptions, RelationKind } from "./tracker/local";
 export { IssueNotFoundError, matchesIssueFilter } from "./tracker/tracker";
 export type { Tracker } from "./tracker/tracker";
+
+export { createRecipes, RECIPE_PATH } from "./recipe/recipe";
+export type { Recipes, RecipesOptions, ScriptedRecipe } from "./recipe/recipe";
