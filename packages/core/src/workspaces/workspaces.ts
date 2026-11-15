@@ -257,8 +257,8 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     let baseSha: string;
     let head: string;
     try {
-      baseSha = existsSync(row.path)
-        ? (row.baseSha ?? (await resolveBase(cfg, row.baseRef)))
+      baseSha = !claim.isNew && existsSync(row.path)
+        ?(row.baseSha ?? (await resolveBase(cfg, row.baseRef)))
         : await withRepoLock(repo, () => createWorktree(cfg, row, claim.isNew));
       head = await git(row.path, ["rev-parse", "HEAD"]);
     } catch (error) {
@@ -300,6 +300,14 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     row: typeof workspaces.$inferSelect,
     isNew: boolean,
   ): Promise<string> {
+    // Una fila nueva cuya carpeta ya existe apunta al worktree de otra branch: en macOS `CLA-1` y
+    // `cla-1` son la misma carpeta, y reusarla dejaría dos corridas escribiendo en el mismo worktree.
+    if (isNew && existsSync(row.path)) {
+      throw new BranchNotAllowedError(
+        `La carpeta ${row.path} ya existe y no es de la branch ${row.branch} ` +
+          "(¿otra branch con el mismo nombre en otras mayúsculas?). Elige otro nombre.",
+      );
+    }
     const hasRemote = await hasOrigin(cfg);
     if (hasRemote) await git(cfg.path, ["fetch", REMOTE]);
     const baseSha = await resolveBase(cfg, row.baseRef);

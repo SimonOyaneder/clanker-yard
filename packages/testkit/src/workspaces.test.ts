@@ -154,6 +154,17 @@ describe("acquire", () => {
     await expect(acquire(id, "other")).resolves.toBeDefined();
   });
 
+  test("una branch nueva no reusa una carpeta que ya existe, aunque sea un worktree", async () => {
+    const id = repo("r1");
+    // Lo que pasa en macOS con `CLA-1` después de `cla-1`: la carpeta es la misma.
+    const path = join(dataDir, "worktrees", "r1", "cla-1");
+    repoById.get(id)!.git("worktree", "add", "-b", "otra", path);
+
+    await expect(acquire(id, "cla-1")).rejects.toBeInstanceOf(BranchNotAllowedError);
+    expect(store.db.$client.prepare("SELECT count(*) AS n FROM workspaces").get()).toEqual({ n: 0 });
+    expect(repoById.get(id)!.git("-C", path, "rev-parse", "--abbrev-ref", "HEAD")).toBe("otra");
+  });
+
   test("tras release se reusa el mismo worktree con un token nuevo y la branch queda idle", async () => {
     const id = repo("r1");
     const first = await acquire(id, "cla-1", runA);
