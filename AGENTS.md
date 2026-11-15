@@ -13,6 +13,8 @@ python3 scripts/design-section.py d-data   # imprime una sección
 
 Ids más usados: `devx` (dev setup), `d-data` (schema, API, monorepo), `stack`, `ui`, `d-ui`, `d-flows`, `d-agents`. Si el diseño no cuadra con la realidad, haz lo más simple que respete su intención y deja el desvío escrito en el PR.
 
+Desvíos ya conocidos: `agentEnv` (`d-agents`) incluye `USER` además de `PATH`, `HOME` y `LANG`, y en modo suscripción nunca hereda `ANTHROPIC_*`, `CLAUDE_CODE_OAUTH_TOKEN` ni `CLAUDE_CODE_USE_*` (ver `docs/claude-subscription.md`).
+
 ## Instalar, correr, probar
 
 ```
