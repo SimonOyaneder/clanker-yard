@@ -49,6 +49,16 @@ packages/testkit  runtime fake, fixtures, repos git temporales
 
 El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run db:generate -w @clanker/core` deja una carpeta nueva en `packages/core/migrations/` (se commitea). Para triggers u otro SQL que drizzle-kit no modela: `npx drizzle-kit generate --custom --name <x>` desde `packages/core` y escribe el SQL a mano. No edites una migración ya mergeada.
 
+## Testkit
+
+`@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:
+
+- `tempGitRepo({ commits, branches, remote })`: repo git real en un directorio temporal, aislado de tu config de git. `commits` va sobre `main`, `branches` sale del último commit de `main`, y con `remote: true` `origin` es un bare local donde `main` y las ramas ya están publicadas (push y fetch funcionan sin red). Devuelve `{ dir, remoteDir, git(...args), cleanup() }`.
+- `seedDb(scenario)` y `loadFixture(path)`: devuelven un `CLANKER_HOME` temporal (`{ path, dbPath, env, cleanup() }`) con `clanker.db` sembrada por un escenario o copiada de un `.sqlite`. Pasa `home.env` al proceso que lanzas, o abre `openStore({ path: home.dbPath })` en el test. Siempre `cleanup()` en `afterEach`.
+- Los escenarios viven en `packages/testkit/src/scenarios.ts` (`empty`, `loop-running`, `issue-blocked`). Un escenario nuevo es una función que escribe en el Store con `store.tx`.
+- Fixtures: `packages/testkit/fixtures/db/<escenario>.sqlite`. No se versionan (`*.sqlite` está ignorado): se generan con el schema vigente con `npm run fixtures -w @clanker/testkit` (corre las migraciones y siembra cada escenario). Si cambias el schema o un escenario, regenéralas.
+- Los tests de un paquete que necesiten la base usan `seedDb` (o `openStore({ path: ":memory:" })` si no hace falta un archivo); `loadFixture` es para apuntar la UI, el CLI o un E2E a un `.sqlite` generado.
+
 ## UI
 
 - Usa un componente de shadcn antes de escribir uno propio. Agrégalo desde `packages/ui` (`npx shadcn@latest add <componente>`) o pídelo al MCP de shadcn (`.mcp.json`).
