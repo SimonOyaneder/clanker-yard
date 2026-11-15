@@ -89,11 +89,13 @@ describe("bot de review", () => {
       state: "lgtm",
       sha: HEAD_SHA,
       reviewId: Number(approved.fullDatabaseId),
+      at: "2026-11-10T10:00:00Z",
+      findings: [],
     });
   });
 
   test("un LGTM de un commit anterior no vale para el head: es como si el bot no hubiera revisado", () => {
-    expect(build(prNode({ reviews: [lgtm({ sha: OLD_SHA })] })).bot).toEqual({ state: "none" });
+    expect(build(prNode({ reviews: [lgtm({ sha: OLD_SHA })] })).bot).toEqual({ state: "none", findings: [] });
   });
 
   test("sin sameSha en el pack, el LGTM de otro commit sí vale", () => {
@@ -113,8 +115,30 @@ describe("bot de review", () => {
     ];
 
     for (const r of withFindings) {
-      expect(build(prNode({ reviews: [r] })).bot).toEqual({ state: "findings", sha: HEAD_SHA, reviewId: Number(r.fullDatabaseId) });
+      expect(build(prNode({ reviews: [r] })).bot).toMatchObject({ state: "findings", sha: HEAD_SHA, reviewId: Number(r.fullDatabaseId), at: "2026-11-10T10:00:00Z" });
     }
+  });
+
+  test("los hallazgos son los threads del bot sin resolver, con su lugar y su texto", () => {
+    const [open, resolved, human] = [
+      thread(bot("review-bot[bot]"), "Falta validar el monto"),
+      thread(bot("review-bot[bot]"), "Ya corregido", { resolved: true }),
+      thread(user("ana"), "otra cosa"),
+    ];
+    open.comments.nodes[0] = { ...open.comments.nodes[0]!, path: "app/models/transfer.rb", line: 42 };
+    const r = review(bot("review-bot[bot]"), "COMMENTED", { body: "Ver threads" });
+
+    expect(build(prNode({ reviews: [r], reviewThreads: [open, resolved, human] })).bot.findings).toEqual([
+      { id: open.comments.nodes[0]!.fullDatabaseId, path: "app/models/transfer.rb", line: 42, text: "Falta validar el monto" },
+    ]);
+  });
+
+  test("una review del bot sin threads abiertos es ella misma el hallazgo", () => {
+    const withBody = review(bot("review-bot[bot]"), "CHANGES_REQUESTED", { body: "  Falta el test  " });
+    const empty = review(bot("review-bot[bot]"), "COMMENTED");
+
+    expect(build(prNode({ reviews: [withBody] })).bot.findings).toEqual([{ id: `review-${withBody.fullDatabaseId}`, text: "Falta el test" }]);
+    expect(build(prNode({ reviews: [empty] })).bot.findings).toEqual([{ id: `review-${empty.fullDatabaseId}`, text: "El bot no aprobó y no dejó comentarios." }]);
   });
 
   test("gana la review más reciente; las descartadas y las sin enviar no cuentan", () => {
@@ -133,9 +157,9 @@ describe("bot de review", () => {
   });
 
   test("sin reviews del bot, o sin bot en el pack (aunque alguien escriba LGTM), es none", () => {
-    expect(build(prNode()).bot).toEqual({ state: "none" });
-    expect(build(prNode({ reviews: [review(user("ana"), "APPROVED", { body: "LGTM" })] })).bot).toEqual({ state: "none" });
-    expect(build(prNode({ reviews: [lgtm()] }), noPack).bot).toEqual({ state: "none" });
+    expect(build(prNode()).bot).toEqual({ state: "none", findings: [] });
+    expect(build(prNode({ reviews: [review(user("ana"), "APPROVED", { body: "LGTM" })] })).bot).toEqual({ state: "none", findings: [] });
+    expect(build(prNode({ reviews: [lgtm()] }), noPack).bot).toEqual({ state: "none", findings: [] });
   });
 });
 
@@ -202,7 +226,7 @@ describe("CI con las reglas del pack", () => {
       prNode({ head: { oid: HEAD_SHA, contexts: [checkRun("test", "SUCCESS"), statusContext("merge-queue", "FAILURE"), checkRun("lint", "SKIPPED"), checkRun("types", "NEUTRAL")] } }),
     );
 
-    expect(state.ci).toEqual({ state: "green", sha: HEAD_SHA, failing: [] });
+    expect(state.ci).toEqual({ state: "green", sha: HEAD_SHA, failing: [], flaky: [] });
   });
 
   test("rojo gana sobre pendiente y lista los checks que fallaron, cualquiera sea su conclusión", () => {
@@ -215,7 +239,7 @@ describe("CI con las reglas del pack", () => {
       }),
     );
 
-    expect(state.ci).toEqual({ state: "red", sha: HEAD_SHA, failing: ["a", "b", "c", "d"] });
+    expect(state.ci).toEqual({ state: "red", sha: HEAD_SHA, failing: ["a", "b", "c", "d"], flaky: [] });
   });
 
   test("pendiente: un check sin terminar o un status esperado", () => {
@@ -224,6 +248,7 @@ describe("CI con las reglas del pack", () => {
         state: "pending",
         sha: HEAD_SHA,
         failing: [],
+        flaky: [],
       });
     }
   });
@@ -231,6 +256,13 @@ describe("CI con las reglas del pack", () => {
   test("sin checks, o solo checks ignorados, es none", () => {
     expect(build(prNode()).ci.state).toBe("none");
     expect(build(prNode({ head: { oid: HEAD_SHA, contexts: [statusContext("merge-queue", "PENDING")] } })).ci.state).toBe("none");
+  });
+
+  test("knownFlaky del pack marca, entre los que fallan, los flaky conocidos", () => {
+    const pack: ResolvedPack = { ...acme, ciRules: { ...acme.ciRules, knownFlaky: ["e2e", "visual"] } };
+    const contexts = [checkRun("e2e", "FAILURE"), checkRun("unit", "FAILURE"), checkRun("visual", "SUCCESS")];
+
+    expect(build(prNode({ head: { oid: HEAD_SHA, contexts } }), pack).ci).toMatchObject({ state: "red", failing: ["e2e", "unit"], flaky: ["e2e"] });
   });
 
   test("okStates del pack: si SKIPPED no es ok, un check saltado deja el CI rojo", () => {
@@ -250,7 +282,7 @@ describe("CI sin pack", () => {
       noPack,
     );
 
-    expect(state.ci).toEqual({ state: "green", sha: HEAD_SHA, failing: [] });
+    expect(state.ci).toEqual({ state: "green", sha: HEAD_SHA, failing: [], flaky: [] });
   });
 
   test("un requerido en rojo es rojo; uno sin terminar es pendiente", () => {

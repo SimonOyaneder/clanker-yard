@@ -83,6 +83,8 @@ const CheckState = z.enum(["SUCCESS", "SKIPPED", "NEUTRAL", "FAILURE", "ERROR", 
 const CiRules = z.strictObject({
   ignoreChecks: z.array(z.string().min(1)).optional(),
   okStates: z.array(CheckState).optional(),
+  /** Checks que fallan sin culpa del cambio: el estado del PR los marca antes de que un agente los triagee. */
+  knownFlaky: z.array(z.string().min(1)).optional(),
 });
 
 /** Condiciones que sabe evaluar el core. `offer` y `auto` pueden apoyarse en la lista anterior (`ready`, `offer`). */

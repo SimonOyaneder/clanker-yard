@@ -39,6 +39,16 @@ export const PrTalk = z.object({
 });
 export type PrTalk = z.infer<typeof PrTalk>;
 
+/** Algo que el bot de review dejó abierto: un thread suyo sin resolver, con el lugar y el texto de su primer comentario. */
+export const BotFinding = z.object({
+  /** El `fullDatabaseId` del primer comentario del thread, como nombra `pr.reply` a un thread (`review-<id>` si el bot no dejó threads: el id es el de su review). */
+  id: z.string(),
+  path: z.string().optional(),
+  line: z.int().optional(),
+  text: z.string(),
+});
+export type BotFinding = z.infer<typeof BotFinding>;
+
 export const PrState = z.object({
   /** `repo#número`, por ejemplo `api#4251`. */
   key: z.string(),
@@ -56,19 +66,25 @@ export const PrState = z.object({
   /**
    * Lo último que dijo el bot de review del pack. `lgtm` solo si esa review cumple la regla del pack
    * (estado, texto y, si lo pide, el mismo sha que el head); un LGTM de un sha anterior es `none`.
-   * `sha` y `reviewId` son los de la review del bot: quien espere al bot los compara con `headSha`.
+   * `sha`, `reviewId` y `at` (ISO 8601) son los de la review del bot: quien espere al bot compara `sha`
+   * con `headSha` y `at` con el momento en que le pidió la review. `findings` solo viene con
+   * `state: "findings"`: sus threads sin resolver o, si no dejó threads, el cuerpo de su review.
    * Sin bot en el pack siempre es `none`.
    */
   bot: z.object({
     state: z.enum(["none", "lgtm", "findings"]),
     sha: z.string().optional(),
     reviewId: z.int().optional(),
+    at: z.string().optional(),
+    findings: z.array(BotFinding),
   }),
   ci: z.object({
     state: z.enum(["pending", "green", "red", "none"]),
     sha: z.string(),
     /** Nombres de los checks en rojo que cuentan para el estado. */
     failing: z.array(z.string()),
+    /** Los de `failing` que el pack declara flaky conocidos (`ciRules.knownFlaky`). */
+    flaky: z.array(z.string()),
   }),
   threads: z.object({
     humanOpen: z.int().nonnegative(),

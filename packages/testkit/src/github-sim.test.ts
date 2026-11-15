@@ -345,6 +345,18 @@ describe("REST: checks", () => {
   });
 });
 
+describe("merge", () => {
+  test("un PR mergeado queda cerrado, con su commit de merge en GraphQL y merged_at en REST", async () => {
+    const pr = sim.openPr({ head: BRANCH });
+    expect(await prState(1)).toMatchObject({ state: "open" });
+
+    pr.merge();
+
+    expect(await prState(1)).toMatchObject({ state: "merged", mergeCommitSha: pr.headSha() });
+    expect((await api("GET", `/repos/${REPO}/pulls/1`)).body).toMatchObject({ state: "closed", merged: true, merged_at: expect.any(String) });
+  });
+});
+
 describe("la review del bot y el council", () => {
   test("un LGTM de un commit anterior ya no vale para el head de hoy", async () => {
     const pr = sim.openPr({ head: BRANCH });

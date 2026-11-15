@@ -104,8 +104,8 @@ describe("prs.get", () => {
 
     const state = await createPrs({ connections, packs }).get({ ...REPO, repo: "otra-org/api" });
 
-    expect(state.bot).toEqual({ state: "none" });
-    expect(state.ci).toEqual({ state: "red", sha: HEAD_SHA, failing: ["test"] });
+    expect(state.bot).toEqual({ state: "none", findings: [] });
+    expect(state.ci).toEqual({ state: "red", sha: HEAD_SHA, failing: ["test"], flaky: [] });
   });
 
   test("completa las páginas de threads y de checks que no entraron en la primera", async () => {
@@ -151,7 +151,7 @@ describe("prs.get", () => {
 
     const state = await createPrs({ connections, packs }).get(REPO);
 
-    expect(state.ci).toEqual({ state: "none", sha: HEAD_SHA, failing: [] });
+    expect(state.ci).toEqual({ state: "none", sha: HEAD_SHA, failing: [], flaky: [] });
   });
 
   test("un PR o repo que no existe es PrNotFoundError", async () => {

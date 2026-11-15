@@ -39,8 +39,12 @@ export interface RawThread {
   /** El node id de GraphQL (`PRRT_...`), lo que piden las mutations de thread. */
   id: string;
   isResolved: boolean;
-  /** Los primeros 20: el primero abre el thread y dice de quién es; el resto son las respuestas. */
-  comments: { nodes: { fullDatabaseId: string; body: string; author: Actor | null }[] };
+  /**
+   * Los primeros 20: el primero abre el thread y dice de quién es; el resto son las respuestas.
+   * GitHub siempre manda `path` y `line` (`line` es nulo si el comentario ya no calza con el diff); un
+   * comentario sin lugar, como el de un fixture, simplemente no los trae.
+   */
+  comments: { nodes: { fullDatabaseId: string; body: string; path?: string; line?: number | null; author: Actor | null }[] };
 }
 
 export type RawContext =
@@ -103,7 +107,7 @@ export class PrNotFoundError extends Error {
 
 const PAGE_SIZE = 100;
 const PAGE_INFO = "pageInfo { hasNextPage endCursor }";
-const THREAD = `id isResolved comments(first: 20) { nodes { fullDatabaseId body author { __typename login } } }`;
+const THREAD = `id isResolved comments(first: 20) { nodes { fullDatabaseId body path line author { __typename login } } }`;
 const CONTEXT = `__typename
   ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
   ... on StatusContext { context state isRequired(pullRequestNumber: $number) }`;

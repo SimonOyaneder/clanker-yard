@@ -74,7 +74,7 @@ export interface SimPull {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
-  merged_at: null;
+  merged_at: string | null;
   head: { label: string; ref: string; sha: string };
   base: { label: string; ref: string; sha: string | undefined };
 }
@@ -121,6 +121,8 @@ export interface SimPr {
   ci(outcome: "green" | "red" | "pending", opts?: { name?: string }): void;
   requestReview(login: string): void;
   setDraft(draft: boolean): void;
+  /** Mergea el PR: queda cerrado y mergeado, con el head de hoy como commit del merge. */
+  merge(): void;
 }
 
 export interface GitHubSim {
@@ -177,6 +179,8 @@ interface PrData {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+  /** Cuándo se mergeó y con qué commit (`merge()`); `null` mientras no. */
+  merged: { at: string; sha: string } | null;
   /** El último sha visto de la branch: GitHub conserva el head de un PR aunque borren la branch. */
   lastSha: string;
   reviews: SimReview[];
@@ -308,14 +312,14 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     return {
       number: pr.number,
       repo: { name, defaultBranch },
-      state: pr.state === "open" ? "OPEN" : "CLOSED",
+      state: pr.merged ? "MERGED" : pr.state === "open" ? "OPEN" : "CLOSED",
       isDraft: pr.draft,
       headRefName: pr.head,
       headRefOid: sha,
       baseRefName: pr.base,
       reviewDecision: reviewDecision(pr),
       ...mergeability(pr),
-      mergeCommit: null,
+      mergeCommit: pr.merged ? { oid: pr.merged.sha } : null,
       author: withAvatar(pr.author),
       labels: [],
       requestedReviewers: pr.requested.map(withAvatar),
@@ -357,7 +361,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     created_at: pr.createdAt,
     updated_at: pr.updatedAt,
     closed_at: pr.closedAt,
-    merged_at: null,
+    merged_at: pr.merged?.at ?? null,
     head: { label: `${owner}:${pr.head}`, ref: pr.head, sha: headSha(pr) },
     base: { label: `${owner}:${pr.base}`, ref: pr.base, sha: branchSha(pr.base) },
   });
@@ -410,6 +414,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       createdAt: at,
       updatedAt: at,
       closedAt: null,
+      merged: null,
       lastSha: sha,
       reviews: [],
       issueComments: [],
@@ -493,6 +498,11 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       setDraft(draft) {
         pr.draft = draft;
       },
+      merge() {
+        pr.state = "closed";
+        pr.closedAt = pr.merged?.at ?? tick();
+        pr.merged ??= { at: pr.closedAt, sha: headSha(pr) };
+      },
     };
   }
 
@@ -541,7 +551,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         const { mergeable, mergeStateStatus } = mergeability(found);
         return json(200, {
           ...pullJson(found),
-          merged: false,
+          merged: found.merged !== null,
           mergeable: mergeable === "MERGEABLE",
           mergeable_state: mergeStateStatus.toLowerCase(),
         });

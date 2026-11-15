@@ -25,7 +25,7 @@ const reference = {
     timeoutSec: 540,
     resolvableAuthors: ["acme-review[bot]"],
   },
-  ciRules: { ignoreChecks: ["merge-queue"], okStates: ["SUCCESS", "SKIPPED", "NEUTRAL"] },
+  ciRules: { ignoreChecks: ["merge-queue"], okStates: ["SUCCESS", "SKIPPED", "NEUTRAL"], knownFlaky: ["e2e"] },
   mergeStrategy: {
     type: "comment",
     command: "acme merge",

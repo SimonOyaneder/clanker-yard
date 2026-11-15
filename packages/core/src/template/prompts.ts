@@ -174,7 +174,7 @@ export const TRIAGE_BOT = `Modo bot: los ítems son comentarios del bot de revie
 
 export const TRIAGE_COVERAGE = `Modo coverage: los ítems son líneas sin cubrir (\`kind: "coverage"\`) que reportó el chequeo de cobertura. Outcome \`fix\` si algún ítem es \`valid\`; si no, \`reply\`.`;
 
-export const TRIAGE_CI = `Modo ci: los ítems son checks fallidos (\`kind: "ci"\`) con su extracto de falla. Por cada uno decide si lo causó el cambio (\`valid\`, con el arreglo) o no (\`flaky\` o \`foreign\`). Outcome \`fix\` si algún ítem es \`valid\`; si no, \`foreign\`.`;
+export const TRIAGE_CI = `Modo ci: los ítems son checks fallidos (\`kind: "ci"\`) con su extracto de falla. Por cada uno decide si lo causó el cambio (\`valid\`, con el arreglo) o no (\`flaky\` o \`foreign\`). Un ítem con \`flaky: true\` ya está declarado flaky conocido: dalo por \`flaky\` salvo que el extracto muestre que el cambio lo causa. Outcome \`fix\` si algún ítem es \`valid\`; si no, \`foreign\`.`;
 
 export const PLAN_CHECK_PROMPT = `Validas el plan de un dev antes de que programe: lo único que requiere juicio entre el plan y el código. Solo lees.
 

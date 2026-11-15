@@ -1,4 +1,4 @@
-import type { PrState, ReviewerState, ResolvedPack } from "@clanker/api";
+import type { BotFinding, PrState, ReviewerState, ResolvedPack } from "@clanker/api";
 import type { Actor, PrNode, RawContext, RawReview, RawThread } from "./pr-query";
 
 export interface PrStateContext {
@@ -84,20 +84,31 @@ function reviewersOf(node: PrNode, isHuman: IsHuman): ReviewerState[] {
 }
 
 function botOf(node: PrNode, { reviewBot }: ResolvedPack): PrState["bot"] {
-  if (!reviewBot) return { state: "none" };
+  if (!reviewBot) return { state: "none", findings: [] };
   const last = node.reviews
     .filter((r) => r.author && reviewBot.logins.includes(r.author.login) && r.state !== "PENDING" && r.state !== "DISMISSED")
     .sort((a, b) => byTime(a.submittedAt).localeCompare(byTime(b.submittedAt)))
     .at(-1);
-  if (!last) return { state: "none" };
+  if (!last) return { state: "none", findings: [] };
 
   const { lgtm } = reviewBot;
   const sha = last.commit?.oid;
-  const review = { ...(sha && { sha }), reviewId: Number(last.fullDatabaseId) };
-  if (!isLgtm(last, lgtm)) return { state: "findings", ...review };
+  const review = { ...(sha && { sha }), reviewId: Number(last.fullDatabaseId), ...(last.submittedAt && { at: last.submittedAt }) };
+  if (!isLgtm(last, lgtm)) return { state: "findings", ...review, findings: findingsOf(node, reviewBot.logins, last) };
   // Un LGTM de un commit anterior no vale para el head de hoy: es como si el bot no hubiera revisado.
-  if (lgtm.sameSha && sha !== node.headRefOid) return { state: "none" };
-  return { state: "lgtm", ...review };
+  if (lgtm.sameSha && sha !== node.headRefOid) return { state: "none", findings: [] };
+  return { state: "lgtm", ...review, findings: [] };
+}
+
+/** Los threads del bot sin resolver; si no hay, la review misma (un cuerpo sin threads también pide algo). */
+function findingsOf(node: PrNode, botLogins: string[], review: RawReview): BotFinding[] {
+  const open = node.reviewThreads.flatMap((thread): BotFinding[] => {
+    const first = thread.comments.nodes[0];
+    if (thread.isResolved || !first?.author || !botLogins.includes(first.author.login)) return [];
+    return [{ id: first.fullDatabaseId, ...(first.path && { path: first.path }), ...(first.line != null && { line: first.line }), text: first.body }];
+  });
+  if (open.length > 0) return open;
+  return [{ id: `review-${review.fullDatabaseId}`, text: review.body.trim() || "El bot no aprobó y no dejó comentarios." }];
 }
 
 function isLgtm(review: RawReview, lgtm: NonNullable<ResolvedPack["reviewBot"]>["lgtm"]): boolean {
@@ -138,7 +149,8 @@ function ciOf(node: PrNode, { ciRules }: ResolvedPack): PrState["ci"] {
   const notOk = counted.filter((c) => !ok.has(c.state));
   const failing = notOk.filter((c) => c.state !== "PENDING").map((c) => c.name);
   const state = counted.length === 0 ? "none" : failing.length > 0 ? "red" : notOk.length > 0 ? "pending" : "green";
-  return { state, sha: node.head.oid, failing };
+  const flaky = new Set(ciRules?.knownFlaky);
+  return { state, sha: node.head.oid, failing, flaky: failing.filter((name) => flaky.has(name)) };
 }
 
 /**

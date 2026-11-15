@@ -127,6 +127,7 @@ export const TriageBrief = z.object({
       path: z.string().optional(),
       line: z.number().int().optional(),
       text: z.string(),
+      flaky: z.boolean().optional().describe("Un check de CI que el pack ya declara flaky conocido."),
     }),
   ),
 });

@@ -12,11 +12,13 @@ import {
   createFileSecrets,
   createFlows,
   createPacks,
+  createPrs,
   createRecipes,
   createSlots,
   createWorkspaces,
   openStore,
   prReplyAction,
+  prWaits,
   reviewRequestBotAction,
   workspaceAcquireAction,
   workspaceSyncBaseAction,
@@ -47,6 +49,12 @@ interface SetupOptions extends FlowStubsOptions {
   fixtures?: string[];
   /** Registra las acciones reales que ya existen en el core en lugar de sus stubs. */
   real?: boolean;
+  /**
+   * Registra `pr.botReview` y `pr.ci` reales sobre el GitHub simulado en lugar de sus stubs. Las reviews
+   * del bot que ya hay en el PR son anteriores a la petición, así que no cuentan: el bot da LGTM apenas
+   * `review.requestBot` le pide la review.
+   */
+  waits?: boolean;
 }
 
 const BOT = "review-bot[bot]";
@@ -115,8 +123,24 @@ async function setup(options: SetupOptions = {}) {
     workspaceOf: () => ({ path: dir, base: "main" }),
   });
   flows.registerAction(prReplyAction({ connections, packs, pause: () => Promise.resolve() }));
-  flows.registerAction(reviewRequestBotAction({ connections, packs }));
+  const requestBot = reviewRequestBotAction({ connections, packs });
+  flows.registerAction(
+    options.waits
+      ? {
+          ...requestBot,
+          run: async (args, ctx) => {
+            const result = await requestBot.run(args, ctx);
+            pr.botLgtm();
+            return result;
+          },
+        }
+      : requestBot,
+  );
   const skip = [...(options.skip ?? [])];
+  if (options.waits) {
+    for (const wait of Object.values(prWaits(createPrs({ connections, packs })))) flows.registerWait(wait);
+    skip.push("pr.botReview", "pr.ci");
+  }
   if (options.real) {
     const workspaces = createWorkspaces({
       store,
@@ -176,8 +200,8 @@ const notes = (store: Store, runId: RunId) =>
   store.events.since(0, { types: ["decision.opened"] }).filter((e) => e.runId === runId).map((e) => (e.payload as { title: string }).title);
 
 describe("validación", () => {
-  test.each([false, true])("las dos plantillas validan y se guardan (acciones reales donde existen: %s)", async (real) => {
-    const { flows } = await setup({ real });
+  test.each([false, true])("las dos plantillas validan y se guardan (acciones y waits reales donde existen: %s)", async (real) => {
+    const { flows } = await setup({ real, waits: real });
 
     const saved = saveTemplates(flows);
 
@@ -336,6 +360,37 @@ describe("pr-feedback con el runtime fake", () => {
       fixtures: fixtures("base", "reviews-ok", "feedback"),
       script: { "pr.ci": ["fail"] },
     });
+    saveTemplates(flows);
+
+    const { runId, run } = await runTechlead(flows, store);
+
+    expect(run).toMatchObject({ status: "done", outcome: "done" });
+    const [feedback] = flows.listRuns().filter((r) => r.parentRunId === runId);
+    expect(topLevel(flows.getRun(feedback!.id))).toEqual(["bot-req", "bot-wait", "ci-wait", "ci-triage"]);
+    expect(notes(store, feedback!.id)).toEqual(["CI rojo ajeno o flaky"]);
+  });
+});
+
+describe("pr-feedback con los waits reales sobre el GitHub simulado", () => {
+  test("el bot da LGTM y el CI está verde: pide la review, espera y termina", async () => {
+    const { flows, store, pr } = await setup({ fixtures: fixtures("base", "reviews-ok"), waits: true });
+    pr.ci("green");
+    saveTemplates(flows);
+
+    const { runId, run } = await runTechlead(flows, store);
+
+    expect(run).toMatchObject({ status: "done", outcome: "done" });
+    const [feedback] = flows.listRuns().filter((r) => r.parentRunId === runId);
+    expect(flows.getRun(feedback!.id).steps.map((s) => [s.nodeId, s.outcome])).toEqual([
+      ["bot-req", "ok"],
+      ["bot-wait", "lgtm"],
+      ["ci-wait", "ok"],
+    ]);
+  });
+
+  test("un check rojo cierra el feedback con la nota del CI ajeno", async () => {
+    const { flows, store, pr } = await setup({ fixtures: fixtures("base", "reviews-ok", "feedback"), waits: true });
+    pr.ci("red");
     saveTemplates(flows);
 
     const { runId, run } = await runTechlead(flows, store);
