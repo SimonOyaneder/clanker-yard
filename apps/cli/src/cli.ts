@@ -1,5 +1,6 @@
 import type { Client } from "@clanker/api";
 import { events } from "./events";
+import { importLegacy } from "./import";
 import { mcp } from "./mcp";
 import { metricsCompareCommand } from "./metrics-compare";
 import { projectsList } from "./projects";
@@ -32,6 +33,7 @@ const commands: Record<string, Command> = {
   "runs get": runsGet,
   "events tail": events,
   "metrics compare": metricsCompareCommand,
+  "import legacy": importLegacy,
   mcp,
 };
 

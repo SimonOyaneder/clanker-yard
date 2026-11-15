@@ -13,6 +13,8 @@ export const MetricsFilter = z.object({
   from: z.int().nonnegative().optional(),
   /** ms epoch, exclusive. */
   to: z.int().nonnegative().optional(),
+  /** `true` solo las corridas importadas del clanker-loop; `false` solo las que corrió Clanker Yard; sin él, todas. */
+  imported: z.boolean().optional(),
 });
 export type MetricsFilter = z.infer<typeof MetricsFilter>;
 

@@ -13,6 +13,7 @@ import type { Decisions } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
 import { DecisionNotFoundError, DecisionResolveError, RunNotFoundError, RunStartError } from "../flows/engine";
 import { createStepDetails, StepNotFoundError } from "../flows/step-detail";
+import { LegacyImportError, type LegacyImporter } from "../import/legacy";
 import { createMetrics } from "../metrics/metrics";
 import type { Packs } from "../packs/packs";
 import { DefValidationError, type Defs } from "../defs/defs";
@@ -50,6 +51,8 @@ export interface RouterDeps {
   artifacts: Artifacts;
   decisions: Decisions;
   defs: Defs;
+  /** `imports.legacy`. */
+  legacyImport: LegacyImporter;
   coreVersion: string;
   bootId: string;
   /** ms epoch */
@@ -238,6 +241,9 @@ export function createRouter(deps: RouterDeps) {
       byDay: os.metrics.byDay.handler(({ input }) => metrics.byDay(input)),
       byModel: os.metrics.byModel.handler(({ input }) => metrics.byModel(input)),
     },
+    imports: {
+      legacy: os.imports.legacy.handler(({ input }) => asApiError(() => deps.legacyImport.run(input))),
+    },
     decisions: {
       list: os.decisions.list.handler(({ input }) => deps.decisions.list(input)),
       get: os.decisions.get.handler(({ input }) => {
@@ -323,7 +329,8 @@ function toApiError(error: unknown): unknown {
     error instanceof NotAGitRepoError ||
     error instanceof RecipeTestError ||
     error instanceof RecipeSyntaxError ||
-    error instanceof DefValidationError
+    error instanceof DefValidationError ||
+    error instanceof LegacyImportError
   ) {
     return new ORPCError("BAD_REQUEST", { message: error.message, cause: error });
   }

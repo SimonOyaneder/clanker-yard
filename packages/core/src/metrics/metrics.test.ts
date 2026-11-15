@@ -167,6 +167,25 @@ describe("agregados", () => {
     ]);
   });
 
+  test("`imported` separa las corridas que trajo `import legacy` (las de `source_key`) de las que corrió Yard", async () => {
+    const { metrics, store, a1 } = await seeded();
+    store.tx((tx) => tx.db.update(runs).set({ sourceKey: "legacy:metrics:x:ENG-1:t" }).where(eq(runs.id, a1)).run());
+
+    expect(metrics.byRole({ imported: true })).toEqual([
+      { role: "reviewer", runs: 1, tokens: 3, costMicros: 200 },
+      { role: "dev", runs: 1, tokens: 3, costMicros: 100 },
+    ]);
+    expect(metrics.byRole({ imported: false })).toEqual([
+      { role: "reviewer", runs: 2, tokens: 6, costMicros: 360 },
+      { role: "dev", runs: 2, tokens: 6, costMicros: 150 },
+    ]);
+    expect(metrics.byModel({ imported: true })).toEqual([
+      { model: "sonnet", tokens: 3, costMicros: 200 },
+      { model: "opus", tokens: 3, costMicros: 100 },
+    ]);
+    expect(metrics.byDay({ imported: false }).map((d) => d.runs)).toEqual([1, 1]);
+  });
+
   test("byDay agrupa por día de cierre en la zona pedida", async () => {
     const { metrics } = await seeded();
 

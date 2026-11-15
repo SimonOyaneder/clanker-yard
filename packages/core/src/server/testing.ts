@@ -7,6 +7,7 @@ import { createArtifacts } from "../artifacts/artifacts";
 import { createDecisions } from "../decisions/decisions";
 import { createDefs } from "../defs/defs";
 import { createFlows, type Flows } from "../flows/flows";
+import { createLegacyImporter } from "../import/legacy";
 import { createPacks } from "../packs/packs";
 import { createProjects } from "../projects/projects";
 import { createRunStarter } from "../projects/start-run";
@@ -29,7 +30,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "artifacts" | "decisions" | "defs"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "artifacts" | "decisions" | "defs" | "legacyImport"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -61,5 +62,6 @@ export function apiDeps(
     artifacts,
     decisions: createDecisions(store),
     defs,
+    legacyImport: createLegacyImporter({ store, defs }),
   };
 }

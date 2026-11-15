@@ -63,7 +63,7 @@ describe("clanker metrics compare", () => {
       readFile: readSample,
     });
 
-    expect(calls).toEqual([{ projectId: "prj_01J0000000000000000000000A" }]);
+    expect(calls).toEqual([{ projectId: "prj_01J0000000000000000000000A", imported: false }]);
     expect(JSON.parse(out)).toEqual([
       { role: "dev", legacy: { runs: 1, usd: 1, tokens: 800_000 }, current: { runs: 2, usd: 3, tokens: 2_000_000 }, usdChangePercent: 200 },
       { role: "pr-feedback", legacy: null, current: { runs: 1, usd: 0.25, tokens: 100_000 }, usdChangePercent: null },

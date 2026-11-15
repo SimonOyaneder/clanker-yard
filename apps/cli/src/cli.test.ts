@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { CachedIssue, type Client, ClankerProject, type Event, type RunDetail } from "@clanker/api";
 import { describe, expect, test } from "vitest";
 import { type CliContext, runCli } from "./cli";
@@ -277,5 +278,52 @@ describe("clanker events tail", () => {
     await expect(exec(["events", "tail", "-n", "x"], {})).rejects.toThrow('-n debe ser un entero desde 0, no "x"');
     await expect(exec(["events", "tail", "--run", "nope"], {})).rejects.toThrow('"nope" no es un id de corrida');
     await expect(exec(["events", "tail", "--type", "run.nope"], {})).rejects.toThrow('Tipo de evento desconocido "run.nope"');
+  });
+});
+
+describe("clanker import legacy", () => {
+  const result = { dryRun: false, created: { projects: 2, issues: 7, pullRequests: 5, runs: 9, runRoleCosts: 23 }, unresolvedRepos: ["infra"] };
+  const clientFor = (reply: unknown) => {
+    const calls: unknown[] = [];
+    return { calls, imports: { legacy: (input: unknown) => (calls.push(input), Promise.resolve(reply)) } };
+  };
+
+  test("pide la importación con la ruta absoluta y cuenta lo que creó y los repos que faltan", async () => {
+    const client = clientFor(result);
+
+    const out = await exec(["import", "legacy", "--from", "datos/clanker-loop"], client);
+
+    expect(client.calls).toEqual([{ from: resolve("datos/clanker-loop"), dryRun: false }]);
+    expect(out).toBe(
+      [
+        "Importado:",
+        "proyectos                     2",
+        "issues                        7",
+        "PRs                           5",
+        "corridas (con sus métricas)   9",
+        "costos por rol               23",
+        "Repos sin registrar (sus PRs quedaron fuera): infra.",
+        "Regístralos en Clanker Yard y repite el comando: solo agrega lo que falte.",
+      ].join("\n"),
+    );
+  });
+
+  test("--dry-run se lo pasa al core y lo dice en la salida; --json imprime el resultado", async () => {
+    const client = clientFor({ ...result, dryRun: true, unresolvedRepos: [] });
+
+    const out = await exec(["import", "legacy", "--from", "/x", "--dry-run"], client);
+    const json = await exec(["import", "legacy", "--from", "/x", "--dry-run", "--json"], client);
+
+    expect(client.calls).toEqual([
+      { from: "/x", dryRun: true },
+      { from: "/x", dryRun: true },
+    ]);
+    expect(out.split("\n")[0]).toBe("Simulación: no se escribió nada. Una importación real crearía:");
+    expect(out).not.toContain("Repos sin registrar");
+    expect(JSON.parse(json)).toMatchObject({ dryRun: true, created: { runs: 9 } });
+  });
+
+  test("sin --from falla con el uso, sin tocar el core", async () => {
+    await expect(exec(["import", "legacy"], {})).rejects.toThrow(/Falta --from\. Uso: clanker import legacy/);
   });
 });

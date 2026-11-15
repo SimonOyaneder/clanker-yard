@@ -601,10 +601,13 @@ export const runs = sqliteTable(
     /** Contador → veces que se tomó. Son de la corrida y no se reinician. */
     rounds: text({ mode: "json" }).$type<Record<string, number>>().notNull(),
     costMicros: integer("cost_micros").notNull().default(0),
+    /** Solo las corridas que importó `clanker import legacy`: la clave de su fila de origen, para no importarla dos veces. `NULL` en las que corrió Clanker Yard. */
+    sourceKey: text("source_key"),
     startedAt: integer("started_at").notNull(),
     endedAt: integer("ended_at"),
   },
   (t) => [
+    uniqueIndex("runs_source_key").on(t.sourceKey),
     foreignKey({ columns: [t.flowDefId, t.flowVersion], foreignColumns: [defVersions.defId, defVersions.version] }),
     foreignKey({
       columns: [t.profileDefId, t.profileVersion],

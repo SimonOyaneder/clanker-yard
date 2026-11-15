@@ -6,6 +6,10 @@ const num = z.number().nonnegative();
 export const LegacyMetricsRow = z.looseObject({
   issue: z.string(),
   project: z.string().optional(),
+  /** `medio`, `alto`... el perfil de modelos con que corrió. */
+  profile: z.string().optional(),
+  repo: z.string().optional(),
+  estimate: num.optional(),
   /** `real` por defecto; las corridas de council vienen como `council` y no cuentan. */
   mode: z.string().default("real"),
   /** `listo`, `falló`, `necesita-humano`... */

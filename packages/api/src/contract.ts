@@ -15,6 +15,7 @@ import {
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
 import { DefFilter, DefRecord, DefRef } from "./defs";
+import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectSummary, RoleMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
 import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
@@ -262,6 +263,17 @@ const runs = {
   start: base.input(StartRun).output(RunDetail),
 };
 
+const imports = {
+  /**
+   * Importa el historial del clanker-loop (`docs/design.html#d-data`, "Migración desde el clanker-loop"):
+   * proyectos, issues, PRs y las corridas de `metrics.jsonl` con sus métricas. Solo lee `from` y se puede
+   * repetir: cada corrida lleva una clave de origen y lo ya importado no se duplica. Emite `import.completed`.
+   * Sin `meta.mcp`: lee archivos del disco de la persona. `BAD_REQUEST` si `from` no es una carpeta del
+   * loop (sin `metrics.jsonl`) o una fila no cumple el formato.
+   */
+  legacy: base.input(LegacyImportInput).output(LegacyImportResult),
+};
+
 const metrics = {
   /** Por costo, de más a menos. */
   byRole: base.input(MetricsFilter.default({})).output(z.array(RoleMetrics)),
@@ -306,5 +318,5 @@ const defs = {
     .output(DefRecord),
 };
 
-export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, metrics, defs };
+export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, metrics, defs, imports };
 export type Contract = typeof contract;

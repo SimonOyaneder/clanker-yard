@@ -23,6 +23,7 @@ export interface StartServerOptions extends Pick<
   | "artifacts"
   | "decisions"
   | "defs"
+  | "legacyImport"
   | "coreVersion"
   | "dataDir"
   | "onShutdown"

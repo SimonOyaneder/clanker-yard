@@ -69,7 +69,8 @@ export const METRICS_COMPARE_USAGE = "clanker metrics compare --legacy <metrics.
 
 /**
  * `clanker metrics compare`: lee el `metrics.jsonl` del loop actual y lo compara, rol por rol, con lo
- * que Clanker Yard lleva (todos los proyectos, o `--project`). `--legacy-project` se queda con las
+ * que Clanker Yard corrió (todos los proyectos, o `--project`; sin lo que `import legacy` trajo del loop
+ * actual, que ya está del lado de `--legacy`). `--legacy-project` se queda con las
  * líneas de un proyecto del loop actual. Devuelve lo que se imprime.
  */
 export async function metricsCompare(args: string[], { client, readFile }: MetricsCompareDeps): Promise<string> {
@@ -88,7 +89,7 @@ export async function metricsCompare(args: string[], { client, readFile }: Metri
   const legacy = parseLegacyMetrics(readFile(values.legacy)).filter((r) => legacyProject === undefined || r.project === legacyProject);
 
   const projectId = values.project === undefined ? undefined : (await projectBySlug(client, values.project)).id;
-  const rows = compareByRole(legacy, await client.metrics.byRole({ projectId }));
+  const rows = compareByRole(legacy, await client.metrics.byRole({ projectId, imported: false }));
   return values.json ? JSON.stringify(rows, null, 2) : formatComparison(rows);
 }
 

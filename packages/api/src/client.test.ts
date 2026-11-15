@@ -129,6 +129,11 @@ const router = os.router({
     byDay: os.metrics.byDay.handler(() => []),
     byModel: os.metrics.byModel.handler(() => []),
   },
+  imports: {
+    legacy: os.imports.legacy.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+  },
   defs: {
     list: os.defs.list.handler(() => []),
     get: os.defs.get.handler(() => {

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { API_MAJOR, type Event, FlowDef, Role, contract, createClient } from "@clanker/api";
 import { createORPCClient } from "@orpc/client";
@@ -425,6 +426,28 @@ describe("metrics", () => {
     expect(await client.metrics.byDay({ utcOffsetMinutes: -180 })).toEqual([]);
     expect(await client.projects.summary({ id: project.id })).toMatchObject({ runs: 0, costMicros: 0, avgCostMicros: null, byRole: [] });
     await expect(client.projects.summary({ id: "prj_01J0000000000000000000000A" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("imports.legacy", () => {
+  const fixtures = fileURLToPath(new URL("../../fixtures/legacy", import.meta.url));
+
+  test("importa el fixture, `dryRun` no escribe, repetirlo no duplica y una carpeta que no es del loop es BAD_REQUEST", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+
+    const dry = await client.imports.legacy({ from: fixtures, dryRun: true });
+    expect(await client.projects.list()).toEqual([]);
+    const real = await client.imports.legacy({ from: fixtures });
+    expect(real).toMatchObject({ dryRun: false, created: dry.created });
+    expect((await client.imports.legacy({ from: fixtures })).created.runs).toBe(0);
+
+    const demo = (await client.projects.list()).find((p) => p.slug === "demo-lote-0a1b2c3d4e5f")!;
+    expect(await client.projects.summary({ id: demo.id })).toMatchObject({ runs: 5, costMicros: 22_150_000 });
+    expect((await client.metrics.byRole({ imported: false }))).toEqual([]);
+    expect((await client.events.list({ filter: { types: ["import.completed"] } })).map((e) => e.origin)).toEqual(["import", "import"]);
+
+    await expect(client.imports.legacy({ from: tmpdir() })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
 

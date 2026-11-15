@@ -13,6 +13,7 @@ import { createDecisions } from "./decisions/decisions";
 import { createDefs, type Defs } from "./defs/defs";
 import { createFlows } from "./flows/flows";
 import { createAskpass } from "./git/askpass";
+import { createLegacyImporter } from "./import/legacy";
 import { createGitRemote } from "./git/remote";
 import { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
 import { createPrCache } from "./github/pr-cache";
@@ -219,6 +220,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     artifacts,
     decisions: createDecisions(store),
     defs,
+    legacyImport: createLegacyImporter({ store, defs }),
     bootId,
     coreVersion: opts.coreVersion,
     dataDir,

@@ -1,5 +1,5 @@
 import type { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectId, ProjectSummary, RoleMetrics } from "@clanker/api";
-import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { runMetrics, runRoleCosts, runs } from "../store/schema";
 import type { Store } from "../store/store";
 
@@ -19,6 +19,7 @@ export function createMetrics(store: Store): Metrics {
       f.projectId === undefined ? undefined : eq(runs.projectId, f.projectId),
       f.from === undefined ? undefined : gte(runs.endedAt, f.from),
       f.to === undefined ? undefined : lt(runs.endedAt, f.to),
+      f.imported === undefined ? undefined : f.imported ? isNotNull(runs.sourceKey) : isNull(runs.sourceKey),
     );
   const cost = sql<number>`sum(${runRoleCosts.costMicros})`.mapWith(Number);
   const tokens = sql<number>`sum(${runRoleCosts.tokens})`.mapWith(Number);
