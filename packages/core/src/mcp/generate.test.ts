@@ -16,11 +16,49 @@ const resources = {
 describe("generateMcp sobre el contrato real", () => {
   const plan = generateMcp();
 
-  test("arma list y get, ambas solo de lectura y cerradas al mundo", () => {
-    expect(plan.tools.map((t) => [t.name, t.annotations])).toEqual([
-      ["list", { readOnlyHint: true, openWorldHint: false }],
-      ["get", { readOnlyHint: true, openWorldHint: false }],
-    ]);
+  test("las tools por kind y las acciones, con las anotaciones de la regla", () => {
+    const readOnly = { readOnlyHint: true, openWorldHint: false };
+    const safe = { destructiveHint: false, openWorldHint: false };
+    const safeIdempotent = { ...safe, idempotentHint: true };
+    const destructive = { destructiveHint: true, idempotentHint: true, openWorldHint: false };
+    expect(Object.fromEntries(plan.tools.map((t) => [t.name, t.annotations]))).toEqual({
+      list: readOnly,
+      get: readOnly,
+      create: safe,
+      update: safeIdempotent,
+      delete: destructive,
+      set_lanes: safeIdempotent,
+      pause_loop: safeIdempotent,
+      start_loop: safeIdempotent,
+      run_issue: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      pause_run: safeIdempotent,
+      resume_run: safeIdempotent,
+      cancel_run: destructive,
+      interrupt_run: destructive,
+      retry_step: { ...safe, idempotentHint: false },
+      steer_step: { ...safe, idempotentHint: false },
+      resolve_decision: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    });
+  });
+
+  test("create, update y delete toman el input de defs con los kinds que se escriben, y los rutean ahí", () => {
+    const byName = Object.fromEntries(plan.tools.map((t) => [t.name, t]));
+    for (const [name, procedure] of [["create", "create"], ["update", "update"], ["delete", "archive"]] as const) {
+      expect([...byName[name]!.routes]).toEqual(
+        ["flow", "role", "profile"].map((kind) => [kind, { path: ["defs", procedure], shared: true, hasInput: true }]),
+      );
+    }
+    expect(Object.keys(byName.create!.inputSchema.shape)).toEqual(["kind", "slug", "scope", "repoId", "body", "dryRun"]);
+    expect(byName.update!.inputSchema.safeParse({ kind: "flow", id: "def_1", body: {} }).data).toMatchObject({ dryRun: false });
+    expect(byName.update!.inputSchema.safeParse({ kind: "recipe", id: "def_1", body: {} }).success).toBe(false);
+    expect(Object.keys(byName.delete!.inputSchema.shape)).toEqual(["kind", "id"]);
+  });
+
+  test("cada acción es una tool con la descripción de su procedimiento y su input", () => {
+    const run = plan.tools.find((t) => t.name === "run_issue")!;
+    expect(run.description).toContain("Lanza el flujo");
+    expect(run.routes.get("")).toEqual({ path: ["runs", "start"], shared: false, hasInput: true });
+    expect(plan.tools.find((t) => t.name === "start_loop")!.routes.get("")!.path).toEqual(["projects", "resume"]);
   });
 
   test("cada kind que una tool sirve tiene esquema, y los procedimientos van a su ruta", () => {
@@ -48,14 +86,14 @@ describe("generateMcp sobre el contrato real", () => {
 
 describe("generateMcp rechaza un contrato mal marcado", () => {
   test("una acción sin anotaciones", () => {
-    const contract = { ...resources, runs: { retry: marked({ action: "retry_step" }).input(Id) } };
+    const contract = { ...resources, runs: { retry: marked({ action: "retry_step", description: "x" }).input(Id) } };
     expect(() => generateMcp(contract)).toThrow('runs.retry: la acción "retry_step" no declara anotaciones');
   });
 
   test("una acción con anotaciones se arma con el input del procedimiento", () => {
-    const contract = { ...resources, runs: { retry: marked({ action: "retry_step", annotations: { idempotentHint: true } }).input(Id) } };
+    const contract = { ...resources, runs: { retry: marked({ action: "retry_step", description: "Reintenta.", annotations: { idempotentHint: true } }).input(Id) } };
     const tool = generateMcp(contract).tools.find((t) => t.name === "retry_step");
-    expect(tool).toMatchObject({ annotations: { idempotentHint: true } });
+    expect(tool).toMatchObject({ description: "Reintenta.", annotations: { idempotentHint: true } });
     expect(tool!.inputSchema.safeParse({ id: "stp_1" }).success).toBe(true);
   });
 
@@ -73,13 +111,22 @@ describe("generateMcp rechaza un contrato mal marcado", () => {
     expect(() => generateMcp(contract)).toThrow('b.list: la tool "get" ya tiene un procedimiento para el kind "run"');
   });
 
-  test("una tool de escritura, que es de otra issue", () => {
-    const contract = { ...resources, flows: { create: marked({ tool: "create", kind: "flow" }).input(Id) } };
-    expect(() => generateMcp(contract)).toThrow('flows.create: la tool "create" es de escritura');
+  test("una tool de escritura que sirven dos procedimientos", () => {
+    const contract = {
+      ...resources,
+      a: { create: marked({ tool: "create", kind: "flow" }).input(Id.extend({ kind: z.string() })) },
+      b: { create: marked({ tool: "create", kind: "role" }).input(Id.extend({ kind: z.string() })) },
+    };
+    expect(() => generateMcp(contract)).toThrow('b.create: la tool "create" ya la sirve a.create');
+  });
+
+  test("una tool de escritura sin input", () => {
+    const contract = { ...resources, flows: { create: marked({ tool: "create", kind: "flow" }).output(z.string()) } };
+    expect(() => generateMcp(contract)).toThrow('flows.create: la tool "create" necesita un input');
   });
 
   test("un input que no es un objeto", () => {
-    const contract = { ...resources, runs: { retry: marked({ action: "x", annotations: {} }).input(z.string()) } };
+    const contract = { ...resources, runs: { retry: marked({ action: "x", description: "x", annotations: {} }).input(z.string()) } };
     expect(() => generateMcp(contract)).toThrow("runs.retry: el input de un procedimiento con meta.mcp debe ser un objeto zod");
   });
 

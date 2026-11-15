@@ -178,6 +178,18 @@ const router = os.router({
     get: os.defs.get.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    create: os.defs.create.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    update: os.defs.update.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    archive: os.defs.archive.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    restore: os.defs.restore.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
   },
   decisions: {
     list: os.decisions.list.handler(() => []),

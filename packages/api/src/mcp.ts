@@ -16,22 +16,23 @@ import { RunDetail } from "./runs";
  *   `update` y `delete` reciben el `kind` y el input del procedimiento marcado para ese kind. Un
  *   procedimiento que sirve a varios kinds (`defs.list`) declara `kind` como lista y recibe además
  *   `kind` en su input.
- * - Acción: `.meta({ mcp: { action: "retry_step", annotations: { idempotentHint: true } } })`. Una tool
- *   por acción, con el input zod del procedimiento tal cual.
+ * - Acción: `.meta({ mcp: { action: "retry_step", description, annotations } })`. Una tool por acción, con el
+ *   input zod del procedimiento tal cual y `description` como su descripción para el modelo.
  * - Resource de lectura: `.meta({ mcp: { resource: "run_timeline" } })`; qué URI sirve cada uno lo
  *   decide el generador.
  *
- * Regla de anotaciones: `list` y `get` van con `readOnlyHint`, `update` con `idempotentHint`, `delete` e
- * `interrupt_run` con `destructiveHint`, y todas con `openWorldHint: false` salvo las que publican en
- * GitHub o Linear. Las tools por kind las toman de esa regla; una acción debe declararlas, y el
- * generador falla si no lo hace.
+ * Regla de anotaciones: `list` y `get` van con `readOnlyHint`; `create`, `update` y las acciones que no
+ * destruyen con `destructiveHint: false` (un cliente lo da por verdadero si falta); `update` con
+ * `idempotentHint`; `delete` (archiva), `cancel_run` e `interrupt_run` con `destructiveHint`; y todas con
+ * `openWorldHint: false` salvo las que publican en GitHub o Linear. Las tools por kind las toman de esa
+ * regla; una acción debe declararlas, y el generador falla si no lo hace.
  */
 export type McpMeta =
   | {
       tool: "list" | "get" | "create" | "update" | "delete";
       kind: McpKind | readonly McpKind[];
     }
-  | { action: string; annotations?: McpAnnotations }
+  | { action: string; description: string; annotations?: McpAnnotations }
   | { resource: McpResourceName };
 
 /** Los kinds que `list` y `get` entienden: los de `defs` que ya tienen esquema, más las entidades. */

@@ -11,12 +11,14 @@ import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
+import type { Flows } from "../flows/flows";
 import { DecisionNotFoundError, DecisionResolveError, RunCommandError, RunNotFoundError, RunStartError } from "../flows/engine";
 import { createStepDetails, StepNotFoundError } from "../flows/step-detail";
 import { LegacyImportError, type LegacyImporter } from "../import/legacy";
 import { createMetrics } from "../metrics/metrics";
 import type { Packs } from "../packs/packs";
 import { DefValidationError, type Defs } from "../defs/defs";
+import { createDefWriter, DefNotFoundError, DefWriteError } from "../defs/write";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { IssueNotCachedError, type RunStarter } from "../projects/start-run";
 import type { LaneSettings } from "../scheduler/lanes";
@@ -55,7 +57,7 @@ export interface RouterDeps {
   lanes: LaneSettings;
   /** `system.breakers`. */
   breakers: Pick<Breakers, "list">;
-  flows: Engine;
+  flows: Flows;
   /** Lo que `prs.refresh` avisa cuando un PR cambió (los waits y los eventos de Watch): el core lo comparte con su propio caché. */
   onPrChange?: PrCacheDeps["onChange"];
   artifacts: Artifacts;
@@ -79,6 +81,7 @@ export function createRouter(deps: RouterDeps) {
   const schemaVersion = readSchemaVersion(store.db.$client);
   const { artifacts, flows, projects, repos, recipeTester, runs } = deps;
   const metrics = createMetrics(store);
+  const defWriter = createDefWriter({ defs: deps.defs, flows: deps.flows });
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
   const prs = createPrs({ connections: deps.connections, packs: deps.packs });
@@ -314,6 +317,10 @@ export function createRouter(deps: RouterDeps) {
         }
         return def;
       }),
+      create: os.defs.create.handler(({ input, context }) => asApiError(() => defWriter.create(input, context.origin))),
+      update: os.defs.update.handler(({ input, context }) => asApiError(() => defWriter.update(input, context.origin))),
+      archive: os.defs.archive.handler(({ input, context }) => asApiError(() => defWriter.archive(input.kind, input.id, context.origin))),
+      restore: os.defs.restore.handler(({ input, context }) => asApiError(() => defWriter.restore(input.kind, input.id, context.origin))),
     },
     events: {
       list: os.events.list.handler(({ input }) =>
@@ -358,6 +365,7 @@ function toApiError(error: unknown): unknown {
     error instanceof RunNotFoundError ||
     error instanceof DecisionNotFoundError ||
     error instanceof StepNotFoundError ||
+    error instanceof DefNotFoundError ||
     error instanceof SessionNotFoundError ||
     error instanceof RepoNotFoundError ||
     error instanceof IssueNotCachedError
@@ -376,6 +384,7 @@ function toApiError(error: unknown): unknown {
     error instanceof RecipeTestError ||
     error instanceof RecipeSyntaxError ||
     error instanceof DefValidationError ||
+    error instanceof DefWriteError ||
     error instanceof LegacyImportError
   ) {
     return new ORPCError("BAD_REQUEST", { message: error.message, cause: error });

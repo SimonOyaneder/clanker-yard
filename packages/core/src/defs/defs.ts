@@ -18,7 +18,7 @@ export interface SaveDef {
   /** Obligatorio con scope `repo`, y solo ahí. */
   repoId?: string;
   body: unknown;
-  /** `ui`, `mcp`, `import` o `repo:<ruta>@<sha>`. */
+  /** `ui`, `cli`, `mcp`, `import` o `repo:<ruta>@<sha>`. */
   source: string;
 }
 
@@ -285,7 +285,7 @@ export function createDefs(store: Store, now: () => number = Date.now): Defs {
 }
 
 function sourceOrigin(source: string): Origin {
-  if (source === "ui" || source === "mcp" || source === "import") return source;
+  if (source === "ui" || source === "cli" || source === "mcp" || source === "import") return source;
   return "core";
 }
 
@@ -294,7 +294,8 @@ function hashBody(body: unknown): string {
   return createHash("sha256").update(canonicalJson(body)).digest("hex");
 }
 
-function canonicalJson(value: unknown): string {
+/** Lo que `hashBody` hashea; `diffBodies` lo usa para decir que dos valores son el mismo. */
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value)

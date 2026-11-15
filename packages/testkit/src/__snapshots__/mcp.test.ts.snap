@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`tools > lista solo list y get, de solo lectura 1`] = `
+exports[`tools > lista las tools de lectura, las de escritura y las acciones, con sus anotaciones 1`] = `
 [
   {
     "annotations": {
@@ -90,6 +90,406 @@ exports[`tools > lista solo list y get, de solo lectura 1`] = `
       "type": "object",
     },
     "name": "get",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+    },
+    "description": "Crea una entidad nueva (flow, role, profile) con la versión 1. El esquema de su body está en el resource clanker://schema/<kind>. Con dryRun valida y devuelve los errores sin guardar; un flujo se valida además contra los roles, acciones y subflujos que existen.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "body": {
+          "description": "El contenido del kind; su esquema está en el resource clanker://schema/<kind>.",
+        },
+        "dryRun": {
+          "default": false,
+          "description": "Valida y devuelve los errores o el diff sin guardar nada.",
+          "type": "boolean",
+        },
+        "kind": {
+          "description": "Qué entidad.",
+          "enum": [
+            "flow",
+            "role",
+            "profile",
+          ],
+          "type": "string",
+        },
+        "repoId": {
+          "pattern": "^repo_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "scope": {
+          "default": "user",
+          "enum": [
+            "user",
+            "repo",
+          ],
+          "type": "string",
+        },
+        "slug": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "kind",
+        "body",
+      ],
+      "type": "object",
+    },
+    "name": "create",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Reemplaza el body de una entidad (flow, role, profile) y guarda una versión nueva: las corridas en curso siguen con la suya. Con dryRun devuelve los errores o el diff contra la versión vigente sin guardar. Para deshacer, \`get\` con una \`version\` anterior y \`update\` con su body. Las defs builtin y de packs no se editan: crea una de scope user con el mismo slug.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "body": {
+          "description": "El contenido del kind; su esquema está en el resource clanker://schema/<kind>.",
+        },
+        "dryRun": {
+          "default": false,
+          "description": "Valida y devuelve los errores o el diff sin guardar nada.",
+          "type": "boolean",
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "kind": {
+          "description": "Qué entidad.",
+          "enum": [
+            "flow",
+            "role",
+            "profile",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "kind",
+        "id",
+        "body",
+      ],
+      "type": "object",
+    },
+    "name": "update",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Archiva una entidad (flow, role, profile); no la borra, conserva sus versiones y nunca toca las corridas que la usaron ni su historial. Se deshace desde la UI.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "kind": {
+          "description": "Qué entidad.",
+          "enum": [
+            "flow",
+            "role",
+            "profile",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "kind",
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "delete",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Cambia cuántas corridas caben a la vez en el carril \`dev\` y en el de \`maintenance\`; lo que no se pasa no cambia. Rige de inmediato y nunca interrumpe lo que ya corre.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "dev": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "maintenance": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "set_lanes",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Pausa el loop de un proyecto: deja de lanzar sus issues, sin tocar lo que ya corre ni a otros proyectos.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "pause_loop",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Inicia o retoma el loop de un proyecto: vuelve a lanzar sus issues según la cola y sus carriles.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "start_loop",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+    },
+    "description": "Lanza el flujo del proyecto (o \`flow\`) sobre una issue y vuelve sin esperar; el avance está en \`clanker://run/<id>/timeline\`. Reclama la issue en su tracker. Si ya hay una corrida viva de ese flujo sobre ella, devuelve esa.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "flow": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "issueId": {
+          "pattern": "^iss_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "params": {
+          "additionalProperties": {},
+          "default": {},
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "projectId",
+        "issueId",
+      ],
+      "type": "object",
+    },
+    "name": "run_issue",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Pausa una corrida: no se despachan pasos nuevos y los agentes en curso terminan lo suyo (con \`now\`, se interrumpen y su sesión queda lista para retomarse).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^run_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "now": {
+          "default": false,
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "pause_run",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Retoma una corrida pausada; una que ya corre no cambia.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^run_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "resume_run",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Cancela una corrida y sus hijas: los agentes se interrumpen y sus pasos quedan \`canceled\`. No se puede retomar; el historial se conserva.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^run_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "cancel_run",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Interrumpe ya al agente en curso de una corrida (la pausa con \`now\`). Su sesión queda guardada y \`resume_run\` la retoma donde iba.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^run_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "interrupt_run",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+    },
+    "description": "Reintenta desde un paso: su nodo corre de nuevo con sesión nueva y lo que la corrida tenía en marcha se cancela. Cierra la decisión que la estacionaba.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "stepId": {
+          "pattern": "^stp_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "stepId",
+      ],
+      "type": "object",
+    },
+    "name": "retry_step",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+    },
+    "description": "Le deja un mensaje al agente de un paso y retoma su sesión con él (si está en curso, lo interrumpe).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "message": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "stepId": {
+          "pattern": "^stp_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "stepId",
+        "message",
+      ],
+      "type": "object",
+    },
+    "name": "steer_step",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+    },
+    "description": "Resuelve una decisión pendiente con una de sus \`options\` (\`get\` o \`list\` de kind \`decision\` las muestran); la corrida estacionada sigue. Una decisión resuelta no se puede resolver otra vez.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^dec_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "option": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "option",
+      ],
+      "type": "object",
+    },
+    "name": "resolve_decision",
   },
 ]
 `;

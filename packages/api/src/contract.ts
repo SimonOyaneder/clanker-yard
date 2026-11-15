@@ -14,7 +14,7 @@ import {
   StepRunId,
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
-import { DefFilter, DefRecord, DefRef } from "./defs";
+import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
 import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectSummary, RoleMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
@@ -32,6 +32,14 @@ import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 export const API_MAJOR = 1;
 
 const base = oc.$meta<ContractMeta>({});
+
+/**
+ * Anotaciones de las acciones del MCP. `destructiveHint` va siempre explícito: un cliente lo da por
+ * verdadero si falta, y pediría confirmación hasta para pausar.
+ */
+const SAFE = { destructiveHint: false, openWorldHint: false } as const;
+const SAFE_IDEMPOTENT = { ...SAFE, idempotentHint: true } as const;
+const DESTRUCTIVE_IDEMPOTENT = { destructiveHint: true, idempotentHint: true, openWorldHint: false } as const;
 
 /** Los kinds de `defs` que `list` y `get` sirven: los que ya tienen esquema (`context` no). */
 const DEF_MCP_KINDS = ["flow", "role", "profile", "recipe", "pack"] as const;
@@ -67,7 +75,16 @@ const system = {
    * se admiten y el Scheduler reparte lo que quedó libre. Una corrida que ya corre nunca se interrumpe
    * porque baje el tope.
    */
-  setLanes: base.input(LanesPatch).output(Lanes),
+  setLanes: base
+    .meta({
+      mcp: {
+        action: "set_lanes",
+        description: "Cambia cuántas corridas caben a la vez en el carril `dev` y en el de `maintenance`; lo que no se pasa no cambia. Rige de inmediato y nunca interrumpe lo que ya corre.",
+        annotations: SAFE_IDEMPOTENT,
+      },
+    })
+    .input(LanesPatch)
+    .output(Lanes),
   /** Los circuit breakers abiertos ahora, el más antiguo primero: qué está en pausa, por qué y cuándo se vuelve a probar. */
   breakers: base.output(z.array(Breaker)),
 };
@@ -187,9 +204,27 @@ const projects = {
    * corridas y el carril de mantenimiento siguen). Emite `project.paused` con el actor. `NOT_FOUND` si no existe;
    * `BAD_REQUEST` si está archivado.
    */
-  pause: base.input(z.object({ id: ProjectId })).output(ClankerProject),
+  pause: base
+    .meta({
+      mcp: {
+        action: "pause_loop",
+        description: "Pausa el loop de un proyecto: deja de lanzar sus issues, sin tocar lo que ya corre ni a otros proyectos.",
+        annotations: SAFE_IDEMPOTENT,
+      },
+    })
+    .input(z.object({ id: ProjectId }))
+    .output(ClankerProject),
   /** Lo contrario: el Scheduler vuelve a lanzar sus issues y emite `project.resumed`. Los mismos errores que `pause`. */
-  resume: base.input(z.object({ id: ProjectId })).output(ClankerProject),
+  resume: base
+    .meta({
+      mcp: {
+        action: "start_loop",
+        description: "Inicia o retoma el loop de un proyecto: vuelve a lanzar sus issues según la cola y sus carriles.",
+        annotations: SAFE_IDEMPOTENT,
+      },
+    })
+    .input(z.object({ id: ProjectId }))
+    .output(ClankerProject),
   /** El cupo del carril dev de este proyecto (`parallel`). Rige de inmediato: el Scheduler lanza lo que quepa. */
   setParallel: base.input(z.object({ id: ProjectId, parallel: z.int().positive() })).output(ClankerProject),
   /**
@@ -293,41 +328,99 @@ const runs = {
    * issue devuelve esa. `BAD_REQUEST` si el proyecto no está activo, no hay flujo, faltan params o falta
    * el perfil, o el tracker no puede reclamar la issue; `NOT_FOUND` si el proyecto o la issue no existen.
    */
-  start: base.input(StartRun).output(RunDetail),
+  start: base
+    .meta({
+      mcp: {
+        action: "run_issue",
+        description: "Lanza el flujo del proyecto (o `flow`) sobre una issue y vuelve sin esperar; el avance está en `clanker://run/<id>/timeline`. Reclama la issue en su tracker. Si ya hay una corrida viva de ese flujo sobre ella, devuelve esa.",
+        // Reclama la issue en Linear o GitHub: asignada y en progreso.
+        annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      },
+    })
+    .input(StartRun)
+    .output(RunDetail),
   /**
    * Pausa la corrida y sus hijas que corren: no se despachan pasos nuevos y los agentes en curso terminan lo suyo
    * (con `now`, se interrumpen y su paso vuelve a pending con su sesión lista para retomarse). Sigue ocupando su
    * cupo y su sujeto. Quién lo pidió queda en los eventos `run.status`. `NOT_FOUND` si no existe; `BAD_REQUEST` si no
    * corre (estacionada, terminada...). Pausar una ya pausada con `now` interrumpe a los agentes que sigan.
    */
-  pause: base.input(z.object({ id: RunId, now: z.boolean().default(false) })).output(RunDetail),
+  pause: base
+    .meta({
+      mcp: {
+        action: "pause_run",
+        description: "Pausa una corrida: no se despachan pasos nuevos y los agentes en curso terminan lo suyo (con `now`, se interrumpen y su sesión queda lista para retomarse).",
+        annotations: SAFE_IDEMPOTENT,
+      },
+    })
+    .input(z.object({ id: RunId, now: z.boolean().default(false) }))
+    .output(RunDetail),
   /** Retoma una corrida pausada; una que ya corre no cambia. `NOT_FOUND` si no existe; `BAD_REQUEST` en cualquier otro estado. */
-  resume: base.input(z.object({ id: RunId })).output(RunDetail),
+  resume: base
+    .meta({ mcp: { action: "resume_run", description: "Retoma una corrida pausada; una que ya corre no cambia.", annotations: SAFE_IDEMPOTENT } })
+    .input(z.object({ id: RunId }))
+    .output(RunDetail),
   /**
    * Cancela la corrida y todas sus hijas: sus pasos quedan `canceled`, los agentes se interrumpen (y su proceso
    * cae a los 10 s si no cierra), las acciones reciben el abort de su señal, las decisiones que las estacionaban
    * quedan `superseded` y cada corrida emite `run.finished` con outcome `canceled` y el actor. Una corrida que ya
    * terminó no cambia. `NOT_FOUND` si no existe.
    */
-  cancel: base.input(z.object({ id: RunId })).output(RunDetail),
+  cancel: base
+    .meta({
+      mcp: {
+        action: "cancel_run",
+        description: "Cancela una corrida y sus hijas: los agentes se interrumpen y sus pasos quedan `canceled`. No se puede retomar; el historial se conserva.",
+        annotations: DESTRUCTIVE_IDEMPOTENT,
+      },
+    })
+    .input(z.object({ id: RunId }))
+    .output(RunDetail),
   /**
    * Interrumpe lo que la corrida tiene en marcha: es `pause` con `now`. El agente en curso se detiene con su sesión
    * guardada y `resume` la retoma donde iba, sin gastar intento.
    */
-  interrupt: base.input(z.object({ id: RunId })).output(RunDetail),
+  interrupt: base
+    .meta({
+      mcp: {
+        action: "interrupt_run",
+        description: "Interrumpe ya al agente en curso de una corrida (la pausa con `now`). Su sesión queda guardada y `resume_run` la retoma donde iba.",
+        annotations: DESTRUCTIVE_IDEMPOTENT,
+      },
+    })
+    .input(z.object({ id: RunId }))
+    .output(RunDetail),
   /**
    * "Reintentar desde acá": el nodo del paso corre de nuevo como una visita nueva con sesión nueva, y lo que la
    * corrida tenía en marcha (el paso en curso, sus ramas, sus corridas hijas) se cancela. Cierra la decisión que
    * la estacionaba. Devuelve la corrida del paso. `NOT_FOUND` si no existe el paso; `BAD_REQUEST` si su corrida no
    * está viva o el paso es una rama o el join de un parallel (se reintenta el parallel).
    */
-  retryStep: base.input(z.object({ stepId: StepRunId })).output(RunDetail),
+  retryStep: base
+    .meta({
+      mcp: {
+        action: "retry_step",
+        description: "Reintenta desde un paso: su nodo corre de nuevo con sesión nueva y lo que la corrida tenía en marcha se cancela. Cierra la decisión que la estacionaba.",
+        annotations: { ...SAFE, idempotentHint: false },
+      },
+    })
+    .input(z.object({ stepId: StepRunId }))
+    .output(RunDetail),
   /**
    * Le deja un mensaje al agente de un paso y retoma su sesión con él: si está en curso lo interrumpe, si está pending
    * lo marca, y si es el paso en que la corrida espera una decisión `needs_human`, la cierra y retoma la última
    * sesión del paso. `BAD_REQUEST` si el paso no es de un agente o no está en uno de esos estados.
    */
-  steerStep: base.input(z.object({ stepId: StepRunId, message: z.string().min(1) })).output(RunDetail),
+  steerStep: base
+    .meta({
+      mcp: {
+        action: "steer_step",
+        description: "Le deja un mensaje al agente de un paso y retoma su sesión con él (si está en curso, lo interrumpe).",
+        annotations: { ...SAFE, idempotentHint: false },
+      },
+    })
+    .input(z.object({ stepId: StepRunId, message: z.string().min(1) }))
+    .output(RunDetail),
   /**
    * Sigue el edge de `outcome` sin ejecutar el paso (o sin terminar de esperarlo). Solo pasos `action` y `wait`
    * (decisión #44) y solo un `outcome` que el nodo declara. `BAD_REQUEST` con un agente, una rama de parallel, un
@@ -376,7 +469,17 @@ const decisions = {
    * existe; `BAD_REQUEST` si ya se resolvió, un gate o `needs_human` no tiene su corrida esperándola o
    * la opción no es suya.
    */
-  resolve: base.input(z.object({ id: DecisionId, option: z.string().min(1) })).output(Decision),
+  resolve: base
+    .meta({
+      mcp: {
+        action: "resolve_decision",
+        description: "Resuelve una decisión pendiente con una de sus `options` (`get` o `list` de kind `decision` las muestran); la corrida estacionada sigue. Una decisión resuelta no se puede resolver otra vez.",
+        // Un gate guarda justo los pasos que publican (merge, push): elegir su outcome los deja correr.
+        annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      },
+    })
+    .input(z.object({ id: DecisionId, option: z.string().min(1) }))
+    .output(Decision),
 };
 
 /** Flujos, roles, perfiles, recetas y packs: lo versionado en `defs`, leído por kind. */
@@ -391,6 +494,38 @@ const defs = {
     .meta({ mcp: { tool: "get", kind: DEF_MCP_KINDS } })
     .input(DefRef)
     .output(DefRecord),
+  /**
+   * Crea una def de scope `user` (o `repo`) con su versión 1. Valida el body con el esquema del kind y, en un
+   * flujo, con `flows.validate`: sus errores llegan como `BAD_REQUEST`, o en `errors` con `dryRun`. También es
+   * un error que ya exista esa def (archivada o no), que `repoId` no vaya con scope `repo` o que el slug de un
+   * flujo no sea el `id` de su body. Emite `def.versioned` con el origin de quien llama.
+   */
+  create: base
+    .meta({ mcp: { tool: "create", kind: DEF_WRITE_KINDS } })
+    .input(DefCreate)
+    .output(DefWrite),
+  /**
+   * Reemplaza el body y guarda una versión nueva si cambió (el mismo contenido no suma versiones ni emite
+   * eventos). Con `dryRun` solo valida y devuelve el diff contra la versión vigente. Para deshacer un cambio,
+   * `get` de la versión anterior y `update` con su body. `NOT_FOUND` si no existe; `BAD_REQUEST` si el body es
+   * inválido, la def está archivada o su scope es `builtin` o `pack` (los regenera el core: pisarlas es
+   * `create` con scope `user` y el mismo slug). Las corridas en curso siguen con la versión que fijaron.
+   */
+  update: base
+    .meta({ mcp: { tool: "update", kind: DEF_WRITE_KINDS } })
+    .input(DefUpdate)
+    .output(DefWrite),
+  /**
+   * Archiva la def (`restore` la deshace): deja de resolverse por slug, pero conserva sus versiones y no toca
+   * las corridas que la usaron ni su historial. Archivar una ya archivada no cambia nada. `NOT_FOUND` si no
+   * existe; `BAD_REQUEST` si su scope es `builtin` o `pack`. Emite `def.archived`.
+   */
+  archive: base
+    .meta({ mcp: { tool: "delete", kind: DEF_WRITE_KINDS } })
+    .input(DefArchive)
+    .output(DefRecord),
+  /** Deshace `archive`; una vigente no cambia. `NOT_FOUND` si no existe. Emite `def.restored`. Sin `meta.mcp`: el deshacer lo ofrece la UI. */
+  restore: base.input(DefArchive).output(DefRecord),
 };
 
 export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, metrics, defs, imports };

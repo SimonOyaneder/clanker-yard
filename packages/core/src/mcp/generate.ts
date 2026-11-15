@@ -41,23 +41,43 @@ export interface GenerateOptions {
   kindSchemas?: Partial<Record<McpKind, KindSchema>>;
 }
 
-/**
- * Anotaciones de las tools por kind (`docs/design.html#d-data`). `create`, `update` y `delete` son de la
- * issue de escritura: hasta entonces el generador se niega a armarlas.
- */
+type WriteToolName = "create" | "update" | "delete";
+type ToolName = "list" | "get" | WriteToolName;
+
+/** Anotaciones de las tools por kind (`docs/design.html#d-data`); la regla está en `McpMeta`. */
 const READ_ONLY: McpAnnotations = { readOnlyHint: true, openWorldHint: false };
-const TOOL_ANNOTATIONS: Record<"list" | "get", McpAnnotations> = { list: READ_ONLY, get: READ_ONLY };
+const TOOL_ANNOTATIONS: Record<ToolName, McpAnnotations> = {
+  list: READ_ONLY,
+  get: READ_ONLY,
+  create: { destructiveHint: false, openWorldHint: false },
+  update: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  delete: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+};
+
+const isWrite = (name: ToolName): name is WriteToolName => name === "create" || name === "update" || name === "delete";
+
+/** Lo que se le dice al modelo de cada tool de escritura; `kinds` son los que sirve. */
+const WRITE_DESCRIPTIONS: Record<WriteToolName, (kinds: string[]) => string> = {
+  create: (kinds) =>
+    `Crea una entidad nueva (${kinds.join(", ")}) con la versión 1. El esquema de su body está en el resource clanker://schema/<kind>. Con dryRun valida y devuelve los errores sin guardar; un flujo se valida además contra los roles, acciones y subflujos que existen.`,
+  update: (kinds) =>
+    `Reemplaza el body de una entidad (${kinds.join(", ")}) y guarda una versión nueva: las corridas en curso siguen con la suya. Con dryRun devuelve los errores o el diff contra la versión vigente sin guardar. Para deshacer, \`get\` con una \`version\` anterior y \`update\` con su body. Las defs builtin y de packs no se editan: crea una de scope user con el mismo slug.`,
+  delete: (kinds) =>
+    `Archiva una entidad (${kinds.join(", ")}); no la borra, conserva sus versiones y nunca toca las corridas que la usaron ni su historial. Se deshace desde la UI.`,
+};
 
 const RESOURCE_NAMES: readonly McpResourceName[] = ["run_timeline", "step_report"];
 
 /**
- * Recorre el contrato y arma lo que el MCP expone, sin tocar el SDK: las tools `list` y `get` por kind,
- * las acciones, los esquemas y los procedimientos de los resources. Lanza con un mensaje accionable si
+ * Recorre el contrato y arma lo que el MCP expone, sin tocar el SDK: las tools por kind (`list`, `get`,
+ * `create`, `update` y `delete`), las acciones, los esquemas y los procedimientos de los resources. Lanza con un mensaje accionable si
  * un procedimiento con `meta.mcp` no cumple la convención (anotaciones, esquema del kind), porque el
  * MCP se arma al arrancar el core y un contrato mal marcado no debe llegar a un cliente.
  */
 export function generateMcp(contract: Contract = apiContract, { kindSchemas = MCP_KIND_SCHEMAS }: GenerateOptions = {}): McpPlan {
-  const byTool = new Map<string, Map<string, McpRoute>>();
+  const byTool = new Map<ToolName, Map<string, McpRoute>>();
+  /** El input de cada tool de escritura: la tool lo toma tal cual, así que lo sirve un solo procedimiento. */
+  const writeInputs = new Map<WriteToolName, { where: string; input: z.ZodObject; shared: boolean }>();
   const actions: McpTool[] = [];
   const resources = new Map<McpResourceName, McpRoute>();
   const filters = new Map<McpKind, z.ZodObject>();
@@ -70,8 +90,13 @@ export function generateMcp(contract: Contract = apiContract, { kindSchemas = MC
     const route = (shared: boolean): McpRoute => ({ path, shared, hasInput: input !== undefined });
 
     if ("tool" in meta) {
-      if (meta.tool !== "list" && meta.tool !== "get") {
-        throw new Error(`${where}: la tool "${meta.tool}" es de escritura y todavía no se genera; esta versión del MCP es de solo lectura.`);
+      if (isWrite(meta.tool)) {
+        const written = writeInputs.get(meta.tool);
+        if (written && written.where !== where) {
+          throw new Error(`${where}: la tool "${meta.tool}" ya la sirve ${written.where}; una tool de escritura toma el input de un solo procedimiento.`);
+        }
+        if (!input) throw new Error(`${where}: la tool "${meta.tool}" necesita un input.`);
+        writeInputs.set(meta.tool, { where, input: objectOf(where, input), shared: typeof meta.kind !== "string" });
       }
       const kinds = typeof meta.kind === "string" ? [meta.kind] : meta.kind;
       const routes = byTool.get(meta.tool) ?? new Map<string, McpRoute>();
@@ -87,7 +112,7 @@ export function generateMcp(contract: Contract = apiContract, { kindSchemas = MC
       if (!input) throw new Error(`${where}: la acción "${meta.action}" necesita un input.`);
       actions.push({
         name: meta.action,
-        description: `Acción ${meta.action}.`,
+        description: meta.description,
         annotations: meta.annotations,
         inputSchema: objectOf(where, input),
         routes: new Map([["", route(false)]]),
@@ -98,7 +123,7 @@ export function generateMcp(contract: Contract = apiContract, { kindSchemas = MC
     }
   }
 
-  const tools = [...byTool].map(([name, routes]) => crudTool(name as "list" | "get", routes, filters));
+  const tools = [...byTool].map(([name, routes]) => (isWrite(name) ? writeTool(name, routes, writeInputs.get(name)!) : crudTool(name, routes, filters)));
   const schemas = new Map<McpKind, object>();
   for (const tool of tools) {
     for (const kind of tool.routes.keys() as Iterable<McpKind>) {
@@ -133,6 +158,20 @@ function crudTool(name: "list" | "get", routes: Map<string, McpRoute>, filters: 
       kind,
       filter: z.record(z.string(), z.unknown()).optional().describe("Campos del filtro del kind, como `{ \"status\": [\"running\"] }`."),
     }),
+    routes,
+  };
+}
+
+function writeTool(name: WriteToolName, routes: Map<string, McpRoute>, { input, shared }: { input: z.ZodObject; shared: boolean }): McpTool {
+  const kinds = [...routes.keys()];
+  const kind = z.enum(nonEmpty(kinds)).describe("Qué entidad.");
+  // Un procedimiento compartido recibe `kind` en su input: la tool lo declara con los kinds que sirve.
+  const fields = shared ? input.omit({ kind: true }).shape : input.shape;
+  return {
+    name,
+    description: WRITE_DESCRIPTIONS[name](kinds),
+    annotations: TOOL_ANNOTATIONS[name],
+    inputSchema: z.object({ kind, ...fields }),
     routes,
   };
 }
