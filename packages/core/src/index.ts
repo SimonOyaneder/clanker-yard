@@ -117,12 +117,15 @@ export {
 } from "./workspaces/workspaces";
 export { EXCERPT_MAX_LINES } from "./workspaces/exec";
 export type { ExecResult } from "./workspaces/exec";
-export { createRepos } from "./workspaces/repos";
+export { createRepos, InvalidRepoError, RepoNotFoundError } from "./workspaces/repos";
 export type { Repos } from "./workspaces/repos";
+export { NotAGitRepoError } from "./workspaces/inspect";
 
 export { JUGUETE_FLOW, JUGUETE_PROFILE, JUGUETE_ROLE } from "./builtin/juguete";
 export { createProjects, InvalidProjectError, ProjectNotFoundError } from "./projects/projects";
 export type { Projects } from "./projects/projects";
+export { createRunStarter, IssueNotCachedError } from "./projects/start-run";
+export type { RunStarter, RunStarterDeps } from "./projects/start-run";
 export type {
   AcquireRequest,
   ExecOptions,
@@ -143,7 +146,9 @@ export type { LocalTracker, LocalTrackerOptions, RelationKind } from "./tracker/
 export { IssueNotFoundError, matchesIssueFilter } from "./tracker/tracker";
 export type { Tracker } from "./tracker/tracker";
 
-export { createRecipes, RECIPE_PATH } from "./recipe/recipe";
+export { createRecipes, readRecipe, RECIPE_PATH, RecipeSyntaxError } from "./recipe/recipe";
 export type { CommandRun, Recipes, RecipesOptions, ScriptedRecipe } from "./recipe/recipe";
+export { createRecipeTester, RecipeTestError } from "./recipe/recipe-test";
+export type { RecipeTester, RecipeTesterOptions } from "./recipe/recipe-test";
 
 export { commitsApplyAction } from "./commits/apply";

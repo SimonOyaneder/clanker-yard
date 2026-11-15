@@ -21,9 +21,13 @@ export function createMemoryAppData(now = Date.now()): AppData {
       trackerRef: "boundaries",
       defaultFlowId: "techlead-clasico",
       defaultProfileId: "medio",
+      repos: [],
+      queueFilter: {},
+      conventions: {},
       parallel: 1,
       status: "active",
       flowParams: {},
+      maxCostUsd: null,
     },
     {
       id: id("prj", 2),
@@ -33,9 +37,13 @@ export function createMemoryAppData(now = Date.now()): AppData {
       trackerRef: id("prj", 2),
       defaultFlowId: "juguete",
       defaultProfileId: "juguete",
+      repos: [],
+      queueFilter: {},
+      conventions: {},
       parallel: 2,
       status: "paused",
       flowParams: {},
+      maxCostUsd: null,
     },
   ]
 
@@ -135,9 +143,13 @@ export function createMemoryAppData(now = Date.now()): AppData {
         trackerRef: input.trackerRef ?? projectId,
         defaultFlowId: input.defaultFlowId ?? null,
         defaultProfileId: input.defaultProfileId ?? null,
+        repos: input.repos?.map(({ repoId, labels = [] }) => ({ repoId, labels })) ?? [],
+        queueFilter: input.queueFilter ?? {},
+        conventions: input.conventions ?? {},
         parallel: input.parallel ?? 1,
         status: "active",
         flowParams: input.flowParams ?? {},
+        maxCostUsd: input.maxCostUsd ?? null,
       }
       projects.push(created)
       return created

@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 import { type Contract, type Event, contract } from "./index";
 
 describe("contrato", () => {
-  test("exporta los routers system, events, connections, artifacts, issues, projects, prs y runs con sus procedimientos", () => {
+  test("exporta los routers system, events, connections, artifacts, issues, projects, prs, repos y runs con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual([
       "artifacts",
       "connections",
@@ -11,6 +11,7 @@ describe("contrato", () => {
       "issues",
       "projects",
       "prs",
+      "repos",
       "runs",
       "system",
     ]);
@@ -21,6 +22,7 @@ describe("contrato", () => {
     expect(Object.keys(contract.issues).sort()).toEqual(["createLocal", "get", "list"]);
     expect(Object.keys(contract.projects).sort()).toEqual(["create", "get", "list", "update"]);
     expect(Object.keys(contract.prs)).toEqual(["get"]);
+    expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "testRecipe"]);
     expect(Object.keys(contract.runs).sort()).toEqual(["get", "list", "start"]);
     for (const procedure of [
       ...Object.values(contract.system),
@@ -29,6 +31,7 @@ describe("contrato", () => {
       ...Object.values(contract.issues),
       ...Object.values(contract.projects),
       ...Object.values(contract.prs),
+      ...Object.values(contract.repos),
       ...Object.values(contract.runs),
     ]) {
       expect(isContractProcedure(procedure)).toBe(true);
@@ -46,8 +49,9 @@ describe("contrato", () => {
     const base = { slug: "demo", name: "Demo" };
 
     expect(await schema.validate({ ...base, tracker: "local" })).toMatchObject({
-      value: { parallel: 1, flowParams: {} },
+      value: { parallel: 1, flowParams: {}, repos: [], queueFilter: {}, conventions: {}, maxCostUsd: null },
     });
+    expect(await schema.validate({ ...base, tracker: "local", maxCostUsd: 0 })).toHaveProperty("issues");
     expect(await schema.validate({ ...base, tracker: "local", trackerRef: "x" })).toHaveProperty("issues");
     expect(await schema.validate({ ...base, tracker: "linear" })).toHaveProperty("issues");
     expect(await schema.validate({ ...base, tracker: "linear", trackerRef: "BA" })).not.toHaveProperty("issues");

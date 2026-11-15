@@ -10,7 +10,7 @@ export const JUGUETE_FLOW: FlowDef = {
   name: "Juguete",
   trigger: { type: "manual" },
   effects: "local",
-  /** `repo` es el id de un repo registrado; el proyecto lo fija en `flowParams`. */
+  /** `repo` y `base` los pone `runs.start` desde los repos del proyecto; `flowParams` puede fijarlos. */
   params: { repo: "string", base: { type: "string", default: "main" } },
   start: "acquire",
   nodes: {

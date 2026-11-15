@@ -29,11 +29,7 @@ export interface RecipesOptions {
 }
 
 export interface Recipes {
-  /**
-   * Lee y valida `.clanker/recipe.json` de `dir`. `undefined` si el repo no tiene receta: funciona
-   * igual, sin slots, sin `wrap` y sin checks. Una receta inválida lanza `DefValidationError` con la
-   * ruta de cada campo.
-   */
+  /** `readRecipe`. */
   read(dir: string): Recipe | undefined;
   /** La acción `recipe.check` para `flows.registerAction`. */
   checkAction: ActionDef<typeof CheckArgs>;
@@ -76,33 +72,41 @@ const SPEC_FILE = /(^|\/)(specs?|tests?|__tests__)\/|[._-](spec|test)\.[^/]+$/;
 /** Un repo sin receta: ni entorno, ni wrap, ni checks. */
 const NO_RECIPE: Pick<Recipe, "env" | "wrap" | "commands" | "checks"> = { env: {}, wrap: undefined, commands: {}, checks: [] };
 
+/** `.clanker/recipe.json` no es JSON. */
+export class RecipeSyntaxError extends Error {}
+
+/**
+ * Lee y valida `.clanker/recipe.json` de `dir`. `undefined` si el repo no tiene receta: funciona
+ * igual, sin slots, sin `wrap` y sin checks. Una receta inválida lanza `DefValidationError` con la
+ * ruta de cada campo, o `RecipeSyntaxError` si ni siquiera es JSON.
+ */
+export function readRecipe(dir: string): Recipe | undefined {
+  let text: string;
+  try {
+    text = readFileSync(join(dir, RECIPE_PATH), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (error) {
+    throw new RecipeSyntaxError(`${RECIPE_PATH} de ${dir} no es JSON válido: ${(error as Error).message}`, { cause: error });
+  }
+  const parsed = Recipe.safeParse(json);
+  if (!parsed.success) {
+    throw new DefValidationError(
+      "recipe",
+      RECIPE_PATH,
+      parsed.error.issues.map(({ path, message }) => ({ path, message })),
+    );
+  }
+  return parsed.data;
+}
+
 export function createRecipes({ store, defs, workspaces, artifacts, fake }: RecipesOptions): Recipes {
   defs.register("recipe", Recipe);
-
-  function read(dir: string): Recipe | undefined {
-    let text: string;
-    try {
-      text = readFileSync(join(dir, RECIPE_PATH), "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-    let json: unknown;
-    try {
-      json = JSON.parse(text);
-    } catch (error) {
-      throw new Error(`${RECIPE_PATH} de ${dir} no es JSON válido: ${(error as Error).message}`, { cause: error });
-    }
-    const parsed = Recipe.safeParse(json);
-    if (!parsed.success) {
-      throw new DefValidationError(
-        "recipe",
-        RECIPE_PATH,
-        parsed.error.issues.map(({ path, message }) => ({ path, message })),
-      );
-    }
-    return parsed.data;
-  }
 
   /** Lo que cambió la issue: commits desde la base, cambios sin commit y archivos nuevos. Sin los borrados. */
   async function changedFiles(ws: WorkspaceRef, baseSha: string): Promise<string[]> {
@@ -183,7 +187,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
     async run({ ws, scope, slot }, ctx) {
       let recipe;
       try {
-        recipe = read(ws.path) ?? NO_RECIPE;
+        recipe = readRecipe(ws.path) ?? NO_RECIPE;
       } catch (error) {
         // Una receta mal escrita no se arregla reintentando.
         throw asPermanent(error);
@@ -216,7 +220,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
     },
   };
 
-  return { read, checkAction, runCommand };
+  return { read: readRecipe, checkAction, runCommand };
 }
 
 function asPermanent(error: unknown): PermanentActionError {

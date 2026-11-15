@@ -124,7 +124,8 @@ const MergeStrategy = z.strictObject({
   onAuto: MergeReaction,
 });
 
-const Conventions = z.strictObject({
+/** Las convenciones de un pack; un proyecto puede fijar las suyas (`ClankerProject.conventions`). */
+export const Conventions = z.strictObject({
   commentPrefix: z.string().optional(),
   councilPrefix: z.string().optional(),
   commits: z.enum(["conventional"]).optional(),
@@ -152,6 +153,7 @@ export const PackSettings = z.strictObject({
   mergeStrategy: MergeStrategy.optional(),
   conventions: Conventions.default({}),
 });
+export type Conventions = z.infer<typeof Conventions>;
 export type PackSettings = z.infer<typeof PackSettings>;
 
 /** Una ruta `.json` dentro de la carpeta del pack: nunca absoluta y nunca fuera de ella. */

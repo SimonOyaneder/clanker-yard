@@ -12,6 +12,8 @@ export const IssueId = prefixedId("iss");
 export type IssueId = z.infer<typeof IssueId>;
 export const ProjectId = prefixedId("prj");
 export type ProjectId = z.infer<typeof ProjectId>;
+export const RepoId = prefixedId("repo");
+export type RepoId = z.infer<typeof RepoId>;
 export const RunId = prefixedId("run");
 export type RunId = z.infer<typeof RunId>;
 export const StepRunId = prefixedId("stp");
@@ -65,6 +67,9 @@ export const EventType = z.enum([
   "def.versioned",
   "def.archived",
   "def.restored",
+  "recipe.test_started",
+  "recipe.test_output",
+  "recipe.test_finished",
   "issue.synced",
   "issue.queued",
   "issue.claimed",

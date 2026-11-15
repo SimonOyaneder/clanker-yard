@@ -83,6 +83,16 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
   },
+  repos: {
+    list: os.repos.list.handler(() => []),
+    add: os.repos.add.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    detect: os.repos.detect.handler(() => []),
+    testRecipe: os.repos.testRecipe.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+  },
   runs: {
     list: os.runs.list.handler(() => []),
     get: os.runs.get.handler(() => {

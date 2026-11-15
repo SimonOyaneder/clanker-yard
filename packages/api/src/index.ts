@@ -7,6 +7,7 @@ export * from "./flow";
 export * from "./pack";
 export * from "./prs";
 export * from "./recipe";
+export * from "./repos";
 export * from "./projects";
 export * from "./runs";
 export * from "./tracker";

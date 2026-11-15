@@ -1,9 +1,24 @@
 import * as z from "zod";
-import { ProjectId } from "./domain";
-import { TrackerId } from "./tracker";
+import { ProjectId, RepoId } from "./domain";
+import { Conventions } from "./pack";
+import { IssueFilter, TrackerId } from "./tracker";
 
 export const ProjectStatus = z.enum(["active", "paused", "archived"]);
 export type ProjectStatus = z.infer<typeof ProjectStatus>;
+
+/**
+ * Un repo del proyecto. `runs.start` elige el repo de una issue por sus labels: el primero de la lista
+ * que tenga alguno de los labels de la issue; si ninguno calza, el primero de la lista.
+ */
+export const ProjectRepo = z.object({
+  repoId: RepoId,
+  /** Los labels de issue que mandan al repo. Un label no puede estar en dos repos del mismo proyecto. */
+  labels: z.array(z.string().min(1)).default([]),
+});
+export type ProjectRepo = z.infer<typeof ProjectRepo>;
+
+const ProjectRepos = z.array(ProjectRepo);
+const MaxCostUsd = z.number().positive().nullable();
 
 /**
  * Un proyecto de Clanker: una cola de issues de un tracker y el flujo con que se trabajan
@@ -22,11 +37,19 @@ export const ClankerProject = z.object({
   defaultFlowId: z.string().min(1).nullable(),
   /** Slug del perfil con que corren los pasos agent. */
   defaultProfileId: z.string().min(1).nullable(),
+  /** En orden: el primero es el repo por defecto. */
+  repos: ProjectRepos,
+  /** Qué issues entran a la cola. */
+  queueFilter: IssueFilter,
+  /** Reglas del proyecto para el brief y los PRs; pisan a las del pack. */
+  conventions: Conventions,
   /** Cupo del carril dev. */
   parallel: z.int().positive(),
   status: ProjectStatus,
   /** Pisa los defaults de `params` del flujo (por ejemplo `reviewRounds`) sin crear una versión del flujo. */
   flowParams: z.record(z.string(), z.unknown()),
+  /** Tope de gasto por corrida; `null` es sin tope. */
+  maxCostUsd: MaxCostUsd,
 });
 export type ClankerProject = z.infer<typeof ClankerProject>;
 
@@ -43,8 +66,12 @@ export const NewProject = z
     trackerRef: z.string().min(1).optional(),
     defaultFlowId: z.string().min(1).optional(),
     defaultProfileId: z.string().min(1).optional(),
+    repos: ProjectRepos.default([]),
+    queueFilter: IssueFilter.default({}),
+    conventions: Conventions.default({}),
     parallel: z.int().positive().default(1),
     flowParams: z.record(z.string(), z.unknown()).default({}),
+    maxCostUsd: MaxCostUsd.default(null),
   })
   .superRefine((project, ctx) => {
     const isLocal = project.tracker === "local";
@@ -70,8 +97,13 @@ export const ProjectPatch = z.object({
   name: z.string().min(1).optional(),
   defaultFlowId: z.string().min(1).nullable().optional(),
   defaultProfileId: z.string().min(1).nullable().optional(),
+  /** Reemplaza la lista entera. */
+  repos: ProjectRepos.optional(),
+  queueFilter: IssueFilter.optional(),
+  conventions: Conventions.optional(),
   parallel: z.int().positive().optional(),
   status: ProjectStatus.optional(),
   flowParams: z.record(z.string(), z.unknown()).optional(),
+  maxCostUsd: MaxCostUsd.optional(),
 });
 export type ProjectPatch = z.infer<typeof ProjectPatch>;

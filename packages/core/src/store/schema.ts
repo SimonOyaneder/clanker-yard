@@ -3,10 +3,12 @@ import type {
   ArtifactKind,
   ConnectionProvider,
   ConnectionStatus,
+  Conventions,
   DefKind,
   Event,
   EventType,
   IssueId,
+  IssueFilter,
   IssueRef,
   Milestone,
   Origin,
@@ -14,6 +16,7 @@ import type {
   Priority,
   ProjectId,
   ProjectStatus,
+  RepoId,
   RunId,
   StatusCategory,
   StepRunId,
@@ -232,12 +235,18 @@ export const projects = sqliteTable(
     parallel: integer().notNull().default(1),
     status: text().$type<ProjectStatus>().notNull().default("active"),
     flowParams: text("flow_params", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    queueFilter: text("queue_filter", { mode: "json" }).$type<IssueFilter>().notNull().default({}),
+    conventions: text({ mode: "json" }).$type<Conventions>().notNull().default({}),
+    /** `null` es sin tope. */
+    maxCostUsd: real("max_cost_usd"),
   },
   (t) => [
     uniqueIndex("projects_slug").on(t.slug),
     uniqueIndex("projects_tracker_ref").on(t.tracker, t.trackerRef),
     check("projects_parallel_positive", sql`${t.parallel} >= 1`),
     check("projects_flow_params_json", sql`json_valid(${t.flowParams})`),
+    check("projects_queue_filter_json", sql`json_valid(${t.queueFilter})`),
+    check("projects_conventions_json", sql`json_valid(${t.conventions})`),
   ],
 );
 
@@ -245,12 +254,39 @@ export const projects = sqliteTable(
 export const repos = sqliteTable(
   "repos",
   {
-    id: text().primaryKey(),
+    id: text().$type<RepoId>().primaryKey(),
     name: text().notNull(),
     path: text().notNull(),
+    /** `owner/name` en GitHub; `null` si `origin` no es de GitHub. */
+    remote: text(),
     defaultBranch: text("default_branch").notNull(),
   },
   (t) => [uniqueIndex("repos_path").on(t.path)],
+);
+
+/**
+ * Los repos de un proyecto. `ord` es el orden de la lista: el primero es el repo por defecto de
+ * `runs.start`. `labels` son los labels de issue que mandan al repo.
+ */
+export const projectRepos = sqliteTable(
+  "project_repos",
+  {
+    projectId: text("project_id")
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    repoId: text("repo_id")
+      .$type<RepoId>()
+      .notNull()
+      .references(() => repos.id),
+    ord: integer().notNull(),
+    labels: text({ mode: "json" }).$type<string[]>().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.projectId, t.repoId] }),
+    uniqueIndex("project_repos_ord").on(t.projectId, t.ord),
+    check("project_repos_labels_json", sql`json_valid(${t.labels})`),
+  ],
 );
 
 /** Estado de polling y cuota por recurso: ETags (`etag`, `cursor`) y la última cuota que GitHub informó. */

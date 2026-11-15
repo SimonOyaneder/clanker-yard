@@ -51,6 +51,57 @@ export async function execLogged({ cwd, command, env, logPath, signal, onSpawn }
   }
 }
 
+export interface StreamRequest {
+  cwd: string;
+  command: string;
+  /** Se suma a la lista blanca del entorno heredado. */
+  env: Record<string, string>;
+  /** Cada trozo de stdout o stderr, apenas sale. No debe lanzar: corre dentro de un callback del stream. */
+  onOutput(text: string): void;
+  signal: AbortSignal;
+}
+
+/** Cuánto de la salida se conserva en memoria (la cola): lo que sigue se pasó por `onOutput`. */
+const STREAM_KEEP_CHARS = 64 * 1024;
+
+/**
+ * Como `execLogged`, pero la salida pasa por `onOutput` en vivo en lugar de ir a un log, y vuelve en
+ * `output` (stdout y stderr entrelazados, solo la cola). Un `signal` abortado mata el grupo de procesos
+ * del comando; el resultado es su exit, sin lanzar.
+ */
+export async function execStreaming({ cwd, command, env, onOutput, signal }: StreamRequest): Promise<{ exitCode: number; output: string }> {
+  signal.throwIfAborted();
+  let output = "";
+  const { code } = await new Promise<{ code: number | null }>((resolve, reject) => {
+    const child = spawn("sh", ["-c", command], { cwd, env: { ...inheritedEnv(), ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const abort = () => {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        // El grupo ya terminó.
+      }
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    const take = (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      output = (output + text).slice(-STREAM_KEEP_CHARS);
+      onOutput(text);
+    };
+    child.stdout.on("data", take);
+    child.stderr.on("data", take);
+    child.once("error", (error) => {
+      signal.removeEventListener("abort", abort);
+      reject(new Error(`No se pudo lanzar "${command}" en ${cwd}: ${error.message}`, { cause: error }));
+    });
+    // `close` y no `exit`: espera a que los pipes se vacíen.
+    child.once("close", (code) => {
+      signal.removeEventListener("abort", abort);
+      resolve({ code });
+    });
+  });
+  return { exitCode: code ?? 1, output };
+}
+
 function inheritedEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of INHERITED_ENV) {

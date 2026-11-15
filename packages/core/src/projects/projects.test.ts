@@ -1,4 +1,4 @@
-import { type ClankerProject, type ProjectId } from "@clanker/api";
+import { type ClankerProject, NewProject, type Origin, type ProjectId, type RepoId } from "@clanker/api";
 import { createRouterClient, ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
@@ -8,7 +8,11 @@ import { apiDeps } from "../server/testing";
 import { newId } from "../store/conventions";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
+import { createRepos } from "../workspaces/repos";
 import { InvalidProjectError, ProjectNotFoundError, createProjects, type Projects } from "./projects";
+
+/** `projects.create` con los defaults de `NewProject`, como los deja la API. */
+const create = (input: NewProject, origin: Origin) => projects.create(NewProject.parse(input), origin);
 
 let store: Store;
 let defs: Defs;
@@ -28,7 +32,7 @@ const events = (...types: string[]) => store.events.since(0, { types: types as n
 
 describe("create", () => {
   test("un proyecto local usa su id como trackerRef y parte activo con los defaults", () => {
-    const project = projects.create(
+    const project = create(
       { slug: "demo", name: "Demo", tracker: "local", parallel: 1, flowParams: {} },
       "cli",
     );
@@ -41,9 +45,13 @@ describe("create", () => {
       trackerRef: project.id,
       defaultFlowId: null,
       defaultProfileId: null,
+      repos: [],
+      queueFilter: {},
+      conventions: {},
       parallel: 1,
       status: "active",
       flowParams: {},
+      maxCostUsd: null,
     });
     expect(projects.get(project.id)).toEqual(project);
     expect(events("project.created")).toMatchObject([
@@ -55,7 +63,7 @@ describe("create", () => {
     defs.save({ kind: "flow", slug: "juguete", scope: "builtin", body: {}, source: "builtin" });
     defs.save({ kind: "profile", slug: "max", scope: "user", body: {}, source: "ui" });
 
-    const project = projects.create(
+    const project = create(
       {
         slug: "ba",
         name: "BA",
@@ -80,14 +88,14 @@ describe("create", () => {
 
   test("rechaza un slug repetido, un tracker y ref repetidos y defaults que no existen, sin guardar nada", () => {
     const linear = { name: "BA", tracker: "linear", trackerRef: "BA", parallel: 1, flowParams: {} } as const;
-    projects.create({ ...linear, slug: "ba" }, "ui");
+    create({ ...linear, slug: "ba" }, "ui");
 
-    expect(() => projects.create({ ...linear, slug: "ba", trackerRef: "OTRO" }, "ui")).toThrow(/slug "ba"/);
-    expect(() => projects.create({ ...linear, slug: "eng-2" }, "ui")).toThrow(/ya hay un proyecto de linear para "BA"/i);
-    expect(() => projects.create({ ...linear, slug: "x", trackerRef: "X", defaultFlowId: "nope" }, "ui")).toThrow(
+    expect(() => create({ ...linear, slug: "ba", trackerRef: "OTRO" }, "ui")).toThrow(/slug "ba"/);
+    expect(() => create({ ...linear, slug: "eng-2" }, "ui")).toThrow(/ya hay un proyecto de linear para "BA"/i);
+    expect(() => create({ ...linear, slug: "x", trackerRef: "X", defaultFlowId: "nope" }, "ui")).toThrow(
       /No existe el flujo "nope"/,
     );
-    expect(() => projects.create({ ...linear, slug: "x", trackerRef: "X", defaultProfileId: "nope" }, "ui")).toThrow(
+    expect(() => create({ ...linear, slug: "x", trackerRef: "X", defaultProfileId: "nope" }, "ui")).toThrow(
       InvalidProjectError,
     );
     expect(projects.list().map((p) => p.slug)).toEqual(["ba"]);
@@ -95,10 +103,76 @@ describe("create", () => {
   });
 });
 
+describe("repos, cola, convenciones y tope", () => {
+  let api: RepoId;
+  let web: RepoId;
+  beforeEach(() => {
+    const repos = createRepos(store);
+    api = repos.add({ name: "api", path: "/tmp/api" });
+    web = repos.add({ name: "web", path: "/tmp/web" });
+  });
+
+  test("guarda los repos en orden con sus labels, el filtro de la cola, las convenciones y el tope", () => {
+    const project = create(
+      {
+        slug: "demo",
+        name: "Demo",
+        tracker: "local",
+        repos: [{ repoId: web, labels: ["frontend"] }, { repoId: api }],
+        queueFilter: { status: ["todo"], excludeLabels: ["no-clanker"] },
+        conventions: { commits: "conventional", pr: { omitSections: ["Rollback"] } },
+        maxCostUsd: 5,
+      },
+      "ui",
+    );
+
+    expect(project).toMatchObject({
+      repos: [{ repoId: web, labels: ["frontend"] }, { repoId: api, labels: [] }],
+      queueFilter: { status: ["todo"], excludeLabels: ["no-clanker"] },
+      conventions: { commits: "conventional", pr: { omitSections: ["Rollback"] } },
+      maxCostUsd: 5,
+    });
+    expect(projects.get(project.id)).toEqual(project);
+  });
+
+  test("rechaza un repo sin registrar, repetido o un label que manda a dos repos, sin guardar nada", () => {
+    const base = { slug: "demo", name: "Demo", tracker: "local" } as const;
+    const unknown = "repo_00000000000000000000000001";
+
+    expect(() => create({ ...base, repos: [{ repoId: unknown }] }, "ui")).toThrow(/No existe el repo repo_0+1/);
+    expect(() => create({ ...base, repos: [{ repoId: api }, { repoId: api }] }, "ui")).toThrow(/dos veces/);
+    expect(() =>
+      create({ ...base, repos: [{ repoId: api, labels: ["x"] }, { repoId: web, labels: ["x"] }] }, "ui"),
+    ).toThrow(/El label "x" manda a dos repos/);
+    expect(projects.list()).toEqual([]);
+    expect(events("project.created")).toEqual([]);
+  });
+
+  test("update reemplaza la lista de repos y la cola, y emite project.updated con esos campos; los mismos valores no emiten nada", () => {
+    const project = create({ slug: "demo", name: "Demo", tracker: "local", repos: [{ repoId: api }] }, "ui");
+
+    const updated = projects.update(
+      project.id,
+      { repos: [{ repoId: web, labels: ["frontend"] }], queueFilter: { labels: ["clanker"] }, maxCostUsd: 2.5 },
+      "cli",
+    );
+    projects.update(project.id, { repos: [{ repoId: web, labels: ["frontend"] }], maxCostUsd: 2.5 }, "cli");
+
+    expect(updated).toMatchObject({ repos: [{ repoId: web, labels: ["frontend"] }], queueFilter: { labels: ["clanker"] }, maxCostUsd: 2.5 });
+    expect(projects.get(project.id)).toEqual(updated);
+    expect(events("project.updated")).toMatchObject([{ payload: { fields: ["queueFilter", "maxCostUsd", "repos"] } }]);
+    expect(projects.update(project.id, { maxCostUsd: null }, "cli").maxCostUsd).toBeNull();
+    expect(() => projects.update(project.id, { repos: [{ repoId: "repo_00000000000000000000000001", labels: [] }] }, "cli")).toThrow(
+      InvalidProjectError,
+    );
+    expect(projects.get(project.id)!.repos).toEqual([{ repoId: web, labels: ["frontend"] }]);
+  });
+});
+
 describe("update", () => {
   let project: ClankerProject;
   beforeEach(() => {
-    project = projects.create({ slug: "demo", name: "Demo", tracker: "local", parallel: 1, flowParams: {} }, "ui");
+    project = create({ slug: "demo", name: "Demo", tracker: "local", parallel: 1, flowParams: {} }, "ui");
   });
 
   test("cambia solo lo que viene y emite project.updated con esos campos", () => {

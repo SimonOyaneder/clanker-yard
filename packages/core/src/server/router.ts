@@ -9,10 +9,16 @@ import type { Artifacts } from "../artifacts/artifacts";
 import type { Engine } from "../flows/engine";
 import { RunNotFoundError, RunStartError } from "../flows/engine";
 import type { Packs } from "../packs/packs";
+import { DefValidationError } from "../defs/defs";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
+import { IssueNotCachedError, type RunStarter } from "../projects/start-run";
+import { RecipeSyntaxError } from "../recipe/recipe";
+import { RecipeTestError, type RecipeTester } from "../recipe/recipe-test";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
+import { NotAGitRepoError } from "../workspaces/inspect";
+import { InvalidRepoError, RepoNotFoundError, type Repos } from "../workspaces/repos";
 import { eventsAfter } from "./event-stream";
 
 /** Lo que cada llamada trae consigo, venga por HTTP o en proceso (`createRouterClient`, MCP). */
@@ -26,6 +32,10 @@ export interface RouterDeps {
   issues: Issues;
   projects: Projects;
   packs: Packs;
+  repos: Repos;
+  recipeTester: RecipeTester;
+  /** `runs.start`: reclama la issue y lanza el flujo. */
+  runs: RunStarter;
   flows: Engine;
   artifacts: Artifacts;
   coreVersion: string;
@@ -42,7 +52,7 @@ const os = implement(contract).$context<CoreContext>();
 export function createRouter(deps: RouterDeps) {
   const { store } = deps;
   const schemaVersion = readSchemaVersion(store.db.$client);
-  const { artifacts, flows, projects } = deps;
+  const { artifacts, flows, projects, repos, recipeTester, runs } = deps;
   const prs = createPrs({ connections: deps.connections, packs: deps.packs });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
@@ -164,41 +174,20 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
     },
+    repos: {
+      list: os.repos.list.handler(() => repos.list()),
+      add: os.repos.add.handler(({ input }) => asApiErrorAsync(() => repos.register(input.path, input.name))),
+      detect: os.repos.detect.handler(({ input }) => asApiErrorAsync(() => repos.detect(input.folder))),
+      testRecipe: os.repos.testRecipe.handler(({ input, context }) =>
+        asApiErrorAsync(() => recipeTester.test(input.repoId, context.origin)),
+      ),
+    },
     runs: {
       list: os.runs.list.handler(({ input }) => flows.listRuns(input)),
       get: os.runs.get.handler(({ input }) => asApiError(() => flows.getRun(input.id))),
-      start: os.runs.start.handler(({ input }) => {
-        const project = projectOrNotFound(input.projectId);
-        if (project.status !== "active") {
-          throw new ORPCError("BAD_REQUEST", {
-            message: `El proyecto ${project.slug} está ${project.status}: reactívalo (projects.update) antes de lanzar corridas.`,
-          });
-        }
-        const issue = deps.issues.get(input.issueId);
-        if (!issue) {
-          throw new ORPCError("NOT_FOUND", { message: `No hay una issue ${input.issueId} en el caché.` });
-        }
-        if (issue.projectId !== project.id) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: `La issue ${issue.ref.key} es de otro proyecto, no de ${project.slug}.`,
-          });
-        }
-        const flow = input.flow ?? project.defaultFlowId;
-        if (flow === null) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: `El proyecto ${project.slug} no tiene flujo por defecto: pasa \`flow\` o fija defaultFlowId con projects.update.`,
-          });
-        }
-        // Los flowParams del proyecto son del flujo por defecto: otro flujo no los declara.
-        const params = { ...(flow === project.defaultFlowId ? project.flowParams : {}), ...input.params };
-        const runId = asApiError(() =>
-          flows.start(flow, { type: "issue", id: issue.id }, params, {
-            projectId: project.id,
-            profile: project.defaultProfileId ?? undefined,
-          }),
-        );
-        return flows.getRun(runId);
-      }),
+      start: os.runs.start.handler(({ input, context }) =>
+        asApiErrorAsync(() => runs.start(input, context.origin)),
+      ),
     },
     events: {
       list: os.events.list.handler(({ input }) =>
@@ -225,14 +214,39 @@ function asApiError<T>(fn: () => T): T {
   try {
     return fn();
   } catch (error) {
-    if (error instanceof ProjectNotFoundError || error instanceof RunNotFoundError) {
-      throw new ORPCError("NOT_FOUND", { message: error.message, cause: error });
-    }
-    if (error instanceof InvalidProjectError || error instanceof RunStartError) {
-      throw new ORPCError("BAD_REQUEST", { message: error.message, cause: error });
-    }
-    throw error;
+    throw toApiError(error);
   }
+}
+
+async function asApiErrorAsync<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+function toApiError(error: unknown): unknown {
+  if (
+    error instanceof ProjectNotFoundError ||
+    error instanceof RunNotFoundError ||
+    error instanceof RepoNotFoundError ||
+    error instanceof IssueNotCachedError
+  ) {
+    return new ORPCError("NOT_FOUND", { message: error.message, cause: error });
+  }
+  if (
+    error instanceof InvalidProjectError ||
+    error instanceof RunStartError ||
+    error instanceof InvalidRepoError ||
+    error instanceof NotAGitRepoError ||
+    error instanceof RecipeTestError ||
+    error instanceof RecipeSyntaxError ||
+    error instanceof DefValidationError
+  ) {
+    return new ORPCError("BAD_REQUEST", { message: error.message, cause: error });
+  }
+  return error;
 }
 
 /** El `Last-Event-ID` del reconectado manda sobre `after`: es lo último que el cliente vio. */

@@ -124,13 +124,111 @@ describe("runs sobre el runtime fake", () => {
     expect(lease.map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
   });
 
-  test("sin el repo en los params del proyecto, runs.start es BAD_REQUEST y no crea la corrida", async () => {
+  test("sin repos en el proyecto ni en sus flowParams, runs.start es BAD_REQUEST, no crea la corrida y no reclama la issue", async () => {
     const client = await boot();
     const project = await createToyProject(client, {});
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
 
     await expect(client.runs.start({ projectId: project.id, issueId: issue.id })).rejects.toSatisfy(
-      (e) => e instanceof ORPCError && e.code === "BAD_REQUEST" && /Falta el param "repo"/.test(e.message),
+      (e) => e instanceof ORPCError && e.code === "BAD_REQUEST" && /no tiene ninguno: regístralo con repos\.add/.test(e.message),
+    );
+    expect(await client.runs.list({})).toEqual([]);
+    expect(await client.issues.get({ id: issue.id })).toMatchObject({ status: "todo" });
+  });
+});
+
+describe("runs.start con los repos del proyecto", () => {
+  /** Un repo temporal con `branch` además de `main`; `cleanup` al final del test. */
+  const extraRepos: TempGitRepo[] = [];
+  afterEach(() => {
+    for (const extra of extraRepos.splice(0)) extra.cleanup();
+  });
+  function extraRepo(opts: Parameters<typeof tempGitRepo>[0] = {}) {
+    const extra = tempGitRepo(opts);
+    extraRepos.push(extra);
+    return extra;
+  }
+
+  test("reclama la issue y arranca con el repo que mandan sus labels y su branch por defecto como base", async () => {
+    const client = await boot();
+    const back = await client.repos.add({ path: repo.dir, name: "back" });
+    const web = extraRepo();
+    web.git("branch", "-m", "main", "master");
+    const front = await client.repos.add({ path: web.dir, name: "front" });
+    const project = await client.projects.create({
+      slug: "demo",
+      name: "Demo",
+      tracker: "local",
+      defaultFlowId: "juguete",
+      defaultProfileId: "juguete",
+      repos: [
+        { repoId: back.id, labels: ["backend"] },
+        { repoId: front.id, labels: ["frontend"] },
+      ],
+    });
+    const frontend = await client.issues.createLocal({ projectId: project.id, title: "Botón", labels: ["frontend"] });
+    const untagged = await client.issues.createLocal({ projectId: project.id, title: "Sin label" });
+    const nextClaimed = await follow(client, project.id, ["issue.claimed"]);
+
+    const run = await client.runs.start({ projectId: project.id, issueId: frontend.id });
+    const fallback = await client.runs.start({ projectId: project.id, issueId: untagged.id });
+
+    expect(run.params).toEqual({ repo: front.id, base: "master" });
+    expect(fallback.params).toEqual({ repo: back.id, base: "main" });
+    expect(await nextClaimed()).toMatchObject({ subject: { type: "issue", id: frontend.id }, payload: { issueId: frontend.id } });
+    expect(await client.issues.get({ id: frontend.id })).toMatchObject({
+      status: "in_progress",
+      assignee: { id: expect.any(String) },
+    });
+  });
+
+  test("los flowParams del proyecto pisan los defaults del flujo y lo que pasa quien lanza pisa a los dos", async () => {
+    const client = await boot();
+    const target = extraRepo({ branches: { release: [{ message: "chore: release" }], staging: [{ message: "chore: staging" }] } });
+    const registered = await client.repos.add({ path: target.dir });
+    const project = await client.projects.create({
+      slug: "demo",
+      name: "Demo",
+      tracker: "local",
+      defaultFlowId: "juguete",
+      defaultProfileId: "juguete",
+      repos: [{ repoId: registered.id }],
+      flowParams: { base: "release" },
+    });
+    const first = await client.issues.createLocal({ projectId: project.id, title: "Una" });
+    const second = await client.issues.createLocal({ projectId: project.id, title: "Otra" });
+
+    const byProject = await client.runs.start({ projectId: project.id, issueId: first.id });
+    const byCaller = await client.runs.start({ projectId: project.id, issueId: second.id, params: { base: "staging" } });
+
+    // El default del flujo es `main`: el flowParams del proyecto lo pisa.
+    expect(byProject.params).toEqual({ repo: registered.id, base: "release" });
+    expect(byCaller.params).toEqual({ repo: registered.id, base: "staging" });
+  });
+
+  test("lanzar dos veces la misma issue devuelve la misma corrida", async () => {
+    const client = await boot();
+    const registered = await client.repos.add({ path: repo.dir });
+    const project = await createToyProject(client, {});
+    await client.projects.update({ id: project.id, repos: [{ repoId: registered.id }] });
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
+
+    const first = await client.runs.start({ projectId: project.id, issueId: issue.id });
+    const again = await client.runs.start({ projectId: project.id, issueId: issue.id });
+
+    expect(again.id).toBe(first.id);
+    expect(await client.runs.list({ projectId: project.id })).toHaveLength(1);
+  });
+
+  test("si el tracker no deja reclamar la issue, runs.start es BAD_REQUEST y no crea la corrida", async () => {
+    const client = await boot();
+    const registered = await client.repos.add({ path: repo.dir });
+    const project = await createToyProject(client, { repo: registered.id });
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "Ajena" });
+    store.db.$client.exec(`UPDATE local_issues SET assignee = '{"id":"otra","name":"Otra persona"}'`);
+
+    await expect(client.runs.start({ projectId: project.id, issueId: issue.id })).rejects.toSatisfy(
+      (e) => e instanceof ORPCError && e.code === "BAD_REQUEST" && /asignada a Otra persona/.test(e.message),
     );
     expect(await client.runs.list({})).toEqual([]);
   });

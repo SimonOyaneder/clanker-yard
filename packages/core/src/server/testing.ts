@@ -8,7 +8,12 @@ import { createDefs } from "../defs/defs";
 import { createFlows } from "../flows/flows";
 import { createPacks } from "../packs/packs";
 import { createProjects } from "../projects/projects";
+import { createRunStarter } from "../projects/start-run";
+import { createRecipeTester } from "../recipe/recipe-test";
 import type { Store } from "../store/store";
+import { createIssues } from "../tracker/issues";
+import { createLocalTracker } from "../tracker/local";
+import { createRepos } from "../workspaces/repos";
 import type { RouterDeps } from "./router";
 
 const noRuntime: AgentRuntime = {
@@ -18,7 +23,10 @@ const noRuntime: AgentRuntime = {
   resume: () => Promise.reject(new Error("este test no corre agentes")),
 };
 
-export function apiDeps(store: Store, dataDir: string): Pick<RouterDeps, "projects" | "packs" | "flows" | "artifacts"> {
+export function apiDeps(
+  store: Store,
+  dataDir: string,
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "flows" | "artifacts"> {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -28,5 +36,16 @@ export function apiDeps(store: Store, dataDir: string): Pick<RouterDeps, "projec
     artifacts,
     roles: () => undefined,
   });
-  return { projects: createProjects(store, defs), packs: createPacks({ defs }), flows, artifacts };
+  const projects = createProjects(store, defs);
+  const repos = createRepos(store);
+  const local = createLocalTracker(store);
+  return {
+    projects,
+    packs: createPacks({ defs }),
+    repos,
+    recipeTester: createRecipeTester({ store, repos, dataDir }),
+    runs: createRunStarter({ store, defs, projects, repos, issues: createIssues(store, local), flows, trackers: { local } }),
+    flows,
+    artifacts,
+  };
 }

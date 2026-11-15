@@ -9,10 +9,12 @@ import {
   EventFilter,
   IssueId,
   ProjectId,
+  RepoId,
   RunId,
 } from "./domain";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
 import { PrRef, PrState } from "./prs";
+import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
 import { Run, RunDetail, RunFilter, StartRun } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 
@@ -165,8 +167,9 @@ const projects = {
   /** Falla con `NOT_FOUND` si no existe. */
   get: base.input(z.object({ id: ProjectId })).output(ClankerProject),
   /**
-   * Falla con `BAD_REQUEST` si el slug o el par (tracker, trackerRef) ya existen, o si el flujo o el
-   * perfil por defecto no existen.
+   * Falla con `BAD_REQUEST` si el slug o el par (tracker, trackerRef) ya existen, si el flujo o el
+   * perfil por defecto no existen, o si un repo no está registrado (`repos.add`), se repite o comparte
+   * un label con otro repo del proyecto.
    */
   create: base.input(NewProject).output(ClankerProject),
   /** Cambia solo los campos presentes; las mismas validaciones que `create`. */
@@ -182,6 +185,30 @@ const prs = {
   get: base.input(PrRef).output(PrState),
 };
 
+const repos = {
+  /** Por nombre. */
+  list: base.output(z.array(Repo)),
+  /**
+   * Registra el checkout de `path`, que debe ser la raíz de un repo de git: el nombre, la branch por
+   * defecto y el remoto de GitHub salen de él. `BAD_REQUEST` si no es la raíz de un repo o ya está
+   * registrado.
+   */
+  add: base.input(NewRepo).output(Repo),
+  /**
+   * Los repos de git que hay en `folder` (la propia carpeta si es un repo; si no, sus subcarpetas
+   * directas), cada uno con su receta: encontrada, falta o inválida. No registra nada.
+   */
+  detect: base.input(z.object({ folder: z.string().min(1) })).output(z.array(DetectedRepo)),
+  /**
+   * Corre la receta de un repo sobre un worktree desechable: `requires`, `setup.guard`, `setup.worktree`
+   * y `setup.slot`, con el slot 1 (todavía no hay pools de slots). La salida va en vivo por los eventos
+   * `recipe.test_started`, `recipe.test_output` y `recipe.test_finished` (payload con `repoId`) y la
+   * llamada vuelve al terminar. `BAD_REQUEST` si el repo no tiene receta o es inválida, o si ya hay una
+   * prueba en curso de ese repo; `NOT_FOUND` si no está registrado.
+   */
+  testRecipe: base.input(z.object({ repoId: RepoId })).output(RecipeTestResult),
+};
+
 const runs = {
   /** De la más reciente a la más antigua. Sin pasos: están en `get`. */
   list: base.input(RunFilter.default({})).output(z.array(Run)),
@@ -189,12 +216,15 @@ const runs = {
   get: base.input(z.object({ id: RunId })).output(RunDetail),
   /**
    * Lanza el flujo del proyecto (o `flow`) sobre una issue del proyecto y vuelve sin esperar: el
-   * progreso llega por `events.stream` filtrando por el `runId`. Es idempotente: si ya hay una corrida
-   * viva de ese flujo sobre la issue devuelve esa. `BAD_REQUEST` si el proyecto no está activo, no hay
-   * flujo, faltan params o falta el perfil; `NOT_FOUND` si el proyecto o la issue no existen.
+   * progreso llega por `events.stream` filtrando por el `runId`. Reclama la issue en su tracker
+   * (asignada a ti y en progreso) y pasa `repo` y `base` al flujo si los declara: el repo sale de los
+   * labels de la issue (ver `ProjectRepo`) y la base es su branch por defecto; `flowParams` del
+   * proyecto y `params` los pisan. Es idempotente: si ya hay una corrida viva de ese flujo sobre la
+   * issue devuelve esa. `BAD_REQUEST` si el proyecto no está activo, no hay flujo, faltan params o falta
+   * el perfil, o el tracker no puede reclamar la issue; `NOT_FOUND` si el proyecto o la issue no existen.
    */
   start: base.input(StartRun).output(RunDetail),
 };
 
-export const contract = { system, events, connections, artifacts, issues, projects, prs, runs };
+export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs };
 export type Contract = typeof contract;

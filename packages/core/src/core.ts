@@ -11,11 +11,14 @@ import { createFlows } from "./flows/flows";
 import { createPacks } from "./packs/packs";
 import { createProcs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
+import { createRunStarter } from "./projects/start-run";
+import { createRecipeTester } from "./recipe/recipe-test";
 import type { Secrets } from "./secrets/secrets";
 import { startServer, type CoreServer, type StartServerOptions } from "./server/server";
 import { newId } from "./store/conventions";
 import type { Store } from "./store/store";
 import { createIssues } from "./tracker/issues";
+import { createLocalTracker } from "./tracker/local";
 import { createRepos } from "./workspaces/repos";
 import { createWorkspaces, workspaceAcquireAction, workspaceReleaseAction } from "./workspaces/workspaces";
 
@@ -54,7 +57,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const agents = createAgents({ store, defs, runtime });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const procs = createProcs({ store, bootId });
-  const workspaces = createWorkspaces({ store, dataDir, repos: createRepos(store).config, identity: GIT_IDENTITY, procs });
+  const repos = createRepos(store);
+  const workspaces = createWorkspaces({ store, dataDir, repos: repos.config, identity: GIT_IDENTITY, procs });
   const flows = createFlows({
     store,
     defs,
@@ -77,13 +81,19 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   if (orphans + leases + steps > 0) {
     store.tx((tx) => tx.emit({ type: "core.recovered", origin: "core", payload: { steps, leases, orphans } }));
   }
+  const local = createLocalTracker(store);
+  const issues = createIssues(store, local);
+  const projects = createProjects(store, defs);
 
   const server = await startServer({
     store,
     connections: createConnections(store, opts.secrets),
-    issues: createIssues(store),
-    projects: createProjects(store, defs),
+    issues,
+    projects,
     packs: createPacks({ defs }),
+    repos,
+    recipeTester: createRecipeTester({ store, repos, dataDir }),
+    runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local } }),
     flows,
     artifacts,
     bootId,
