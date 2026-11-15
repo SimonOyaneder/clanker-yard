@@ -10,7 +10,7 @@ import type { ActionCtx, ActionDef } from "../flows/catalog";
 import { agentSessions, stepRuns } from "../store/schema";
 import type { Store } from "../store/store";
 import { excerpt } from "../workspaces/exec";
-import type { Workspaces, WorkspaceRef } from "../workspaces/workspaces";
+import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 
 export const RECIPE_PATH = ".clanker/recipe.json";
 
@@ -37,25 +37,32 @@ export interface Recipes {
   read(dir: string): Recipe | undefined;
   /** La acción `recipe.check` para `flows.registerAction`. */
   checkAction: ActionDef<typeof CheckArgs>;
+  /**
+   * Corre el comando `name` de `recipe` (que debe tenerlo en `commands`) dentro de `ws.path`, con el
+   * `env` y el `wrap` de la receta y `{{files}}` = `files`. Un exit distinto de 0 es un resultado. El
+   * extracto queda como artefacto del paso de `ctx` (`role: check:<name>`). Con el runtime `fake`
+   * no corre nada: consume `run.<name>` del guion.
+   */
+  runCommand(
+    ws: WorkspaceRef,
+    recipe: Pick<Recipe, "env" | "wrap" | "commands">,
+    name: string,
+    opts: { files: string[]; slot?: number },
+    ctx: ActionCtx,
+  ): Promise<CommandRun>;
 }
 
 const CheckArgs = z.object({
   /** El output de `workspace.acquire` (`$ws`). */
-  ws: z.object({
-    workspaceId: z.string(),
-    path: z.string(),
-    branch: z.string(),
-    baseSha: z.string(),
-    fencingToken: z.int(),
-  }),
+  ws: WorkspaceOutput,
   /** `changed`: `{{files}}` son los archivos que cambió la issue; `all`: `{{files}}` queda vacío. */
   scope: z.enum(["changed", "all"]),
   /** El slot de entorno del worktree, para `{{slot}}`. Sin él, una receta que lo usa falla. */
   slot: z.int().positive().optional(),
 });
 
-/** Un check que corrió. `extract` son las últimas 60 líneas y `artifact` el hash con el que quedaron guardadas. */
-interface CheckRun {
+/** Un comando que corrió. `extract` son las últimas 60 líneas y `artifact` el hash con el que quedaron guardadas. */
+export interface CommandRun {
   name: string;
   ok: boolean;
   exitCode: number;
@@ -123,14 +130,26 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
     return session.ref;
   }
 
-  /** Corre un check y guarda su extracto como artefacto del paso. */
-  async function runCheck(
-    name: string,
-    command: string,
-    env: Record<string, string>,
+  async function runCommand(
     ws: WorkspaceRef,
+    recipe: Pick<Recipe, "env" | "wrap" | "commands">,
+    name: string,
+    { files, slot }: { files: string[]; slot?: number },
     ctx: ActionCtx,
-  ): Promise<CheckRun> {
+  ): Promise<CommandRun> {
+    const vars: TemplateVars = {
+      slot,
+      worktree: ws.path,
+      branch: ws.branch,
+      files,
+      envKeys: Object.keys(recipe.env),
+    };
+    const env = Object.fromEntries(
+      Object.entries(recipe.env).map(([key, value]) => [key, renderTemplate(value, vars, { shell: false })]),
+    );
+    const wrap = recipe.wrap === undefined ? [] : [renderTemplate(recipe.wrap, vars, { shell: true })];
+    const command = [...wrap, renderTemplate(recipe.commands[name]!, vars, { shell: true })].join(" ");
+
     let exitCode: number;
     let extract: string;
     if (fake) {
@@ -156,36 +175,24 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
     outcomes: ["ok", "fail"],
     effects: "local",
     async run({ ws, scope, slot }, ctx) {
-      const { env: recipeEnv, wrap: recipeWrap, commands, checks: names } = read(ws.path) ?? NO_RECIPE;
+      const recipe = read(ws.path) ?? NO_RECIPE;
       const changed = await changedFiles(ws, ws.baseSha);
-      const vars: TemplateVars = {
-        slot,
-        worktree: ws.path,
-        branch: ws.branch,
-        files: scope === "changed" ? changed : [],
-        envKeys: Object.keys(recipeEnv),
-      };
-      const env = Object.fromEntries(
-        Object.entries(recipeEnv).map(([key, value]) => [key, renderTemplate(value, vars, { shell: false })]),
-      );
-      const wrap = recipeWrap === undefined ? [] : [renderTemplate(recipeWrap, vars, { shell: true })];
+      const files = scope === "changed" ? changed : [];
 
       // Se corre en orden y se corta en el primer rojo: los checks siguientes casi siempre dependen de los
       // anteriores (un typecheck roto llena de ruido el lint y los tests), y así el agente recibe un solo extracto.
-      const checks: Array<CheckRun | { name: string; skipped: true }> = [];
-      for (const name of names) {
-        const template = commands[name]!;
-        if (scope === "changed" && changed.length === 0 && templateVariables(template).includes("files")) {
+      const checks: Array<CommandRun | { name: string; skipped: true }> = [];
+      for (const name of recipe.checks) {
+        if (scope === "changed" && changed.length === 0 && templateVariables(recipe.commands[name]!).includes("files")) {
           checks.push({ name, skipped: true });
           continue;
         }
-        const command = [...wrap, renderTemplate(template, vars, { shell: true })].join(" ");
-        const result = await ctx.once(`check:${name}`, () => runCheck(name, command, env, ws, ctx));
+        const result = await ctx.once(`check:${name}`, () => runCommand(ws, recipe, name, { files, slot }, ctx));
         checks.push(result);
         if (!result.ok) break;
       }
 
-      const failed = checks.find((c): c is CheckRun => "ok" in c && !c.ok);
+      const failed = checks.find((c): c is CommandRun => "ok" in c && !c.ok);
       return {
         outcome: failed ? "fail" : "ok",
         output: {
@@ -197,5 +204,5 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
     },
   };
 
-  return { read, checkAction };
+  return { read, checkAction, runCommand };
 }

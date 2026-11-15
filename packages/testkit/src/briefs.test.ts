@@ -223,11 +223,44 @@ describe("hunks.json", () => {
       "",
     ].join("\n");
 
-    expect(listHunks(diff)).toEqual([
+    expect(listHunks(diff).map(({ id, path, header }) => ({ id, path, header }))).toEqual([
       { id: "h1", path: "x.rb", header: "@@ -10,6 +10,9 @@" },
       { id: "h2", path: "x.rb", header: "@@ -40,2 +43,2 @@" },
       { id: "h3", path: "gone.rb", header: "@@ -1 +0,0 @@" },
+      { id: "h4", path: "img.png", header: "(binario)" },
     ]);
+  });
+
+  test("un cambio que git no parte en hunks es un hunk entero: vacío nuevo, borrado vacío, modo y binario", () => {
+    const diff = [
+      "diff --git a/empty.txt b/empty.txt",
+      "new file mode 100644",
+      "index 0000000..e69de29",
+      "diff --git a/old.txt b/old.txt",
+      "deleted file mode 100644",
+      "index e69de29..0000000",
+      "diff --git a/run.sh b/run.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "",
+    ].join("\n");
+
+    expect(listHunks(diff).map(({ id, path, header }) => `${id} ${path} ${header}`)).toEqual([
+      "h1 empty.txt (archivo vacío nuevo)",
+      "h2 old.txt (archivo vacío borrado)",
+      "h3 run.sh (cambio de modo)",
+    ]);
+  });
+
+  test("el encabezado del archivo y el cuerpo de cada hunk dan el patch de cualquier subconjunto", () => {
+    const diff = ["diff --git a/x.rb b/x.rb", "index 1..2 100644", "--- a/x.rb", "+++ b/x.rb", "@@ -1 +1 @@", "-a", "+b", "@@ -9 +9 @@", "-c", "+d", ""].join("\n");
+
+    const [first, second] = listHunks(diff);
+
+    expect(first!.fileHeader).toBe("diff --git a/x.rb b/x.rb\nindex 1..2 100644\n--- a/x.rb\n+++ b/x.rb\n");
+    expect(first!.body).toBe("@@ -1 +1 @@\n-a\n+b\n");
+    expect(second!.body).toBe("@@ -9 +9 @@\n-c\n+d\n");
+    expect(first!.fileHeader + first!.body + second!.body).toBe(diff);
   });
 });
 

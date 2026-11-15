@@ -1,21 +1,10 @@
-import { execFile } from "node:child_process";
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
 import type { ArtifactKind, Brief, IssueDetail, IssueRef, Report } from "@clanker/api";
 import type { Artifacts } from "../artifacts/artifacts";
+import { git } from "../git/git";
+import { diffBetween, listHunks, snapshotTree } from "../git/tree";
 import type { WorkspaceLease, Workspaces } from "../workspaces/workspaces";
-
-const execFileAsync = promisify(execFile);
 
 /** Carpeta de los artefactos dentro del worktree; el brief los cita con rutas relativas a él. */
 export const RUN_DIR = ".clanker-run";
@@ -58,13 +47,6 @@ export interface PreparedBrief {
   snapshot: string;
 }
 
-/** Un hunk del diff: `h12 app/models/x.rb @@ -10,6 +10,9 @@`. */
-export interface Hunk {
-  id: string;
-  path: string;
-  header: string;
-}
-
 export interface Briefs {
   /**
    * Deja en `<worktree>/.clanker-run/` lo que el agente lee si lo necesita (`issue.md`, `diff.patch`,
@@ -103,7 +85,9 @@ export function createBriefs({
       if (since !== undefined) {
         add("diffRound", "diff-round.patch", "snapshot", await diffBetween(cwd, since, snapshot));
       }
-      add("hunks", "hunks.json", "snapshot", `${JSON.stringify(listHunks(diff), null, 2)}\n`, "application/json");
+      // El agente elige hunks por id: el texto de cada uno ya está en diff.patch.
+      const hunks = listHunks(diff).map(({ id, path, header }) => ({ id, path, header }));
+      add("hunks", "hunks.json", "snapshot", `${JSON.stringify(hunks, null, 2)}\n`, "application/json");
       for (const { round, role, report } of reports) {
         const name = `r${round}-${role}`;
         add(`report-${name}`, `reports/${name}.json`, "report", `${JSON.stringify(report, null, 2)}\n`, "application/json");
@@ -191,42 +175,6 @@ function issueMarkdown(issue: IssueDetail): string {
   ].join("\n\n") + "\n";
 }
 
-/**
- * Un id por hunk, en el orden del patch: `h1`, `h2`... El mismo diff da siempre los mismos ids.
- * Los archivos binarios no tienen hunks.
- */
-export function listHunks(diff: string): Hunk[] {
-  const hunks: Hunk[] = [];
-  let path: string | undefined;
-  let oldPath: string | undefined;
-  // Las líneas `---` y `+++` solo son encabezado antes del primer `@@`: dentro de un hunk, `--- x` es la línea `-- x` borrada.
-  let inHunk = false;
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("diff --git ")) {
-      path = oldPath = undefined;
-      inHunk = false;
-    } else if (!inHunk && line.startsWith("--- ")) {
-      oldPath = stripPrefix(line.slice(4), "a/");
-    } else if (!inHunk && line.startsWith("+++ ")) {
-      path = stripPrefix(line.slice(4), "b/") ?? oldPath;
-    } else if (line.startsWith("@@") && path !== undefined) {
-      inHunk = true;
-      const header = /^(@@ -\S+ \+\S+ @@)/.exec(line);
-      if (header) hunks.push({ id: `h${hunks.length + 1}`, path, header: header[1]! });
-    }
-  }
-  return hunks;
-}
-
-/**
- * `undefined` si el nombre no lleva el prefijo: es el "no existe" de un archivo creado o borrado. Git
- * agrega un tab tras los nombres con espacios.
- */
-function stripPrefix(name: string, prefix: string): string | undefined {
-  const clean = name.replace(/\t.*$/, "");
-  return clean.startsWith(prefix) ? clean.slice(prefix.length) : undefined;
-}
-
 async function excludeRunDir(cwd: string): Promise<void> {
   // En un worktree `info/exclude` es el del repo común: vale para todos sus worktrees.
   const exclude = resolve(cwd, (await git(cwd, ["rev-parse", "--git-path", "info/exclude"])).trim());
@@ -237,60 +185,7 @@ async function excludeRunDir(cwd: string): Promise<void> {
   appendFileSync(exclude, `${current === "" || current.endsWith("\n") ? "" : "\n"}${entry}\n`);
 }
 
-/**
- * El árbol del worktree tal como está (commits, cambios y archivos nuevos), sin tocar su index real:
- * se parte de un index temporal con `HEAD` y se hace `add --all`. No se copia el index real: sin los
- * datos de stat git rehashea todo, pero un cambio del mismo tamaño dentro del mismo segundo del
- * checkout (el mtime de git en macOS es de un segundo) no se le puede escapar.
- */
-async function snapshotTree(cwd: string): Promise<string> {
-  const tmp = mkdtempSync(join(tmpdir(), "clanker-index-"));
-  try {
-    const env = { GIT_INDEX_FILE: join(tmp, "index") };
-    await git(cwd, ["read-tree", "HEAD"], env);
-    await git(cwd, ["add", "--all"], env);
-    return (await git(cwd, ["write-tree"], env)).trim();
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-}
-
-/** Con prefijos `a/` `b/` fijos y sin renames: el patch no depende de la config de git de quien lo corra. */
-async function diffBetween(cwd: string, from: string, to: string): Promise<string> {
-  return git(cwd, [
-    "-c",
-    "core.quotePath=false",
-    "diff",
-    "--no-color",
-    "--no-ext-diff",
-    "--no-renames",
-    "--binary",
-    "--src-prefix=a/",
-    "--dst-prefix=b/",
-    from,
-    to,
-  ]);
-}
-
 function writeFile(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content);
-}
-
-/** Sin `trimEnd`, a diferencia de `Workspaces.git`: a un patch sin su salto final `git apply` lo rechaza. */
-async function git(cwd: string, args: string[], env: Record<string, string> = {}): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("git", args, {
-      cwd,
-      env: { ...process.env, ...env },
-      encoding: "utf8",
-      maxBuffer: 256 * 1024 * 1024,
-    });
-    return stdout;
-  } catch (error) {
-    const { stderr } = error as { stderr?: string };
-    throw new Error(`git ${args.join(" ")} falló en ${cwd}: ${stderr?.trim() ?? String(error)}`, {
-      cause: error,
-    });
-  }
 }

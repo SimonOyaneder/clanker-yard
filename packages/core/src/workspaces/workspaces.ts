@@ -1,17 +1,14 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import type { RunId } from "@clanker/api";
 import { and, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
+import { git, tryGit } from "../git/git";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { execLogged, type ExecResult } from "./exec";
 import { newId } from "../store/conventions";
 import { workspaces } from "../store/schema";
 import type { Store } from "../store/store";
-
-const execFileAsync = promisify(execFile);
 
 const REMOTE = "origin";
 const WORKTREE_LOCK_REASON = "clanker-yard";
@@ -575,35 +572,19 @@ function normalizeBase(base: string): string {
   return base.replace(/^refs\/(heads|remotes)\//, "").replace(new RegExp(`^${REMOTE}/`), "");
 }
 
-async function git(cwd: string, args: string[], env: Record<string, string> = {}): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("git", args, {
-      cwd,
-      env: { ...process.env, ...env },
-      encoding: "utf8",
-    });
-    return stdout.trimEnd();
-  } catch (error) {
-    const { stderr } = error as { stderr?: string };
-    throw new Error(`git ${args.join(" ")} falló en ${cwd}: ${stderr?.trim() ?? String(error)}`, {
-      cause: error,
-    });
-  }
-}
-
-/** `undefined` si git sale con error: para preguntas de existencia, donde el error es la respuesta. */
-async function tryGit(cwd: string, args: string[]): Promise<string | undefined> {
-  try {
-    return await git(cwd, args);
-  } catch {
-    return undefined;
-  }
-}
-
 export const WorkspaceAcquireArgs = z.object({
   repo: z.string(),
   branch: z.string(),
   base: z.string(),
+});
+
+/** El output de `workspace.acquire` (`$ws`), tal como lo reciben las acciones que operan sobre el worktree. */
+export const WorkspaceOutput = z.object({
+  workspaceId: z.string(),
+  path: z.string(),
+  branch: z.string(),
+  baseSha: z.string(),
+  fencingToken: z.int(),
 });
 
 /**

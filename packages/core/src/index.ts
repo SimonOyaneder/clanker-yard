@@ -24,8 +24,10 @@ export type {
   ResumeRequest,
   RunRequest,
 } from "./agents/agents";
-export { acceptanceCriteria, createBriefs, listHunks, RUN_DIR } from "./agents/brief";
-export type { BriefRequest, Briefs, Hunk, PreparedBrief, PreviousReport } from "./agents/brief";
+export { acceptanceCriteria, createBriefs, RUN_DIR } from "./agents/brief";
+export type { BriefRequest, Briefs, PreparedBrief, PreviousReport } from "./agents/brief";
+export { listHunks } from "./git/tree";
+export type { Hunk } from "./git/tree";
 export { createClaudeRuntime } from "./agents/claude/claude-runtime";
 export type { ClaudeRuntimeOptions, QueryFn } from "./agents/claude/claude-runtime";
 export { apiKeyCredentials, subscriptionCredentials } from "./agents/claude/credentials";
@@ -131,4 +133,6 @@ export { IssueNotFoundError, matchesIssueFilter } from "./tracker/tracker";
 export type { Tracker } from "./tracker/tracker";
 
 export { createRecipes, RECIPE_PATH } from "./recipe/recipe";
-export type { Recipes, RecipesOptions, ScriptedRecipe } from "./recipe/recipe";
+export type { CommandRun, Recipes, RecipesOptions, ScriptedRecipe } from "./recipe/recipe";
+
+export { commitsApplyAction } from "./commits/apply";
