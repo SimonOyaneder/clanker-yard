@@ -8,6 +8,7 @@ import { CommandPalette } from "@/components/command-palette"
 import { Shortcut } from "@/components/common"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { ProjectView, issuesById } from "@/components/project/project-view"
+import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
 import { RunView, type RunTab } from "@/components/project/run-view"
 import { PrsView } from "@/components/prs/prs-view"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
@@ -80,6 +81,11 @@ function Shell() {
   const [runId, setRunId] = useState<RunId | null>(null)
   const [module, setModuleState] = useState<Module>(() => (readPref<string>("module", "projects") === "prs" ? "prs" : "projects"))
   const [runTab, setRunTabState] = useState<RunTab>(() => (readPref<string>("runTab", "graph") === "timeline" ? "timeline" : "graph"))
+  // El panel del paso: qué nodo y qué pestaña. El nodo es de una corrida, así que al abrir otra se cierra.
+  const [stepSel, setStepSel] = useState<{ runId: RunId; node: string } | null>(null)
+  const [stepTab, setStepTab] = useState<StepTab>("transcript")
+  const stepNode = runId && stepSel?.runId === runId ? stepSel.node : null
+  const setStepNode = useCallback((node: string | null) => setStepSel(node && runId ? { runId, node } : null), [runId])
   const [sidebarOpen, setSidebarOpenState] = useState(() => readPref("sidebar", true))
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -267,29 +273,35 @@ function Shell() {
     }
   }, [refresh, go, goBack, goForward, setSidebarOpen, sidebarOpen, selectProject, host])
 
-  // Esc vuelve de una corrida al proyecto, salvo que haya un diálogo o menú abierto.
+  // Esc sube un nivel: del panel del paso a la corrida y de la corrida al proyecto, salvo que haya un diálogo o menú abierto.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || !runId || module !== "projects") return
       if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
-      go({ runId: null })
+      if (stepNode) setStepNode(null)
+      else go({ runId: null })
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [runId, module, go])
+  }, [runId, module, go, stepNode, setStepNode])
 
-  // G y L cambian entre el grafo y la línea de tiempo de la corrida abierta, como las teclas de Linear.
+  // G y L cambian entre el grafo y la línea de tiempo de la corrida abierta, como las teclas de Linear;
+  // con el panel de un paso abierto, T, B, R, A e I eligen su pestaña.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!runId || module !== "projects" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
-      const tab = e.key === "g" ? "graph" : e.key === "l" ? "timeline" : null
-      if (!tab || (e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return
+      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return
       if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
-      setRunTab(tab)
+      const key = e.key.toLowerCase()
+      const tab = key === "g" ? "graph" : key === "l" ? "timeline" : null
+      if (tab) return setRunTab(tab)
+      const step = stepNode ? STEP_TAB_KEYS[key] : undefined
+      // La pestaña principal depende del nodo (transcript o comando): `transcript` cae a la primera de las suyas.
+      if (step) setStepTab(step === "main" ? "transcript" : step)
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [runId, module, setRunTab])
+  }, [runId, module, setRunTab, stepNode])
 
   const detail = projectData.data
   const openRun = runId && detail ? detail.runs.find((r) => r.id === runId) : undefined
@@ -368,7 +380,7 @@ function Shell() {
                     <Loading />
                   )
                 ) : runId ? (
-                  <RunPane key={runId} runId={runId} issue={openRunIssue} tab={runTab} onTab={setRunTab} onBack={() => go({ runId: null })} />
+                  <RunPane key={runId} runId={runId} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />
                 ) : (
                   <ProjectView project={project} runs={detail.runs} issues={detail.issues} />
                 )}
@@ -390,6 +402,7 @@ function Shell() {
         prs={prs.data?.prs ?? []}
         onGoPrs={() => go({ module: "prs" })}
         onRunTab={runId && module === "projects" ? setRunTab : null}
+        onStep={stepNode ? { onTab: setStepTab, onClose: () => setStepNode(null) } : null}
       />
       <NewProjectDialog
         open={newProjectOpen}
@@ -406,10 +419,30 @@ function Shell() {
   )
 }
 
-function RunPane({ runId, issue, tab, onTab, onBack }: { runId: RunId; issue: CachedIssue | undefined; tab: RunTab; onTab: (tab: RunTab) => void; onBack: () => void }) {
+function RunPane({
+  runId,
+  issue,
+  tab,
+  onTab,
+  node,
+  onNode,
+  stepTab,
+  onStepTab,
+  onBack,
+}: {
+  runId: RunId
+  issue: CachedIssue | undefined
+  tab: RunTab
+  onTab: (tab: RunTab) => void
+  node: string | null
+  onNode: (nodeId: string | null) => void
+  stepTab: StepTab
+  onStepTab: (tab: StepTab) => void
+  onBack: () => void
+}) {
   const appData = useAppData()
   const run = useLiveQuery(`run:${runId}`, () => appData.run(runId))
-  if (run.data) return <RunView run={run.data} issue={issue} tab={tab} onTabChange={onTab} />
+  if (run.data) return <RunView run={run.data} issue={issue} tab={tab} onTabChange={onTab} node={node} onNodeChange={onNode} stepTab={stepTab} onStepTab={onStepTab} />
   if (run.error) {
     return (
       <Problem

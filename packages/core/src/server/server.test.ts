@@ -3,17 +3,19 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { API_MAJOR, type Event, contract, createClient } from "@clanker/api";
+import { API_MAJOR, type Event, Role, contract, createClient } from "@clanker/api";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
 import { createRouterClient, getEventMeta } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
+import { createDefs } from "../defs/defs";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { openNote } from "../decisions/decisions";
 import { createArtifacts, INLINE_MAX_BYTES } from "../artifacts/artifacts";
 import { readSchemaVersion } from "../store/migrate";
+import { agentSessions } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { startFakeLinear } from "../linear/fake-linear";
@@ -301,6 +303,49 @@ describe("artifacts", () => {
     await expect(client.artifacts.get({ hash: "../../etc/passwd" })).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
+  });
+});
+
+describe("runs.transcript", () => {
+  const sessionId = "ses_01J0000000000000000000000A";
+
+  function seedSession(): void {
+    const defs = createDefs(store);
+    defs.register("role", Role);
+    const role = defs.save({ kind: "role", slug: "dev", scope: "user", source: "ui", body: { prompt: "Eres dev.", context: [], modes: { plan: { instructions: "x", report: { type: "object" }, outcomes: ["ok"], session: "new" } } } });
+    store.tx(({ db }) => {
+      db.insert(agentSessions)
+        .values({ id: sessionId, roleDefId: role.id, roleVersion: role.version, runtime: "claude-sdk", sessionRef: "claude-1", cwd: "/w", model: "sonnet", status: "success", startedAt: 1 })
+        .run();
+    });
+  }
+
+  test("pagina el transcript de la sesión por su cursor, y una sesión sin archivo da una página vacía", async () => {
+    dataDir = mkdtempSync(join(tmpdir(), "clanker-core-"));
+    seedSession();
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+    expect(await client.runs.transcript({ sessionId })).toEqual({ entries: [], next: 0, hasMore: false });
+
+    mkdirSync(join(dataDir, "transcripts"));
+    const text = (t: string) => JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: t }] } });
+    writeFileSync(join(dataDir, "transcripts", "claude-1.jsonl"), `${text("uno")}\n${text("dos")}\n${text("tres")}\n`);
+
+    const first = await client.runs.transcript({ sessionId, limit: 2 });
+    expect(first.entries).toMatchObject([{ text: "uno" }, { text: "dos" }]);
+    expect(first.hasMore).toBe(true);
+    const rest = await client.runs.transcript({ sessionId, cursor: first.next, limit: 2 });
+    expect(rest.entries).toMatchObject([{ text: "tres" }]);
+    expect(rest.hasMore).toBe(false);
+  });
+
+  test("una sesión o un paso que no existen son NOT_FOUND", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+    await expect(client.runs.transcript({ sessionId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(client.runs.step({ id: "stp_01J0000000000000000000000A" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 

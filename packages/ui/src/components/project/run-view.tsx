@@ -1,27 +1,50 @@
 import type { CachedIssue, RunDetail, Step } from "@clanker/api"
 import { Copy, GitBranch, GitMerge, ListTree, Network } from "lucide-react"
+import { useMemo } from "react"
 import { Hint, Pill, SectionTitle, StatBar } from "@/components/common"
 import { RunGraph } from "@/components/project/run-graph"
 import { RunStatusPill, isLive, stepLook } from "@/components/project/status"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { StepPanel, type StepTab, useCopySessionId } from "@/components/project/step-panel"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useNow } from "@/hooks/use-now"
 import { copy } from "@/lib/clipboard"
 import { absolute, compactCount, costUsd, elapsed, issueKey, tone } from "@/lib/format"
-import { currentRound, shapeOf } from "@/lib/run-graph"
+import { readPref, writePref } from "@/lib/prefs"
+import { currentRound, type GraphNodeKind, shapeOf } from "@/lib/run-graph"
 import { cn } from "@/lib/utils"
 
 const OUTCOME = { done: "terminó el flujo", blocked: "terminó sin completar la issue", failed: "un paso falló sin salida" } as const
 
 export type RunTab = "graph" | "timeline"
 
+interface RunViewProps {
+  run: RunDetail
+  issue: CachedIssue | undefined
+  tab: RunTab
+  onTabChange: (tab: RunTab) => void
+  /** El nodo cuyo panel está abierto; `null` si ninguno. */
+  node: string | null
+  onNodeChange: (nodeId: string | null) => void
+  stepTab: StepTab
+  onStepTab: (tab: StepTab) => void
+}
+
+// Ancho que ocupa el panel del paso, en % de la vista; el último que dejó el usuario.
+const PANEL_SIZE_PREF = "stepPanelSize"
+
 // Una corrida de una issue: el grafo del flujo que corre, con dónde va y cuánto costó cada paso, y la
-// línea de tiempo de sus pasos en el orden en que se crearon.
-export function RunView({ run, issue, tab, onTabChange }: { run: RunDetail; issue: CachedIssue | undefined; tab: RunTab; onTabChange: (tab: RunTab) => void }) {
+// línea de tiempo de sus pasos en el orden en que se crearon. A la derecha, redimensionable, el panel del
+// paso elegido: qué recibió y qué dijo el agente, o qué comando corrió la acción.
+export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, stepTab, onStepTab }: RunViewProps) {
   const ticking = run.status === "running" || run.status === "waiting"
   const now = useNow(ticking)
   const failure = run.status === "failed" ? run.steps.findLast((s) => s.status === "failed" && s.error) : undefined
-  const round = currentRound(shapeOf(run.flowDef, run.steps), run)
+  const shape = useMemo(() => shapeOf(run.flowDef, run.steps), [run.flowDef, run.steps])
+  const copySessionId = useCopySessionId()
+  const open = shape.nodes.find((n) => n.id === node && n.kind !== "end")
+  const round = currentRound(shape, run)
   const inputTokens = run.usage.input + run.usage.cacheRead + run.usage.cacheWrite
   const cacheHit = inputTokens > 0 ? Math.round((run.usage.cacheRead / inputTokens) * 100) : null
 
@@ -84,48 +107,77 @@ export function RunView({ run, issue, tab, onTabChange }: { run: RunDetail; issu
         ]}
       />
 
-      <Tabs value={tab} onValueChange={(value) => onTabChange(value as RunTab)} className="gap-3">
-        <TabsList>
-          <Hint label="El flujo de la corrida como grafo" keys="G" side="bottom">
-            <TabsTrigger value="graph">
-              <Network /> Grafo
-            </TabsTrigger>
-          </Hint>
-          <Hint label="Los pasos en el orden en que corrieron" keys="L" side="bottom">
-            <TabsTrigger value="timeline">
-              <ListTree /> Línea de tiempo
-            </TabsTrigger>
-          </Hint>
-        </TabsList>
-        <TabsContent value="graph">
-          <RunGraph run={run} now={now} />
-        </TabsContent>
-        <TabsContent value="timeline">
-          <section className="flex flex-col gap-2">
-            <SectionTitle count={run.steps.length}>Línea de tiempo</SectionTitle>
-            {run.steps.length === 0 ? (
-              <p className="text-muted-foreground">{isLive(run.status) ? "Todavía no parte ningún paso." : "La corrida terminó sin ejecutar pasos."}</p>
-            ) : (
-              <ol className="overflow-hidden rounded-lg border bg-card">
-                {run.steps.map((step) => (
-                  <StepRow key={step.id} step={step} now={now} />
-                ))}
-              </ol>
-            )}
-          </section>
-        </TabsContent>
-      </Tabs>
+      <div className="h-[clamp(520px,78vh,900px)]">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          onLayoutChanged={(layout) => {
+            if (layout.step !== undefined) writePref(PANEL_SIZE_PREF, Math.round(layout.step))
+          }}
+        >
+          <ResizablePanel id="main" minSize="30%" className={cn(open && "pr-3")}>
+            <Tabs value={tab} onValueChange={(value) => onTabChange(value as RunTab)} className="h-full min-h-0 gap-3">
+              <TabsList>
+                <Hint label="El flujo de la corrida como grafo" keys="G" side="bottom">
+                  <TabsTrigger value="graph">
+                    <Network /> Grafo
+                  </TabsTrigger>
+                </Hint>
+                <Hint label="Los pasos en el orden en que corrieron" keys="L" side="bottom">
+                  <TabsTrigger value="timeline">
+                    <ListTree /> Línea de tiempo
+                  </TabsTrigger>
+                </Hint>
+              </TabsList>
+              <TabsContent value="graph" className="min-h-0">
+                <RunGraph run={run} now={now} shape={shape} selected={open?.id ?? null} onSelect={onNodeChange} onCopySessionId={copySessionId} />
+              </TabsContent>
+              <TabsContent value="timeline" className="min-h-0 overflow-y-auto">
+                <section className="flex flex-col gap-2">
+                  <SectionTitle count={run.steps.length}>Línea de tiempo</SectionTitle>
+                  {run.steps.length === 0 ? (
+                    <p className="text-muted-foreground">{isLive(run.status) ? "Todavía no parte ningún paso." : "La corrida terminó sin ejecutar pasos."}</p>
+                  ) : (
+                    <ol className="overflow-hidden rounded-lg border bg-card">
+                      {run.steps.map((step) => (
+                        <StepRow key={step.id} step={step} now={now} selected={step.nodeId === open?.id} kind={shape.nodes.find((n) => n.id === step.nodeId)?.kind} onOpen={() => onNodeChange(step.nodeId)} onCopySessionId={() => copySessionId(step.id)} />
+                      ))}
+                    </ol>
+                  )}
+                </section>
+              </TabsContent>
+            </Tabs>
+          </ResizablePanel>
+          {open ? (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel id="step" defaultSize={`${readPref(PANEL_SIZE_PREF, 40)}%`} minSize="28%" maxSize="70%" className="pl-3">
+                <StepPanel key={open.id} run={run} node={open} tab={stepTab} onTab={onStepTab} onClose={() => onNodeChange(null)} />
+              </ResizablePanel>
+            </>
+          ) : null}
+        </ResizablePanelGroup>
+      </div>
     </div>
   )
 }
 
-function StepRow({ step, now }: { step: Step; now: number }) {
+function StepRow({ step, now, selected, kind, onOpen, onCopySessionId }: { step: Step; now: number; selected: boolean; kind: GraphNodeKind | undefined; onOpen: () => void; onCopySessionId: () => void }) {
   const look = stepLook(step.status)
   return (
     <li className="border-b last:border-b-0">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="flex flex-col gap-1 px-3 py-2">
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label={`Abrir el panel de ${step.nodeId}`}
+            aria-pressed={selected}
+            onClick={onOpen}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onOpen()
+            }}
+            className={cn("flex cursor-pointer flex-col gap-1 px-3 py-2 outline-none hover:bg-muted/50 focus-visible:bg-muted/50", selected && "bg-muted/60")}
+          >
             <div className="flex min-h-5 items-center gap-3">
               <look.Icon aria-label={look.label} className={cn("size-3.5 flex-none", look.iconClass, look.pulse && "cc-blink")} />
               <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">{step.nodeId}</span>
@@ -163,6 +215,11 @@ function StepRow({ step, now }: { step: Step; now: number }) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-52">
+          <ContextMenuItem onSelect={onOpen}>
+            {kind === "agent" ? "Ver transcript" : "Ver el paso"}
+            <ContextMenuShortcut>⏎</ContextMenuShortcut>
+          </ContextMenuItem>
+          {kind === "agent" ? <ContextMenuItem onSelect={onCopySessionId}>Copiar sessionId</ContextMenuItem> : null}
           <ContextMenuItem onSelect={() => copy(step.id, "el ID del paso")}>
             <Copy /> Copiar ID del paso
           </ContextMenuItem>

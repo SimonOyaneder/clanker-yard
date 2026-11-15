@@ -19,6 +19,14 @@ export function compactCount(n: number): string {
   return short(n / 1_000_000, "M")
 }
 
+// Tamaño de un archivo: "820 B", "48,2 KB", "6,2 MB".
+export function fileSize(bytes: number): string {
+  const short = (value: number, unit: string) => `${value.toFixed(value >= 100 ? 0 : 1).replace(".", ",").replace(/,0$/, "")} ${unit}`
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return short(bytes / 1024, "KB")
+  return short(bytes / (1024 * 1024), "MB")
+}
+
 export function ago(when: When | null | undefined, now = Date.now()): string {
   if (when === null || when === undefined) return ""
   const s = Math.max(0, Math.round((now - toMs(when)) / 1000))

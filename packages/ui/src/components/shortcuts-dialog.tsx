@@ -19,7 +19,7 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
       ["Ir al proyecto 1…9 de la barra", "⌘1"],
       ["Atrás (también ⌘[ y el botón de pulgar trasero)", "⌘←"],
       ["Adelante (también ⌘] y el botón de pulgar delantero)", "⌘→"],
-      ["Volver de la corrida al proyecto (sin diálogos abiertos)", "⎋"],
+      ["Cerrar el panel del paso, o volver de la corrida al proyecto (sin diálogos abiertos)", "⎋"],
     ],
   },
   {
@@ -27,6 +27,17 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
     items: [
       ["Ver el grafo del flujo", "G"],
       ["Ver la línea de tiempo", "L"],
+      ["Abrir el panel del paso enfocado en el grafo", "⏎"],
+    ],
+  },
+  {
+    title: "Panel del paso",
+    items: [
+      ["Transcript (o comando en una acción)", "T"],
+      ["Brief que recibió", "B"],
+      ["Reporte", "R"],
+      ["Artefactos", "A"],
+      ["Intentos", "I"],
     ],
   },
   {

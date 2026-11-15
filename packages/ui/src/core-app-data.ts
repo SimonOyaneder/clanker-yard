@@ -2,10 +2,10 @@ import type { Client, EventType } from "@clanker/api"
 import type { AppData } from "@/app-data"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
-export type CoreClient = Pick<Client, "projects" | "issues" | "runs" | "events">
+export type CoreClient = Pick<Client, "projects" | "issues" | "runs" | "artifacts" | "events">
 
-// Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos). Los eventos de agente
-// (`agent.activity`) son el grueso de la tabla y la UI todavía no los muestra.
+// Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos, y las sesiones de agente
+// que el panel del paso y su transcript siguen en vivo).
 const LIVE_EVENTS = [
   "project.created",
   "project.updated",
@@ -27,7 +27,10 @@ const LIVE_EVENTS = [
   "step.waiting",
   "step.finished",
   "step.retrying",
+  "agent.started",
+  "agent.activity",
   "agent.usage",
+  "agent.ended",
 ] as const satisfies readonly EventType[]
 
 /** El `AppData` real: la API del core por el cliente oRPC. */
@@ -38,6 +41,9 @@ export function createCoreAppData(client: CoreClient): AppData {
     issues: (projectId) => client.issues.list({ projectId }),
     runs: (filter) => client.runs.list(filter),
     run: (id) => client.runs.get({ id }),
+    step: (id) => client.runs.step({ id }),
+    transcript: (sessionId, cursor) => client.runs.transcript({ sessionId, cursor }),
+    artifact: async (hash) => (await client.artifacts.get({ hash })).content.text(),
     startRun: (input) => client.runs.start(input),
     events: (after, signal) => client.events.stream({ after, filter: { types: [...LIVE_EVENTS] } }, { signal }),
     // El core todavía no sirve PRs (el caché de PRs con sus eventos es de una fase posterior).

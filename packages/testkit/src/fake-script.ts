@@ -11,6 +11,8 @@ const ScriptEvent = z.union([
     at: z.number().nonnegative(),
     tool: z.string(),
     input: z.record(z.string(), z.unknown()).optional(),
+    /** Lo que la herramienta devolvió: queda en el transcript (`transcripts` del runtime), no en los eventos. */
+    output: z.string().optional(),
   }),
   z.strictObject({
     at: z.number().nonnegative(),

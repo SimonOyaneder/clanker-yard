@@ -2,6 +2,7 @@
 match: { mode: saludar }
 events:
   - { at: 0, text: "Leo la issue" }
+  - { at: 1000, tool: Read, input: { file_path: "issue.md" }, output: "Saluda al mundo\n\nCriterios de aceptación:\n- dice hola" }
   - { at: 2500, usage: { model: haiku, in: 120, out: 30, costUsd: 0.004 } }
   - { at: 5000, text: "Saludo y termino" }
   - { at: 7000, usage: { model: haiku, in: 140, out: 40, costUsd: 0.0085 } }

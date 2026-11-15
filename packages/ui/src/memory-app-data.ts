@@ -2,6 +2,7 @@ import { type CachedIssue, type ClankerProject, type ProjectId, Run, type RunDet
 import type { AppData } from "@/app-data"
 import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildPrs } from "@/seed-prs"
+import { seedStep, transcriptPage, type StepSeed } from "@/seed-steps"
 
 // Datos de ejemplo en memoria para desarrollar la UI sin core. Nada llega por `events`: lo que se ve es
 // lo del arranque más lo que cambia `createProject` y `startRun`.
@@ -169,6 +170,20 @@ export function createMemoryAppData(now = Date.now()): AppData {
       usage: { input: 120_000, output: 90_000, cacheRead: 1_100_000, cacheWrite: 90_000 },
     }),
   ]
+  // El detalle de cada paso se arma al pedirlo: `seedStep` es determinista, así que repetirlo da lo mismo.
+  const seeds = new Map<string, StepSeed>()
+  const seedOf = (stepId: string): StepSeed => {
+    const cached = seeds.get(stepId)
+    if (cached) return cached
+    for (const r of runs) {
+      const found = r.steps.find((st) => st.id === stepId)
+      if (!found) continue
+      const seed = seedStep(found, Number(stepId.slice(-4)), r.flowDef.nodes[found.nodeId], found.startedAt ?? now)
+      seeds.set(stepId, seed)
+      return seed
+    }
+    throw new Error(`No existe el paso ${stepId}`)
+  }
   const projectOf = (projectId: ProjectId) => projects.find((p) => p.id === projectId)
   const detailOf = (runId: string) => {
     const found = runs.find((r) => r.id === runId)
@@ -207,6 +222,25 @@ export function createMemoryAppData(now = Date.now()): AppData {
         // `Run` descarta los pasos, que solo trae `run`.
         .map((r) => Run.parse(r)),
     run: async (runId) => detailOf(runId),
+    step: async (stepId) => seedOf(stepId).detail,
+    transcript: async (sessionId, cursor) => {
+      for (const r of runs) {
+        for (const st of r.steps) {
+          const entries = seedOf(st.id).transcripts.get(sessionId)
+          if (entries) return transcriptPage(entries, cursor)
+        }
+      }
+      throw new Error(`No existe la sesión ${sessionId}`)
+    },
+    artifact: async (hash) => {
+      for (const r of runs) {
+        for (const st of r.steps) {
+          const text = seedOf(st.id).artifacts.get(hash)
+          if (text !== undefined) return text
+        }
+      }
+      throw new Error(`No existe el artefacto ${hash}`)
+    },
     startRun: async ({ projectId, issueId }) => {
       const project = projectOf(projectId)
       if (!project) throw new Error(`No existe el proyecto ${projectId}`)

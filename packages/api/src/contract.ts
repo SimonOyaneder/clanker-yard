@@ -12,13 +12,14 @@ import {
   ProjectId,
   RepoId,
   RunId,
+  StepRunId,
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
 import { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectSummary, RoleMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
 import { PrRef, PrState } from "./prs";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
-import { Run, RunDetail, RunFilter, StartRun } from "./runs";
+import { Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 
 /**
@@ -235,6 +236,19 @@ const runs = {
   list: base.input(RunFilter.default({})).output(z.array(Run)),
   /** Con sus pasos, sus outcomes y el costo. `NOT_FOUND` si no existe. */
   get: base.input(z.object({ id: RunId })).output(RunDetail),
+  /**
+   * Lo del panel de un paso que `get` no trae: sus sesiones de agente con el reporte validado, sus
+   * artefactos (el brief que recibió y lo que dejó; contenido con `artifacts.get`) y, en una acción,
+   * los comandos que corrió con su salida y su código de salida. `NOT_FOUND` si no existe el paso.
+   */
+  step: base.input(z.object({ id: StepRunId })).output(StepDetail),
+  /**
+   * El transcript completo de una sesión de agente, normalizado y paginado por `cursor` (un offset
+   * en el archivo, no un número de página: sirve para seguir una sesión que todavía escribe). Una sesión
+   * sin transcript (el runtime no lo guarda, o aún no escribió) devuelve una página vacía.
+   * `NOT_FOUND` si no existe la sesión.
+   */
+  transcript: base.input(TranscriptQuery).output(TranscriptPage),
   /**
    * Lanza el flujo del proyecto (o `flow`) sobre una issue del proyecto y vuelve sin esperar: el
    * progreso llega por `events.stream` filtrando por el `runId`. Reclama la issue en su tracker

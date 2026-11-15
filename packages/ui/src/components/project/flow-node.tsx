@@ -2,7 +2,7 @@ import { Handle, type NodeProps, Position } from "@xyflow/react"
 import { Bot, CircleCheck, Flag, GitFork, Hand, Hourglass, Merge, Terminal, Workflow, type LucideIcon } from "lucide-react"
 import { Hint, Pill } from "@/components/common"
 import { stepLook } from "@/components/project/status"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { copy } from "@/lib/clipboard"
 import { costUsd, elapsed, tone } from "@/lib/format"
 import { boxSize, type GraphNode, type GraphNodeKind, type NodeState } from "@/lib/run-graph"
@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils"
 export interface FlowNodeData extends Record<string, unknown> {
   node: GraphNode
   state: NodeState
+  /** Abre el panel del paso. Sin él, la corrida no lo ofrece (el editor de flujos no tiene pasos). */
+  onOpen?: () => void
+  onCopySessionId?: () => void
 }
 
 const KIND: Record<GraphNodeKind, { Icon: LucideIcon; hint: string }> = {
@@ -26,7 +29,7 @@ const KIND: Record<GraphNodeKind, { Icon: LucideIcon; hint: string }> = {
 
 // Un nodo del flujo en solo lectura. El editor de flujos usa este mismo componente con otro `data`.
 export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData }) {
-  const { node, state } = data
+  const { node, state, onOpen, onCopySessionId } = data
   const { Icon, hint } = KIND[node.kind]
   const look = stepLook(state.status)
   const reached = state.visits > 0
@@ -85,6 +88,17 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-52">
+        {onOpen ? (
+          <ContextMenuItem disabled={!reached} onSelect={onOpen}>
+            {node.kind === "agent" ? "Ver transcript" : "Ver el paso"}
+            <ContextMenuShortcut>⏎</ContextMenuShortcut>
+          </ContextMenuItem>
+        ) : null}
+        {onCopySessionId && node.kind === "agent" ? (
+          <ContextMenuItem disabled={!reached} onSelect={onCopySessionId}>
+            Copiar sessionId
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem onSelect={() => copy(node.label, "el nodo")}>Copiar nombre del nodo</ContextMenuItem>
         <ContextMenuItem disabled={!state.stepId} onSelect={() => state.stepId && copy(state.stepId, "el ID del paso")}>
           Copiar ID del paso

@@ -8,7 +8,7 @@ import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/c
 import { git, GitError, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { diffBetween, snapshotTree } from "../git/tree";
-import { excerpt, execLogged, type ExecResult } from "./exec";
+import { defaultLogDir, excerpt, execLogged, stepLogPath, type ExecResult } from "./exec";
 import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
 import { runs, workspaces } from "../store/schema";
@@ -191,7 +191,7 @@ export type SyncBaseResult =
 
 export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   const { store, dataDir, repos, identity, remote, procs, worktreeSetup, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
-  const logDir = opts.logDir ?? join(dataDir, "logs");
+  const logDir = opts.logDir ?? defaultLogDir(dataDir);
   const heartbeats = new Map<string, { timer: NodeJS.Timeout; workspaceId: string; runId: RunId; token: number }>();
   const repoLocks = new Map<string, Promise<unknown>>();
 
@@ -836,7 +836,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         cwd: lease.path,
         command,
         env,
-        logPath: join(logDir, "runs", runId, `${stepId}.log`),
+        logPath: stepLogPath(logDir, runId, stepId),
         signal,
         onSpawn: procs && ((child) => procs.track(child, { kind: "recipe", stepRunId: stepId })),
       });

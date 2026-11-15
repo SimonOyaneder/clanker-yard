@@ -1,5 +1,6 @@
 import * as z from "zod";
-import { ArtifactHash, IssueId, ProjectId, RunId, StepRunId, SubjectRef } from "./domain";
+import { Report } from "./agents";
+import { AgentSessionId, ArtifactHash, ArtifactKind, IssueId, ProjectId, RunId, StepRunId, SubjectRef } from "./domain";
 import { FlowDef } from "./flow";
 
 export const RunStatus = z.enum([
@@ -90,6 +91,123 @@ export const RunDetail = Run.extend({
   usage: RunUsage,
 });
 export type RunDetail = z.infer<typeof RunDetail>;
+
+export const AgentSessionStatus = z.enum([
+  "running",
+  "success",
+  "error_max_turns",
+  "error_max_budget_usd",
+  "login_expired",
+  "quota_exhausted",
+  "report_invalid",
+  "error",
+]);
+export type AgentSessionStatus = z.infer<typeof AgentSessionStatus>;
+
+/** Una sesión de agente de un paso: un intento, o la sesión que un reintento retomó. */
+export const StepSession = z.object({
+  id: AgentSessionId,
+  runtime: z.string(),
+  /** El id de la sesión en su runtime: el que `claude --resume` entiende. */
+  sessionRef: z.string(),
+  /** Slug del rol que corrió. */
+  role: z.string(),
+  model: z.string(),
+  effort: z.string().nullable(),
+  status: AgentSessionStatus,
+  /** Por qué terminó mal: el mensaje del runtime o lo que no validó del reporte. */
+  error: z.string().nullable(),
+  turns: z.int().nonnegative(),
+  usage: RunUsage,
+  costMicros: z.int().nonnegative(),
+  startedAt: z.int().nonnegative(),
+  endedAt: z.int().nonnegative().nullable(),
+  /** El reporte validado; solo en la sesión que lo entregó. */
+  report: Report.nullable(),
+});
+export type StepSession = z.infer<typeof StepSession>;
+
+/** Un artefacto que el paso recibió o dejó. `name` es el rol de su ref: `input`, `output`, `check:tests`, `r2/diff.patch`. */
+export const StepArtifact = z.object({
+  hash: ArtifactHash,
+  name: z.string(),
+  kind: ArtifactKind,
+  mime: z.string(),
+  size: z.int().nonnegative(),
+});
+export type StepArtifact = z.infer<typeof StepArtifact>;
+
+/** Un comando que corrió un paso `action`, tal como quedó en su log. */
+export const StepCommand = z.object({
+  command: z.string(),
+  /** Stdout y stderr entrelazados; si pasaba de `COMMAND_OUTPUT_MAX_CHARS`, solo el final. */
+  output: z.string(),
+  truncated: z.boolean(),
+  /** `null` mientras el comando sigue corriendo o si lo mató una señal (`killedBy`). */
+  exitCode: z.int().nullable(),
+  killedBy: z.string().nullable(),
+});
+export type StepCommand = z.infer<typeof StepCommand>;
+
+export const COMMAND_OUTPUT_MAX_CHARS = 64 * 1024;
+
+/** Lo que el panel de un paso muestra y `runs.get` no trae. */
+export const StepDetail = z.object({
+  id: StepRunId,
+  /** De la más antigua a la más nueva. Vacío en un paso que no es de agente. */
+  sessions: z.array(StepSession),
+  artifacts: z.array(StepArtifact),
+  commands: z.array(StepCommand),
+});
+export type StepDetail = z.infer<typeof StepDetail>;
+
+const Clipped = { truncated: z.boolean() };
+
+/** Un evento del transcript, ya normalizado: la UI no lee los mensajes crudos del runtime. */
+export const TranscriptEntry = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("prompt"), text: z.string(), ...Clipped }),
+  z.object({ kind: z.literal("text"), text: z.string(), ...Clipped }),
+  z.object({ kind: z.literal("thinking"), text: z.string(), ...Clipped }),
+  z.object({
+    kind: z.literal("tool_call"),
+    id: z.string(),
+    tool: z.string(),
+    /** Lo más útil de lo que recibió la herramienta (ruta, comando, patrón). */
+    detail: z.string().nullable(),
+    /** Lo que recibió, como JSON con sangría. */
+    input: z.string(),
+    ...Clipped,
+  }),
+  z.object({ kind: z.literal("tool_result"), id: z.string(), text: z.string(), isError: z.boolean(), ...Clipped }),
+  z.object({ kind: z.literal("compaction"), trigger: z.string() }),
+  z.object({
+    kind: z.literal("result"),
+    subtype: z.string(),
+    isError: z.boolean(),
+    turns: z.int().nonnegative().nullable(),
+    costUsd: z.number().nonnegative().nullable(),
+    text: z.string().nullable(),
+  }),
+]);
+export type TranscriptEntry = z.infer<typeof TranscriptEntry>;
+
+export const TRANSCRIPT_TEXT_MAX_CHARS = 16 * 1024;
+
+export const TranscriptQuery = z.object({
+  sessionId: AgentSessionId,
+  /** El `next` de la página anterior; sin él, desde el principio. */
+  cursor: z.int().nonnegative().default(0),
+  limit: z.int().min(1).max(500).default(200),
+});
+
+export const TranscriptPage = z.object({
+  entries: z.array(TranscriptEntry),
+  /** Desde dónde pedir lo siguiente: sirve también para seguir una sesión en vivo cuando `hasMore` es falso. */
+  next: z.int().nonnegative(),
+  /** Hay más en el archivo ahora mismo. */
+  hasMore: z.boolean(),
+});
+export type TranscriptPage = z.infer<typeof TranscriptPage>;
 
 export const RunFilter = z.object({
   projectId: ProjectId.optional(),

@@ -23,6 +23,7 @@ import type { ClaudeCredentials } from "./credentials";
 import { createEventQueue } from "./event-queue";
 import { agentEnv, toOptions } from "./options";
 import { credentialMismatch, noteSignals, outcomeOf, type Signals } from "./outcome";
+import { transcriptFile } from "./transcript";
 
 /** Lo único que el adapter usa de `query`: los tests inyectan uno falso. */
 export type QueryFn = (params: { prompt: string; options: Options }) => AsyncIterable<SDKMessage>;
@@ -86,7 +87,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     return prepared;
   }
 
-  const transcriptOf = (sessionId: string) => join(paths.transcripts, `${sessionId}.jsonl`);
+  const transcriptOf = (sessionId: string) => transcriptFile(home, sessionId);
   const storedOf = (sessionId: string) => join(paths.sessions, `${sessionId}.json`);
 
   async function launch(

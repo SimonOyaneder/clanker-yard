@@ -113,6 +113,56 @@ test("una corrida en curso se ve como el grafo de su flujo, con el paso actual p
   await page.keyboard.press("Escape");
 });
 
+test("el panel del paso muestra el transcript, el brief y el reporte del agente", async ({ window: page }) => {
+  await sidebar(page).getByRole("button", { name: "Demo" }).click()
+  await finishedRun(page).getByRole("button").click()
+  await expect(graph(page)).toBeVisible()
+
+  // El menú del nodo ofrece ver el transcript y copiar el sessionId.
+  await node(page, "saludar").click({ button: "right" })
+  await expect(page.getByRole("menuitem", { name: "Copiar sessionId" })).toBeVisible()
+  await page.getByRole("menuitem", { name: "Ver transcript" }).click()
+
+  const panel = page.getByRole("region", { name: "Panel del paso saludar" })
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText("Leo la issue")).toBeVisible()
+  // Las tool calls van plegadas: al abrir la de `Read` aparece lo que recibió y lo que devolvió.
+  await panel.getByRole("button", { name: /Read/ }).click()
+  await expect(panel.getByText("Criterios de aceptación:", { exact: false })).toBeVisible()
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme)
+    await snap(page, "panel-transcript", theme)
+  }
+
+  // B, R e I cambian de pestaña con el panel abierto.
+  await page.keyboard.press("b")
+  await expect(panel.getByText("Brief que recibió")).toBeVisible()
+  await expect(panel.getByText("juguete", { exact: true })).toBeVisible()
+  await page.keyboard.press("r")
+  await expect(panel.getByText("saludé")).toBeVisible()
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme)
+    await snap(page, "panel-reporte", theme)
+  }
+  await page.keyboard.press("i")
+  await expect(panel.getByRole("button", { name: /Intento 1/ })).toBeVisible()
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme)
+    await snap(page, "panel-intentos", theme)
+  }
+
+  // Un paso que no es de agente no tiene transcript: su pestaña principal es el comando.
+  await node(page, "release").click()
+  await expect(page.getByRole("region", { name: "Panel del paso release" }).getByRole("tab", { name: "Comando" })).toBeVisible()
+
+  // Esc cierra el panel y recién otro Esc vuelve al proyecto.
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("region", { name: /Panel del paso/ })).toBeHidden()
+  await expect(graph(page)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("heading", { name: "Demo" })).toBeVisible()
+})
+
 test("screenshots de cada vista en claro y oscuro", async ({ window: page }) => {
   for (const theme of ["light", "dark"] as const) {
     await setTheme(page, theme);

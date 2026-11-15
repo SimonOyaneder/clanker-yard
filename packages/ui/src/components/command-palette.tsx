@@ -1,7 +1,8 @@
 import type { CachedIssue, ClankerProject, Run } from "@clanker/api"
-import { GitPullRequest, Keyboard, ListTree, Network, PanelLeft, Play, Plus, RefreshCw } from "lucide-react"
+import { FileText, GitPullRequest, History, Keyboard, ListTree, MessageSquare, Network, PanelLeft, Paperclip, Play, Plus, RefreshCw, ScrollText, X } from "lucide-react"
 import type { PullRequest } from "@/types"
 import type { RunTab } from "@/components/project/run-view"
+import type { StepTab } from "@/components/project/step-panel"
 import { RunStatusIcon, isLive } from "@/components/project/status"
 import {
   CommandDialog,
@@ -32,10 +33,12 @@ interface Props {
   onGoPrs: () => void
   /** Solo con una corrida abierta: cambia entre su grafo y su línea de tiempo. */
   onRunTab: ((tab: RunTab) => void) | null
+  /** Solo con el panel de un paso abierto. */
+  onStep: { onTab: (tab: StepTab) => void; onClose: () => void } | null
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onRunTab }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onRunTab, onStep }: Props) {
   const actions = useAppActions()
   const host = useHost()
   const run = (fn: () => void) => () => {
@@ -63,6 +66,35 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <CommandItem onSelect={run(() => onRunTab("timeline"))}>
               <ListTree /> Ver la línea de tiempo
               <CommandShortcut>L</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
+
+        {onStep ? (
+          <CommandGroup heading="Panel del paso">
+            <CommandItem onSelect={run(() => onStep.onTab("transcript"))}>
+              <MessageSquare /> Ver el transcript o el comando
+              <CommandShortcut>T</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={run(() => onStep.onTab("brief"))}>
+              <ScrollText /> Ver el brief que recibió
+              <CommandShortcut>B</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={run(() => onStep.onTab("report"))}>
+              <FileText /> Ver el reporte
+              <CommandShortcut>R</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={run(() => onStep.onTab("artifacts"))}>
+              <Paperclip /> Ver los artefactos
+              <CommandShortcut>A</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={run(() => onStep.onTab("attempts"))}>
+              <History /> Ver los intentos
+              <CommandShortcut>I</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={run(onStep.onClose)}>
+              <X /> Cerrar el panel del paso
+              <CommandShortcut>⎋</CommandShortcut>
             </CommandItem>
           </CommandGroup>
         ) : null}

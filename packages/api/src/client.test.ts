@@ -107,6 +107,12 @@ const router = os.router({
     get: os.runs.get.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    step: os.runs.step.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    transcript: os.runs.transcript.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     start: os.runs.start.handler(() => {
       throw new Error("no se usa en este test");
     }),

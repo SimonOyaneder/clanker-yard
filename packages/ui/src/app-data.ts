@@ -1,4 +1,6 @@
 import type {
+  AgentSessionId,
+  ArtifactHash,
   CachedIssue,
   ClankerProject,
   Event,
@@ -9,6 +11,9 @@ import type {
   RunFilter,
   RunId,
   StartRun,
+  StepDetail,
+  StepRunId,
+  TranscriptPage,
 } from "@clanker/api"
 import { createContext, useContext } from "react"
 import type { PRsResult } from "@/types"
@@ -24,6 +29,12 @@ export interface AppData {
   /** De la más reciente a la más antigua, sin pasos. */
   runs(filter?: RunFilter): Promise<Run[]>
   run(id: RunId): Promise<RunDetail>
+  /** Sesiones, artefactos y comandos de un paso: lo que su panel muestra y `run` no trae. */
+  step(id: StepRunId): Promise<StepDetail>
+  /** Una página del transcript de una sesión de agente, desde el `next` de la anterior (0 para empezar). */
+  transcript(sessionId: AgentSessionId, cursor: number): Promise<TranscriptPage>
+  /** El contenido de un artefacto como texto. */
+  artifact(hash: ArtifactHash): Promise<string>
   /** Vuelve sin esperar: el progreso llega por `events`. */
   startRun(input: StartRun): Promise<RunDetail>
   /**

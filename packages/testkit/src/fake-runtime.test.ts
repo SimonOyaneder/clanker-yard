@@ -417,3 +417,35 @@ result:
     await expect(agents.run(request(1))).rejects.toThrow(/no cumple el esquema del modo/);
   });
 });
+
+describe("transcripts", () => {
+  test("con `transcripts` deja un jsonl por sesión con mensajes del estilo del SDK de Claude", async () => {
+    const transcripts = mkdtempSync(join(tmpdir(), "clanker-fake-transcripts-"));
+    cleanups.push(() => rmSync(transcripts, { recursive: true, force: true }));
+    const runtime = createFakeRuntime({
+      fixtures: fixtures({
+        "dev.r1.yaml": `
+events:
+  - { at: 0, text: "Leo" }
+  - { at: 1, tool: Read, input: { file_path: "a.rb" }, output: "puts 1" }
+${report("listo")}`,
+      }),
+      sleep: instant,
+      transcripts,
+    });
+
+    const run = await runtime.start(spec("dev", brief("plan", 1)));
+    await run.result;
+
+    const records = readFileSync(join(transcripts, `${run.ref.sessionId}.jsonl`), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; message?: { content: { type: string }[] } });
+    expect(records.map((r) => [r.type, r.message?.content[0]?.type])).toEqual([
+      ["assistant", "text"],
+      ["assistant", "tool_use"],
+      ["user", "tool_result"],
+      ["result", undefined],
+    ]);
+  });
+});

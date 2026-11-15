@@ -1,6 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+
+/** Donde Workspaces deja los logs de los comandos si no se le da otra carpeta. */
+export const defaultLogDir = (dataDir: string) => join(dataDir, "logs");
+
+/** El log de los comandos que corrió un paso: cada uno con su encabezado `$ comando` y su pie `[exit N]`. */
+export const stepLogPath = (logDir: string, runId: string, stepId: string) => join(logDir, "runs", runId, `${stepId}.log`);
 
 /** Lo único que un comando de receta hereda del entorno del core: ni `GH_TOKEN` ni `LINEAR_*` ni credenciales de nadie. */
 const INHERITED_ENV = ["PATH", "HOME", "USER", "LANG", "TMPDIR", "SHELL"] as const;

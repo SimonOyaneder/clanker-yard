@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { Brief, compileJsonSchema, type JsonSchema } from "@clanker/api";
@@ -22,6 +24,11 @@ export interface FakeRuntimeOptions {
   speed?: number;
   /** Cómo se espera entre eventos; los tests lo reemplazan para no dormir. Debe resolver al abortarse `signal`. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /**
+   * Una carpeta donde dejar `<sessionId>.jsonl` por sesión, con mensajes con la forma de los del SDK de Claude
+   * (el core lee `transcripts/` de su `CLANKER_HOME`, así que el demo pasa esa). Sin ella no se escribe nada.
+   */
+  transcripts?: string;
 }
 
 /**
@@ -80,7 +87,8 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
     const events = channel<AgentEvent>();
     const abort = new AbortController();
     const speed = options.speed ?? script.speed;
-    const result = play(script, session.cwd, speed, events.push, abort.signal).finally(events.close);
+    const record = options.transcripts ? transcriptWriter(options.transcripts, sessionId) : undefined;
+    const result = play(script, session.cwd, speed, events.push, abort.signal, record).finally(events.close);
     // Quien solo itera los eventos todavía no pidió `result`: un crash no debe tumbar el proceso antes.
     result.catch(() => {});
     return {
@@ -97,10 +105,13 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
     speed: number,
     emit: (event: AgentEvent) => void,
     signal: AbortSignal,
+    record?: (message: Record<string, unknown>) => void,
   ): Promise<RunResult> {
     const crashAt = script.result.status === "crash" ? script.result.at : Infinity;
     const usage = emptyUsage();
     let clock = 0;
+    let messages = 0;
+    let tools = 0;
 
     const waitUntil = async (at: number) => {
       const ms = (at - clock) / speed;
@@ -114,9 +125,15 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
       if (signal.aborted) return interrupted(usage);
       if ("text" in event) {
         emit({ type: "text", text: event.text });
+        record?.({ type: "assistant", message: { id: `msg_${++messages}`, content: [{ type: "text", text: event.text }] } });
       } else if ("tool" in event) {
         const detail = detailOf(event.input);
         emit({ type: "tool_start", tool: event.tool, ...(detail === undefined ? {} : { detail }) });
+        const id = `toolu_${++tools}`;
+        record?.({ type: "assistant", message: { id: `msg_${id}`, content: [{ type: "tool_use", id, name: event.tool, input: event.input ?? {} }] } });
+        if (event.output !== undefined) {
+          record?.({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: event.output }] } });
+        }
         emit({ type: "tool_end", tool: event.tool });
       } else {
         const turn = {
@@ -140,6 +157,14 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
     }
 
     for (const patch of script.patches) await applyPatch(patch, cwd);
+    record?.({
+      type: "result",
+      subtype: result.status === "success" ? "success" : result.status,
+      is_error: result.status !== "success",
+      num_turns: usage.turns,
+      total_cost_usd: usage.costMicros / 1_000_000,
+      result: result.text ?? "",
+    });
 
     return {
       status: result.status,
@@ -182,6 +207,13 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
       return next;
     },
   };
+}
+
+/** Agrega un mensaje por línea a `<dir>/<sessionId>.jsonl`, como el transcript del runtime de Claude. */
+function transcriptWriter(dir: string, sessionId: string): (message: Record<string, unknown>) => void {
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${sessionId}.jsonl`);
+  return (message) => appendFileSync(file, `${JSON.stringify({ ...message, session_id: sessionId })}\n`);
 }
 
 /** El core pone el brief al final del mensaje, tras una línea en blanco; `JSON.stringify` con sangría nunca genera una. */

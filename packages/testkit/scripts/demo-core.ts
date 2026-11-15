@@ -24,7 +24,7 @@ const core = await startCore({
   store,
   dataDir: home,
   connections: createConnections(store, createFileSecrets({ dir: join(home, "secrets") })),
-  runtimes: [createFakeRuntime({ fixtures })],
+  runtimes: [createFakeRuntime({ fixtures, transcripts: join(home, "transcripts") })],
   env: { CORE_RUNTIME: "fake" },
   coreVersion: "0.0.0-demo",
   onShutdown: () => void stop(),

@@ -5,10 +5,12 @@ import { PrNotFoundError } from "../github/pr-query";
 import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
+import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
 import { RunNotFoundError, RunStartError } from "../flows/engine";
+import { createStepDetails, StepNotFoundError } from "../flows/step-detail";
 import { createMetrics } from "../metrics/metrics";
 import type { Packs } from "../packs/packs";
 import { DefValidationError } from "../defs/defs";
@@ -19,6 +21,7 @@ import { RecipeTestError, type RecipeTester } from "../recipe/recipe-test";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
+import { defaultLogDir } from "../workspaces/exec";
 import { NotAGitRepoError } from "../workspaces/inspect";
 import { InvalidRepoError, RepoNotFoundError, type Repos } from "../workspaces/repos";
 import { eventsAfter } from "./event-stream";
@@ -57,6 +60,8 @@ export function createRouter(deps: RouterDeps) {
   const schemaVersion = readSchemaVersion(store.db.$client);
   const { artifacts, flows, projects, repos, recipeTester, runs } = deps;
   const metrics = createMetrics(store);
+  const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
+  const transcripts = createTranscripts({ store, home: deps.dataDir });
   const prs = createPrs({ connections: deps.connections, packs: deps.packs });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
@@ -210,6 +215,8 @@ export function createRouter(deps: RouterDeps) {
     runs: {
       list: os.runs.list.handler(({ input }) => flows.listRuns(input)),
       get: os.runs.get.handler(({ input }) => asApiError(() => flows.getRun(input.id))),
+      step: os.runs.step.handler(({ input }) => asApiErrorAsync(() => stepDetails.get(input.id))),
+      transcript: os.runs.transcript.handler(({ input }) => asApiErrorAsync(() => transcripts.read(input))),
       start: os.runs.start.handler(({ input, context }) =>
         asApiErrorAsync(() => runs.start(input, context.origin)),
       ),
@@ -268,6 +275,8 @@ function toApiError(error: unknown): unknown {
   if (
     error instanceof ProjectNotFoundError ||
     error instanceof RunNotFoundError ||
+    error instanceof StepNotFoundError ||
+    error instanceof SessionNotFoundError ||
     error instanceof RepoNotFoundError ||
     error instanceof IssueNotCachedError
   ) {

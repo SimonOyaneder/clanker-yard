@@ -1,4 +1,4 @@
-import type { Run, RunStatus, StepStatus } from "@clanker/api"
+import type { AgentSessionStatus, Run, RunStatus, StepStatus } from "@clanker/api"
 import { CheckCircle2, Circle, CircleDot, CircleOff, Clock, CircleAlert, Hand } from "lucide-react"
 import type { ComponentType } from "react"
 import { Pill } from "@/components/common"
@@ -60,3 +60,16 @@ const STEP: Record<StepStatus, Look> = {
 }
 
 export const stepLook = (status: StepStatus) => STEP[status]
+
+const SESSION: Record<AgentSessionStatus, { label: string; tone: string; hint: string }> = {
+  running: { label: "corriendo", tone: tone.violet, hint: "El agente sigue trabajando en esta sesión." },
+  success: { label: "listo", tone: tone.green, hint: "El agente entregó un reporte que cumple el esquema del modo." },
+  error_max_turns: { label: "máx. turnos", tone: tone.red, hint: "La sesión llegó al tope de turnos del rol sin entregar el reporte." },
+  error_max_budget_usd: { label: "tope de gasto", tone: tone.red, hint: "La sesión llegó al tope de gasto del rol sin entregar el reporte." },
+  login_expired: { label: "login vencido", tone: tone.amber, hint: "Claude necesita que vuelvas a iniciar sesión. El paso espera sin gastar un intento." },
+  quota_exhausted: { label: "cuota agotada", tone: tone.amber, hint: "La cuota del plan se agotó. El paso espera a que se reinicie sin gastar un intento." },
+  report_invalid: { label: "reporte inválido", tone: tone.red, hint: "Ni el reintento entregó un reporte que cumpla el esquema del modo." },
+  error: { label: "error", tone: tone.red, hint: "La sesión terminó con un error; el motivo está en el intento." },
+}
+
+export const sessionLook = (status: AgentSessionStatus) => SESSION[status]
