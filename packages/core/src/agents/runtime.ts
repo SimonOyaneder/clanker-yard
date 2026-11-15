@@ -91,8 +91,8 @@ export interface Usage {
 
 /**
  * `login_expired` y `quota_exhausted` son distintos a propósito: el primero lo arregla una
- * persona volviendo a iniciar sesión, el segundo es esperar a que se reinicie la cuota.
- * Solo el segundo abre el breaker.
+ * persona volviendo a iniciar sesión, el segundo es esperar a que se reinicie la cuota. Los dos
+ * abren el breaker del runtime; solo el primero deja la cuenta de Claude en rojo.
  */
 export type RunStatus =
   | "success"

@@ -21,7 +21,9 @@ export interface ProbeDeps {
  * - `github`: `GET /user` con cada cuenta conectada (un 401 la deja `revoked`; una cuota agotada falla igual).
  * - `runtime:claude-sdk`: `connections.testClaude` (de menor a mayor costo; la llamada mínima solo si el login y la versión están bien).
  *   Otros runtimes no tienen causas de entorno que probar.
- * - `repo:<id>`: los `requires` de su receta, en el checkout del repo.
+ * - `repo:<id>`: los `requires` de su receta, en el checkout del repo y con el mismo `env` que les da `recipe.check`
+ *   (con el primer slot de dev si la receta tiene slots): una prueba que los corre distinto podría no pasar nunca y
+ *   dejar el repo en pausa para siempre. Un repo que ya no está registrado no tiene nada que pausar.
  */
 export function environmentProbe({ connections, repos, runtime }: ProbeDeps): (scope: string) => Promise<string | undefined> {
   async function github(): Promise<string | undefined> {
@@ -47,15 +49,16 @@ export function environmentProbe({ connections, repos, runtime }: ProbeDeps): (s
 
   async function repo(id: string): Promise<string | undefined> {
     const found = repos.get(id);
-    if (!found) return `El repo ${id} ya no está registrado.`;
+    if (!found) return undefined;
     const recipe = readRecipe(found.path);
     if (!recipe || recipe.requires.length === 0) return undefined;
-    const vars = { worktree: found.path, branch: found.defaultBranch, files: [], envKeys: Object.keys(recipe.env) };
+    const vars = { worktree: found.path, branch: found.defaultBranch, files: [], envKeys: Object.keys(recipe.env), slot: recipe.slots && 1 };
+    const env = Object.fromEntries(Object.entries(recipe.env).map(([key, value]) => [key, renderTemplate(value, vars, { shell: false })]));
     const signal = AbortSignal.timeout(REQUIRES_TIMEOUT_MS);
     const down = await failedRequires(
       recipe,
       (template) => renderTemplate(template, vars, { shell: true }),
-      async (command) => (await execStreaming({ cwd: found.path, command, env: {}, onOutput: () => {}, signal })).exitCode,
+      async (command) => (await execStreaming({ cwd: found.path, command, env, onOutput: () => {}, signal })).exitCode,
     );
     return down.length === 0 ? undefined : `No responde: ${down.join(", ")}.`;
   }

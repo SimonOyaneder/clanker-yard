@@ -62,7 +62,7 @@ export function credentialMismatch(
 
 /**
  * Estado de un run a partir de su mensaje `result` (ausente si el proceso murió antes) y de lo que el
- * stream avisó. `login_expired` y `quota_exhausted` se distinguen a propósito: solo la cuota abre el breaker.
+ * stream avisó. `login_expired` y `quota_exhausted` se distinguen a propósito (ver `RunStatus`).
  * Con API key, `login_expired` es la key rechazada.
  */
 export function outcomeOf(

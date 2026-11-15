@@ -103,10 +103,21 @@ describe("repo", () => {
     expect(await probeFor()(repoScope(id))).toBeUndefined();
   });
 
-  test("un repo sin receta o sin requires no tiene nada que probar, y uno que ya no existe sigue pausado", async () => {
+  test("un repo sin receta, sin requires o que ya no está registrado no tiene nada que probar", async () => {
     const id = repoWith();
 
     expect(await probeFor()(repoScope(id))).toBeUndefined();
-    expect(await probeFor()(repoScope("repo_desconocido"))).toBe("El repo repo_desconocido ya no está registrado.");
+    expect(await probeFor()(repoScope("repo_desconocido"))).toBeUndefined();
+  });
+
+  test("corre los requires con el env de la receta y un slot, como recipe.check", async () => {
+    const id = repoWith({
+      version: 1,
+      slots: { dev: 2, maintenance: 1 },
+      env: { DB_NAME: "app_cy{{slot}}" },
+      requires: [{ name: "Postgres", check: 'test "$DB_NAME" = app_cy1 && test {{slot+5432}} = 5433' }],
+    });
+
+    expect(await probeFor()(repoScope(id))).toBeUndefined();
   });
 });
