@@ -138,5 +138,23 @@ function factsOf(state: PrState): PrEventInput[] {
       payload: (fresh) => ({ talk: talk.filter((t) => fresh.includes(talkKey(t))) }),
     });
   }
+  facts.push(...mergeFactsOf(state));
+  return facts;
+}
+
+/**
+ * Los hechos de la estrategia de merge, una vez por head (el `sha` de la marca, como el `offered` y el
+ * `queuefail` del vigilante: un "todavía no" no se vuelve a preguntar hasta que haya un sha nuevo).
+ * `pr.mergeReady` lleva el nivel que se cumple (`auto` o `offer`) y `pr.mergeFailed` avisa que la cola
+ * (merge-queue) falló después del comando de merge, en un PR fuera de draft.
+ */
+export function mergeFactsOf({ merge, headSha, state }: PrState): PrEventInput[] {
+  const facts: PrEventInput[] = [];
+  if (merge.offer) {
+    facts.push({ type: "pr.mergeReady", keys: [headSha], payload: () => ({ sha: headSha, level: merge.auto ? "auto" : "offer" }) });
+  }
+  if (merge.queue === "failed" && state === "open") {
+    facts.push({ type: "pr.mergeFailed", keys: [headSha], payload: () => ({ sha: headSha }) });
+  }
   return facts;
 }

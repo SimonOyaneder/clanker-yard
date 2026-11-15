@@ -116,3 +116,37 @@ describe("list", () => {
     expect(cache.list({ repo: "acme/api" })[1]).toMatchObject({ state: null, readAt: null });
   });
 });
+
+describe("setHold", () => {
+  test("marca el PR, lo relee con el hold ya puesto y avisa del cambio; quitarlo también", async () => {
+    cache.saveRest(repoId, pull(), NOW);
+    await cache.refresh(ref(7));
+    onChange.mockReset();
+    // El PrState de `prs.get` lee el hold de la fila: aquí se arma como lo haría `MergeScope`.
+    cache = createPrCache({
+      store,
+      repos,
+      prs: { get: () => Promise.resolve(stateOfHold(cache.row(repoId, 7)!.hold)) },
+      onChange,
+      now: () => NOW,
+    });
+
+    const held = await cache.setHold(ref(7), true);
+
+    expect(held.hold).toBe(true);
+    expect(cache.row(repoId, 7)).toMatchObject({ hold: true, detail: { hold: true } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    expect((await cache.setHold(ref(7), false)).hold).toBe(false);
+    expect(cache.row(repoId, 7)).toMatchObject({ hold: false, detail: { hold: false } });
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  test("un PR que el core no conoce no se puede marcar", async () => {
+    await expect(cache.setHold(ref(7), true)).rejects.toThrow("El core no conoce el PR acme/api#7");
+    await expect(cache.setHold(ref(7, "otra/cosa"), true)).rejects.toThrow("otra/cosa#7");
+  });
+});
+
+const stateOfHold = (hold: boolean) =>
+  buildPrState(prNode({ number: 7 }), { pack: { id: null, ...PackSettings.parse({}) }, viewer: ACCOUNT, hold });

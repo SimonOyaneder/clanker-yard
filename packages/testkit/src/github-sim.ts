@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   healthyGitHub,
+  defaultBranchChecksData,
   prGraphql,
   recorded,
   startFakeGitHub,
@@ -151,6 +152,11 @@ export interface GitHubSim {
    * piden review (`pr.botFindings`, `pr.botLgtm`), como el real. Devuelve cómo dejar de escuchar.
    */
   onComment(listener: (pr: SimPr, body: string) => void): () => void;
+  /**
+   * Un check o status sobre el head de hoy de la branch por defecto, sin PR de por medio: así se ve, por ejemplo,
+   * que `merge-queue` corre en el repo (`DefaultBranchChecks`). Cada commit de la branch tiene los suyos.
+   */
+  defaultBranchCheck(name: string, kind?: "check" | "status"): void;
   /** Fija la cuota de un recurso; con `remaining: 0` GitHub corta con el error de cuota primaria. */
   setQuota(resource: QuotaResource, quota: { remaining: number; resetAt?: number }): void;
   /** Cuánta cuota le queda hoy a un recurso: una request con ETag que da 304 no la gasta. */
@@ -255,6 +261,8 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   /** Los checks que exige la branch protection (los que un helper marcó `required`): valen para todo commit. */
   const requiredChecks = new Set<string>();
   const commentListeners = new Set<(pr: SimPr, body: string) => void>();
+  /** Checks de commits que ningún PR puso (los de la branch por defecto): sha → contextos. */
+  const commitContexts = new Map<string, RawContext[]>();
   const quotas: Record<QuotaResource, { remaining: number; reset: number }> = {
     core: { remaining: QUOTA_LIMITS.core, reset: QUOTA_RESET },
     graphql: { remaining: QUOTA_LIMITS.graphql, reset: QUOTA_RESET },
@@ -302,6 +310,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   function contextsOf(pr: PrData, sha: string): RawContext[] {
     return pr.contexts.get(sha) ?? [];
   }
+  const contextsAt = (sha: string): RawContext[] => [...prs.flatMap((p) => contextsOf(p, sha)), ...(commitContexts.get(sha) ?? [])];
 
   function reviewDecision(pr: PrData): PrNode["reviewDecision"] {
     const latest = new Map<string, ReviewState>();
@@ -678,8 +687,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       (match) => {
         const sha = rev(decodeURIComponent(match[1]!));
         if (sha === undefined) return json(422, { message: `No commit found for SHA: ${match[1]}`, documentation_url: DOCS, status: "422" });
-        const runs = prs
-          .flatMap((p) => contextsOf(p, sha))
+        const runs = contextsAt(sha)
           .filter((c): c is Extract<RawContext, { __typename: "CheckRun" }> => c.__typename === "CheckRun");
         const unique = [...new Map(runs.map((c) => [c.name, c])).values()];
         return json(200, {
@@ -702,9 +710,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         if (sha === undefined) return json(422, { message: `No commit found for SHA: ${match[1]}`, documentation_url: DOCS, status: "422" });
         const statuses = [
           ...new Map(
-            prs
-              .flatMap((p) => contextsOf(p, sha))
-              .flatMap((c) => (c.__typename === "StatusContext" ? [[c.context, c] as const] : [])),
+            contextsAt(sha).flatMap((c) => (c.__typename === "StatusContext" ? [[c.context, c] as const] : [])),
           ).values(),
         ];
         const states = statuses.map((s) => s.state.toLowerCase());
@@ -828,6 +834,22 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       }
       return prGraphql(detail, { id: pr.nodeId })(request)!;
     }
+    if (queryName === "DefaultBranchChecks") {
+      const { owner: o, name: n } = variables as { owner: string; name: string };
+      if (`${o}/${n}` !== repo) {
+        return graphqlNotFoundAt({ repository: null }, ["repository"], `Could not resolve to a Repository with the name '${o}/${n}'.`);
+      }
+      const shas = git("rev-list", "-n", "20", `refs/heads/${defaultBranch}`).split("\n").filter(Boolean);
+      const commits = shas.map((sha) => {
+        const contexts = commitContexts.get(sha) ?? [];
+        if (contexts.length === 0) return null;
+        return {
+          checks: contexts.flatMap((c) => (c.__typename === "CheckRun" ? [c.name] : [])),
+          statuses: contexts.flatMap((c) => (c.__typename === "StatusContext" ? [c.context] : [])),
+        };
+      });
+      return json(200, { data: defaultBranchChecksData(commits) });
+    }
     if (queryName === "PrThreads" || queryName === "PrContexts") {
       const pr = prs.find((p) => p.nodeId === variables.id);
       if (!pr) return graphqlNotFoundAt({ node: null }, ["node"], `Could not resolve to a node with the global id of '${String(variables.id)}'.`);
@@ -902,6 +924,15 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     onComment(listener) {
       commentListeners.add(listener);
       return () => commentListeners.delete(listener);
+    },
+    defaultBranchCheck(checkName, kind = "status") {
+      const sha = branchSha(defaultBranch);
+      if (sha === undefined) throw new Error(`El bare no tiene la branch ${defaultBranch}.`);
+      const context: RawContext =
+        kind === "check"
+          ? { __typename: "CheckRun", name: checkName, status: "COMPLETED", conclusion: "SUCCESS", isRequired: false }
+          : { __typename: "StatusContext", context: checkName, state: "SUCCESS", isRequired: false };
+      commitContexts.set(sha, [...(commitContexts.get(sha) ?? []), context]);
     },
     quotaRemaining: (resource) => quotas[resource].remaining,
     setQuota(resource, { remaining, resetAt }) {

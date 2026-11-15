@@ -81,12 +81,15 @@ const prState = (state: PrState["state"], ci: PrState["ci"]["state"]): PrState =
   mergeable: "clean",
   reviewDecision: "none",
   reviewers: [],
+  approvers: [],
   bot: { state: "none", findings: [] },
   ci: { state: ci, sha: "abc", failing: [], flaky: [] },
   threads: { unresolved: 0, humanOpen: 0, humanResolved: 0, botOpen: 0, councilOpen: [], councilEver: false },
   talk: [],
   labels: [],
   signals: {},
+  merge: { via: "button", ready: false, blockers: [], queue: null, offer: false, auto: false },
+  hold: false,
 });
 
 describe("la cola de un proyecto", () => {

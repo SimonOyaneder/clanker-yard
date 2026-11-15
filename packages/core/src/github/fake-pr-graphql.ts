@@ -17,6 +17,19 @@ function page<T>(all: T[], after: string | undefined) {
   };
 }
 
+/** Un commit de la branch por defecto para `DefaultBranchChecks`: los checks y statuses de su rollup, o `null` si no tiene. */
+export type DefaultBranchCommit = { checks: string[]; statuses: string[] } | null;
+
+/** La respuesta de `DefaultBranchChecks` (`fetchDefaultBranchChecks`) para estos commits, del más nuevo al más viejo. */
+export function defaultBranchChecksData(commits: DefaultBranchCommit[]) {
+  const context = (commit: NonNullable<DefaultBranchCommit>) => [
+    ...commit.checks.map((name) => ({ __typename: "CheckRun", name })),
+    ...commit.statuses.map((context) => ({ __typename: "StatusContext", context })),
+  ];
+  const history = commits.map((commit) => ({ statusCheckRollup: commit === null ? null : { contexts: { nodes: context(commit) } } }));
+  return { repository: { defaultBranchRef: { target: { history: { nodes: history } } } } };
+}
+
 /**
  * Responde a las queries de `pr-query.ts` con este PR, como el real: la primera página de threads y de
  * checks en `PrDetail` y las siguientes en `PrThreads` y `PrContexts`. `teamRequests` agrega reviews
@@ -24,7 +37,7 @@ function page<T>(all: T[], after: string | undefined) {
  */
 export function prGraphql(
   node: PrNode,
-  { teamRequests = 0, id = "PR_kwDOexample" }: { teamRequests?: number; id?: string } = {},
+  { teamRequests = 0, id = "PR_kwDOexample", defaultBranchChecks = [] }: { teamRequests?: number; id?: string; defaultBranchChecks?: DefaultBranchCommit[] } = {},
 ) {
   const rollup = (after?: string) => ({ statusCheckRollup: { contexts: page(node.head.contexts, after) } });
   const respond = (data: unknown): RecordedResponse => ({
@@ -43,6 +56,7 @@ export function prGraphql(
     if (query.includes("query PrContexts")) {
       return respond({ node: { commits: { nodes: [{ commit: rollup(after) }] } } });
     }
+    if (query.includes("query DefaultBranchChecks")) return respond(defaultBranchChecksData(defaultBranchChecks));
     return respond({
       repository: {
         name: node.repo.name,

@@ -20,6 +20,7 @@ import { createGitRemote } from "./git/remote";
 import { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
 import { createPrCache, type PrRow } from "./github/pr-cache";
 import { prWaits, signalPr } from "./github/pr-waits";
+import { createMergeScope } from "./github/merge-scope";
 import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/publish";
 import { stackRestackAction, stackRestackRewrittenAction } from "./github/restack";
@@ -49,6 +50,7 @@ import type { Store } from "./store/store";
 import { createIssues } from "./tracker/issues";
 import { createLocalTracker } from "./tracker/local";
 import { createPrEvents } from "./watch/events";
+import { startMergeReactions } from "./watch/merge-reactions";
 import { createErrorReporter } from "./watch/report";
 import { createTrackerChanges } from "./watch/tracker-changes";
 import { startTriggers } from "./watch/triggers";
@@ -185,7 +187,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       slots.extendLeases();
     },
   });
-  const prs = createPrs({ connections: opts.connections, packs });
+  const prs = createPrs({ connections: opts.connections, packs, merge: createMergeScope({ store, repos, connections: opts.connections }) });
   const watchErrors = createErrorReporter(store);
   const prEvents = createPrEvents({ store, repos, workspaces, errors: watchErrors });
   /** Un PR cambió (Watch o `prs.refresh`): los waits que lo esperan y los eventos con su dedupe. */
@@ -260,6 +262,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     breakers,
   });
   const stopTriggers = startTriggers({ store, defs, projects, repos, flows, errors: watchErrors });
+  const mergeReactions = startMergeReactions({ store, repos, packs, prs, connections: opts.connections, errors: watchErrors });
   const watch = createWatch({
     store,
     connections: opts.connections,
@@ -308,6 +311,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       await watch.stop();
       // Como el Scheduler: un cierre no abre corridas nuevas.
       stopTriggers();
+      mergeReactions.stop();
       const graceMs = drain ? DRAIN_MS : 0;
       // Antes de apagar el motor: un cierre no abre corridas nuevas.
       await scheduler.close();

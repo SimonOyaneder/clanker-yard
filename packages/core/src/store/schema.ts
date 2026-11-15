@@ -333,6 +333,8 @@ export const repos = sqliteTable(
     /** `owner/name` en GitHub; `null` si `origin` no es de GitHub. */
     remote: text(),
     defaultBranch: text("default_branch").notNull(),
+    /** Pisa a `appliesWhen` del pack: `on` aplica su estrategia de merge aunque no se vea merge-queue, `off` no la aplica nunca; `null` lo detecta (decisión #33). */
+    mergeStrategy: text("merge_strategy", { enum: ["on", "off"] }),
   },
   (t) => [uniqueIndex("repos_path").on(t.path)],
 );
@@ -817,6 +819,8 @@ export const pullRequests = sqliteTable(
     detail: text({ mode: "json" }).$type<PrState>(),
     detailAt: integer("detail_at"),
     headChangedAt: integer("head_changed_at"),
+    /** "No mergear nunca este PR": lo marca el usuario y apaga `merge.offer` y `merge.auto` del `PrState`. */
+    hold: integer({ mode: "boolean" }).notNull().default(false),
   },
   (t) => [uniqueIndex("pull_requests_repo_number").on(t.repoId, t.number)],
 );
@@ -840,6 +844,22 @@ export const watchMarks = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (t) => [uniqueIndex("watch_marks_pr_kind_key").on(t.prId, t.kind, t.key)],
+);
+
+/**
+ * La decisión que ofrece mergear un PR (`pr.mergeReady` con nivel `offer`) y el head sobre el que se ofreció:
+ * aprobarla vale para ese contenido, así que si el head cambió después no se comenta nada.
+ */
+export const mergeOffers = sqliteTable(
+  "merge_offers",
+  {
+    decisionId: text("decision_id").$type<DecisionId>().primaryKey(),
+    prId: text("pr_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    headSha: text("head_sha").notNull(),
+  },
+  (t) => [index("merge_offers_pr").on(t.prId)],
 );
 
 /**

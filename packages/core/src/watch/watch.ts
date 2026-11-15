@@ -111,10 +111,13 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
 
   const isHot = (t: Target, at: number) => t.waited || (t.row?.headChangedAt != null && at - t.row.headChangedAt < HOT_MS);
 
-  /** Checks pendientes, o todavía sin registrarse en un PR caliente: se piden check-runs y status con ETag. */
+  /**
+   * Checks pendientes, un merge en cola (merge-queue cambia su status sin mover el PR) o todavía sin registrarse en
+   * un PR caliente: se piden check-runs y status con ETag.
+   */
   function watchesCi(t: Target, at: number): boolean {
-    const ci = t.row?.detail?.ci.state;
-    return ci === "pending" || (ci === "none" && isHot(t, at));
+    const detail = t.row?.detail;
+    return detail?.ci.state === "pending" || detail?.merge.queue === "queued" || (detail?.ci.state === "none" && isHot(t, at));
   }
 
   function pollEveryMs(t: Target, at: number): number {

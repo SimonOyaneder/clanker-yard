@@ -14,6 +14,11 @@ export const Repo = z.object({
   /** `null` si `origin` no apunta a GitHub. */
   remote: RepoRemote.nullable(),
   defaultBranch: z.string().min(1),
+  /**
+   * Pisa `appliesWhen` de la estrategia de merge del pack (decisión #33 del diseño): `on` la aplica aunque no
+   * se vea merge-queue en la branch por defecto, `off` no la aplica nunca; `null` lo detecta.
+   */
+  mergeStrategy: z.enum(["on", "off"]).nullable(),
 });
 export type Repo = z.infer<typeof Repo>;
 

@@ -1,4 +1,5 @@
-import type { BotFinding, PrState, ReviewerState, ResolvedPack } from "@clanker/api";
+import type { BotFinding, MergeStrategy, PrState, ReviewerState, ResolvedPack } from "@clanker/api";
+import { evaluateMerge, GITHUB_BUTTON } from "./merge-strategy";
 import type { Actor, PrNode, RawContext, RawReview, RawThread } from "./pr-query";
 
 export interface PrStateContext {
@@ -6,6 +7,10 @@ export interface PrStateContext {
   pack: ResolvedPack;
   /** Login de la cuenta conectada: lo que ella escribió no es un humano esperando respuesta. */
   viewer: string;
+  /** El usuario marcó este PR como "no mergear nunca" (`pull_requests.hold`). */
+  hold?: boolean;
+  /** Si la estrategia de merge del pack aplica al repo (`appliesWhen`). Donde no, se mergea con el botón de GitHub. */
+  mergeApplies?: boolean;
 }
 
 /** Largo máximo del extracto de un comentario o review en `talk`. */
@@ -17,10 +22,10 @@ const DEFAULT_OK_STATES = ["SUCCESS", "SKIPPED", "NEUTRAL"];
  * El estado normalizado de un PR. Es puro: todo lo que depende de la organización sale del pack, y sin
  * pack no hay bot, ni señales, ni reglas de CI propias.
  */
-export function buildPrState(node: PrNode, { pack, viewer }: PrStateContext): PrState {
+export function buildPrState(node: PrNode, { pack, viewer, hold = false, mergeApplies = true }: PrStateContext): PrState {
   const isHuman = humanTest(pack);
 
-  return {
+  const state: Omit<PrState, "merge"> = {
     key: `${node.repo.name}#${node.number}`,
     state: node.state === "MERGED" ? "merged" : node.state === "CLOSED" ? "closed" : node.isDraft ? "draft" : "open",
     headRef: node.headRefName,
@@ -31,13 +36,23 @@ export function buildPrState(node: PrNode, { pack, viewer }: PrStateContext): Pr
     ...(node.mergeCommit && { mergeCommitSha: node.mergeCommit.oid }),
     reviewDecision: node.reviewDecision?.toLowerCase() as PrState["reviewDecision"] ?? "none",
     reviewers: reviewersOf(node, isHuman),
+    approvers: approversOf(node, isHuman, viewer),
     bot: botOf(node, pack),
     ci: ciOf(node, pack),
     threads: threadsOf(node, pack, isHuman, viewer),
     talk: talkOf(node, pack, isHuman, viewer),
     labels: node.labels,
     signals: signalsOf(node, pack),
+    hold,
   };
+
+  // Donde la estrategia del pack no aplica (un repo sin merge-queue) `/merge` no significa nada: el botón de GitHub.
+  const strategy = mergeApplies ? pack.mergeStrategy : undefined;
+  const merge = evaluateMerge(
+    { ...state, defaultBranch: node.repo.defaultBranch ?? "main", queue: queueOf(node, strategy, viewer) },
+    strategy ?? GITHUB_BUTTON,
+  );
+  return { ...state, merge: { via: strategy ? "comment" : "button", ...merge } };
 }
 
 function mergeableOf(node: PrNode): PrState["mergeable"] {
@@ -81,6 +96,21 @@ function reviewersOf(node: PrNode, isHuman: IsHuman): ReviewerState[] {
     byLogin.set(requested.login, { login: requested.login, avatarUrl: requested.avatarUrl ?? null, state: "pending" });
   }
   return [...byLogin.values()];
+}
+
+/**
+ * Los humanos cuya última review que opina es una aprobación (`latestOpinionatedReviews` del vigilante): un
+ * comentario no la cambia, pedir cambios o descartarla sí. La cuenta conectada nunca cuenta.
+ */
+function approversOf(node: PrNode, isHuman: IsHuman, viewer: string): string[] {
+  const approved = new Map<string, boolean>();
+  const reviews = [...node.reviews].sort((a, b) => byTime(a.submittedAt).localeCompare(byTime(b.submittedAt)));
+  for (const { author, state } of reviews) {
+    if (!isHuman(author) || author.login === viewer) continue;
+    if (state === "APPROVED") approved.set(author.login, true);
+    else if (state === "CHANGES_REQUESTED" || state === "DISMISSED") approved.set(author.login, false);
+  }
+  return [...approved].flatMap(([login, yes]) => (yes ? [login] : [])).sort();
 }
 
 function botOf(node: PrNode, { reviewBot }: ResolvedPack): PrState["bot"] {
@@ -151,6 +181,21 @@ function ciOf(node: PrNode, { ciRules }: ResolvedPack): PrState["ci"] {
   const state = counted.length === 0 ? "none" : failing.length > 0 ? "red" : notOk.length > 0 ? "pending" : "green";
   const flaky = new Set(ciRules?.knownFlaky);
   return { state, sha: node.head.oid, failing, flaky: failing.filter((name) => flaky.has(name)) };
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Si la cuenta conectada ya comentó el comando de merge (solo ese texto, como el `/merge` de Control y el
+ * vigilante): en cola, o fallida si el check de la cola (`queueCheck`, merge-queue) quedó en FAILURE o ERROR.
+ */
+function queueOf(node: PrNode, strategy: MergeStrategy | undefined, viewer: string): PrState["merge"]["queue"] {
+  if (!strategy) return null;
+  const command = new RegExp(`^\\s*${escapeRegExp(strategy.command)}\\s*$`);
+  if (!node.comments.some((c) => c.author?.login === viewer && command.test(c.body))) return null;
+  const queueCheck = node.head.contexts.find((c) => (c.__typename === "StatusContext" ? c.context : c.name) === strategy.queueCheck);
+  const state = queueCheck && (queueCheck.__typename === "StatusContext" ? queueCheck.state : (queueCheck.conclusion ?? queueCheck.status));
+  return state === "FAILURE" || state === "ERROR" ? "failed" : "queued";
 }
 
 /**

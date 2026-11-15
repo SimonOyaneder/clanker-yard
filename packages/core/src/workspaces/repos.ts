@@ -35,6 +35,12 @@ export interface Repos {
   detect(folder: string): Promise<DetectedRepo[]>;
   /** La configuración que Workspaces necesita de un repo. Lanza si el id no existe. */
   config(id: string): RepoConfig;
+  /**
+   * Fija si la estrategia de merge del pack aplica a este repo (`on`, `off`) o vuelve a detectarlo (`null`:
+   * `appliesWhen` del pack). Vale desde la próxima lectura de cada PR del repo. Lanza `RepoNotFoundError` si
+   * el id no existe.
+   */
+  setMergeStrategy(id: string, override: Repo["mergeStrategy"]): void;
 }
 
 export interface ReposOptions {
@@ -70,6 +76,11 @@ export function createRepos(store: Store, { remote: remoteOf }: ReposOptions = {
         repoId: byPath(info.path)?.id ?? null,
         recipe: recipeStatus(info.path),
       }));
+    },
+    setMergeStrategy(id, override) {
+      const row = self.get(id);
+      if (!row) throw new RepoNotFoundError(id);
+      store.tx((tx) => tx.db.update(repos).set({ mergeStrategy: override }).where(eq(repos.id, row.id)).run());
     },
     config(id) {
       const row = self.get(id);

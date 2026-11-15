@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, mkdtempSync, rmSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, type Client } from "@clanker/api";
-import { createConnections, createFileSecrets, createSlots, newId, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createRepos, createSlots, newId, openStore, RepoNotFoundError, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -111,7 +111,7 @@ describe("repos.add", () => {
 
     const added = await client.repos.add({ path: repo.dir, name: "web" });
 
-    expect(added).toEqual({ id: expect.stringMatching(/^repo_/), name: "web", path: expect.any(String), remote: "acme/web", defaultBranch: "main" });
+    expect(added).toEqual({ id: expect.stringMatching(/^repo_/), name: "web", path: expect.any(String), remote: "acme/web", defaultBranch: "main", mergeStrategy: null });
     expect(await client.repos.list()).toEqual([added]);
   });
 
@@ -124,6 +124,25 @@ describe("repos.add", () => {
     await expect(client.repos.add({ path: join(repo.dir, "src") })).rejects.toSatisfy(badRequest(/no es la raíz de un repo/));
     await expect(client.repos.add({ path: scratchDir() })).rejects.toSatisfy(badRequest(/no es un repo de git/));
     expect(await client.repos.list()).toHaveLength(1);
+  });
+});
+
+describe("el override de la estrategia de merge", () => {
+  test("repos.list lo trae: null mientras no se fije, y vuelve a null al quitarlo", async () => {
+    const repo = repoWith(undefined);
+    const { id } = await client.repos.add({ path: repo.dir });
+    const repos = createRepos(store);
+    expect(await client.repos.list()).toMatchObject([{ id, mergeStrategy: null }]);
+
+    repos.setMergeStrategy(id, "off");
+    expect(await client.repos.list()).toMatchObject([{ id, mergeStrategy: "off" }]);
+
+    repos.setMergeStrategy(id, null);
+    expect(await client.repos.list()).toMatchObject([{ id, mergeStrategy: null }]);
+  });
+
+  test("un repo que no existe lanza RepoNotFoundError", () => {
+    expect(() => createRepos(store).setMergeStrategy("repo_nope", "on")).toThrow(RepoNotFoundError);
   });
 });
 

@@ -50,6 +50,24 @@ export const BotFinding = z.object({
 });
 export type BotFinding = z.infer<typeof BotFinding>;
 
+/**
+ * Qué dice la estrategia de merge sobre un PR abierto (`docs/design.html#d-ops`, "Tres niveles de merge"):
+ * `ready` es la píldora verde (`mergeStatus` de Clanker Control), `blockers` lo que la apaga (el texto que ve
+ * el usuario), `queue` si ya se pidió el merge (`queued`) o falló (`failed`). `offer` y `auto` son los otros
+ * dos niveles: pedir una decisión y mergear sin preguntar; `auto` implica `offer`, y `hold` apaga los dos. Un
+ * PR mergeado o cerrado no tiene nada de esto. `via` es cómo se mergea: `comment` con el comando de la
+ * estrategia del pack, o `button` con el botón de GitHub (sin pack, o donde la estrategia no aplica).
+ */
+export const PrMerge = z.object({
+  via: z.enum(["comment", "button"]),
+  ready: z.boolean(),
+  blockers: z.array(z.string()),
+  queue: z.enum(["queued", "failed"]).nullable(),
+  offer: z.boolean(),
+  auto: z.boolean(),
+});
+export type PrMerge = z.infer<typeof PrMerge>;
+
 export const PrState = z.object({
   /** `repo#número`, por ejemplo `api#4251`. */
   key: z.string(),
@@ -64,6 +82,8 @@ export const PrState = z.object({
   reviewDecision: z.enum(["approved", "changes_requested", "review_required", "none"]),
   /** Solo humanos (no el autor, ni bots, ni lo que el pack ignora). */
   reviewers: z.array(ReviewerState),
+  /** Humanos cuya última review que opina (aprueba o pide cambios) es una aprobación, como `latestOpinionatedReviews` del vigilante. Nunca la cuenta conectada. */
+  approvers: z.array(z.string()),
   /**
    * Lo último que dijo el bot de review del pack. `lgtm` solo si esa review cumple la regla del pack
    * (estado, texto y, si lo pide, el mismo sha que el head); un LGTM de un sha anterior es `none`.
@@ -103,6 +123,9 @@ export const PrState = z.object({
   labels: z.array(PrLabel),
   /** Una entrada por señal del pack presente en el PR: id de la señal → nivel (`risk` → `high`). */
   signals: z.record(z.string(), z.string()),
+  merge: PrMerge,
+  /** "No mergear nunca este PR": lo marca el usuario (`pull_requests.hold`) y apaga `merge.offer` y `merge.auto`. */
+  hold: z.boolean(),
 });
 export type PrState = z.infer<typeof PrState>;
 

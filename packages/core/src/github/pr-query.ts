@@ -228,6 +228,40 @@ export async function fetchPr(client: GitHubClient, repo: { owner: string; name:
   };
 }
 
+/** Los commits de la branch por defecto que mira `fetchDefaultBranchChecks`. */
+const DEFAULT_BRANCH_COMMITS = 20;
+
+const DEFAULT_BRANCH_CHECKS = `
+query DefaultBranchChecks($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef {
+      target {
+        ... on Commit {
+          history(first: ${DEFAULT_BRANCH_COMMITS}) {
+            nodes {
+              statusCheckRollup { contexts(first: ${PAGE_SIZE}) { nodes { __typename ... on CheckRun { name } ... on StatusContext { context } } } }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+/**
+ * Los nombres de los checks y statuses de los últimos commits de la branch por defecto: con ellos se ve si un
+ * check como `merge-queue` corre en el repo. Vacío si el repo no tiene commits. Se pide después de leer un PR del
+ * repo, así que un repo inexistente ya salió como `PrNotFoundError`.
+ */
+export async function fetchDefaultBranchChecks(client: GitHubClient, repo: { owner: string; name: string }): Promise<Set<string>> {
+  type Context = { __typename: "CheckRun"; name: string } | { __typename: "StatusContext"; context: string };
+  const data = await client.graphql<{
+    repository: { defaultBranchRef: { target: { history?: { nodes: { statusCheckRollup: { contexts: { nodes: Context[] } } | null }[] } } | null } | null };
+  }>(DEFAULT_BRANCH_CHECKS, repo);
+  const commits = data.repository.defaultBranchRef?.target?.history?.nodes ?? [];
+  return new Set(commits.flatMap((c) => c.statusCheckRollup?.contexts.nodes ?? []).map((c) => (c.__typename === "CheckRun" ? c.name : c.context)));
+}
+
 async function allPages<T>(first: Page<T> | undefined, next: (after: string) => Promise<Page<T>>): Promise<T[]> {
   if (!first) return [];
   const all = [...first.nodes];

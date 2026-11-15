@@ -284,7 +284,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       ["infra", { status: "invalid", message: 'checks.0: "lint" no está en commands (no hay ninguno).' }, { ok: false, at: min(600) }],
     ] as const
   ).map(([name, recipe, lastTest], i): RepoRow => {
-    const repo: Repo = { id: id("repo", i + 1), name, path: `/Users/dev/${name}`, remote: `acme/${name}`, defaultBranch: "main" }
+    const repo: Repo = { id: id("repo", i + 1), name, path: `/Users/dev/${name}`, remote: `acme/${name}`, defaultBranch: "main", mergeStrategy: null }
     return { repo, recipe, lastTest }
   })
   // Lo que el usuario saltó o subió en la cola, que `queue` refleja.
@@ -520,7 +520,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
     addRepo: async (path) => {
       if (repoRows.some((r) => r.repo.path === path)) throw new Error(`${path} ya está registrado.`)
       const name = path.split("/").filter(Boolean).pop() ?? path
-      const repo: Repo = { id: id("repo", repoRows.length + 1), name, path, remote: null, defaultBranch: "main" }
+      const repo: Repo = { id: id("repo", repoRows.length + 1), name, path, remote: null, defaultBranch: "main", mergeStrategy: null }
       repoRows.push({ repo, recipe: { status: "missing" }, lastTest: null })
       return repo
     },

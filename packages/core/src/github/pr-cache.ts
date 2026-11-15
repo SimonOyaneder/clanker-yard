@@ -36,6 +36,12 @@ export interface PrCache {
    */
   refresh(ref: PrRef): Promise<PrState>;
   row(repoId: string, number: number): PrRow | undefined;
+  /**
+   * Marca o desmarca "no mergear nunca" (`pull_requests.hold`) y relee el PR con `refresh`, así su `merge`
+   * (y el evento `pr.mergeReady` si vuelve a estar listo) ya cuenta con el cambio. Lanza si el core no
+   * conoce el PR: solo se puede poner hold a los que Watch o `pr.publish` ya registraron.
+   */
+  setHold(ref: PrRef, hold: boolean): Promise<PrState>;
   /** Los que siguen abiertos (o en draft): lo que Watch vigila. */
   open(): PrRow[];
   /**
@@ -87,14 +93,16 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
     });
   }
 
+  async function refresh(ref: PrRef): Promise<PrState> {
+    const state = await prs.get(ref);
+    const repo = repos.byRemote(ref.repo);
+    const saved = repo && saveDetail(repo.id, ref.number, state);
+    if (saved && JSON.stringify(saved.previous) !== JSON.stringify(state)) onChange?.(ref, state, saved.row);
+    return state;
+  }
+
   return {
-    async refresh(ref) {
-      const state = await prs.get(ref);
-      const repo = repos.byRemote(ref.repo);
-      const saved = repo && saveDetail(repo.id, ref.number, state);
-      if (saved && JSON.stringify(saved.previous) !== JSON.stringify(state)) onChange?.(ref, state, saved.row);
-      return state;
-    },
+    refresh,
 
     list({ repo, owned, state } = {}) {
       const rows = store.db
@@ -122,6 +130,14 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
     },
 
     row: find,
+
+    async setHold(ref, hold) {
+      const repo = repos.byRemote(ref.repo);
+      const row = repo && find(repo.id, ref.number);
+      if (!row) throw new Error(`El core no conoce el PR ${ref.repo}#${ref.number}: registra el repo y espera a que Watch lo vea.`);
+      store.tx((tx) => tx.db.update(pullRequests).set({ hold }).where(eq(pullRequests.id, row.id)).run());
+      return refresh(ref);
+    },
 
     open: () => store.db.select().from(pullRequests).where(eq(pullRequests.state, "open")).all(),
 

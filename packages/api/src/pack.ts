@@ -112,20 +112,35 @@ const MergeReaction = z.enum(["gate", "act", "none"]);
  * Cómo se mergea. Sin estrategia: el botón de GitHub, con una decisión que estaciona solo ese PR.
  * Con `comment` se mergea comentando `command` (en Acme, `/merge`).
  */
-const MergeStrategy = z.strictObject({
-  type: z.literal("comment"),
-  command: z.string().min(1),
-  /** El check que marca el PR como en cola (merge-queue). */
-  queueCheck: z.string().min(1).optional(),
-  /** La estrategia solo aplica en repos donde este check aparece en los commits de la branch por defecto. */
-  appliesWhen: z.strictObject({ checkSeenOnDefault: z.string().min(1) }).optional(),
-  ready: z.array(MergeCondition),
-  offer: z.array(MergeCondition),
-  auto: z.array(MergeCondition),
-  /** Qué hace el core cuando se cumple `offer`: `gate` abre una decisión, `act` mergea, `none` nada. */
-  onOffer: MergeReaction,
-  onAuto: MergeReaction,
-});
+const MergeStrategy = z
+  .strictObject({
+    type: z.literal("comment"),
+    command: z.string().min(1),
+    /** El check que marca el PR como en cola (merge-queue). */
+    queueCheck: z.string().min(1).optional(),
+    /** La estrategia solo aplica en repos donde este check aparece en los commits de la branch por defecto. */
+    appliesWhen: z.strictObject({ checkSeenOnDefault: z.string().min(1) }).optional(),
+    ready: z.array(MergeCondition),
+    offer: z.array(MergeCondition),
+    auto: z.array(MergeCondition),
+    /** Qué hace el core cuando se cumple `offer`: `gate` abre una decisión, `act` mergea, `none` nada. */
+    onOffer: MergeReaction,
+    /** Lo mismo para `auto`; `gate` lo trata como una oferta. */
+    onAuto: MergeReaction,
+  })
+  .superRefine((strategy, ctx) => {
+    // Cada nivel se apoya solo en los de abajo: una lista que se cita a sí misma no se puede evaluar.
+    const forbidden = { ready: ["ready", "offer"], offer: ["offer"], auto: [] } as const;
+    for (const level of ["ready", "offer", "auto"] as const) {
+      strategy[level].forEach((condition, index) => {
+        if ((forbidden[level] as readonly string[]).includes(condition)) {
+          ctx.addIssue({ code: "custom", path: [level, index], message: `"${condition}" no puede ir en \`${level}\`: cada nivel solo se apoya en los de abajo` });
+        }
+      });
+    }
+  });
+export type MergeStrategy = z.infer<typeof MergeStrategy>;
+export type MergeCondition = z.infer<typeof MergeCondition>;
 
 /** Las convenciones de un pack; un proyecto puede fijar las suyas (`ClankerProject.conventions`). */
 export const Conventions = z.strictObject({

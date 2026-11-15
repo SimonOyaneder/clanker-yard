@@ -35,11 +35,21 @@ const acme: ResolvedPack = {
     },
     ciRules: { ignoreChecks: ["merge-queue"], okStates: ["SUCCESS", "SKIPPED", "NEUTRAL"] },
     conventions: { commentPrefix: "[clanker] ", councilPrefix: "[clanker-council] " },
+    mergeStrategy: {
+      type: "comment",
+      command: "/merge",
+      queueCheck: "merge-queue",
+      ready: ["notDraft", "approved", "ciGreen", "baseIsDefault", "noConflict", "noHumanOpenThreads", "notQueued"],
+      offer: ["ready", "humanApprover", "noHumanTalk", "noCouncilOpen", "notHold"],
+      auto: ["offer", "noHumanResolvedThreads", "noCouncilEver"],
+      onOffer: "gate",
+      onAuto: "act",
+    },
   }),
 };
 const noPack: ResolvedPack = { id: null, ...PackSettings.parse({}) };
 
-const build = (node: PrNode, pack = acme) => buildPrState(node, { pack, viewer: VIEWER });
+const build = (node: PrNode, pack = acme, more: { hold?: boolean; mergeApplies?: boolean } = {}) => buildPrState(node, { pack, viewer: VIEWER, ...more });
 
 describe("el PR", () => {
   test("lo básico: clave, ramas, head y decisión de GitHub", () => {
@@ -449,5 +459,111 @@ describe("señales y labels del pack", () => {
 
     expect(state.signals).toEqual({});
     expect(state.labels).toEqual([{ name: "risk:high", color: "d73a4a", description: null }]);
+  });
+});
+
+describe("approvers", () => {
+  test("los humanos cuya última review que opina es una aprobación, en orden alfabético", () => {
+    const state = build(
+      prNode({
+        reviews: [
+          review(user("caro"), "APPROVED", { at: "2026-11-10T10:00:00Z" }),
+          review(user("ana"), "APPROVED", { at: "2026-11-10T11:00:00Z" }),
+          review(user("ana"), "COMMENTED", { body: "una duda", at: "2026-11-10T12:00:00Z" }),
+          review(user("beto"), "APPROVED", { at: "2026-11-10T10:00:00Z" }),
+          review(user("beto"), "CHANGES_REQUESTED", { body: "no", at: "2026-11-10T13:00:00Z" }),
+          review(user("dani"), "APPROVED", { at: "2026-11-10T10:00:00Z" }),
+          review(user("dani"), "DISMISSED", { at: "2026-11-10T14:00:00Z" }),
+          review(user("eli"), "APPROVED", { at: "2026-11-10T15:00:00Z" }),
+          review(user("eli"), "PENDING", { at: "2026-11-10T16:00:00Z" }),
+        ],
+      }),
+    );
+
+    expect(state.approvers).toEqual(["ana", "caro", "eli"]);
+  });
+
+  test("ni bots, ni cuentas del pack, ni la cuenta conectada aprueban", () => {
+    const state = build(
+      prNode({
+        reviews: [
+          review(bot("review-bot[bot]"), "APPROVED", { body: "LGTM" }),
+          review(user("codecov"), "APPROVED"),
+          review(user(VIEWER), "APPROVED"),
+          review(null, "APPROVED"),
+        ],
+      }),
+    );
+
+    expect(state.approvers).toEqual([]);
+  });
+});
+
+describe("merge", () => {
+  /** Aprobado por un humano, CI verde y sobre la principal: lo mínimo para el nivel auto de Acme. */
+  const ready = (overrides: Partial<PrNode> = {}) =>
+    prNode({
+      reviewDecision: "APPROVED",
+      reviews: [review(user("ana"), "APPROVED")],
+      head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS")] },
+      ...overrides,
+    });
+  const fin = (body = "/merge", at = "2026-11-10T12:00:00Z") => comment(user(VIEWER), body, at);
+
+  test("con la estrategia del pack: ready, offer y auto de un PR limpio", () => {
+    expect(build(ready()).merge).toEqual({ via: "comment", ready: true, blockers: [], queue: null, offer: true, auto: true });
+  });
+
+  test("un /merge de la cuenta conectada lo pone en cola, y merge-queue en FAILURE o ERROR lo da por fallado", () => {
+    const queued = build(ready({ comments: [fin("  /merge\n")], head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS"), statusContext("merge-queue", "PENDING")] } }));
+    const failed = (state: "FAILURE" | "ERROR") =>
+      build(ready({ comments: [fin()], head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS"), statusContext("merge-queue", state)] } })).merge.queue;
+
+    expect(queued.merge).toMatchObject({ queue: "queued", ready: false, blockers: [], offer: false, auto: false });
+    expect(failed("FAILURE")).toBe("failed");
+    expect(failed("ERROR")).toBe("failed");
+    // Sin el check de la cola, o con uno que no falló, sigue en cola.
+    expect(build(ready({ comments: [fin()] })).merge.queue).toBe("queued");
+    expect(build(ready({ comments: [fin()], head: { oid: HEAD_SHA, contexts: [statusContext("merge-queue", "SUCCESS")] } })).merge.queue).toBe("queued");
+  });
+
+  test("solo cuenta el comando exacto de la cuenta conectada", () => {
+    for (const comments of [
+      [fin("/merge please")],
+      [fin("/Merge")],
+      [comment(user("ana"), "/merge")],
+      [comment(bot("review-bot[bot]"), "/merge")],
+    ]) {
+      expect(build(ready({ comments })).merge.queue).toBeNull();
+    }
+  });
+
+  test("un comando con caracteres de regex se compara literal", () => {
+    const pack: ResolvedPack = { ...acme, mergeStrategy: { ...acme.mergeStrategy!, command: "merge (now)?" } };
+
+    expect(build(ready({ comments: [fin("merge (now)?")] }), pack).merge.queue).toBe("queued");
+    expect(build(ready({ comments: [fin("merge now")] }), pack).merge.queue).toBeNull();
+  });
+
+  test("hold apaga offer y auto pero no ready", () => {
+    expect(build(ready(), acme, { hold: true })).toMatchObject({ hold: true, merge: { ready: true, offer: false, auto: false } });
+    expect(build(ready()).hold).toBe(false);
+  });
+
+  test("donde la estrategia no aplica, o sin pack, se mergea con el botón de GitHub y /merge no significa nada", () => {
+    const withFin = ready({ comments: [fin()] });
+
+    expect(build(withFin, acme, { mergeApplies: false }).merge).toEqual({ via: "button", ready: true, blockers: [], queue: null, offer: true, auto: false });
+    expect(build(withFin, noPack).merge).toMatchObject({ via: "button", queue: null, auto: false });
+  });
+
+  test("un PR sin aprobación o con un hilo de humano abierto no está listo", () => {
+    const state = build(prNode({ reviewThreads: [thread(user("ana"), "falta esto")], head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS")] } }));
+
+    expect(state.merge).toMatchObject({ ready: false, offer: false, blockers: ["falta aprobación", "1 hilos de humanos sin resolver"] });
+  });
+
+  test("un PR mergeado o cerrado no tiene merge", () => {
+    expect(build(ready({ state: "MERGED" })).merge).toEqual({ via: "comment", ready: false, blockers: [], queue: null, offer: false, auto: false });
   });
 });

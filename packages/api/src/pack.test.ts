@@ -95,6 +95,16 @@ describe("Pack", () => {
       { ...reference, mergeStrategy: { ...reference.mergeStrategy, ready: ["notDraft", "soyBueno"] } },
       "mergeStrategy.ready.1",
     ],
+    [
+      "un nivel que se cita a sí mismo",
+      { ...reference, mergeStrategy: { ...reference.mergeStrategy, offer: ["ready", "offer"] } },
+      "mergeStrategy.offer.1",
+    ],
+    [
+      "`ready` apoyado en un nivel de arriba",
+      { ...reference, mergeStrategy: { ...reference.mergeStrategy, ready: ["notDraft", "offer"] } },
+      "mergeStrategy.ready.1",
+    ],
     ["un flow que sale de la carpeta", { ...reference, flows: ["../fuera.json"] }, "flows.0"],
     ["un role con ruta absoluta", { ...reference, roles: ["/etc/rol.json"] }, "roles.0"],
     ["un flow que no es json", { ...reference, flows: ["flows/a.md"] }, "flows.0"],

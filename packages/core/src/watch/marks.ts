@@ -9,7 +9,15 @@ import type { StoreDb, Tx } from "../store/store";
 /** Los eventos de un PR que Watch emite; el `kind` de su marca es el tipo del evento. */
 export type PrEventType = Extract<
   EventType,
-  "pr.botReview" | "pr.ci" | "pr.conflict" | "pr.comment" | "pr.merged" | "pr.base_rewritten" | "pr.human"
+  | "pr.botReview"
+  | "pr.ci"
+  | "pr.conflict"
+  | "pr.comment"
+  | "pr.merged"
+  | "pr.base_rewritten"
+  | "pr.human"
+  | "pr.mergeReady"
+  | "pr.mergeFailed"
 >;
 
 /** La marca que no es un evento: la punta que Watch ya evaluó de un PR. */
