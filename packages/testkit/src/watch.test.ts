@@ -271,6 +271,23 @@ describe("descubrir y detectar", () => {
     expect(cache.list()[0]?.state?.mergeable).toBe("unknown");
   });
 
+  test("stop no espera las visitas que faltan del despertar en curso", async () => {
+    sim.openPr({ head: "one" });
+    sim.openPr({ head: "two" });
+    await wake();
+    clock += 10 * MINUTE;
+    const from = sim.requests.length;
+    const polls = trackerPolls.length;
+
+    const ticking = watch.tick();
+    await watch.stop();
+    await ticking;
+
+    const requests = requestsSince(from);
+    expect(pullReads(requests, 1) + pullReads(requests, 2)).toBe(0);
+    expect(trackerPolls).toHaveLength(polls);
+  });
+
   test("un PR que se mergea se lee una última vez y deja de vigilarse", async () => {
     const pr = sim.openPr({ head: "one" });
     await wake();

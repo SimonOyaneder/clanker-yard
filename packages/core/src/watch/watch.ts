@@ -41,7 +41,10 @@ export interface Watch {
   tick(): Promise<void>;
   /** Despierta cada `WATCH_TICK_MS`. */
   start(): void;
-  /** Deja de despertar y espera a que termine lo que está en vuelo. */
+  /**
+   * Deja de despertar y espera a que termine lo que está en vuelo: la visita en curso y los eventos que ya
+   * salieron de ella, no el resto de las visitas del despertar (con muchos PRs vencidos serían minutos).
+   */
   stop(): Promise<void>;
 }
 
@@ -83,6 +86,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
   const unknownRereads = new Map<string, number>();
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
+  let stopping = false;
 
   // --- qué mirar ---
 
@@ -297,21 +301,27 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
         return brake.level !== "exhausted" && (brake.level !== "waits-only" || t.waited) && isDue(t, at, brake);
       })
       .sort((a, b) => Number(b.waited) - Number(a.waited) || (lastVisit.get(keyOf(a.ref)) ?? 0) - (lastVisit.get(keyOf(b.ref)) ?? 0));
-    for (const t of due) await attempt(t.ref.account, keyOf(t.ref), () => visit(t, at));
+    for (const t of due) {
+      if (stopping) break;
+      await attempt(t.ref.account, keyOf(t.ref), () => visit(t, at));
+    }
 
     // Descubrir PRs no depende de que ya haya alguno vigilado: la búsqueda corre por cada cuenta con repos registrados.
     const accounts = repos.list().flatMap(({ id }) => repos.config(id).remote?.account ?? []);
     for (const account of new Set(accounts.filter((a) => active.has(a)))) {
       const { level } = throttle(account);
       const every = level === "normal" ? SEARCH_EVERY_MS : SEARCH_EVERY_MS * SLOW_FACTOR;
-      if (level === "waits-only" || level === "exhausted" || at - (lastSearch.get(account) ?? Number.NEGATIVE_INFINITY) < every) continue;
+      if (stopping || level === "waits-only" || level === "exhausted" || at - (lastSearch.get(account) ?? Number.NEGATIVE_INFINITY) < every) continue;
       await attempt(account, `${account} search`, async () => {
-        for (const t of await discover(account, at)) await attempt(account, keyOf(t.ref), () => visit(t, at));
+        for (const t of await discover(account, at)) {
+          if (stopping) break;
+          await attempt(account, keyOf(t.ref), () => visit(t, at));
+        }
       });
     }
 
     await events.flush(at);
-    await trackers?.poll(at);
+    if (!stopping) await trackers?.poll(at);
   }
 
   /** Un despertar a la vez: si el anterior sigue en vuelo, este no hace nada. */
@@ -328,10 +338,12 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
     tick,
 
     start() {
+      stopping = false;
       timer ??= setInterval(() => void tick(), WATCH_TICK_MS).unref();
     },
 
     async stop() {
+      stopping = true;
       clearInterval(timer);
       timer = undefined;
       await running;
