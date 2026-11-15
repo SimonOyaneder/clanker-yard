@@ -609,6 +609,39 @@ describe("fallos del propio motor", () => {
     expect(h.eventTypes(runId)).toEqual(["run.started", "step.started", "step.finished", "run.parked"]);
     expect(log).toHaveBeenCalled();
   });
+
+  test("un paso que el motor no puede cargar estaciona su corrida sin frenar a las demás", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let calls = 0;
+    h.action("flaky", ["ok"], () => {
+      if (++calls === 1) throw new Error("timeout de red");
+      return { outcome: "ok" };
+    });
+    const single = (id: string) => ({
+      schema: 1,
+      id,
+      name: id,
+      trigger: { type: "manual" },
+      start: "flaky",
+      nodes: { flaky: { type: "action", action: "flaky", args: {}, on: { ok: "@done" } } },
+    });
+    h.save(single("old"));
+    h.save(single("new"));
+
+    const old = h.start("old", { type: "issue", id: "ENG-1" });
+    await vi.advanceTimersByTimeAsync(0);
+    // El paso en backoff apunta a un nodo que su flujo ya no tiene.
+    h.store.db.$client.exec(`UPDATE step_runs SET node_id = 'gone' WHERE run_id = '${old}'`);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const fresh = h.start("new", { type: "issue", id: "ENG-2" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.flows.getRun(fresh)).toMatchObject({ status: "done" });
+    expect(h.flows.getRun(old)).toMatchObject({ status: "parked", parkReason: "needs_human" });
+    expect(h.flows.getRun(old).steps[0]).toMatchObject({ status: "failed", outcome: "error", error: expect.stringContaining("gone") });
+    expect(h.eventTypes(old).slice(-2)).toEqual(["step.finished", "run.parked"]);
+  });
 });
 
 describe("agentes", () => {

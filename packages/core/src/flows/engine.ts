@@ -357,6 +357,16 @@ export function createEngine(deps: EngineDeps): Engine {
     return { run, step, flow, node: target.node, parallel };
   }
 
+  /** El `Job` del paso. Si su flujo o su nodo ya no se pueden cargar, el paso falla, solo su corrida queda parked y devuelve `undefined`. */
+  function loadJob(run: RunRow, step: StepRow): Job | undefined {
+    try {
+      return jobOf(run, step);
+    } catch (error) {
+      parkUnloadable(run, step, describe(error));
+      return undefined;
+    }
+  }
+
   /** Despierta al dispatcher: lo llaman cada transición y el tick de 5 s (backoff vencido, timeouts y sondeos de waits). */
   function wake(): void {
     if (closed) return;
@@ -388,7 +398,8 @@ export function createEngine(deps: EngineDeps): Engine {
       .all();
 
     for (const { step, run } of ready) {
-      const planned = jobOf(run, step);
+      const planned = loadJob(run, step);
+      if (!planned) continue;
       const isAgent = planned.node.type === "agent";
       if (isAgent && activeAgents >= maxAgents) continue;
       const leased = lease(step);
@@ -400,6 +411,31 @@ export function createEngine(deps: EngineDeps): Engine {
         wake();
       });
       inFlight.add(job);
+    }
+  }
+
+  /** El paso (pending o en un wait) no se pudo cargar: falla sin correr y su corrida queda parked. */
+  function parkUnloadable(run: RunRow, step: StepRow, error: string): void {
+    try {
+      store.tx((tx) => {
+        const failed = tx.db
+          .update(stepRuns)
+          .set({ status: "failed", outcome: "error", error, notBefore: null })
+          .where(and(eq(stepRuns.id, step.id), inArray(stepRuns.status, ["pending", "waiting"])))
+          .returning({ id: stepRuns.id })
+          .get();
+        if (!failed) return;
+        tx.emit({
+          type: "step.finished",
+          origin: "core",
+          ...scopeOf(run, step.id),
+          payload: { ...stepPayload(step), outcome: "error", outputHash: null, costMicros: 0, error },
+        });
+        tx.db.update(runs).set({ status: "parked", parkReason: "needs_human" }).where(eq(runs.id, run.id)).run();
+        tx.emit({ type: "run.parked", origin: "core", ...scopeOf(run, step.id), payload: { reason: "needs_human" } });
+      });
+    } catch (cause) {
+      console.error(`No se pudo estacionar la corrida ${run.id}, que no se puede cargar (${error}):`, cause);
     }
   }
 
@@ -953,7 +989,7 @@ export function createEngine(deps: EngineDeps): Engine {
       .where(and(eq(stepRuns.status, "waiting"), isNotNull(stepRuns.waitKey), eq(runs.status, "running")))
       .orderBy(asc(stepRuns.id))
       .all()
-      .map(({ step, run }) => jobOf(run, step));
+      .flatMap(({ step, run }) => loadJob(run, step) ?? []);
   }
 
   /** El wait y los args que el paso guardó al entrar. */
@@ -961,7 +997,13 @@ export function createEngine(deps: EngineDeps): Engine {
     if (job.node.type !== "wait") return { ok: false, error: `El paso ${job.step.id} espera y su nodo no es un wait.` };
     const wait = waits.get(job.node.event);
     if (!wait) return { ok: false, error: `El wait "${job.node.event}" no está registrado.` };
-    const args = wait.args.safeParse(readArtifact(job.step.inputHash));
+    let saved: unknown;
+    try {
+      saved = readArtifact(job.step.inputHash);
+    } catch (error) {
+      return { ok: false, error: describe(error) };
+    }
+    const args = wait.args.safeParse(saved);
     if (!args.success) return { ok: false, error: `Los args de "${job.node.event}" no son válidos: ${formatIssues(args.error)}` };
     return { ok: true, wait, args: args.data };
   }

@@ -240,4 +240,29 @@ describe("wait", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(h.flows.getRun(runId)).toMatchObject({ status: "done", outcome: "done" });
   });
+
+  test("un wait que el motor no puede cargar estaciona su corrida sin frenar el tick de las demás", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.save(flow());
+    h.save({
+      schema: 1,
+      id: "solo",
+      name: "Solo",
+      trigger: { type: "manual" },
+      start: "after",
+      nodes: { after: { type: "action", action: "after", args: {}, on: { ok: "@done" } } },
+    });
+
+    const waiting = h.start("ci", { type: "issue", id: "ENG-1" }, { pr: 7 });
+    await vi.advanceTimersByTimeAsync(0);
+    // El wait apunta a un nodo que su flujo ya no tiene.
+    h.store.db.$client.exec(`UPDATE step_runs SET node_id = 'gone' WHERE run_id = '${waiting}'`);
+    const fresh = h.start("solo", { type: "issue", id: "ENG-2" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.flows.getRun(fresh)).toMatchObject({ status: "done" });
+    expect(h.flows.getRun(waiting)).toMatchObject({ status: "parked", parkReason: "needs_human" });
+    expect(stepOf(h, waiting, "gone")).toMatchObject({ status: "failed", outcome: "error", error: expect.stringContaining("gone") });
+  });
 });
