@@ -40,6 +40,8 @@ export type {
   Usage,
 } from "./agents/runtime";
 
+export { clankerLoopTemplate } from "./template";
+
 export { createFlows, FlowValidationError } from "./flows/flows";
 export type { FlowVersion, Flows, FlowsDeps, SaveFlowOptions } from "./flows/flows";
 export type {

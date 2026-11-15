@@ -1,0 +1,906 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`esquemas de reporte > snapshot 1`] = `
+{
+  "committer": {
+    "plan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "commits": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "hunks": {
+                "description": "Ids de hunks.json.",
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "message": {
+                "type": "string",
+              },
+              "tests": {
+                "description": "Tests que deben pasar en este commit.",
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "whyAtomic": {
+                "description": "Una frase: por qué no se puede dividir más.",
+                "type": "string",
+              },
+            },
+            "required": [
+              "message",
+              "hunks",
+              "tests",
+              "whyAtomic",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "notes": {
+          "description": "Para quien dirige el trabajo, no para quien revisa el PR.",
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "pr": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "type": "string",
+            },
+            "title": {
+              "type": "string",
+            },
+          },
+          "required": [
+            "title",
+            "body",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "commits",
+        "pr",
+        "notes",
+      ],
+      "type": "object",
+    },
+    "route": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "commits": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "hunks": {
+                "description": "Ids de hunks.json.",
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "message": {
+                "type": "string",
+              },
+              "tests": {
+                "description": "Tests que deben pasar en este commit.",
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "whyAtomic": {
+                "description": "Una frase: por qué no se puede dividir más.",
+                "type": "string",
+              },
+            },
+            "required": [
+              "message",
+              "hunks",
+              "tests",
+              "whyAtomic",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "commits",
+      ],
+      "type": "object",
+    },
+  },
+  "dev": {
+    "conflict": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cuts": {
+          "description": "Un corte por razón de cambio, pista para el committer.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "behavior": {
+                "type": "string",
+              },
+              "paths": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "behavior",
+              "paths",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "deletedTests": {
+          "description": "Cada test borrado y dónde vive ahora lo que probaba, o por qué ya no aplica.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "now": {
+                "type": "string",
+              },
+              "test": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "test",
+              "now",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "files": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "rejected": {
+          "description": "Instrucciones que no aplicaste, con la razón.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+              },
+              "reason": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "reason",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "files",
+        "rejected",
+        "deletedTests",
+        "cuts",
+      ],
+      "type": "object",
+    },
+    "council": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cuts": {
+          "description": "Un corte por razón de cambio, pista para el committer.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "behavior": {
+                "type": "string",
+              },
+              "paths": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "behavior",
+              "paths",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "deletedTests": {
+          "description": "Cada test borrado y dónde vive ahora lo que probaba, o por qué ya no aplica.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "now": {
+                "type": "string",
+              },
+              "test": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "test",
+              "now",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "files": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "rejected": {
+          "description": "Instrucciones que no aplicaste, con la razón.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+              },
+              "reason": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "reason",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "files",
+        "rejected",
+        "deletedTests",
+        "cuts",
+      ],
+      "type": "object",
+    },
+    "fix": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cuts": {
+          "description": "Un corte por razón de cambio, pista para el committer.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "behavior": {
+                "type": "string",
+              },
+              "paths": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "behavior",
+              "paths",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "deletedTests": {
+          "description": "Cada test borrado y dónde vive ahora lo que probaba, o por qué ya no aplica.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "now": {
+                "type": "string",
+              },
+              "test": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "test",
+              "now",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "files": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "rejected": {
+          "description": "Instrucciones que no aplicaste, con la razón.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+              },
+              "reason": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "reason",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "files",
+        "rejected",
+        "deletedTests",
+        "cuts",
+      ],
+      "type": "object",
+    },
+    "implement": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cuts": {
+          "description": "Un corte por razón de cambio, pista para el committer.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "behavior": {
+                "type": "string",
+              },
+              "paths": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "behavior",
+              "paths",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "deletedTests": {
+          "description": "Cada test borrado y dónde vive ahora lo que probaba, o por qué ya no aplica.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "now": {
+                "type": "string",
+              },
+              "test": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "test",
+              "now",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "files": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "rejected": {
+          "description": "Instrucciones que no aplicaste, con la razón.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+              },
+              "reason": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "reason",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "files",
+        "rejected",
+        "deletedTests",
+        "cuts",
+      ],
+      "type": "object",
+    },
+    "plan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "approach": {
+          "type": "string",
+        },
+        "assumptions": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "files": {
+          "description": "Archivos que vas a tocar.",
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "issueDoubts": {
+          "description": "Especificaciones de la issue que no hacen sentido. Vacío si no hay.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "alternative": {
+                "description": "Tu alternativa más simple.",
+                "type": "string",
+              },
+              "evidence": {
+                "description": "Ruta (con línea) que lo muestra.",
+                "type": "string",
+              },
+              "says": {
+                "description": "Lo que dice la issue.",
+                "type": "string",
+              },
+              "why": {
+                "description": "Por qué no calza con el repo.",
+                "type": "string",
+              },
+            },
+            "required": [
+              "says",
+              "why",
+              "evidence",
+              "alternative",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "mold": {
+          "description": "Ruta de la funcionalidad parecida que usas de molde.",
+          "type": "string",
+        },
+        "tests": {
+          "description": "Tests que vas a escribir o ajustar.",
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "approach",
+        "files",
+        "tests",
+        "mold",
+        "assumptions",
+        "issueDoubts",
+      ],
+      "type": "object",
+    },
+  },
+  "plan-check": {
+    "check": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "corrections": {
+          "description": "Ajustes concretos que el dev aplica al implementar.",
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "doubts": {
+          "description": "Una entrada por cada issueDoubts del plan.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "decision": {
+                "enum": [
+                  "issue",
+                  "alternative",
+                ],
+                "type": "string",
+              },
+              "says": {
+                "type": "string",
+              },
+              "why": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "says",
+              "decision",
+              "why",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "doubts",
+        "corrections",
+      ],
+      "type": "object",
+    },
+  },
+  "review-bugs": {
+    "re-review": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "description": "Máximo 10, de mayor a menor severidad.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "claim": {
+                "description": "El escenario concreto o la regla que se viola.",
+                "type": "string",
+              },
+              "fix": {
+                "description": "El cambio concreto.",
+                "type": "string",
+              },
+              "id": {
+                "description": "Local al reporte (f1, f2...). El core le pone el id estable.",
+                "type": "string",
+              },
+              "line": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer",
+              },
+              "path": {
+                "type": "string",
+              },
+              "rule": {
+                "description": "Id del patrón ("[2.3]") o sección de AGENTS.md.",
+                "type": "string",
+              },
+              "severity": {
+                "enum": [
+                  "red",
+                  "yellow",
+                  "white",
+                ],
+                "type": "string",
+              },
+              "trivial": {
+                "description": "Solo un white: arreglarlo no suma código ni ramas.",
+                "type": "boolean",
+              },
+            },
+            "required": [
+              "id",
+              "severity",
+              "path",
+              "line",
+              "claim",
+              "fix",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "previous": {
+          "description": "Estado de cada hallazgo del brief. Vacío en la primera ronda.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+              },
+              "status": {
+                "enum": [
+                  "fixed",
+                  "open",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "status",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "findings",
+        "previous",
+      ],
+      "type": "object",
+    },
+    "review": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "description": "Máximo 10, de mayor a menor severidad.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "claim": {
+                "description": "El escenario concreto o la regla que se viola.",
+                "type": "string",
+              },
+              "fix": {
+                "description": "El cambio concreto.",
+                "type": "string",
+              },
+              "id": {
+                "description": "Local al reporte (f1, f2...). El core le pone el id estable.",
+                "type": "string",
+              },
+              "line": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer",
+              },
+              "path": {
+                "type": "string",
+              },
+              "rule": {
+                "description": "Id del patrón ("[2.3]") o sección de AGENTS.md.",
+                "type": "string",
+              },
+              "severity": {
+                "enum": [
+                  "red",
+                  "yellow",
+                  "white",
+                ],
+                "type": "string",
+              },
+              "trivial": {
+                "description": "Solo un white: arreglarlo no suma código ni ramas.",
+                "type": "boolean",
+              },
+            },
+            "required": [
+              "id",
+              "severity",
+              "path",
+              "line",
+              "claim",
+              "fix",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "previous": {
+          "description": "Estado de cada hallazgo del brief. Vacío en la primera ronda.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+              },
+              "status": {
+                "enum": [
+                  "fixed",
+                  "open",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "status",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "findings",
+        "previous",
+      ],
+      "type": "object",
+    },
+  },
+  "triage": {
+    "bot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "fix": {
+                "description": "Solo un valid: el arreglo o el test concreto.",
+                "type": "string",
+              },
+              "id": {
+                "type": "string",
+              },
+              "prRef": {
+                "description": "Solo other_pr: el PR al que corresponde.",
+                "type": "string",
+              },
+              "reply": {
+                "description": "La razón, en una frase, si el ítem no se arregla aquí.",
+                "type": "string",
+              },
+              "verdict": {
+                "enum": [
+                  "valid",
+                  "false_positive",
+                  "not_applicable",
+                  "other_pr",
+                  "flaky",
+                  "foreign",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "verdict",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "items",
+      ],
+      "type": "object",
+    },
+    "ci": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "fix": {
+                "description": "Solo un valid: el arreglo o el test concreto.",
+                "type": "string",
+              },
+              "id": {
+                "type": "string",
+              },
+              "prRef": {
+                "description": "Solo other_pr: el PR al que corresponde.",
+                "type": "string",
+              },
+              "reply": {
+                "description": "La razón, en una frase, si el ítem no se arregla aquí.",
+                "type": "string",
+              },
+              "verdict": {
+                "enum": [
+                  "valid",
+                  "false_positive",
+                  "not_applicable",
+                  "other_pr",
+                  "flaky",
+                  "foreign",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "verdict",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "items",
+      ],
+      "type": "object",
+    },
+    "coverage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "fix": {
+                "description": "Solo un valid: el arreglo o el test concreto.",
+                "type": "string",
+              },
+              "id": {
+                "type": "string",
+              },
+              "prRef": {
+                "description": "Solo other_pr: el PR al que corresponde.",
+                "type": "string",
+              },
+              "reply": {
+                "description": "La razón, en una frase, si el ítem no se arregla aquí.",
+                "type": "string",
+              },
+              "verdict": {
+                "enum": [
+                  "valid",
+                  "false_positive",
+                  "not_applicable",
+                  "other_pr",
+                  "flaky",
+                  "foreign",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "id",
+              "verdict",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "items",
+      ],
+      "type": "object",
+    },
+  },
+}
+`;

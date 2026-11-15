@@ -101,6 +101,13 @@ El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packa
 
 `createBriefs({ workspaces, artifacts }).prepare(...)` (`packages/core/src/agents/brief.ts`) arma el `Brief` de cualquier rol y deja en `<worktree>/.clanker-run/` lo que el agente lee si lo necesita: `issue.md`, `diff.patch` contra la base del lease (incluye cambios sin commit y archivos nuevos), `diff-round.patch` (solo con `since`, el `snapshot` que devolvió la ronda anterior), `hunks.json` (`h1`, `h2`... por hunk, en el orden del patch) y `reports/r<n>-<rol>.json`. La carpeta se agrega a `.git/info/exclude` y cada archivo también se guarda en `artifacts` con una ref a la corrida (`r<ronda>/<archivo>`). El brief lleva a lo más 5 criterios (los ítems bajo "Criterios de aceptación" del cuerpo) y 10 learnings, y cita los archivos con rutas relativas al worktree. Se prueba en `packages/testkit` (necesita repos git reales).
 
+## Plantilla clanker-loop
+
+`clankerLoopTemplate` (`packages/core/src/template/`) son los roles y perfiles del equipo clanker-loop como datos: bodies de defs `role` y `profile` por slug, validados por `Role`/`Profile` de `@clanker/api`. `payloads.ts` tiene los esquemas zod de brief y reporte (el brief se pasa a JSON Schema suelto y el reporte estricto), `prompts.ts` los prompts y las instrucciones por modo, `roles.ts` y `profiles.ts` los ensamblan. El core no importa nada de aquí: el nombre de un rol solo vive en la plantilla y en sus tests.
+
+- Un prompt no pide lo que hace el core (push, PR, checks, respuestas en el PR o el tracker) ni nada propio de un repo o empresa: eso llega como contexto del rol (`pack`, `repo`). El test de la plantilla lo verifica.
+- Un rol o modo nuevo debe calzar con lo que referencian los flujos de la plantilla: su lista está en `template.test.ts`. Tras cambiar un esquema de reporte, `npx vitest run -u packages/core/src/template` regenera el snapshot; revisa el diff.
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:
