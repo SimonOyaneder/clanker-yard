@@ -9,7 +9,7 @@ export { createArtifacts, GC_MAX_AGE_MS, INLINE_MAX_BYTES } from "./artifacts/ar
 export type { Artifact, ArtifactOwner, Artifacts, ArtifactsOptions } from "./artifacts/artifacts";
 
 export { createDefs, DefValidationError } from "./defs/defs";
-export type { Def, DefIssue, DefKind, DefScope, DefVersion, Defs, SaveDef } from "./defs/defs";
+export type { Def, DefIssue, DefScope, DefVersion, Defs, SaveDef } from "./defs/defs";
 
 export { ACTIVITY_INTERVAL_MS, createAgents } from "./agents/agents";
 export type {

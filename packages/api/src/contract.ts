@@ -4,6 +4,7 @@ import { Connection, ConnectionProvider, GitHubPatForm } from "./connections";
 import {
   ArtifactHash,
   ArtifactKind,
+  type DefKind,
   Event,
   EventFilter,
   IssueId,
@@ -29,7 +30,7 @@ import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 export type McpMeta =
   | {
       tool: "list" | "get" | "create" | "update" | "delete";
-      kind: "flow" | "role" | "profile" | "recipe" | "context" | "pack";
+      kind: DefKind;
     }
   | { action: string; annotations?: McpAnnotations };
 

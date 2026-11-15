@@ -3,6 +3,7 @@ import type {
   ArtifactKind,
   ConnectionProvider,
   ConnectionStatus,
+  DefKind,
   Event,
   EventType,
   IssueId,
@@ -58,7 +59,6 @@ export const events = sqliteTable(
   ],
 );
 
-export const DEF_KINDS = ["flow", "role", "profile", "recipe", "context", "pack"] as const;
 export const DEF_SCOPES = ["builtin", "pack", "repo", "user"] as const;
 
 /** Una sola tabla para todo lo versionado: la API y el MCP editan por kind sin casos especiales. */
@@ -66,7 +66,7 @@ export const defs = sqliteTable(
   "defs",
   {
     id: text().primaryKey(),
-    kind: text({ enum: DEF_KINDS }).notNull(),
+    kind: text().$type<DefKind>().notNull(),
     slug: text().notNull(),
     scope: text({ enum: DEF_SCOPES }).notNull(),
     repoId: text("repo_id"),

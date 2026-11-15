@@ -33,6 +33,10 @@ export const ArtifactKind = z.enum([
 ]);
 export type ArtifactKind = z.infer<typeof ArtifactKind>;
 
+/** Lo versionado en `defs`: lo editan la API y el MCP por kind. */
+export const DefKind = z.enum(["flow", "role", "profile", "recipe", "context", "pack"]);
+export type DefKind = z.infer<typeof DefKind>;
+
 /** Sobre qué trabaja una corrida o a qué se refiere un evento. */
 export const SubjectRef = z.object({
   type: z.enum(["issue", "pr"]),
