@@ -147,9 +147,14 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   function startHeartbeat(workspaceId: string, runId: RunId, token: number): AbortSignal {
     const lost = new AbortController();
     const timer = setInterval(() => {
-      if (renew(workspaceId, runId, token)) return;
+      try {
+        if (renew(workspaceId, runId, token)) return;
+        lost.abort();
+      } catch (error) {
+        // Un throw desde el timer tumbaría el proceso (la base ya cerrada al apagar): sin renovar, el lease se perdió.
+        lost.abort(error);
+      }
       stopHeartbeat(workspaceId, token);
-      lost.abort();
     }, leaseTtlMs / 3);
     timer.unref();
     heartbeats.set(beatKey(workspaceId, token), timer);

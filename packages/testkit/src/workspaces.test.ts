@@ -41,14 +41,18 @@ beforeEach(() => {
   store = openStore({ path: ":memory:", now: () => clock });
   repos = [];
   leases = [];
-  workspaces = createWorkspaces({
+  workspaces = workspacesOn(store);
+});
+
+function workspacesOn(store: Store): Workspaces {
+  return createWorkspaces({
     store,
     dataDir,
     repos: (id) => ({ path: repoById.get(id)!.dir, defaultBranch: "main", protectedBranches: ["release"] }),
     identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
     now: () => clock,
   });
-});
+}
 
 afterEach(() => {
   for (const lease of leases) workspaces.release(lease);
@@ -270,6 +274,17 @@ describe("heartbeat", () => {
     // Perder el lease viejo no detiene el latido del vigente.
     expect(leaseUntil(current.workspaceId)).toBe(renewedAt + LEASE_TTL_MS / 3);
     expect(current.lost.aborted).toBe(false);
+  });
+
+  test("si la base falla al renovar, aborta `lost` con el error en vez de lanzar desde el timer", async () => {
+    const id = repo("r1");
+    const closing = openStore({ path: ":memory:", now: () => clock });
+    const lease = await workspacesOn(closing).acquire({ repo: id, branch: "cla-1", base: "main", runId: runA });
+    closing.close();
+
+    expect(() => vi.advanceTimersByTime(LEASE_TTL_MS / 3)).not.toThrow();
+    expect(lease.lost.aborted).toBe(true);
+    expect(lease.lost.reason).toBeInstanceOf(Error);
   });
 });
 
