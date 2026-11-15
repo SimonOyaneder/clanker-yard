@@ -1,5 +1,5 @@
 import type { CachedIssue, ClankerProject, Run } from "@clanker/api"
-import { FileText, GitPullRequest, History, Keyboard, ListTree, MessageSquare, Network, PanelLeft, Paperclip, Play, Plus, RefreshCw, ScrollText, X } from "lucide-react"
+import { Bot, FileText, GitPullRequest, History, Keyboard, Layers, ListTree, MessageSquare, Network, PanelLeft, Paperclip, Play, Plug, Plus, RefreshCw, ScrollText, X } from "lucide-react"
 import type { PullRequest } from "@/types"
 import type { RunTab } from "@/components/project/run-view"
 import type { StepTab } from "@/components/project/step-panel"
@@ -166,6 +166,18 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
           <CommandItem onSelect={run(onGoPrs)}>
             <GitPullRequest /> Ir a Stacks de PR
             <CommandShortcut>⇧⌘P</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={run(actions.goConnections)}>
+            <Plug /> Ir a Conexiones
+            <CommandShortcut>G C</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={run(actions.connectLinear)}>
+            <Layers /> Conectar con Linear
+            <CommandShortcut>⇧⌘L</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={run(() => void actions.testClaude())}>
+            <Bot /> Probar Claude
+            <CommandShortcut>⇧⌘T</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={run(actions.openNewProject)}>
             <Plus /> Nuevo proyecto

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron as electron, type ElectronApplication, expect, type Page, test as base } from "@playwright/test";
@@ -9,11 +9,21 @@ const screensDir = join(desktopDir, "out/screens");
 
 type Theme = "light" | "dark";
 
-const test = base.extend<object, { app: ElectronApplication; window: Page }>({
-  // La app y su core de demo viven todo el archivo: cada test sigue donde dejó la ventana el anterior.
-  app: [
+const test = base.extend<object, { home: string; app: ElectronApplication; window: Page }>({
+  home: [
     async ({}, use) => {
       const home = mkdtempSync(join(tmpdir(), "clanker-e2e-"));
+      try {
+        await use(home);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    { scope: "worker" },
+  ],
+  // La app y su core de demo viven todo el archivo: cada test sigue donde dejó la ventana el anterior.
+  app: [
+    async ({ home }, use) => {
       let core: DemoCore | undefined;
       let app: ElectronApplication | undefined;
       try {
@@ -29,7 +39,6 @@ const test = base.extend<object, { app: ElectronApplication; window: Page }>({
       } finally {
         await app?.close();
         await core?.stop();
-        rmSync(home, { recursive: true, force: true });
       }
     },
     { scope: "worker" },
@@ -203,4 +212,111 @@ test("screenshots de cada vista en claro y oscuro", async ({ window: page }) => 
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toBeHidden();
   }
+});
+
+// El estado de las conexiones del core de demo cambia con este archivo (ver `packages/testkit/scripts/demo-core.ts`).
+function setDemoControl(home: string, control: { clockDays?: number; claude?: string }): void {
+  writeFileSync(join(home, "demo-control.json"), JSON.stringify(control));
+}
+
+const card = (page: Page, name: string) => page.getByRole("group", { name, exact: true });
+const snapBoth = async (page: Page, view: string) => {
+  // Los toasts de la acción anterior taparían la captura.
+  await page.addStyleTag({ content: "[data-sonner-toaster] { visibility: hidden !important; }" });
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme);
+    await snap(page, view, theme);
+  }
+};
+
+test("conexiones sin configurar: cada tarjeta dice qué hacer", async ({ window: page }) => {
+  await sidebar(page).getByRole("button", { name: "Conexiones" }).click();
+  await expect(page.getByRole("heading", { name: "Conexiones" })).toBeVisible();
+
+  for (const name of ["GitHub", "Linear", "Claude"]) await expect(card(page, name).getByText("sin configurar")).toBeVisible();
+  await expect(card(page, "Linear").getByRole("button", { name: "Conectar con Linear" })).toBeVisible();
+  // El repo sin receta no se puede probar; la tabla trae los tres repos de la demo.
+  await expect(page.getByRole("row", { name: /demo-rota/ }).getByText("inválida")).toBeVisible();
+  await expect(page.getByRole("row", { name: /^demo / }).getByRole("button", { name: "Probar receta" })).toBeDisabled();
+  await expect(sidebar(page).getByLabel("Algo está vencido o caído")).toBeHidden();
+  await snapBoth(page, "conexiones-sin-configurar");
+});
+
+test("pegar un PAT contra el GitHub falso deja el chip en verde", async ({ window: page }) => {
+  const github = card(page, "GitHub");
+  await github.getByLabel("Fine-grained personal access token").fill("token-que-no-es");
+  await github.getByRole("button", { name: "Probar" }).click();
+  await expect(github.getByRole("alert")).toContainText("GitHub rechazó el token");
+  await expect(github.getByText("sin configurar")).toBeVisible();
+
+  // El simulador solo acepta este token (`packages/testkit/scripts/demo-core.ts`).
+  await github.getByLabel("Fine-grained personal access token").fill("github_pat_demo");
+  await github.getByRole("button", { name: "Probar" }).click();
+
+  await expect(github.getByText("conectada", { exact: true })).toBeVisible();
+  await expect(github.getByText("@octocat")).toBeVisible();
+  for (const permission of ["Contents", "Pull requests", "Issues", "Checks"]) await expect(github.getByText(new RegExp(`^${permission} · `))).toBeVisible();
+  // Con el token aceptado el campo desaparece: no queda el secreto en pantalla.
+  await expect(github.getByLabel("Fine-grained personal access token")).toBeHidden();
+});
+
+test("conectar con Linear espera la aprobación en el navegador y la cuenta aparece sola", async ({ app, window: page }) => {
+  // El main solo abre https, así que el link del Linear falso (http) no abre nada: lo recogemos del IPC y lo aprobamos nosotros.
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.on("host:open-external", (_event, url: string) => ((globalThis as { openedUrl?: string }).openedUrl = url));
+  });
+  const linear = card(page, "Linear");
+  await linear.getByRole("button", { name: "Conectar con Linear" }).click();
+  await expect(linear.getByText("Esperando que apruebes en el navegador")).toBeVisible();
+
+  const openedUrl = () => app.evaluate(() => (globalThis as { openedUrl?: string }).openedUrl);
+  await expect.poll(openedUrl).toBeTruthy();
+  const url = (await openedUrl())!;
+  // Aprobar es abrir el link: el Linear falso redirige al loopback del core, que cambia el código por los tokens.
+  expect((await fetch(url)).ok).toBe(true);
+
+  await expect(linear.getByText("conectada", { exact: true })).toBeVisible();
+  await expect(linear.getByText("clanker-yard", { exact: true }).first()).toBeVisible();
+});
+
+test("probar Claude muestra el plan y su uso, y la barra vuelve al pie de la barra lateral", async ({ window: page }) => {
+  const claude = card(page, "Claude");
+  await claude.getByRole("button", { name: "Probar", exact: true }).click();
+
+  await expect(claude.getByText("lista", { exact: true })).toBeVisible();
+  await expect(claude.getByText("Claude Code 2.1.325 · plan max")).toBeVisible();
+  await expect(claude.getByRole("meter", { name: /ventana de 5 h/ })).toHaveAttribute("aria-valuenow", "15");
+  await expect(claude.getByRole("meter", { name: /ventana de 7 días/ })).toHaveAttribute("aria-valuenow", "42");
+  await expect(sidebar(page).getByRole("meter", { name: /ventana de 5 h/ })).toHaveAttribute("aria-valuenow", "15");
+  await expect(sidebar(page).getByLabel("Algo está vencido o caído")).toBeHidden();
+  await snapBoth(page, "conexiones-ok");
+});
+
+test("probar la receta de un repo muestra su log en vivo en un Sheet", async ({ window: page }) => {
+  await page.getByRole("row", { name: /demo-receta/ }).getByRole("button", { name: "Probar receta" }).click();
+
+  const sheet = page.getByRole("dialog", { name: /Probar receta · demo-receta/ });
+  await expect(sheet.getByRole("log", { name: "Salida de la receta" })).toContainText("instalando dependencias 1/3");
+  await expect(sheet.getByText("La receta corrió completa.")).toBeVisible();
+  await expect(sheet.getByRole("log")).toContainText("instalando dependencias 3/3");
+  await snapBoth(page, "receta-sheet");
+  await page.keyboard.press("Escape");
+
+  await expect(page.getByRole("row", { name: /demo-receta/ }).getByText("ok", { exact: true })).toBeVisible();
+});
+
+test("con el token vencido y el login de Claude caído, los chips y el punto rojo lo dicen", async ({ home, window: page }) => {
+  // 40 días después el PAT (vence en 35) y el refresh token de Linear (30) ya no valen; Claude pierde la sesión.
+  setDemoControl(home, { clockDays: 40, claude: "login_expired" });
+  await page.getByRole("button", { name: "core en vivo" }).click();
+  const claude = card(page, "Claude");
+  await claude.getByRole("button", { name: "Probar", exact: true }).click();
+
+  await expect(card(page, "GitHub").getByText("vencida", { exact: true })).toBeVisible();
+  await expect(card(page, "GitHub").getByLabel("Fine-grained personal access token")).toBeVisible();
+  await expect(card(page, "Linear").getByText("vencida", { exact: true })).toBeVisible();
+  await expect(claude.getByText("sesión vencida", { exact: true })).toBeVisible();
+  await expect(claude.getByRole("alert")).toContainText("claude auth login");
+  await expect(sidebar(page).getByLabel("Algo está vencido o caído")).toBeVisible();
+  await snapBoth(page, "conexiones-vencida");
 });

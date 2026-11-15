@@ -81,6 +81,9 @@ export type {
   LinearOptions,
 } from "./connections/connections";
 export { LinearAuthError } from "./linear/oauth";
+export type { LinearEndpoints } from "./linear/oauth";
+export { startFakeLinear } from "./linear/fake-linear";
+export type { FakeLinear, FakeLinearOptions } from "./linear/fake-linear";
 export { GitHubPatError } from "./github/pat";
 export { PrNotFoundError } from "./github/pr-query";
 export { healthyGitHub, recorded, startFakeGitHub } from "./github/fake-github";

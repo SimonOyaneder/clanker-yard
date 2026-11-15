@@ -6,6 +6,7 @@ import { type AppData, AppDataProvider, useAppData } from "@/app-data"
 import { AppSidebar } from "@/components/app-sidebar"
 import { CommandPalette } from "@/components/command-palette"
 import { Shortcut } from "@/components/common"
+import { ConnectionsView } from "@/components/connections/connections-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { ProjectView, issuesById } from "@/components/project/project-view"
 import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
@@ -17,9 +18,12 @@ import { Button } from "@/components/ui/button"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { useClaudePlan } from "@/hooks/use-claude-plan"
+import { useLinearLogin } from "@/hooks/use-linear-login"
 import { LiveProvider, useLive, useLiveQuery } from "@/hooks/use-live"
 import { type Host, HostProvider, useHost } from "@/host"
 import { type AppActions, AppActionsContext } from "@/lib/app-context"
+import { connectionOf, needsAttention } from "@/lib/connections"
 import { useCoreState } from "@/lib/core-status"
 import { issueKey } from "@/lib/format"
 import { reviewStatus } from "@/lib/pr-status"
@@ -28,11 +32,13 @@ import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 import { Hint } from "./components/common"
 
-type Module = "projects" | "prs"
+type Module = "projects" | "prs" | "connections"
 // Dónde está el usuario: lo que guarda el historial de atrás/adelante.
 type Loc = { module: Module; slug: string | null; runId: RunId | null }
 
-const sameLoc = (a: Loc, b: Loc) => a.module === b.module && (a.module === "prs" || (a.slug === b.slug && a.runId === b.runId))
+const sameLoc = (a: Loc, b: Loc) => a.module === b.module && (a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId))
+
+const MODULES: readonly Module[] = ["projects", "prs", "connections"]
 
 const MAX_HISTORY = 50
 
@@ -76,10 +82,18 @@ function Shell() {
   const projectsQuery = useLiveQuery("projects", () => appData.projects())
   const liveRunsQuery = useLiveQuery("live-runs", () => appData.runs({ status: LIVE_STATUSES }))
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
+  const connectionsQuery = useLiveQuery("connections", () => appData.connections())
+  const connections = useMemo(() => connectionsQuery.data ?? [], [connectionsQuery.data])
+  const claudePlan = useClaudePlan(connectionsQuery.data, connectionsQuery.reload)
+  const linearLogin = useLinearLogin(connectionOf(connections, "linear"), connectionsQuery.reload)
+  const startLinearLogin = linearLogin.start
+  const testClaude = claudePlan.test
+  // El punto rojo de Conexiones: algo vencido, revocado o caído.
+  const connectionsAlert = needsAttention(connections, claudePlan.status)
 
   const [slug, setSlug] = useState<string | null>(() => readPref<string | null>("slug", null))
   const [runId, setRunId] = useState<RunId | null>(null)
-  const [module, setModuleState] = useState<Module>(() => (readPref<string>("module", "projects") === "prs" ? "prs" : "projects"))
+  const [module, setModuleState] = useState<Module>(() => MODULES.find((m) => m === readPref<string>("module", "projects")) ?? "projects")
   const [runTab, setRunTabState] = useState<RunTab>(() => (readPref<string>("runTab", "graph") === "timeline" ? "timeline" : "graph"))
   // El panel del paso: qué nodo y qué pestaña. El nodo es de una corrida, así que al abrir otra se cierra.
   const [stepSel, setStepSel] = useState<{ runId: RunId; node: string } | null>(null)
@@ -224,6 +238,44 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goBack, goForward, selectProject, barSlugs.join(",")])
 
+  const goConnections = useCallback(() => go({ module: "connections" }), [go])
+  const connectLinear = useCallback(() => {
+    goConnections()
+    void startLinearLogin()
+  }, [goConnections, startLinearLogin])
+  const probeClaude = useCallback(async () => {
+    goConnections()
+    const status = await testClaude()
+    if (status) toast(`Claude: ${status.state === "ready" ? "lista" : (status.message ?? status.state)}`)
+  }, [goConnections, testClaude])
+
+  // G y luego C (como en Linear) va a Conexiones; ⇧⌘L conecta Linear y ⇧⌘T prueba Claude.
+  useEffect(() => {
+    let armed: ReturnType<typeof setTimeout> | undefined
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "KeyL" || e.code === "KeyT")) {
+        e.preventDefault()
+        if (e.code === "KeyL") connectLinear()
+        else void probeClaude()
+        return
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
+      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return
+      const key = e.key.toLowerCase()
+      if (armed && key === "c") {
+        e.preventDefault()
+        goConnections()
+      }
+      clearTimeout(armed)
+      armed = key === "g" ? setTimeout(() => (armed = undefined), 1000) : undefined
+    }
+    window.addEventListener("keydown", onKey)
+    return () => {
+      clearTimeout(armed)
+      window.removeEventListener("keydown", onKey)
+    }
+  }, [goConnections, connectLinear, probeClaude])
+
   const refresh = useCallback(() => {
     if (module === "prs") {
       forcePrs.current = true
@@ -238,6 +290,9 @@ function Shell() {
       selectProject,
       openRun: (s, id) => go({ module: "projects", slug: s, runId: id }),
       openNewProject: () => setNewProjectOpen(true),
+      goConnections,
+      connectLinear,
+      testClaude: probeClaude,
       startRun: async (p: ClankerProject, issue: CachedIssue) => {
         try {
           const started = await appData.startRun({ projectId: p.id, issueId: issue.id })
@@ -248,7 +303,7 @@ function Shell() {
       },
       refresh,
     }),
-    [selectProject, go, appData, refresh],
+    [selectProject, go, appData, refresh, goConnections, connectLinear, probeClaude],
   )
 
   // Menú nativo (accelerators) y clicks en notificaciones.
@@ -315,6 +370,10 @@ function Shell() {
           liveRuns={liveRunsQuery.data ?? []}
           selected={project?.slug ?? null}
           prsActive={module === "prs"}
+          connectionsActive={module === "connections"}
+          connectionsAlert={connectionsAlert}
+          onSelectConnections={goConnections}
+          plan={claudePlan}
           prsBadge={prs.data ? (prsNeedingAction ? { count: prsNeedingAction, tone: "red" } : prsReady ? { count: prsReady, tone: "green" } : { count: prs.data.prs.length, tone: "muted" }) : null}
           onSelectPrs={() => go({ module: "prs" })}
           connected={live.connected}
@@ -332,6 +391,8 @@ function Shell() {
             <nav aria-label="Ubicación" className="flex min-w-0 flex-1 items-center gap-1 text-[13px]">
               {module === "prs" ? (
                 <span className="truncate px-1.5 font-medium">Stacks de PR</span>
+              ) : module === "connections" ? (
+                <span className="truncate px-1.5 font-medium">Conexiones</span>
               ) : project ? (
                 runId ? (
                   <>
@@ -361,6 +422,18 @@ function Shell() {
           {module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
               <PrsView data={prs.data ?? null} error={prs.error} onRefresh={refresh} />
+            </main>
+          ) : module === "connections" ? (
+            <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>
+              <div className="px-6 pt-5 pb-10">
+                {connectionsQuery.data ? (
+                  <ConnectionsView connections={connections} plan={claudePlan} linearLogin={linearLogin} onChanged={connectionsQuery.reload} />
+                ) : connectionsQuery.error ? (
+                  <Problem message={connectionsQuery.error} onRetry={connectionsQuery.reload} />
+                ) : (
+                  <Loading />
+                )}
+              </div>
             </main>
           ) : (
             <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>

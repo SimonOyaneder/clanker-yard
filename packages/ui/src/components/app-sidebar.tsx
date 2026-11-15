@@ -1,5 +1,7 @@
 import type { ClankerProject, Run } from "@clanker/api"
-import { ChevronRight, Copy, GitPullRequest, Keyboard, Plus, RefreshCw, Search } from "lucide-react"
+import { ChevronRight, Copy, GitPullRequest, Keyboard, Plug, Plus, RefreshCw, Search } from "lucide-react"
+import { PlanUsage } from "@/components/connections/plan-usage"
+import type { ClaudePlan } from "@/hooks/use-claude-plan"
 import type { CoreState } from "@/host"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -30,6 +32,11 @@ interface Props {
   liveRuns: Run[]
   selected: string | null
   prsActive: boolean
+  connectionsActive: boolean
+  /** Algo está vencido o caído: enciende el punto rojo de Conexiones. */
+  connectionsAlert: boolean
+  onSelectConnections: () => void
+  plan: ClaudePlan
   prsBadge: { count: number; tone: "red" | "green" | "muted" } | null
   onSelectPrs: () => void
   connected: boolean
@@ -85,7 +92,7 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ projects, liveRuns, selected, prsActive, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
+export function AppSidebar({ projects, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, plan, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
   const actions = useAppActions()
   const status = footerStatus(core, { error, connected })
   const inBar = barProjects(projects)
@@ -97,7 +104,7 @@ export function AppSidebar({ projects, liveRuns, selected, prsActive, prsBadge, 
   const archived = group("archived")
 
   const item = (p: ClankerProject, index: number | null) => (
-    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!prsActive && p.slug === selected} />
+    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!prsActive && !connectionsActive && p.slug === selected} />
   )
 
   return (
@@ -187,9 +194,29 @@ export function AppSidebar({ projects, liveRuns, selected, prsActive, prsBadge, 
             </SidebarGroup>
           </Collapsible>
         ) : null}
+
+        <SidebarGroup className="py-1">
+          <SidebarGroupLabel>Configurar</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={connectionsActive} onClick={onSelectConnections} title={`Conexiones · G luego C${connectionsAlert ? " · algo está vencido o caído" : ""}`} className="h-8 pr-8">
+                  <Plug className="size-4" />
+                  <span>Conexiones</span>
+                </SidebarMenuButton>
+                {connectionsAlert ? (
+                  <SidebarMenuBadge aria-label="Algo está vencido o caído">
+                    <span className="size-2 rounded-full bg-destructive" />
+                  </SidebarMenuBadge>
+                ) : null}
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="gap-2.5 border-t border-sidebar-border px-3 pt-3 pb-2">
+        <PlanUsage plan={plan} />
         <div className="flex items-center justify-between gap-2">
           <Hint label="Actualizar ahora" keys="⌘R" side="top">
             <button type="button" onClick={actions.refresh} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">

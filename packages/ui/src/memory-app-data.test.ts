@@ -31,3 +31,50 @@ test("los PRs de ejemplo arman un stack de 4 con su raíz y el resto sueltos", a
   expect(groups[0]?.prIds).toHaveLength(4)
   expect(groups.filter((g) => g.prIds.length === 1)).toHaveLength(prs.length - 4)
 })
+
+test("las conexiones de ejemplo traen GitHub en regla, Linear vencida y Claude sin configurar", async () => {
+  const connections = await createMemoryAppData(NOW).connections()
+
+  expect(connections.map((c) => [c.provider, c.status])).toEqual([
+    ["github", "active"],
+    ["linear", "expired"],
+  ])
+})
+
+test("pegar un PAT conecta GitHub, un PAT rechazado dice por qué y no cambia nada", async () => {
+  const data = createMemoryAppData(NOW)
+
+  await expect(data.setGithubPat("bad-token")).rejects.toThrow(/rechazó el token/)
+  expect(await data.setGithubPat("github_pat_ok")).toMatchObject({ provider: "github", status: "active", scopes: expect.arrayContaining(["contents", "checks"]) })
+  expect((await data.connections()).filter((c) => c.provider === "github")).toHaveLength(1)
+})
+
+test("conectar Linear deja la cuenta activa y desconectar la quita", async () => {
+  const data = createMemoryAppData(NOW)
+
+  await data.linearAuth()
+  expect((await data.connections()).find((c) => c.provider === "linear")?.status).toBe("active")
+
+  await data.disconnect("linear", "clanker-yard")
+  expect((await data.connections()).some((c) => c.provider === "linear")).toBe(false)
+})
+
+test("probar Claude conecta la cuenta y devuelve el plan con sus dos barras", async () => {
+  const data = createMemoryAppData(NOW)
+
+  const status = await data.testClaude()
+
+  expect(status).toMatchObject({ state: "ready", plan: "max", usage: { fiveHour: { utilization: 0.15 }, sevenDay: { utilization: 0.42 } } })
+  expect((await data.connections()).find((c) => c.provider === "claude")).toMatchObject({ account: "subscription", status: "active" })
+})
+
+test("probar la receta de un repo sin receta válida lo rechaza diciendo cuál es", async () => {
+  const data = createMemoryAppData(NOW)
+  const rows = await data.repos()
+  const found = rows.find((r) => r.recipe.status === "found")!
+  const missing = rows.find((r) => r.recipe.status === "missing")!
+
+  await expect(data.testRecipe(missing.repo.id)).rejects.toThrow(/web no tiene una receta válida/)
+  expect(await data.testRecipe(found.repo.id)).toMatchObject({ ok: true })
+  expect((await data.repos()).find((r) => r.repo.id === found.repo.id)?.lastTest?.ok).toBe(true)
+})

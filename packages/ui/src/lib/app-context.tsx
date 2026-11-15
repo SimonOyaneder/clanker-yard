@@ -9,6 +9,11 @@ export interface AppActions {
   /** Lanza el flujo del proyecto sobre la issue y avisa el resultado con un toast. */
   startRun: (project: ClankerProject, issue: CachedIssue) => Promise<void>
   refresh: () => void
+  goConnections: () => void
+  /** Va a Conexiones e inicia el login de Linear en el navegador. */
+  connectLinear: () => void
+  /** Va a Conexiones, prueba Claude y avisa el resultado con un toast. */
+  testClaude: () => Promise<void>
 }
 
 export const AppActionsContext = createContext<AppActions | null>(null)

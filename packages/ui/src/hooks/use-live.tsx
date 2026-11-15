@@ -1,3 +1,4 @@
+import type { Event } from "@clanker/api"
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useEffectEvent, useRef, useState } from "react"
 import { useEvents } from "@/hooks/use-events"
 
@@ -7,9 +8,11 @@ interface Live {
   connected: boolean
   /** Hace que todas las consultas vivas vuelvan a pedir sus datos ahora. */
   refresh: () => void
+  /** Recibe cada evento que llega desde ahora (no el relleno de antes de suscribirse). Devuelve cómo dejar de recibir. */
+  subscribe: (listener: (event: Event) => void) => () => void
 }
 
-const LiveContext = createContext<Live>({ revision: 0, connected: false, refresh: () => {} })
+const LiveContext = createContext<Live>({ revision: 0, connected: false, refresh: () => {}, subscribe: () => () => {} })
 
 // Agrupa los eventos que llegan juntos (el relleno inicial trae cientos) en un solo cambio de `revision`.
 const COALESCE_MS = 120
@@ -17,7 +20,12 @@ const COALESCE_MS = 120
 export function LiveProvider({ children }: { children: ReactNode }) {
   const [revision, setRevision] = useState(0)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const connected = useEvents(() => {
+  const listeners = useRef(new Set<(event: Event) => void>())
+  const connected = useEvents((event) => {
+    for (const listener of listeners.current) listener(event)
+    // La salida de una prueba de receta es un log, no un cambio de lo que muestran las consultas: sin esto
+    // cada línea haría releer todo.
+    if (event.type === "recipe.test_output") return
     timer.current ??= setTimeout(() => {
       timer.current = undefined
       setRevision((r) => r + 1)
@@ -30,7 +38,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     if (connected) setRevision((r) => r + 1)
   }, [connected])
   const refresh = useCallback(() => setRevision((r) => r + 1), [])
-  return <LiveContext.Provider value={{ revision, connected, refresh }}>{children}</LiveContext.Provider>
+  const subscribe = useCallback((listener: (event: Event) => void) => {
+    listeners.current.add(listener)
+    return () => void listeners.current.delete(listener)
+  }, [])
+  return <LiveContext.Provider value={{ revision, connected, refresh, subscribe }}>{children}</LiveContext.Provider>
 }
 
 export const useLive = () => useContext(LiveContext)

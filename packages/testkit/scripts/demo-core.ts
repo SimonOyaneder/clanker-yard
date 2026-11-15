@@ -1,13 +1,20 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient } from "@clanker/api";
 import { removeCoreJson, writeCoreJson } from "@clanker/api/node";
-import { createConnections, createFileSecrets, createRepos, openStore, startCore } from "@clanker/core";
-import { createFakeRuntime, tempGitRepo } from "../src/index";
+import { createConnections, createFileSecrets, createRepos, openStore, startCore, startFakeLinear } from "@clanker/core";
+import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
-// y un repo git temporal. Publica `core.json` en CLANKER_HOME, así la app de escritorio (o la CLI) se
-// conecta a él como a un core real; las corridas duran unos 7 s para verlas avanzar en la UI.
+// y tres repos git temporales (sin receta, con una válida y con una inválida). Publica `core.json` en
+// CLANKER_HOME, así la app de escritorio (o la CLI) se conecta a él como a un core real; las corridas duran
+// unos 7 s para verlas avanzar en la UI.
+//
+// Las conexiones nunca salen a internet: GitHub es el simulador (`startGitHubSim`, acepta el PAT
+// `github_pat_demo`), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
+// esperar, escribe `<CLANKER_HOME>/demo-control.json` con `{ "clockDays": 40, "claude": "login_expired" }`: el
+// reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario.
 //
 //   CLANKER_HOME=$(mktemp -d) npm run demo-core -w @clanker/testkit
 
@@ -19,11 +26,45 @@ if (!home) {
 
 const fixtures = fileURLToPath(new URL("../fixtures/runs/juguete-lento", import.meta.url));
 const store = openStore({ path: join(home, "clanker.db") });
-const repo = tempGitRepo({});
+const repo = tempGitRepo({ remote: true });
+const withRecipe = tempGitRepo({
+  commits: [
+    {
+      message: "chore: add the recipe",
+      files: {
+        ".clanker/recipe.json": JSON.stringify({
+          version: 1,
+          requires: [{ name: "Git", check: "git --version" }],
+          setup: { worktree: ["for i in 1 2 3; do echo \"instalando dependencias $i/3\"; sleep 0.3; done"], slot: [] },
+        }),
+      },
+    },
+  ],
+});
+const withBrokenRecipe = tempGitRepo({ commits: [{ message: "chore: add a broken recipe", files: { ".clanker/recipe.json": JSON.stringify({ version: 1, checks: ["no-existe"] }) } }] });
+
+const github = await startGitHubSim({ origin: repo, token: "github_pat_demo" });
+const linear = await startFakeLinear({ clientId: "demo-client" });
+const control = (): { clockDays?: number; claude?: FakeClaudeScenario } => {
+  try {
+    return JSON.parse(readFileSync(join(home, "demo-control.json"), "utf8"));
+  } catch {
+    return {};
+  }
+};
+// El reloj de las conexiones parte de una fecha fija: el PAT del simulador vence el 2026-12-20 y la demo no debe
+// depender del día en que se corre.
+const CLOCK_START = Date.UTC(2026, 10, 15, 12);
+const claude = createFakeClaude({ scenario: () => control().claude ?? "ready" });
 const core = await startCore({
   store,
   dataDir: home,
-  connections: createConnections(store, createFileSecrets({ dir: join(home, "secrets") })),
+  connections: createConnections(store, createFileSecrets({ dir: join(home, "secrets") }), {
+    github: { baseUrl: github.baseUrl },
+    linear: { clientId: "demo-client", redirectPort: 0, endpoints: linear.endpoints },
+    claude: claude.options,
+    now: () => CLOCK_START + (control().clockDays ?? 0) * 86_400_000,
+  }),
   runtimes: [createFakeRuntime({ fixtures, transcripts: join(home, "transcripts") })],
   env: { CORE_RUNTIME: "fake" },
   coreVersion: "0.0.0-demo",
@@ -31,7 +72,10 @@ const core = await startCore({
 });
 
 const client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
-const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+const repos = createRepos(store);
+const repoId = repos.add({ name: "demo", path: repo.dir });
+repos.add({ name: "demo-receta", path: withRecipe.dir });
+repos.add({ name: "demo-rota", path: withBrokenRecipe.dir });
 const project = await client.projects.create({
   slug: "demo",
   name: "Demo",
@@ -61,7 +105,9 @@ function stop(): Promise<void> {
     removeCoreJson(home!);
     await core.close();
     store.close();
-    repo.cleanup();
+    await Promise.all([github.close(), linear.close()]);
+    claude.cleanup();
+    for (const r of [repo, withRecipe, withBrokenRecipe]) r.cleanup();
     process.exit(0);
   })();
   return stopping;

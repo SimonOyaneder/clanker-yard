@@ -3,9 +3,18 @@ import type {
   ArtifactHash,
   CachedIssue,
   ClankerProject,
+  ClaudeMode,
+  ClaudeStatus,
+  Connection,
+  ConnectionProvider,
   Event,
+  GitHubPatForm,
   NewProject,
   ProjectId,
+  RecipeStatus,
+  RecipeTestResult,
+  Repo,
+  RepoId,
   Run,
   RunDetail,
   RunFilter,
@@ -17,6 +26,13 @@ import type {
 } from "@clanker/api"
 import { createContext, useContext } from "react"
 import type { PRsResult } from "@/types"
+
+/** Un repo registrado con lo que hay de su receta y cómo salió su última prueba (`null` si nunca se probó). */
+export interface RepoRow {
+  repo: Repo
+  recipe: RecipeStatus
+  lastTest: { ok: boolean; at: number } | null
+}
 
 // De dónde saca datos la UI y a quién le pide acciones. Los dominios son los del contrato de
 // `@clanker/api`. `createCoreAppData` habla con el core; `createMemoryAppData` sirve datos de ejemplo
@@ -43,6 +59,24 @@ export interface AppData {
    */
   events(after: number, signal: AbortSignal): Promise<AsyncIterable<Event>>
   prs(force: boolean): Promise<PRsResult>
+  /** Las cuentas conectadas, sin tokens. */
+  connections(): Promise<Connection[]>
+  /** El link prellenado del formulario del PAT y la lista de permisos que necesita. */
+  githubPatForm(): Promise<GitHubPatForm>
+  /** Valida el PAT contra GitHub y lo conecta; el mensaje del rechazo dice qué cambiar. */
+  setGithubPat(token: string): Promise<Connection>
+  /** Inicia el login de Linear y devuelve el link para el navegador: lo abre el host y la cuenta aparece sola (`connection.changed`). */
+  linearAuth(): Promise<string>
+  /** Una llamada mínima a Claude: gasta un poco de cuota, así que solo la pide una persona o el refresco espaciado del plan. */
+  testClaude(mode?: ClaudeMode): Promise<ClaudeStatus>
+  /** La prueba antes de guardar: una key rechazada no queda guardada. */
+  setClaudeApiKey(key: string): Promise<Connection>
+  disconnect(provider: ConnectionProvider, account: string): Promise<void>
+  repos(): Promise<RepoRow[]>
+  /** Corre la receta del repo en un worktree desechable y vuelve al terminar; la salida llega mientras tanto como eventos `recipe.test_output`. */
+  testRecipe(repoId: RepoId): Promise<RecipeTestResult>
+  /** Registra el checkout de `path` (la raíz de un repo de git). */
+  addRepo(path: string): Promise<Repo>
 }
 
 const AppDataContext = createContext<AppData | null>(null)

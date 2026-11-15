@@ -16,6 +16,7 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
     title: "Navegación",
     items: [
       ["Stacks de PR", "⇧⌘P"],
+      ["Conexiones (G y luego C)", "GC"],
       ["Ir al proyecto 1…9 de la barra", "⌘1"],
       ["Atrás (también ⌘[ y el botón de pulgar trasero)", "⌘←"],
       ["Adelante (también ⌘] y el botón de pulgar delantero)", "⌘→"],
@@ -38,6 +39,13 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
       ["Reporte", "R"],
       ["Artefactos", "A"],
       ["Intentos", "I"],
+    ],
+  },
+  {
+    title: "Conexiones",
+    items: [
+      ["Conectar con Linear", "⇧⌘L"],
+      ["Probar Claude (llamada mínima, gasta un poco de cuota)", "⇧⌘T"],
     ],
   },
   {
