@@ -108,6 +108,12 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
   },
+  decisions: {
+    list: os.decisions.list.handler(() => []),
+    get: os.decisions.get.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+  },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
     stream: os.events.stream.handler(async function* ({ input }) {

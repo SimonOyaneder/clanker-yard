@@ -4,6 +4,7 @@ import { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubPatForm
 import {
   ArtifactHash,
   ArtifactKind,
+  DecisionId,
   type DefKind,
   Event,
   EventFilter,
@@ -12,6 +13,7 @@ import {
   RepoId,
   RunId,
 } from "./domain";
+import { Decision, DecisionFilter } from "./decisions";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
 import { PrRef, PrState } from "./prs";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
@@ -242,5 +244,12 @@ const runs = {
   start: base.input(StartRun).output(RunDetail),
 };
 
-export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs };
+const decisions = {
+  /** La bandeja: de la más reciente a la más antigua. Sin filtro trae todas, resueltas incluidas. */
+  list: base.input(DecisionFilter.default({})).output(z.array(Decision)),
+  /** `NOT_FOUND` si no existe. */
+  get: base.input(z.object({ id: DecisionId })).output(Decision),
+};
+
+export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions };
 export type Contract = typeof contract;

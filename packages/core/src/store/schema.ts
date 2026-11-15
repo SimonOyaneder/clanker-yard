@@ -4,6 +4,7 @@ import type {
   ConnectionProvider,
   ConnectionStatus,
   Conventions,
+  DecisionId,
   DefKind,
   Event,
   EventType,
@@ -590,4 +591,38 @@ export const procs = sqliteTable(
     startedAt: integer("started_at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.bootId, t.pid] })],
+);
+
+export const DECISION_KINDS = ["gate", "needs_human", "question", "review_note", "note", "alert"] as const;
+export const DECISION_STATUSES = ["pending", "accepted", "rejected", "answered", "expired", "superseded"] as const;
+
+/**
+ * La bandeja. Sin FK a `runs` ni a `projects`, como `runs.project_id`: una decisión sobrevive a su
+ * corrida y los tests siembran filas sueltas.
+ */
+export const decisions = sqliteTable(
+  "decisions",
+  {
+    id: text().$type<DecisionId>().primaryKey(),
+    projectId: text("project_id").$type<ProjectId>(),
+    runId: text("run_id").$type<RunId>(),
+    stepRunId: text("step_run_id").$type<StepRunId>(),
+    subject: text({ mode: "json" }).$type<SubjectRef>(),
+    kind: text({ enum: DECISION_KINDS }).notNull(),
+    title: text().notNull(),
+    body: text().notNull(),
+    options: text({ mode: "json" }).$type<string[]>().notNull(),
+    status: text({ enum: DECISION_STATUSES }).notNull(),
+    resolution: text({ mode: "json" }),
+    resolvedBy: text("resolved_by"),
+    createdAt: integer("created_at").notNull(),
+    resolvedAt: integer("resolved_at"),
+  },
+  (t) => [
+    index("decisions_status_project").on(t.status, t.projectId),
+    index("decisions_run").on(t.runId),
+    check("decisions_options_json", sql`json_valid(${t.options})`),
+    check("decisions_subject_json", sql`${t.subject} IS NULL OR json_valid(${t.subject})`),
+    check("decisions_resolution_json", sql`${t.resolution} IS NULL OR json_valid(${t.resolution})`),
+  ],
 );

@@ -6,6 +6,7 @@ import { type AgentRuntime, selectRuntime } from "./agents/runtime";
 import { createArtifacts } from "./artifacts/artifacts";
 import { installBuiltins } from "./builtin/install";
 import type { Connections } from "./connections/connections";
+import { createDecisions } from "./decisions/decisions";
 import { createDefs, type Defs } from "./defs/defs";
 import { createFlows } from "./flows/flows";
 import { createPacks } from "./packs/packs";
@@ -96,6 +97,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local } }),
     flows,
     artifacts,
+    decisions: createDecisions(store),
     bootId,
     coreVersion: opts.coreVersion,
     dataDir,

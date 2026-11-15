@@ -11,6 +11,7 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
+import { openNote } from "../decisions/decisions";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
 import { actionEffects, agentSessions, runs, stepRuns, type DefPin } from "../store/schema";
@@ -172,14 +173,20 @@ class StaleStepError extends Error {}
 
 /** Cómo terminó una ejecución, antes de decidir qué hace el motor con ella. */
 type Settled =
-  /** Un outcome del nodo, o `error`/`timeout`/`skipped`: sigue su edge. */
-  | { kind: "outcome"; outcome: string; output?: unknown; error?: string }
+  /** Un outcome del nodo, o `error`/`timeout`/`skipped`: sigue su edge. `notes` son las `decisions` del reporte del agente. */
+  | { kind: "outcome"; outcome: string; output?: unknown; error?: string; notes?: Note[] }
   /** Una excepción: se reintenta según `retry`. */
   | { kind: "failed"; error: string }
   /** Falló el entorno, no el paso: vuelve a pending sin gastar intento. */
   | { kind: "deferred"; error: string; notBefore: number }
   /** Un parallel que abrió sus ramas: el padre espera y lo cierra la transacción de la última rama. */
   | { kind: "waiting" };
+
+/** Una nota que el agente dejó en su reporte (`Report.decisions`). */
+interface Note {
+  title: string;
+  body: string;
+}
 
 interface Job {
   run: RunRow;
@@ -720,7 +727,7 @@ export function createEngine(deps: EngineDeps): Engine {
   function fromAgentResult(result: AgentResult): Settled {
     switch (result.status) {
       case "success":
-        return { kind: "outcome", outcome: result.report.outcome, output: result.report.payload };
+        return { kind: "outcome", outcome: result.report.outcome, output: result.report.payload, notes: result.report.decisions };
       case "error":
         return { kind: "failed", error: result.message };
       case "login_expired":
@@ -854,7 +861,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ? undefined
             : artifacts.put(JSON.stringify(settled.output), "report", { mime: "application/json" });
         if (outputHash) artifacts.ref(outputHash, { type: "step_run", id: job.step.id, role: "output" });
-        transition(job, settled.outcome, outputHash, settled.error);
+        transition(job, settled.outcome, outputHash, settled.error, settled.notes);
         return;
       }
       case "failed": {
@@ -912,7 +919,13 @@ export function createEngine(deps: EngineDeps): Engine {
    * misma transacción cierra el parallel con el edge de su outcome. El output del join se guarda
    * antes, porque los artefactos abren su propia transacción.
    */
-  function transition(job: Job, outcome: string, outputHash: ArtifactHash | undefined, error: string | undefined): void {
+  function transition(
+    job: Job,
+    outcome: string,
+    outputHash: ArtifactHash | undefined,
+    error: string | undefined,
+    notes?: Note[],
+  ): void {
     const { step, node, parallel } = job;
     const failed = outcome === "error" || outcome === "timeout";
     const parent = parallel && parallelStepOf(step.runId, parallel.parent);
@@ -924,9 +937,9 @@ export function createEngine(deps: EngineDeps): Engine {
     store.tx((tx) => {
       const run = tx.db.select().from(runs).where(eq(runs.id, step.runId)).get();
       if (!run) throw new Error(`Desapareció la corrida ${step.runId}.`);
-      if (!parallel || !parent) return advance(tx, run, step, node, outcome, outputHash, error);
+      if (!parallel || !parent) return advance(tx, run, step, node, outcome, outputHash, error, notes);
 
-      closeStep(tx, run, step, { status: failed ? "failed" : "done", outcome, outputHash, message: error });
+      closeStep(tx, run, step, { status: failed ? "failed" : "done", outcome, outputHash, message: error, notes });
       // El cierre sumó su costo a la corrida: `advance` parte de la fila al día.
       const current = tx.db.select().from(runs).where(eq(runs.id, run.id)).get() ?? run;
       const parentNode = parallelOf(job.flow, parallel.parent);
@@ -947,6 +960,7 @@ export function createEngine(deps: EngineDeps): Engine {
     outcome: string,
     outputHash: ArtifactHash | undefined,
     error: string | undefined,
+    notes?: Note[],
   ): void {
     const edge = edgeFor(node, outcome);
     const taken = edge === undefined ? undefined : takeEdge(edge, `${step.nodeId}.${outcome}`, run.rounds, run.params);
@@ -957,6 +971,7 @@ export function createEngine(deps: EngineDeps): Engine {
       outputHash,
       message,
       note: taken?.note,
+      notes,
     });
 
     if (!taken) {
@@ -992,7 +1007,16 @@ export function createEngine(deps: EngineDeps): Engine {
     tx: Tx,
     run: RunRow,
     step: StepRow,
-    closing: { status: "done" | "failed"; outcome: string; outputHash?: ArtifactHash; message?: string; note?: string },
+    closing: {
+      status: "done" | "failed";
+      outcome: string;
+      outputHash?: ArtifactHash;
+      message?: string;
+      /** La nota del edge que se tomó. */
+      note?: string;
+      /** Las notas del reporte del agente. */
+      notes?: Note[];
+    },
   ): number {
     const cost = Number(
       tx.db.select({ total: sum(agentSessions.costMicros) }).from(agentSessions).where(eq(agentSessions.stepRunId, step.id)).get()?.total ?? 0,
@@ -1026,6 +1050,13 @@ export function createEngine(deps: EngineDeps): Engine {
         ...(closing.note === undefined ? {} : { note: closing.note }),
       },
     });
+    // Notas que no bloquean: la corrida sigue por su edge, el humano las ve en la bandeja.
+    const scope = scopeOf(run, step.id);
+    if (closing.note !== undefined) {
+      const body = `Al cerrar el paso "${step.nodeId}" con el outcome "${closing.outcome}".`;
+      openNote(tx, { ...scope, kind: "review_note", title: closing.note, body });
+    }
+    for (const note of closing.notes ?? []) openNote(tx, { ...scope, kind: "review_note", ...note });
     if (cost > 0) {
       tx.db.update(runs).set({ costMicros: sql`${runs.costMicros} + ${cost}` }).where(eq(runs.id, run.id)).run();
     }

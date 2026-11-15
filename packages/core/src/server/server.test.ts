@@ -11,6 +11,7 @@ import { createRouterClient, getEventMeta } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
+import { openNote } from "../decisions/decisions";
 import { createArtifacts, INLINE_MAX_BYTES } from "../artifacts/artifacts";
 import { readSchemaVersion } from "../store/migrate";
 import { openStore, type Store } from "../store/store";
@@ -300,6 +301,30 @@ describe("artifacts", () => {
     await expect(client.artifacts.get({ hash: "../../etc/passwd" })).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
+  });
+});
+
+describe("decisions", () => {
+  test("list filtra por kind y status, get trae una y un id desconocido es NOT_FOUND", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const [review, note] = store.tx((tx) => [
+      openNote(tx, { kind: "review_note", title: "Quedan 🟡", body: "tras 3 rondas" }),
+      openNote(tx, { kind: "note", title: "Desvío ya hecho", body: "x" }),
+    ]);
+    if (!review || !note) throw new Error("no se abrieron las notas");
+
+    expect((await client.decisions.list()).map((d) => d.id)).toEqual([note.id, review.id]);
+    expect((await client.decisions.list({ kind: ["review_note"] })).map((d) => d.id)).toEqual([review.id]);
+    expect(await client.decisions.list({ status: ["accepted"] })).toEqual([]);
+    expect(await client.decisions.get({ id: review.id })).toMatchObject({
+      kind: "review_note",
+      status: "pending",
+      title: "Quedan 🟡",
+      options: [],
+      resolution: null,
+    });
+    await expect(client.decisions.get({ id: "dec_01J0000000000000000000000A" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 

@@ -2,6 +2,7 @@ export * from "./agents";
 export * from "./client";
 export * from "./connections";
 export * from "./contract";
+export * from "./decisions";
 export * from "./domain";
 export * from "./flow";
 export * from "./pack";

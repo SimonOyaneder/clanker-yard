@@ -6,6 +6,7 @@ import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
 import type { Artifacts } from "../artifacts/artifacts";
+import type { Decisions } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
 import { RunNotFoundError, RunStartError } from "../flows/engine";
 import type { Packs } from "../packs/packs";
@@ -38,6 +39,7 @@ export interface RouterDeps {
   runs: RunStarter;
   flows: Engine;
   artifacts: Artifacts;
+  decisions: Decisions;
   coreVersion: string;
   bootId: string;
   /** ms epoch */
@@ -208,6 +210,14 @@ export function createRouter(deps: RouterDeps) {
       start: os.runs.start.handler(({ input, context }) =>
         asApiErrorAsync(() => runs.start(input, context.origin)),
       ),
+    },
+    decisions: {
+      list: os.decisions.list.handler(({ input }) => deps.decisions.list(input)),
+      get: os.decisions.get.handler(({ input }) => {
+        const decision = deps.decisions.get(input.id);
+        if (!decision) throw new ORPCError("NOT_FOUND", { message: `No existe la decisión ${input.id}.` });
+        return decision;
+      }),
     },
     events: {
       list: os.events.list.handler(({ input }) =>

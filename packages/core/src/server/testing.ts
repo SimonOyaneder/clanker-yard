@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createAgents } from "../agents/agents";
 import type { AgentRuntime } from "../agents/runtime";
 import { createArtifacts } from "../artifacts/artifacts";
+import { createDecisions } from "../decisions/decisions";
 import { createDefs } from "../defs/defs";
 import { createFlows } from "../flows/flows";
 import { createPacks } from "../packs/packs";
@@ -26,7 +27,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "flows" | "artifacts"> {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "flows" | "artifacts" | "decisions"> {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -47,5 +48,6 @@ export function apiDeps(
     runs: createRunStarter({ store, defs, projects, repos, issues: createIssues(store, local), flows, trackers: { local } }),
     flows,
     artifacts,
+    decisions: createDecisions(store),
   };
 }

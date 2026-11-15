@@ -18,6 +18,8 @@ export const RunId = prefixedId("run");
 export type RunId = z.infer<typeof RunId>;
 export const StepRunId = prefixedId("stp");
 export type StepRunId = z.infer<typeof StepRunId>;
+export const DecisionId = prefixedId("dec");
+export type DecisionId = z.infer<typeof DecisionId>;
 
 /** SHA-256 del contenido en hex: la identidad de un artefacto. */
 export const ArtifactHash = z

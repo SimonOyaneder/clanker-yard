@@ -19,6 +19,7 @@ export interface StartServerOptions extends Pick<
   | "runs"
   | "flows"
   | "artifacts"
+  | "decisions"
   | "coreVersion"
   | "dataDir"
   | "onShutdown"

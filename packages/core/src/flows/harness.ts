@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createAgents } from "../agents/agents";
 import type { AgentRuntime, RunResult, RunSpec, SessionRef, Usage } from "../agents/runtime";
 import { createArtifacts } from "../artifacts/artifacts";
+import { createDecisions } from "../decisions/decisions";
 import { createDefs } from "../defs/defs";
 import { openStore } from "../store/store";
 import type { ActionCtx, ActionResult } from "./catalog";
@@ -187,5 +188,5 @@ export function harness(
 
   const nodes = (runId: RunId) => flows.getRun(runId).steps.map((s) => s.nodeId);
 
-  return { store, defs, flows, artifacts, calls, home: { dbPath, dir } satisfies HarnessHome, crash, action, save, start, finished, eventTypes, nodes, cleanup };
+  return { store, defs, flows, artifacts, decisions: createDecisions(store), calls, home: { dbPath, dir } satisfies HarnessHome, crash, action, save, start, finished, eventTypes, nodes, cleanup };
 }
