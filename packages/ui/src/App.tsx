@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, RunDetail, RunId, RunStatus } from "@clanker/api"
+import type { CachedIssue, ClankerProject, Decision, DecisionId, RunDetail, RunId, RunStatus } from "@clanker/api"
 import { ChevronRight, Plus, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast, Toaster } from "sonner"
@@ -7,6 +7,7 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { CommandPalette } from "@/components/command-palette"
 import { Shortcut } from "@/components/common"
 import { ConnectionsView } from "@/components/connections/connections-view"
+import { InboxView } from "@/components/inbox/inbox-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { ProjectView, issuesById } from "@/components/project/project-view"
 import { RunCommandsProvider, useRunCommands } from "@/components/project/run-commands"
@@ -20,12 +21,15 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useClaudePlan } from "@/hooks/use-claude-plan"
+import { useDecisionResolver } from "@/hooks/use-decision-resolver"
+import { useInbox } from "@/hooks/use-inbox"
 import { useLinearLogin } from "@/hooks/use-linear-login"
 import { LiveProvider, useLive, useLiveQuery } from "@/hooks/use-live"
 import { type Host, HostProvider, useHost } from "@/host"
 import { type AppActions, AppActionsContext } from "@/lib/app-context"
 import { connectionOf, needsAttention } from "@/lib/connections"
 import { useCoreState } from "@/lib/core-status"
+import { parksRun } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
 import { reviewStatus } from "@/lib/pr-status"
 import { runCaps } from "@/lib/run-commands"
@@ -35,13 +39,17 @@ import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 import { Hint } from "./components/common"
 
-type Module = "projects" | "prs" | "connections"
-// Dónde está el usuario: lo que guarda el historial de atrás/adelante.
-type Loc = { module: Module; slug: string | null; runId: RunId | null }
+type Module = "projects" | "prs" | "connections" | "inbox"
+// Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`.
+type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null }
 
-const sameLoc = (a: Loc, b: Loc) => a.module === b.module && (a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId))
+const sameLoc = (a: Loc, b: Loc) =>
+  a.module === b.module && (a.module === "inbox" ? a.decision === b.decision : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId))
 
-const MODULES: readonly Module[] = ["projects", "prs", "connections"]
+const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox"]
+
+// Estas decisiones avisan con una notificación nativa: alguien las tiene que atender. Las notas esperan en la bandeja.
+const NOTIFY_KINDS = new Set(["gate", "needs_human", "alert"])
 
 const MAX_HISTORY = 50
 
@@ -90,6 +98,13 @@ function Shell() {
   const commands = useRunCommands()
   const connectionsQuery = useLiveQuery("connections", () => appData.connections())
   const connections = useMemo(() => connectionsQuery.data ?? [], [connectionsQuery.data])
+  const [decisionId, setDecisionId] = useState<DecisionId | null>(null)
+  const decisionsQuery = useLiveQuery("decisions", () => appData.decisions())
+  const decisions = useMemo(() => decisionsQuery.data ?? [], [decisionsQuery.data])
+  const resolver = useDecisionResolver(decisions, decisionsQuery.reload)
+  const { undo, resolve: resolveNow } = resolver
+  const inbox = useInbox(decisions, resolver.resolving, decisionId)
+  const inboxBadge = inbox.pending.length ? { count: inbox.pending.length, parks: inbox.pending.some(parksRun) } : null
   const claudePlan = useClaudePlan(connectionsQuery.data, connectionsQuery.reload)
   const linearLogin = useLinearLogin(connectionOf(connections, "linear"), connectionsQuery.reload)
   const startLinearLogin = linearLogin.start
@@ -150,8 +165,8 @@ function Shell() {
   }, [])
 
   // Historial como el de un navegador: ⌘[ / ⌘] y los botones de pulgar del mouse.
-  const here = useRef<Loc>({ module, slug, runId })
-  here.current = { module, slug, runId }
+  const here = useRef<Loc>({ module, slug, runId, decision: decisionId })
+  here.current = { module, slug, runId, decision: decisionId }
   const backStack = useRef<Loc[]>([])
   const forwardStack = useRef<Loc[]>([])
   const apply = useCallback(
@@ -160,6 +175,7 @@ function Shell() {
       setSlug(l.slug)
       if (l.slug) writePref("slug", l.slug)
       setRunId(l.runId)
+      setDecisionId(l.decision)
     },
     [setModule],
   )
@@ -245,6 +261,28 @@ function Shell() {
   }, [goBack, goForward, selectProject, barSlugs.join(",")])
 
   const goConnections = useCallback(() => go({ module: "connections" }), [go])
+  const goInbox = useCallback(() => go({ module: "inbox", decision: null }), [go])
+  const openDecision = useCallback((id: DecisionId) => go({ module: "inbox", decision: id }), [go])
+  // J y K recorren la lista sin llenar el historial de atrás/adelante: reemplazan el lugar en vez de sumar uno.
+  const selectDecision = useCallback(
+    (id: DecisionId) => {
+      const next = { ...here.current, module: "inbox" as const, decision: id }
+      here.current = next
+      apply(next)
+    },
+    [apply],
+  )
+  const { items: inboxItems, current: inboxCurrent } = inbox
+  const resolveDecision = useCallback(
+    (d: Decision, option: string) => {
+      // Resolver una decisión pasa a la que sigue en la lista (o a la anterior si era la última).
+      const at = inboxItems.findIndex((i) => i.id === d.id)
+      const next = inboxItems[at + 1] ?? inboxItems[at - 1]
+      if (d.id === inboxCurrent?.id && next) selectDecision(next.id)
+      resolveNow(d, option)
+    },
+    [inboxItems, inboxCurrent, selectDecision, resolveNow],
+  )
   const connectLinear = useCallback(() => {
     goConnections()
     void startLinearLogin()
@@ -255,22 +293,25 @@ function Shell() {
     if (status) toast(`Claude: ${status.state === "ready" ? "lista" : (status.message ?? status.state)}`)
   }, [goConnections, testClaude])
 
-  // G y luego C (como en Linear) va a Conexiones; ⇧⌘L conecta Linear y ⇧⌘T prueba Claude.
+  // G y luego I o C (como en Linear) va a la Bandeja o a Conexiones; ⇧⌘I también va a la Bandeja,
+  // ⇧⌘L conecta Linear y ⇧⌘T prueba Claude.
   useEffect(() => {
     let armed: ReturnType<typeof setTimeout> | undefined
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "KeyL" || e.code === "KeyT")) {
+      if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "KeyL" || e.code === "KeyT" || e.code === "KeyI")) {
         e.preventDefault()
         if (e.code === "KeyL") connectLinear()
+        else if (e.code === "KeyI") goInbox()
         else void probeClaude()
         return
       }
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
       if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return
       const key = e.key.toLowerCase()
-      if (armed && key === "c") {
+      if (armed && (key === "c" || key === "i")) {
         e.preventDefault()
-        goConnections()
+        if (key === "c") goConnections()
+        else goInbox()
       }
       clearTimeout(armed)
       armed = key === "g" ? setTimeout(() => (armed = undefined), 1000) : undefined
@@ -280,7 +321,7 @@ function Shell() {
       clearTimeout(armed)
       window.removeEventListener("keydown", onKey)
     }
-  }, [goConnections, connectLinear, probeClaude])
+  }, [goConnections, goInbox, connectLinear, probeClaude])
 
   const refresh = useCallback(() => {
     if (module === "prs") {
@@ -295,6 +336,7 @@ function Shell() {
     () => ({
       selectProject,
       openRun: (s, id) => go({ module: "projects", slug: s, runId: id }),
+      openDecision,
       openNewProject: () => setNewProjectOpen(true),
       goConnections,
       connectLinear,
@@ -309,7 +351,7 @@ function Shell() {
       },
       refresh,
     }),
-    [selectProject, go, appData, refresh, goConnections, connectLinear, probeClaude],
+    [selectProject, go, appData, refresh, goConnections, connectLinear, probeClaude, openDecision],
   )
 
   // Menú nativo (accelerators) y clicks en notificaciones.
@@ -325,14 +367,42 @@ function Shell() {
       else if (action === "forward") goForward()
       else if (action === "shortcuts") setShortcutsOpen(true)
       else if (action === "go-prs") go({ module: "prs" })
+      else if (action === "go-inbox") goInbox()
     })
-    // Una notificación abre el proyecto; llevarla hasta la corrida es de cuando haya notificaciones de corridas.
-    const offNav = host.onNavigate(({ slug: s }) => selectProject(s))
+    // Una notificación de una decisión abre esa decisión y nada más; la de un proyecto abre el proyecto.
+    const offNav = host.onNavigate((target) => ("decisionId" in target ? openDecision(target.decisionId as DecisionId) : selectProject(target.slug)))
     return () => {
       offMenu()
       offNav()
     }
-  }, [refresh, go, goBack, goForward, setSidebarOpen, sidebarOpen, selectProject, host])
+  }, [refresh, go, goBack, goForward, goInbox, openDecision, setSidebarOpen, sidebarOpen, selectProject, host])
+
+  // Una decisión que alguien tiene que atender avisa con una notificación nativa, si la ventana no está a la vista.
+  // Solo abre la decisión: aprobar o rechazar se hace en la bandeja.
+  useEffect(
+    () =>
+      live.subscribe((event) => {
+        const { decisionId: id, kind, title } = event.payload as { decisionId?: string; kind?: string; title?: string }
+        if (event.type !== "decision.opened" || !id || !title || !NOTIFY_KINDS.has(kind ?? "") || document.hasFocus()) return
+        host.notify({ title: kind === "alert" ? "Alerta en Clanker Yard" : "Una corrida te espera", body: title, target: { decisionId: id } })
+      }),
+    [live, host],
+  )
+
+  // Z deshace la última decisión que se respondió, mientras no se haya mandado al core.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "z" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
+      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return
+      const undone = undo()
+      if (!undone) return
+      e.preventDefault()
+      if (module === "inbox") selectDecision(undone)
+      else toast("Volvió a la bandeja", { duration: 1500 })
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [undo, module, selectDecision])
 
   // Esc sube un nivel: del panel del paso a la corrida y de la corrida al proyecto, salvo que haya un diálogo o menú abierto.
   useEffect(() => {
@@ -399,6 +469,9 @@ function Shell() {
           projects={projects}
           liveRuns={liveRunsQuery.data ?? []}
           selected={project?.slug ?? null}
+          inboxActive={module === "inbox"}
+          inboxBadge={inboxBadge}
+          onSelectInbox={goInbox}
           prsActive={module === "prs"}
           connectionsActive={module === "connections"}
           connectionsAlert={connectionsAlert}
@@ -419,7 +492,19 @@ function Shell() {
               <SidebarTrigger className="size-7 text-muted-foreground" />
             </Hint>
             <nav aria-label="Ubicación" className="flex min-w-0 flex-1 items-center gap-1 text-[13px]">
-              {module === "prs" ? (
+              {module === "inbox" ? (
+                inbox.current && decisionId ? (
+                  <>
+                    <button type="button" onClick={goInbox} className="truncate rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                      Bandeja
+                    </button>
+                    <ChevronRight className="size-3.5 flex-none text-muted-foreground" />
+                    <span className="truncate px-1 font-medium">{inbox.current.title}</span>
+                  </>
+                ) : (
+                  <span className="truncate px-1.5 font-medium">Bandeja</span>
+                )
+              ) : module === "prs" ? (
                 <span className="truncate px-1.5 font-medium">Stacks de PR</span>
               ) : module === "connections" ? (
                 <span className="truncate px-1.5 font-medium">Conexiones</span>
@@ -449,7 +534,21 @@ function Shell() {
             </button>
           </header>
 
-          {module === "prs" ? (
+          {module === "inbox" ? (
+            <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
+              {decisionsQuery.data ? (
+                <InboxView inbox={inbox} decisions={decisions} projects={projects} onSelect={selectDecision} onResolve={resolveDecision} />
+              ) : decisionsQuery.error ? (
+                <div className="px-6 pt-5">
+                  <Problem message={decisionsQuery.error} onRetry={decisionsQuery.reload} />
+                </div>
+              ) : (
+                <div className="px-6 pt-5">
+                  <Loading />
+                </div>
+              )}
+            </main>
+          ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
               <PrsView data={prs.data ?? null} error={prs.error} onRefresh={refresh} />
             </main>
@@ -504,6 +603,11 @@ function Shell() {
         onOpenShortcuts={() => setShortcutsOpen(true)}
         prs={prs.data?.prs ?? []}
         onGoPrs={() => go({ module: "prs" })}
+        onGoInbox={goInbox}
+        pendingDecisions={inbox.pending}
+        onOpenDecision={openDecision}
+        onUndoDecision={resolver.canUndo ? () => void undo() : null}
+        onDecision={module === "inbox" && inbox.current?.status === "pending" ? { decision: inbox.current, onResolve: resolveDecision, onRespond: () => inbox.setResponding(true) } : null}
         onRunTab={runId && module === "projects" ? setRunTab : null}
         runCaps={runId && module === "projects" && openRunDetail ? { id: openRunDetail.id, caps: caps! } : null}
         onStep={stepNode ? { onTab: setStepTab, onClose: () => setStepNode(null) } : null}

@@ -7,6 +7,9 @@ import type {
   ClaudeStatus,
   Connection,
   ConnectionProvider,
+  Decision,
+  DecisionFilter,
+  DecisionId,
   Event,
   GitHubPatForm,
   NewProject,
@@ -77,6 +80,13 @@ export interface AppData {
    * se aborta. La promesa resuelve cuando la conexión está abierta.
    */
   events(after: number, signal: AbortSignal): Promise<AsyncIterable<Event>>
+  /** La bandeja, de la más reciente a la más antigua; sin filtro trae también las resueltas. */
+  decisions(filter?: DecisionFilter): Promise<Decision[]>
+  /**
+   * Resuelve una decisión con una de sus opciones (o con un texto libre si no bloquea). En un gate o un
+   * `needs_human` la corrida estacionada vuelve a la cola de su carril.
+   */
+  resolveDecision(id: DecisionId, option: string): Promise<Decision>
   prs(force: boolean): Promise<PRsResult>
   /** Las cuentas conectadas, sin tokens. */
   connections(): Promise<Connection[]>

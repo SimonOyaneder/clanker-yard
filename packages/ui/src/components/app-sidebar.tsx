@@ -1,5 +1,5 @@
 import type { ClankerProject, Run } from "@clanker/api"
-import { ChevronRight, Copy, GitPullRequest, Keyboard, Plug, Plus, RefreshCw, Search } from "lucide-react"
+import { ChevronRight, Copy, GitPullRequest, Inbox, Keyboard, Plug, Plus, RefreshCw, Search } from "lucide-react"
 import { PlanUsage } from "@/components/connections/plan-usage"
 import type { ClaudePlan } from "@/hooks/use-claude-plan"
 import type { CoreState } from "@/host"
@@ -28,6 +28,10 @@ import { Hint } from "./common"
 
 interface Props {
   projects: ClankerProject[]
+  inboxActive: boolean
+  /** Decisiones pendientes; ámbar si alguna estaciona su corrida. */
+  inboxBadge: { count: number; parks: boolean } | null
+  onSelectInbox: () => void
   /** Las corridas vivas de todos los proyectos (cualquier estado menos terminadas). */
   liveRuns: Run[]
   selected: string | null
@@ -92,7 +96,7 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ projects, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, plan, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
+export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, plan, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
   const actions = useAppActions()
   const status = footerStatus(core, { error, connected })
   const inBar = barProjects(projects)
@@ -104,7 +108,7 @@ export function AppSidebar({ projects, liveRuns, selected, prsActive, connection
   const archived = group("archived")
 
   const item = (p: ClankerProject, index: number | null) => (
-    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!prsActive && !connectionsActive && p.slug === selected} />
+    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!inboxActive && !prsActive && !connectionsActive && p.slug === selected} />
   )
 
   return (
@@ -128,6 +132,20 @@ export function AppSidebar({ projects, liveRuns, selected, prsActive, connection
         <SidebarGroup className="py-1">
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={inboxActive}
+                  onClick={onSelectInbox}
+                  title={`Bandeja · ⇧⌘I · G luego I${inboxBadge ? ` · ${inboxBadge.count === 1 ? "1 decisión pendiente" : `${inboxBadge.count} decisiones pendientes`}${inboxBadge.parks ? ", alguna estaciona su corrida" : ""}` : " · nada pendiente"}`}
+                  className="h-8 pr-10"
+                >
+                  <Inbox className="size-4" />
+                  <span>Bandeja</span>
+                </SidebarMenuButton>
+                {inboxBadge ? (
+                  <SidebarMenuBadge className={cn("text-[11px]", inboxBadge.parks ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>{inboxBadge.count}</SidebarMenuBadge>
+                ) : null}
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={prsActive} onClick={onSelectPrs} title={`Stacks de PR · ⇧⌘P${prsBadge?.count ? ` · ${prsBadge.tone === "red" ? `${prsBadge.count} necesitan acción tuya` : prsBadge.tone === "green" ? `${prsBadge.count} listos para merge` : `${prsBadge.count} abiertos`}` : ""}`} className="h-8 pr-10">
                   <GitPullRequest className="size-4" />

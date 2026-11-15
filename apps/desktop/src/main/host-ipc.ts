@@ -2,18 +2,17 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { BrowserWindow, dialog, ipcMain, Notification, shell } from "electron";
-import type { Theme } from "@clanker/ui";
+import type { NavTarget, Theme } from "@clanker/ui";
 
 const THEMES: readonly Theme[] = ["system", "light", "dark"];
 const EDITORS = ["Zed", "Cursor", "Visual Studio Code"];
 
-interface Target {
-  slug: string;
-  issueId?: string;
-}
-
-const isTarget = (v: unknown): v is Target =>
-  typeof v === "object" && v !== null && typeof (v as Target).slug === "string" && ((v as Target).issueId === undefined || typeof (v as Target).issueId === "string");
+const isTarget = (v: unknown): v is NavTarget => {
+  if (typeof v !== "object" || v === null) return false;
+  const t = v as Record<string, unknown>;
+  if ("decisionId" in t) return typeof t.decisionId === "string";
+  return typeof t.slug === "string" && (t.issueId === undefined || typeof t.issueId === "string");
+};
 
 export interface HostIpcOptions {
   getWindow(): BrowserWindow | null;

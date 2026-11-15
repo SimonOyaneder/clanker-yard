@@ -1,10 +1,12 @@
-import type { CachedIssue, ClankerProject, RunId } from "@clanker/api"
+import type { CachedIssue, ClankerProject, DecisionId, RunId } from "@clanker/api"
 import { createContext, useContext } from "react"
 
 // Acciones globales: las usan los menús contextuales, la paleta ⌘K y los atajos.
 export interface AppActions {
   selectProject: (slug: string) => void
   openRun: (slug: string, runId: RunId) => void
+  /** Abre la decisión en la bandeja (`/inbox/:decision`). */
+  openDecision: (id: DecisionId) => void
   openNewProject: () => void
   /** Lanza el flujo del proyecto sobre la issue y avisa el resultado con un toast. */
   startRun: (project: ClankerProject, issue: CachedIssue) => Promise<void>

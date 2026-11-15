@@ -15,6 +15,7 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
   {
     title: "Navegación",
     items: [
+      ["Bandeja (también G y luego I)", "⇧⌘I"],
       ["Stacks de PR", "⇧⌘P"],
       ["Conexiones (G y luego C)", "GC"],
       ["Ir al proyecto 1…9 de la barra", "⌘1"],
@@ -47,6 +48,16 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
       ["Reporte", "R"],
       ["Artefactos", "A"],
       ["Intentos", "I"],
+    ],
+  },
+  {
+    title: "Bandeja",
+    items: [
+      ["Decisión siguiente / anterior", "JK"],
+      ["Elegir una opción de la decisión", "1"],
+      ["Responder con texto libre", "R"],
+      ["Abrir la corrida de la decisión", "⏎"],
+      ["Deshacer la última respuesta (unos segundos)", "Z"],
     ],
   },
   {

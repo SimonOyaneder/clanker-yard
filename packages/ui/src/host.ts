@@ -10,6 +10,7 @@ export type MenuAction =
   | "forward"
   | "shortcuts"
   | "go-prs"
+  | "go-inbox"
 
 export type Theme = "system" | "light" | "dark"
 export type Unsubscribe = () => void
@@ -31,14 +32,17 @@ export interface CoreLink {
   openLogs(): void
 }
 
+// A dónde lleva un click en una notificación o un link profundo: un proyecto (y quizá una issue) o una decisión de la bandeja.
+export type NavTarget = { slug: string; issueId?: string } | { decisionId: string }
+
 // Lo que la UI le pide al sistema que la aloja (Electron o el navegador). Todo lo demás
 // entra por `AppData`.
 export interface Host {
   core?: CoreLink
   onMenu(cb: (action: MenuAction) => void): Unsubscribe
   // Clicks en notificaciones y links profundos.
-  onNavigate(cb: (target: { slug: string; issueId?: string }) => void): Unsubscribe
-  notify(n: { title: string; body: string; target?: { slug: string; issueId?: string } }): void
+  onNavigate(cb: (target: NavTarget) => void): Unsubscribe
+  notify(n: { title: string; body: string; target?: NavTarget }): void
   openExternal(url: string): void
   openInEditor(path: string): void
   // La UI siempre sigue `prefers-color-scheme`; el host decide qué valor tiene.

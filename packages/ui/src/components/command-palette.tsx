@@ -1,8 +1,9 @@
-import type { CachedIssue, ClankerProject, Run, RunId } from "@clanker/api"
-import { Bot, FileText, GitPullRequest, History, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, Play, Plug, Plus, RefreshCw, RotateCcw, ScrollText, Square, X } from "lucide-react"
+import type { CachedIssue, ClankerProject, Decision, DecisionId, Run, RunId } from "@clanker/api"
+import { Bot, Check, CornerDownLeft, FileText, GitPullRequest, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, ScrollText, Square, Undo2, X } from "lucide-react"
 import type { PullRequest } from "@/types"
 import type { RunTab } from "@/components/project/run-view"
 import type { StepTab } from "@/components/project/step-panel"
+import { KindIcon } from "@/components/inbox/decision-parts"
 import { useRunCommands } from "@/components/project/run-commands"
 import { RunStatusIcon, isLive } from "@/components/project/status"
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/command"
 import { useHost } from "@/host"
 import { useAppActions } from "@/lib/app-context"
+import { KIND_LABEL, optionLabel, optionsOf, takesText } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
 import type { RunCaps } from "@/lib/run-commands"
 import { barProjects } from "@/lib/projects"
@@ -33,6 +35,14 @@ interface Props {
   onOpenShortcuts: () => void
   prs: PullRequest[]
   onGoPrs: () => void
+  onGoInbox: () => void
+  /** Las decisiones pendientes: ⏎ en una la abre en la bandeja. */
+  pendingDecisions: Decision[]
+  onOpenDecision: (id: DecisionId) => void
+  /** Solo si hay una respuesta que todavía se puede deshacer. */
+  onUndoDecision: (() => void) | null
+  /** Solo en la bandeja, con una decisión pendiente a la vista: sus opciones son acciones de la paleta. */
+  onDecision: { decision: Decision; onResolve: (decision: Decision, option: string) => void; onRespond: () => void } | null
   /** Solo con una corrida abierta: cambia entre su grafo y su línea de tiempo. */
   onRunTab: ((tab: RunTab) => void) | null
   /** Solo con una corrida abierta: qué se le puede pedir en su estado. */
@@ -42,7 +52,7 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
   const host = useHost()
@@ -61,6 +71,34 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
       <CommandInput placeholder="Busca un proyecto, una corrida o una acción…" />
       <CommandList className="max-h-[420px]">
         <CommandEmpty>Sin resultados.</CommandEmpty>
+
+        {onDecision ? (
+          <CommandGroup heading="Esta decisión">
+            {optionsOf(onDecision.decision)
+              .slice(0, 9)
+              .map((option, i) => (
+                <CommandItem key={option} value={`decisión opción ${optionLabel(onDecision.decision, option)}`} onSelect={run(() => onDecision.onResolve(onDecision.decision, option))}>
+                  <Check /> {optionLabel(onDecision.decision, option)}
+                  <CommandShortcut>{i + 1}</CommandShortcut>
+                </CommandItem>
+              ))}
+            {takesText(onDecision.decision) ? (
+              <CommandItem value="decisión responder con texto libre" onSelect={run(onDecision.onRespond)}>
+                <Reply /> Responder…
+                <CommandShortcut>R</CommandShortcut>
+              </CommandItem>
+            ) : null}
+          </CommandGroup>
+        ) : null}
+
+        {onUndoDecision ? (
+          <CommandGroup heading="Bandeja">
+            <CommandItem value="deshacer la última respuesta de la bandeja" onSelect={run(onUndoDecision)}>
+              <Undo2 /> Deshacer la última respuesta
+              <CommandShortcut>Z</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
 
         {onRunTab ? (
           <CommandGroup heading="Esta corrida">
@@ -188,6 +226,23 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
           </>
         ) : null}
 
+        {pendingDecisions.length ? (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Decisiones">
+              {pendingDecisions.map((d) => (
+                <CommandItem key={d.id} value={`decisión ${KIND_LABEL[d.kind]} ${d.title} ${d.id}`} onSelect={run(() => onOpenDecision(d.id))}>
+                  <KindIcon kind={d.kind} />
+                  <span className="truncate">{d.title}</span>
+                  <CommandShortcut>
+                    <CornerDownLeft className="size-3" />
+                  </CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        ) : null}
+
         {prs.length ? (
           <>
             <CommandSeparator />
@@ -207,6 +262,10 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
 
         <CommandSeparator />
         <CommandGroup heading="App">
+          <CommandItem onSelect={run(onGoInbox)}>
+            <Inbox /> Ir a la Bandeja
+            <CommandShortcut>⇧⌘I</CommandShortcut>
+          </CommandItem>
           <CommandItem onSelect={run(onGoPrs)}>
             <GitPullRequest /> Ir a Stacks de PR
             <CommandShortcut>⇧⌘P</CommandShortcut>

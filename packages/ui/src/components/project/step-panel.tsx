@@ -8,6 +8,7 @@ import { ArtifactsSection, AttemptsSection, BriefSection, CommandsSection, Repor
 import { EmptyNote } from "@/components/project/step-parts"
 import { useRunCommands } from "@/components/project/run-commands"
 import { StepTranscript } from "@/components/project/step-transcript"
+import { OpenDecisionButton } from "@/components/project/run-decisions"
 import { stepLook } from "@/components/project/status"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -89,6 +90,7 @@ export function StepPanel({ run, shape, node, tab, onTab, onClose }: Props) {
         <div className="flex items-center gap-2">
           <h2 className="min-w-0 truncate font-mono text-[13px] font-medium">{node.label}</h2>
           {step ? <StepPills step={step} /> : null}
+          {step ? <OpenDecisionButton runId={run.id} stepId={step.id} /> : null}
           <Hint label="Cerrar el panel" keys="Esc" side="bottom">
             <Button variant="ghost" size="icon-xs" className="ml-auto" aria-label="Cerrar el panel" onClick={onClose}>
               <X />

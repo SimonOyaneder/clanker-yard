@@ -405,11 +405,12 @@ describe("decisions", () => {
     await expect(client.decisions.resolve({ id: gate.id, option: "go" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
-  test("resolve de una nota, o de una decisión que no existe, es BAD_REQUEST o NOT_FOUND", async () => {
+  test("resolve de una nota la cierra con lo respondido; una decisión que no existe es NOT_FOUND y una resuelta, BAD_REQUEST", async () => {
     const core = await start();
     const client = createClient({ url: core.url, token: core.token, origin: "ui" });
     const note = store.tx((tx) => openDecision(tx, { kind: "note", title: "Desvío", body: "x" }));
 
+    expect(await client.decisions.resolve({ id: note.id, option: "ok" })).toMatchObject({ status: "answered", resolution: { option: "ok" }, resolvedBy: "ui" });
     await expect(client.decisions.resolve({ id: note.id, option: "ok" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(client.decisions.resolve({ id: "dec_01J0000000000000000000000A", option: "ok" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });

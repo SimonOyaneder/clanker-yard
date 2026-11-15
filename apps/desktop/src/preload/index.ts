@@ -1,7 +1,5 @@
-import type { CoreState, MenuAction, Theme } from "@clanker/ui";
+import type { CoreState, MenuAction, NavTarget, Theme } from "@clanker/ui";
 import { contextBridge, ipcRenderer } from "electron";
-
-type Target = { slug: string; issueId?: string };
 
 // Suscripción a un canal del main; devuelve cómo cancelarla.
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -14,8 +12,8 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 // se quedan en el main, que los pone en cada llamada a `clanker-core://`.
 const bridge = {
   onMenu: (cb: (action: MenuAction) => void) => on("menu", cb),
-  onNavigate: (cb: (target: Target) => void) => on("navigate", cb),
-  notify: (n: { title: string; body: string; target?: Target }) => ipcRenderer.send("host:notify", n),
+  onNavigate: (cb: (target: NavTarget) => void) => on("navigate", cb),
+  notify: (n: { title: string; body: string; target?: NavTarget }) => ipcRenderer.send("host:notify", n),
   openExternal: (url: string) => ipcRenderer.send("host:open-external", url),
   openInEditor: (path: string) => ipcRenderer.send("host:open-in-editor", path),
   setTheme: (theme: Theme) => ipcRenderer.send("host:set-theme", theme),

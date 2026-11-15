@@ -9,7 +9,7 @@ export interface DemoCore {
 }
 
 /**
- * Lanza el core de demo del testkit (runtime fake, plantilla `juguete`, proyecto `demo` con 3 issues) sobre
+ * Lanza el core de demo del testkit (runtime fake, plantilla `juguete`, proyecto `demo` con 3 issues y el de la bandeja) sobre
  * `home` y espera a que publique `core.json`: desde ahí la app de escritorio se conecta a él en vez de
  * lanzar el core real, que no sabe de runtimes fake.
  */
@@ -17,7 +17,7 @@ export async function startDemoCore(home: string): Promise<DemoCore> {
   let log = "";
   const child = spawn(process.execPath, ["--import", "tsx", "scripts/demo-core.ts"], {
     cwd: testkitDir,
-    env: { ...process.env, CLANKER_HOME: home, CORE_RUNTIME: "fake" },
+    env: { ...process.env, CLANKER_HOME: home, CORE_RUNTIME: "fake", DEMO_INBOX: "1" },
   });
   const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
   for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk: Buffer) => (log += chunk));

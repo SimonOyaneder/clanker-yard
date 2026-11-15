@@ -74,6 +74,29 @@ describe("notas que no bloquean", () => {
     expect(h.decisions.list({ runId }).map((d) => [d.kind, d.title, d.status])).toEqual([["review_note", "CI rojo ajeno", "pending"]]);
   });
 
+  test("resolver una nota la deja answered con lo que se eligió, sin tocar la corrida", async () => {
+    const h = harness();
+    h.action("check", ["ok", "fail"], () => ({ outcome: "fail" }));
+    h.save({
+      schema: 1,
+      id: "noted",
+      name: "Con nota",
+      trigger: { type: "manual" },
+      start: "check",
+      nodes: { check: { type: "action", action: "check", args: {}, on: { ok: "@done", fail: { to: "@done", note: "CI rojo ajeno" } } } },
+    });
+    const runId = h.start("noted");
+    await h.finished(runId);
+    const [note] = h.decisions.list({ runId });
+
+    h.flows.resolveGate(note?.id as never, "visto, no es mío", "ui");
+
+    expect(h.decisions.get(note?.id as never)).toMatchObject({ status: "answered", resolution: { option: "visto, no es mío" }, resolvedBy: "ui" });
+    expect(h.flows.getRun(runId)).toMatchObject({ status: "done", outcome: "done" });
+    expect(h.store.events.since(0, { runId, types: ["decision.resolved"] })).toHaveLength(1);
+    expect(() => h.flows.resolveGate(note?.id as never, "otra vez", "ui")).toThrow(/ya está answered/);
+  });
+
   test("las decisions del reporte de un agente quedan en la bandeja y la corrida sigue", async () => {
     const h = harness({
       script: () =>

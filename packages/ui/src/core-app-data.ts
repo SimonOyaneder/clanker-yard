@@ -2,10 +2,10 @@ import type { Client, EventType } from "@clanker/api"
 import type { AppData } from "@/app-data"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
-export type CoreClient = Pick<Client, "projects" | "issues" | "runs" | "artifacts" | "events" | "connections" | "repos">
+export type CoreClient = Pick<Client, "projects" | "issues" | "runs" | "artifacts" | "events" | "connections" | "repos" | "decisions">
 
 // Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos, las sesiones de agente que el
-// panel del paso y su transcript siguen en vivo, conexiones y pruebas de receta).
+// panel del paso y su transcript siguen en vivo, las decisiones de la bandeja, conexiones y pruebas de receta).
 const LIVE_EVENTS = [
   "project.created",
   "project.updated",
@@ -33,6 +33,8 @@ const LIVE_EVENTS = [
   "agent.activity",
   "agent.usage",
   "agent.ended",
+  "decision.opened",
+  "decision.resolved",
   "connection.changed",
   "recipe.test_started",
   "recipe.test_output",
@@ -80,6 +82,8 @@ export function createCoreAppData(client: CoreClient): AppData {
     resumeProject: (id) => client.projects.resume({ id }),
     events: (after, signal) => client.events.stream({ after, filter: { types: [...LIVE_EVENTS] } }, { signal }),
     // El core todavía no sirve PRs (el caché de PRs con sus eventos es de una fase posterior).
+    decisions: (filter) => client.decisions.list(filter),
+    resolveDecision: (id, option) => client.decisions.resolve({ id, option }),
     prs: () => Promise.reject(new Error("El core todavía no sirve PRs: llegan con el caché de PRs.")),
     connections: () => client.connections.list(),
     githubPatForm: () => client.connections.githubPatForm(),

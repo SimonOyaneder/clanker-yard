@@ -250,7 +250,7 @@ test("screenshots de cada vista en claro y oscuro", async ({ window: page }) => 
 });
 
 // El estado de las conexiones del core de demo cambia con este archivo (ver `packages/testkit/scripts/demo-core.ts`).
-function setDemoControl(home: string, control: { clockDays?: number; claude?: string }): void {
+function setDemoControl(home: string, control: { clockDays?: number; claude?: string; closeAlert?: boolean }): void {
   writeFileSync(join(home, "demo-control.json"), JSON.stringify(control));
 }
 
@@ -354,4 +354,111 @@ test("con el token vencido y el login de Claude caído, los chips y el punto roj
   await expect(claude.getByRole("alert")).toContainText("claude auth login");
   await expect(sidebar(page).getByLabel("Algo está vencido o caído")).toBeVisible();
   await snapBoth(page, "conexiones-vencida");
+});
+
+// La bandeja: el core de demo deja una corrida por tipo de decisión en el proyecto "Bandeja de prueba" (un gate, un
+// paso sin edge, un tope de gasto y una nota de revisión) y una alerta suelta.
+const inboxItem = (page: Page) => sidebar(page).getByRole("button", { name: "Bandeja", exact: true });
+const inboxList = (page: Page) => page.getByRole("list", { name: "Decisiones pendientes" });
+const decision = (page: Page, title: string) => page.getByRole("article", { name: title });
+const GATE = "¿Publico el saludo?";
+// El plazo de deshacer de la bandeja (`UNDO_MS`) más un margen.
+const UNDO_WAIT = 6_500;
+
+const runRow = (page: Page, issue: string) => page.getByRole("listitem").filter({ hasText: issue }).filter({ hasText: /juguete-\w+ v\d+/ });
+
+test("una corrida estacionada avisa que espera y lleva a su decisión en la bandeja", async ({ window: page }) => {
+  await sidebar(page).getByRole("button", { name: "Bandeja de prueba" }).click();
+  const marte = runRow(page, "Saluda a Marte");
+  await expect(marte.getByText("estacionada", { exact: true })).toBeVisible({ timeout: 30_000 });
+  await marte.getByRole("button").click();
+
+  await expect(page.getByRole("status").filter({ hasText: "no ocupa cupo en su carril" })).toBeVisible();
+  await snapBoth(page, "corrida-estacionada");
+  await page.getByRole("button", { name: "Abrir decisión" }).click();
+  await expect(decision(page, GATE)).toBeVisible();
+  await expect(decision(page, GATE).getByText(/^Estaciona/)).toBeVisible();
+});
+
+test("la bandeja trae una decisión de cada tipo, con las que estacionan primero", async ({ window: page }) => {
+  await expect(inboxList(page).getByRole("listitem")).toHaveCount(5, { timeout: 30_000 });
+  await expect(inboxItem(page)).toHaveAttribute("title", /5 decisiones pendientes, alguna estaciona su corrida/);
+
+  const order = ["¿Publico el saludo?", 'El paso "saludar" no puede seguir', "La corrida llegó a su tope"];
+  const titles = (await inboxList(page).getByRole("listitem").locator("button > span:first-child > span.truncate").evaluateAll((els) => els.map((el) => el.textContent))) as string[];
+  expect(titles.slice(0, 3).sort()).toEqual([...order].sort());
+
+  // Una captura por tipo, bajando por la lista con J.
+  const kindOf: Record<string, string> = {
+    [GATE]: "gate",
+    'El paso "saludar" no puede seguir': "necesita-ayuda",
+    "La corrida llegó a su tope": "tope",
+    "El saludo quedó sin revisar": "nota-de-revision",
+    "La conexión de Linear venció": "alerta",
+  };
+  await inboxList(page).getByRole("listitem").first().getByRole("button").click();
+  for (const [i, title] of titles.entries()) {
+    if (i > 0) await page.keyboard.press("j");
+    await expect(inboxList(page).getByRole("listitem").nth(i).getByRole("button")).toHaveAttribute("aria-current", "true");
+    await expect(decision(page, title!)).toBeVisible();
+    await snapBoth(page, `bandeja-${kindOf[title!]}`);
+  }
+
+  // R abre el texto libre de lo que no bloquea (la nota, no la alerta, que se cierra sola).
+  await page.keyboard.press("k");
+  await page.keyboard.press("r");
+  await expect(page.getByRole("textbox", { name: "Tu respuesta" })).toBeFocused();
+  await snapBoth(page, "bandeja-responder");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("textbox", { name: "Tu respuesta" })).toBeHidden();
+});
+
+test("Z deshace la respuesta y la corrida sigue estacionada", async ({ window: page }) => {
+  await inboxList(page).getByRole("button", { name: new RegExp(GATE.replace("?", "\\?")) }).click();
+  await expect(decision(page, GATE)).toBeVisible();
+
+  await page.keyboard.press("1");
+  await expect(inboxList(page).getByRole("listitem")).toHaveCount(4);
+  await page.keyboard.press("z");
+  await expect(inboxList(page).getByRole("listitem")).toHaveCount(5);
+  await expect(decision(page, GATE)).toBeVisible();
+
+  // Pasado el plazo sigue ahí: nunca se mandó al core.
+  await page.waitForTimeout(UNDO_WAIT);
+  await expect(inboxList(page).getByRole("listitem")).toHaveCount(5);
+});
+
+test("resolver un gate desde la bandeja reencola la corrida y esta termina", async ({ window: page }) => {
+  await decision(page, GATE).getByRole("button", { name: /Publicar el saludo/ }).click();
+  await expect(inboxList(page).getByRole("listitem")).toHaveCount(4);
+  await page.waitForTimeout(UNDO_WAIT);
+
+  await sidebar(page).getByRole("button", { name: "Bandeja de prueba" }).click();
+  // Vuelve a la cola de su carril, el agente saluda (unos 7 s) y el flujo llega al final.
+  await expect(runRow(page, "Saluda a Marte").getByText("lista", { exact: true })).toBeVisible({ timeout: 40_000 });
+});
+
+test("las resueltas guardan lo que se eligió y sin pendientes la bandeja dice qué pasa", async ({ home, window: page }) => {
+  await inboxItem(page).click();
+  // Lo que queda: el paso sin edge, el tope, la nota y la alerta. Se cancelan las dos corridas y se marca vista la nota.
+  const pending = () => inboxList(page).getByRole("listitem");
+  await expect(pending()).toHaveCount(4);
+  await page.locator("body").click({ position: { x: 1000, y: 800 } });
+  // Los dos primeros estacionan su corrida: su opción 2 es cancelar. Después viene la nota (1 la marca vista).
+  for (const option of ["2", "2", "1"]) await page.keyboard.press(option);
+
+  // La alerta no tiene botones: se cierra sola cuando la causa se va (aquí, cuando el demo la cierra).
+  await expect(pending()).toHaveCount(1);
+  await expect(decision(page, "La conexión de Linear venció").getByRole("group", { name: "Opciones" })).toBeHidden();
+  await expect(decision(page, "La conexión de Linear venció").getByRole("button", { name: "Ir a Conexiones" })).toBeVisible();
+  setDemoControl(home, { clockDays: 40, claude: "login_expired", closeAlert: true });
+  await expect(page.getByText("Nada pendiente. Las corridas siguen solas.")).toBeVisible();
+  await snapBoth(page, "bandeja-vacia");
+  await page.waitForTimeout(UNDO_WAIT);
+
+  await page.getByRole("button", { name: "Ver las resueltas" }).click();
+  await expect(page.getByRole("list", { name: "Decisiones resueltas" }).getByRole("listitem")).toHaveCount(5, { timeout: 15_000 });
+  await page.getByRole("list", { name: "Decisiones resueltas" }).getByRole("button", { name: new RegExp(GATE.replace("?", "\\?")) }).click();
+  await expect(decision(page, GATE).getByRole("region", { name: "Resolución" })).toContainText("Publicar el saludo");
+  await snapBoth(page, "bandeja-resueltas");
 });

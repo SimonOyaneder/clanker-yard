@@ -1900,9 +1900,15 @@ export function createEngine(deps: EngineDeps): Engine {
     if (decision.status !== "pending") {
       throw new DecisionResolveError(`La decisión ${decisionId} ya está ${decision.status}: no hay nada que resolver.`);
     }
+    // Una decisión que no bloquea (nota, pregunta, alerta) no tiene corrida que reencolar: resolverla es
+    // dejar constancia de lo elegido o respondido (`option` es una de sus opciones o un texto libre).
+    if (decision.kind !== "gate" && decision.kind !== "needs_human") {
+      closeDecision(tx, decisionId, { status: "answered", resolution: { option }, by });
+      return undefined;
+    }
     const run = decision.runId === null ? undefined : tx.db.select().from(runs).where(eq(runs.id, decision.runId)).get();
     const step = decision.stepRunId === null ? undefined : tx.db.select().from(stepRuns).where(eq(stepRuns.id, decision.stepRunId)).get();
-    if (!run || run.status !== "parked" || !step || (decision.kind !== "gate" && decision.kind !== "needs_human")) {
+    if (!run || run.status !== "parked" || !step) {
       throw new DecisionResolveError(`La decisión ${decisionId} no tiene a ninguna corrida estacionada esperándola.`);
     }
     if (!decision.options.includes(option)) {

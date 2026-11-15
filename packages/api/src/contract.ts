@@ -363,8 +363,10 @@ const decisions = {
    * Resuelve la decisión que tiene estacionada una corrida y la devuelve ya cerrada. La opción es una
    * de `options`: en un gate, el outcome con que sigue el flujo; en un `needs_human`, `retry`,
    * `force:<outcome>` o `cancel`; en el tope de una corrida, `continue` o `cancel`. La corrida vuelve a
-   * la cola de su carril. `NOT_FOUND` si no existe; `BAD_REQUEST` si ya se resolvió, no tiene una
-   * corrida esperándola o la opción no es suya.
+   * la cola de su carril. Una decisión que no bloquea (nota, pregunta, alerta) no tiene corrida: se
+   * cierra `answered` con `option` tal cual, una de sus opciones o un texto libre. `NOT_FOUND` si no
+   * existe; `BAD_REQUEST` si ya se resolvió, un gate o `needs_human` no tiene su corrida esperándola o
+   * la opción no es suya.
    */
   resolve: base.input(z.object({ id: DecisionId, option: z.string().min(1) })).output(Decision),
 };

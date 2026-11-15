@@ -1,4 +1,4 @@
-import { type CachedIssue, type ClankerProject, type ClaudeStatus, type Connection, type ProjectId, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
+import { type CachedIssue, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type ProjectId, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildPrs } from "@/seed-prs"
@@ -170,6 +170,83 @@ export function createMemoryAppData(now = Date.now()): AppData {
     run(3, 3, "parked", 50, [step(30, "ws", "done", ran(50, 49.5)), step(31, "plan", "done", { costMicros: 350_000, ...ran(49.5, 46) }), step(32, "implement", "failed", { error: "tope de gasto excedido", costMicros: 3_000_000, ...ran(46, 38) })], {
       parkReason: "needs_human",
       usage: { input: 120_000, output: 90_000, cacheRead: 1_100_000, cacheWrite: 90_000 },
+    }),
+    // Estacionada en un gate: espera que alguien apruebe antes de seguir.
+    run(4, 4, "parked", 35, [step(33, "ws", "done", ran(35, 34.5)), step(34, "plan", "done", { costMicros: 280_000, ...ran(34.5, 31) })], {
+      parkReason: "gate",
+      usage: { input: 60_000, output: 40_000, cacheRead: 500_000, cacheWrite: 40_000 },
+    }),
+  ]
+
+  // La bandeja: una decisión de cada tipo, dos de ellas bloqueantes y una resuelta hoy. `resolveDecision` solo
+  // cierra la decisión y mueve la corrida estacionada, como lo hace el core.
+  const decision = (n: number, d: Pick<Decision, "kind" | "title" | "body"> & Partial<Decision>): Decision => ({
+    id: id("dec", n),
+    projectId: null,
+    runId: null,
+    stepRunId: null,
+    subject: null,
+    options: [],
+    status: "pending",
+    resolution: null,
+    resolvedBy: null,
+    createdAt: min(10),
+    resolvedAt: null,
+    ...d,
+  })
+  const on = (runN: number) => {
+    const r = runs[runN - 1]!
+    return { projectId: r.projectId, runId: r.id, subject: r.subject }
+  }
+  const decisions: Decision[] = [
+    decision(1, {
+      kind: "gate",
+      title: "¿Publico el PR de ENG-9190 como draft?",
+      body: "draft: Publicar como draft y pedir /review\nready: Publicar listo para revisar\nskip: No publicar todavía",
+      options: ["draft", "ready", "skip"],
+      createdAt: min(4),
+      ...on(4),
+    }),
+    decision(2, {
+      kind: "needs_human",
+      title: "La corrida llegó a su tope",
+      body: "La corrida gastó US$ 3,35 y su tope es US$ 3. Continuar le suma otra vez el tope; cancelar la termina.",
+      options: ["continue", "cancel"],
+      createdAt: min(38),
+      ...on(3),
+    }),
+    decision(3, {
+      kind: "review_note",
+      title: "Quedan 🔴/🟡 tras las rondas de review",
+      body: "🔴 `rv-bugs`: el scope por organización no cubre el caso sin modelo.\n🟡 `rv-patterns`: el nombre del helper no sigue el de los engines vecinos.",
+      createdAt: min(75),
+      ...on(2),
+    }),
+    decision(4, {
+      kind: "alert",
+      title: "La conexión de Linear venció",
+      body: "El refresh token de Linear ya no vale: las issues no se sincronizan hasta que vuelvas a conectar la cuenta.",
+      createdAt: min(130),
+    }),
+    decision(5, {
+      kind: "note",
+      title: "Aprendizaje propuesto: correr los checks antes del commit",
+      body: "En las últimas 4 corridas el commit falló por lint. Propongo agregar `recipe.check` antes de `commit` en el flujo.",
+      options: ["Aprobar", "Editar", "Descartar"],
+      projectId: projects[1]!.id,
+      createdAt: min(1500),
+    }),
+    decision(6, {
+      kind: "gate",
+      title: "¿Publico el PR de ENG-9175?",
+      body: "draft: Publicar como draft y pedir /review\nready: Publicar listo para revisar",
+      options: ["draft", "ready"],
+      status: "answered",
+      resolution: { option: "draft" },
+      resolvedBy: "ui",
+      createdAt: min(200),
+      resolvedAt: min(190),
+      ...on(2),
     }),
   ]
   // El detalle de cada paso se arma al pedirlo: `seedStep` es determinista, así que repetirlo da lo mismo.
@@ -347,6 +424,21 @@ export function createMemoryAppData(now = Date.now()): AppData {
         await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }))
       },
     }),
+    decisions: async (filter = {}) =>
+      decisions
+        .filter((d) => (!filter.projectId || d.projectId === filter.projectId) && (!filter.runId || d.runId === filter.runId) && (!filter.status || filter.status.includes(d.status)) && (!filter.kind || filter.kind.includes(d.kind)))
+        .toSorted((a, b) => b.createdAt - a.createdAt)
+        .map((d) => ({ ...d })),
+    resolveDecision: async (decisionId, option) => {
+      const found = decisions.find((d) => d.id === decisionId)
+      if (!found) throw new Error(`No existe la decisión ${decisionId}`)
+      if (found.status !== "pending") throw new Error(`La decisión ${decisionId} ya está ${found.status}: no hay nada que resolver.`)
+      if (found.options.length && (found.kind === "gate" || found.kind === "needs_human") && !found.options.includes(option)) throw new Error(`"${option}" no es una opción de la decisión ${decisionId}.`)
+      Object.assign(found, { status: "answered", resolution: { option }, resolvedBy: "ui", resolvedAt: Date.now() })
+      const parked = runs.find((r) => r.id === found.runId && r.status === "parked")
+      if (parked && (found.kind === "gate" || found.kind === "needs_human")) Object.assign(parked, option === "cancel" ? { status: "canceled", parkReason: null } : { status: "running", parkReason: null })
+      return { ...found }
+    },
     prs: async () => buildPrs(now),
     connections: async () => connections.map((c) => ({ ...c })),
     githubPatForm: async () => ({
