@@ -3,7 +3,9 @@ import {
   type ArtifactHash,
   type Brief,
   type DecisionId,
+  type Edge,
   type Node,
+  type Origin,
   type ParkReason,
   type ProjectId,
   type RunId,
@@ -35,6 +37,7 @@ import {
 } from "./parallel";
 import { readRunDetail } from "./run-detail";
 import { createSubjects, hasWaiting, loanOf, type SubjectsDeps } from "./subjects";
+import { StepNotFoundError } from "./step-detail";
 import { isTruthy, navigate, refPath, resolveRefs } from "./refs";
 import { calledFlows, LANE_BY_TRIGGER } from "./validate";
 
@@ -46,12 +49,21 @@ const CLOCK_JUMP_MS = 30_000;
 const MAX_CUTS = 3;
 /** El `error` con que `recover` reabre un paso: lo que sigue en el paso hasta que se cierre o falle de nuevo. */
 const RESUMED_AFTER_CUT = "La app se cerró con este paso en curso; se retoma.";
-/** El `error` de una sesión de agente que un corte dejó sin cerrar: así `performAgent` la reconoce para retomarla. */
-const SESSION_CUT = "La app se cerró con la sesión en curso.";
+/** El `error` con que se reabre un paso cuya corrida se pausó con `now`: igual que un corte, pero lo pidió una persona. */
+const RESUMED_AFTER_PAUSE = "La corrida se pausó con este paso en curso; se retoma.";
+/** El `error` con que se reabre un paso al que una persona le dejó un mensaje (`steer`): se retoma la sesión con ese mensaje. */
+const STEERED = "Una persona le dejó un mensaje al agente; se retoma su sesión.";
+/** El `error` de un paso que una persona reintentó: su sesión es nueva aunque el nodo diga `resumeFrom`. */
+const RETRIED = "Una persona reintentó este paso; la sesión es nueva.";
+/** El `error` de una sesión de agente que una interrupción (corte, apagado, pausa o mensaje) dejó sin cerrar: así `performAgent` la reconoce para retomarla. */
+const SESSION_CUT = "La sesión se interrumpió con el paso en curso; se retoma.";
 const CUT_NOTICE =
   "La app se reinició mientras trabajabas en esta tarea. Revisa el worktree: puede tener cambios a medias de antes del corte. Termina tu tarea.";
+const PAUSE_NOTICE =
+  "Una persona pausó la corrida mientras trabajabas en esta tarea. Revisa el worktree: puede tener cambios a medias de antes de la pausa. Termina tu tarea.";
 /** El `error` con que se reintenta un paso de agente que se pasó de su tope: así `performAgent` sabe que ya escaló y la segunda vez no reintenta. */
 const ESCALATED = "El agente se pasó de su tope de gasto o de turnos; se reintenta con el perfil escalado y un handoff.";
+const STEER_NOTICE = "Una persona que supervisa esta corrida te dejó este mensaje para tu tarea:";
 const HANDOFF_NOTICE =
   "La sesión anterior de esta tarea se pasó de su tope de gasto o de turnos y se cerró. Revisa el worktree (git status y git diff --stat): puede tener cambios a medias. Termina tu tarea.";
 /** Prefijo de la opción de un `needs_human` que sigue el edge de un outcome sin ejecutar el paso: `force:ok`. */
@@ -70,6 +82,8 @@ const DEFAULT_AGENT_RETRY: RetryPolicy = { max: 1, backoffSec: [10] };
 
 /** Los estados en que una corrida sigue viva: los mismos del índice parcial de `runs`. */
 const LIVE_RUN_STATUSES = ["queued", "running", "waiting", "parked", "paused"] as const;
+/** Una corrida pausada no despacha pasos nuevos, pero sus waits y sus hijas siguen cerrándose: lo que pasó mientras tanto no se pierde. */
+const ADVANCING_RUN_STATUSES = ["running", "paused"] as const;
 
 type RunRow = typeof runs.$inferSelect;
 type StepRow = typeof stepRuns.$inferSelect;
@@ -206,15 +220,36 @@ export interface Engine {
    * de su carril, antes que las corridas nuevas, y emite `run.requeued`. Lanza `DecisionNotFoundError`
    * si no existe y `DecisionResolveError` si ya se resolvió o la opción no es una de las suyas.
    */
-  resolveGate(decisionId: DecisionId, option: string, by: string): void;
+  resolveGate(decisionId: DecisionId, option: string, by: Origin): void;
   /**
-   * Cancela la corrida y todas sus corridas hijas: los pasos pending, running, waiting y las
-   * decisiones que las estacionan quedan `canceled` o `superseded`, los agentes en curso se
-   * interrumpen y las acciones reciben el abort de su `signal`.
-   * Cada corrida emite `run.finished` con outcome `canceled`. No hace nada con una corrida que ya
-   * terminó. Lanza `RunNotFoundError` si no existe. No libera el worktree.
+   * Lo que una persona le pide a una corrida (`by` queda en los eventos). Lanza `RunNotFoundError` si no existe y
+   * `RunCommandError` si el estado de la corrida no lo permite.
+   *
+   * - `cancel`: cancela la corrida y todas sus corridas hijas: los pasos pending, running, waiting y las
+   *   decisiones que las estacionan quedan `canceled` o `superseded`, los agentes en curso se interrumpen y las
+   *   acciones reciben el abort de su `signal`. Cada corrida emite `run.finished` con outcome `canceled`. No hace
+   *   nada con una corrida que ya terminó.
+   * - `pause`: la corrida y sus hijas que corren pasan a `paused` (siguen ocupando su cupo y su sujeto): no se
+   *   despachan pasos nuevos y los agentes en curso terminan lo suyo. Con `now` se interrumpen y su paso vuelve a
+   *   pending con la sesión lista para retomarse, sin gastar intento. Pausar una corrida ya pausada con `now`
+   *   interrumpe a los agentes que sigan. Solo se pausa lo que corre: una corrida estacionada ya espera a una persona.
+   * - `resume`: las pausadas vuelven a `running`; en una corrida que ya corre no hace nada.
    */
-  cancel(runId: RunId): void;
+  control(runId: RunId, cmd: "pause" | "resume" | "cancel", opts: { by: Origin; now?: boolean }): void;
+  /**
+   * Un comando sobre un paso de una corrida viva, y la corrida a la que pertenece. Lanza `StepNotFoundError` si el
+   * paso no existe y `RunCommandError` si no se puede en su estado (los mensajes dicen qué hacer).
+   *
+   * - `retry`: el nodo vuelve a correr como una visita nueva con sesión nueva y todo lo que la corrida tenía en
+   *   marcha (el paso en curso, sus ramas, las corridas hijas) se cancela: "reintentar desde acá". Sobre el paso
+   *   que está en espera de backoff solo lo despacha ya. No sirve sobre una rama de un parallel (se reintenta el parallel).
+   * - `steer`: solo agentes. Le deja un mensaje y retoma su sesión con él: si el paso está en curso lo interrumpe, si
+   *   está pending lo marca, y si es el paso en que la corrida espera una decisión `needs_human`, la reemplaza por una
+   *   visita nueva que retoma la última sesión del paso.
+   * - `force`: solo pasos `action` y `wait` (decisión #44, nunca un agente): sigue el edge de `force` sin ejecutar
+   *   (o sin terminar de esperar) el paso. Es lo mismo que la opción `force:<outcome>` de un `needs_human`.
+   */
+  stepCommand(stepId: StepRunId, cmd: { retry: true } | { steer: string } | { force: string }, by: Origin): RunId;
   /**
    * Admite las corridas que esperan sujeto o cupo (primero las del carril de mantenimiento, luego las
    * más antiguas) y despacha lo que haya quedado listo. Lo llaman las transiciones y un timer de 5 s;
@@ -264,6 +299,9 @@ export class RunNotFoundError extends Error {
   }
 }
 
+/** El comando no se puede aplicar a la corrida o al paso en su estado actual: no cambió nada y el mensaje dice qué hacer. */
+export class RunCommandError extends Error {}
+
 /** El `reason` del abort de los pasos de una corrida cancelada. */
 class RunCanceled extends Error {
   constructor(runId: RunId) {
@@ -271,10 +309,35 @@ class RunCanceled extends Error {
   }
 }
 
-/** El `reason` del abort de los pasos en vuelo cuando el core se apaga: no es un fallo del paso, que vuelve a pending. */
-class CoreStopping extends Error {
-  constructor() {
-    super("El core se apagó con este paso en curso.");
+/** El `reason` del abort de un paso que una persona reemplazó (`retry`) o cerró a mano (`force`): su cierre tardío se descarta. */
+class StepSuperseded extends Error {
+  constructor(stepId: StepRunId) {
+    super(`El paso ${stepId} lo reemplazó una persona.`);
+  }
+}
+
+/**
+ * El `reason` del abort de un paso en vuelo que no falló: el core se apaga, la corrida se pausa con `now` o una
+ * persona le deja un mensaje. El paso vuelve a pending, sin gastar intento, y su sesión se retoma. `at` es el
+ * instante de la interrupción: la sesión que terminó después es la que cortó.
+ */
+class Interruption extends Error {
+  constructor(
+    readonly why: "stop" | "pause" | "steer",
+    readonly at: number,
+  ) {
+    super(
+      why === "stop"
+        ? "El core se apagó con este paso en curso."
+        : why === "pause"
+          ? "La corrida se pausó con este paso en curso."
+          : "Una persona le dejó un mensaje a este paso.",
+    );
+  }
+
+  /** El `error` con que el paso queda en pending: lo que `performAgent` lee para saber cómo retomarlo. */
+  get marker(): string {
+    return this.why === "stop" ? RESUMED_AFTER_CUT : this.why === "pause" ? RESUMED_AFTER_PAUSE : STEERED;
   }
 }
 
@@ -342,8 +405,6 @@ export function createEngine(deps: EngineDeps): Engine {
   /** El abort de cada paso que este proceso ejecuta, para que `cancel` lo interrumpa. */
   const controllers = new Map<StepRunId, AbortController>();
   const agentSteps = new Set<StepRunId>();
-  /** Desde cuándo se apaga el core: las sesiones que terminaron después las interrumpió el apagado. */
-  let stoppingSince: number | undefined;
   const probing = new Set<StepRunId>();
   const subjects = createSubjects(deps);
   let activeAgents = 0;
@@ -567,20 +628,23 @@ export function createEngine(deps: EngineDeps): Engine {
     tx: Tx,
     run: RunRow,
     nodeId: string,
-    at: { visit: number; round: number; prev?: StepRunId },
-  ): void {
+    at: { visit: number; round: number; prev?: StepRunId; /** Lo que `performAgent` lee para saber cómo retomarlo. */ error?: string },
+  ): StepRunId {
+    const id = newId("stp");
     tx.db
       .insert(stepRuns)
       .values({
-        id: newId("stp"),
+        id,
         runId: run.id,
         nodeId,
         visit: at.visit,
         round: at.round,
         status: "pending",
         prevStepRunId: at.prev,
+        error: at.error,
       })
       .run();
+    return id;
   }
 
   // --- dispatcher ------------------------------------------------------------------------------
@@ -847,7 +911,8 @@ export function createEngine(deps: EngineDeps): Engine {
         if (error instanceof StaleStepError) throw error;
         settled = { kind: "failed", error: describe(error) };
       }
-      if (settled.kind === "failed" && controller.signal.reason instanceof CoreStopping) reopenAfterStop(job);
+      const { reason } = controller.signal;
+      if (settled.kind === "failed" && reason instanceof Interruption) reopenInterrupted(job, reason);
       else if (settled.kind !== "waiting") settle(job, settled);
     } catch (error) {
       if (error instanceof StaleStepError) return;
@@ -861,15 +926,15 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /**
-   * El core se apagó con el paso en curso: vuelve a pending como tras un corte, pero sin sumar a
-   * `recoveries` (un apagado limpio no cuenta para el loop de crash) y sin gastar intento. La sesión
-   * que el apagado interrumpió queda marcada para que `performAgent` la retome.
+   * Una interrupción (apagado, pausa con `now` o un mensaje) cortó el paso en curso: vuelve a pending como tras un
+   * corte, pero sin sumar a `recoveries` (no cuenta para el loop de crash) y sin gastar intento. La sesión
+   * que se interrumpió queda marcada para que `performAgent` la retome.
    */
-  function reopenAfterStop(job: Job): void {
+  function reopenInterrupted(job: Job, interruption: Interruption): void {
     store.tx((tx) => {
       const reopened = tx.db
         .update(stepRuns)
-        .set({ status: "pending", owner: null, leaseUntil: null, notBefore: null, deferrals: sql`${stepRuns.deferrals} + 1`, error: RESUMED_AFTER_CUT })
+        .set({ status: "pending", owner: null, leaseUntil: null, notBefore: null, deferrals: sql`${stepRuns.deferrals} + 1`, error: interruption.marker })
         .where(and(eq(stepRuns.id, job.step.id), eq(stepRuns.attempt, job.step.attempt), inArray(stepRuns.status, ["leased", "running"])))
         .returning({ id: stepRuns.id })
         .get();
@@ -877,7 +942,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const interrupted = tx.db
         .select({ id: agentSessions.id })
         .from(agentSessions)
-        .where(and(eq(agentSessions.stepRunId, job.step.id), eq(agentSessions.status, "error"), gte(agentSessions.endedAt, stoppingSince ?? 0)))
+        .where(and(eq(agentSessions.stepRunId, job.step.id), eq(agentSessions.status, "error"), gte(agentSessions.endedAt, interruption.at)))
         .orderBy(desc(agentSessions.id))
         .limit(1)
         .get();
@@ -886,7 +951,7 @@ export function createEngine(deps: EngineDeps): Engine {
         type: "step.retrying",
         origin: "core",
         ...scopeOf(job.run, job.step.id),
-        payload: { ...stepPayload(job.step), error: RESUMED_AFTER_CUT },
+        payload: { ...stepPayload(job.step), error: interruption.marker },
       });
     });
   }
@@ -1071,7 +1136,8 @@ export function createEngine(deps: EngineDeps): Engine {
       : { run: briefRun, worktree: workspace.path, base: workspace.base, mode: node.mode, artifacts: {}, payload };
     // Tras pasarse del tope el paso reintenta con el perfil escalado y una sesión nueva con handoff.
     const escalated = step.error === ESCALATED;
-    const cut = step.error === RESUMED_AFTER_CUT;
+    const cut = step.error === RESUMED_AFTER_CUT || step.error === RESUMED_AFTER_PAUSE;
+    const steer = step.error === STEERED ? steerOf(step) : undefined;
     const placement = {
       profile: profile.slug,
       profileDef,
@@ -1079,13 +1145,20 @@ export function createEngine(deps: EngineDeps): Engine {
       projectId: run.projectId ?? undefined,
       repoId: workspace.repoId,
       signal,
-      notice: escalated ? HANDOFF_NOTICE : cut ? CUT_NOTICE : undefined,
+      notice: escalated
+        ? HANDOFF_NOTICE
+        : step.error === RESUMED_AFTER_CUT
+          ? CUT_NOTICE
+          : step.error === RESUMED_AFTER_PAUSE
+            ? PAUSE_NOTICE
+            : steer && `${STEER_NOTICE}\n\n${steer.message}`,
     };
-    // Una sesión que el corte dejó `running` se retoma; sin ella (el corte llegó antes de que el runtime
-    // le diera id) empieza una nueva con el mismo brief.
-    const cutSession = cut ? unfinishedSession(step.id) : undefined;
-    const result = cutSession
-      ? await agents.resume({ ...placement, sessionId: cutSession, mode: node.mode, brief })
+    // Una sesión que la interrupción dejó `running` se retoma; sin ella (llegó antes de que el runtime
+    // le diera id) empieza una nueva con el mismo brief. Con un mensaje se retoma la última del paso (o la que
+    // la persona eligió al darle un paso nuevo), aunque haya terminado.
+    const resumable = steer ? (steer.session ?? lastSessionOf(step.id)) : cut ? unfinishedSession(step.id) : undefined;
+    const result = resumable
+      ? await agents.resume({ ...placement, sessionId: resumable, mode: node.mode, brief })
       : await agents.run({
           ...placement,
           role: node.role,
@@ -1094,7 +1167,7 @@ export function createEngine(deps: EngineDeps): Engine {
           mode: node.mode,
           brief,
           workspace: workspace.path,
-          resumeFrom: node.resumeFrom === undefined || escalated ? undefined : priorSession(run, node.resumeFrom),
+          resumeFrom: node.resumeFrom === undefined || escalated || step.error === RETRIED ? undefined : priorSession(run, node.resumeFrom),
         });
     if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
     const overspent = result.status === "error_max_turns" || result.status === "error_max_budget_usd";
@@ -1142,6 +1215,27 @@ export function createEngine(deps: EngineDeps): Engine {
       .orderBy(desc(agentSessions.id))
       .limit(1)
       .get()?.id;
+  }
+
+  /** La última sesión del paso, terminada o no. */
+  function lastSessionOf(stepId: StepRunId): string | undefined {
+    return store.db
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(eq(agentSessions.stepRunId, stepId))
+      .orderBy(desc(agentSessions.id))
+      .limit(1)
+      .get()?.id;
+  }
+
+  /** El mensaje que una persona le dejó al paso con `steer` (el último) y la sesión que quiso retomar, si eligió una. */
+  function steerOf(step: StepRow): { message: string; session?: string } | undefined {
+    const commands = store.events
+      .since(0, { runId: step.runId, types: ["step.commanded"] })
+      .filter((e) => e.stepRunId === step.id && e.payload.command === "steer");
+    const last = commands.at(-1);
+    if (!last || typeof last.payload.message !== "string") return undefined;
+    return { message: last.payload.message, ...(typeof last.payload.session === "string" && { session: last.payload.session }) };
   }
 
   /** La última sesión de un paso terminado de ese nodo, en la corrida o en sus padres, para que `resumeFrom` parta de ella. */
@@ -1457,6 +1551,8 @@ export function createEngine(deps: EngineDeps): Engine {
       message?: string;
       /** La nota del edge que se tomó. */
       note?: string;
+      /** En qué estados está el paso que se cierra; por defecto, el de uno que se ejecutó. Una persona puede cerrar uno pending. */
+      from?: StepRow["status"][];
       /** Las notas del reporte del agente. */
       notes?: Note[];
     },
@@ -1476,7 +1572,7 @@ export function createEngine(deps: EngineDeps): Engine {
         leaseUntil: null,
         notBefore: null,
       })
-      .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), inArray(stepRuns.status, ["leased", "running", "waiting"])))
+      .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), inArray(stepRuns.status, closing.from ?? ["leased", "running", "waiting"])))
       .returning({ id: stepRuns.id })
       .get();
     if (!closed) throw new StaleStepError(step.id);
@@ -1586,18 +1682,18 @@ export function createEngine(deps: EngineDeps): Engine {
       .select({ key: stepRuns.waitKey })
       .from(stepRuns)
       .innerJoin(runs, eq(stepRuns.runId, runs.id))
-      .where(and(eq(stepRuns.status, "waiting"), isNotNull(stepRuns.waitKey), eq(runs.status, "running")))
+      .where(and(eq(stepRuns.status, "waiting"), isNotNull(stepRuns.waitKey), inArray(runs.status, ADVANCING_RUN_STATUSES)))
       .all()
       .flatMap(({ key }) => key ?? []);
   }
 
-  /** Los waits que esperan en corridas activas. */
+  /** Los waits que esperan en corridas que corren o están pausadas. */
   function waitingSteps(): Job[] {
     return store.db
       .select({ step: stepRuns, run: runs })
       .from(stepRuns)
       .innerJoin(runs, eq(stepRuns.runId, runs.id))
-      .where(and(eq(stepRuns.status, "waiting"), isNotNull(stepRuns.waitKey), eq(runs.status, "running")))
+      .where(and(eq(stepRuns.status, "waiting"), isNotNull(stepRuns.waitKey), inArray(runs.status, ADVANCING_RUN_STATUSES)))
       .orderBy(asc(stepRuns.id))
       .all()
       .flatMap(({ step, run }) => loadJob(run, step) ?? []);
@@ -1791,51 +1887,54 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  function resolveGate(decisionId: DecisionId, option: string, by: string): void {
-    const canceled = store.tx((tx): { runId: RunId; stepIds: StepRunId[] } | undefined => {
-      const decision = tx.db.select().from(decisions).where(eq(decisions.id, decisionId)).get();
-      if (!decision) throw new DecisionNotFoundError(decisionId);
-      if (decision.status !== "pending") {
-        throw new DecisionResolveError(`La decisión ${decisionId} ya está ${decision.status}: no hay nada que resolver.`);
-      }
-      const run = decision.runId === null ? undefined : tx.db.select().from(runs).where(eq(runs.id, decision.runId)).get();
-      const step = decision.stepRunId === null ? undefined : tx.db.select().from(stepRuns).where(eq(stepRuns.id, decision.stepRunId)).get();
-      if (!run || run.status !== "parked" || !step || (decision.kind !== "gate" && decision.kind !== "needs_human")) {
-        throw new DecisionResolveError(`La decisión ${decisionId} no tiene a ninguna corrida estacionada esperándola.`);
-      }
-      if (!decision.options.includes(option)) {
-        throw new DecisionResolveError(`"${option}" no es una opción de la decisión ${decisionId}: ${decision.options.join(", ")}.`);
-      }
-      closeDecision(tx, decisionId, { status: "answered", resolution: { option }, by });
-
-      if (run.parkReason === "gate") {
-        const { node } = jobOf(run, step);
-        if (node.type !== "gate") throw new DecisionResolveError(`El paso ${step.id} no es un gate.`);
-        leaveParking(tx, run, decisionId, (current) => advance(tx, current, step, node, option, undefined, undefined));
-      } else if (option === "cancel") {
-        return { runId: run.id, stepIds: cancelFamily(tx, run.id) };
-      } else if (option === "continue") {
-        // El paso listo sigue pending: al volver la corrida a running, el dispatcher lo toma.
-        leaveParking(tx, run, decisionId, () => {});
-      } else if (option === "retry") {
-        leaveParking(tx, run, decisionId, (current) =>
-          insertStep(tx, current, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined }),
-        );
-      } else {
-        const outcome = option.slice(FORCE.length);
-        const { node } = jobOf(run, step);
-        leaveParking(tx, run, decisionId, (current) => {
-          const edge = edgeFor(node, outcome);
-          if (edge === undefined) throw new DecisionResolveError(`El nodo "${step.nodeId}" no tiene edge para el outcome "${outcome}".`);
-          const taken = takeEdge(edge, `${step.nodeId}.${outcome}`, current.rounds, current.params);
-          if (taken.note !== undefined) openEdgeNote(tx, current, step, outcome, taken.note);
-          follow(tx, current, step, taken, 0);
-        });
-      }
-      return undefined;
-    });
-    if (canceled) abortInFlight(canceled.stepIds, canceled.runId);
+  function resolveGate(decisionId: DecisionId, option: string, by: Origin): void {
+    const canceled = store.tx((tx) => resolveDecision(tx, decisionId, option, by));
+    if (canceled) abortInFlight(canceled.stepIds, new RunCanceled(canceled.runId));
     wake();
+  }
+
+  /** `resolveGate` dentro de la transacción de quien llama. Si la opción canceló la corrida, devuelve lo que `abortInFlight` debe interrumpir. */
+  function resolveDecision(tx: Tx, decisionId: DecisionId, option: string, by: Origin): { runId: RunId; stepIds: StepRunId[] } | undefined {
+    const decision = tx.db.select().from(decisions).where(eq(decisions.id, decisionId)).get();
+    if (!decision) throw new DecisionNotFoundError(decisionId);
+    if (decision.status !== "pending") {
+      throw new DecisionResolveError(`La decisión ${decisionId} ya está ${decision.status}: no hay nada que resolver.`);
+    }
+    const run = decision.runId === null ? undefined : tx.db.select().from(runs).where(eq(runs.id, decision.runId)).get();
+    const step = decision.stepRunId === null ? undefined : tx.db.select().from(stepRuns).where(eq(stepRuns.id, decision.stepRunId)).get();
+    if (!run || run.status !== "parked" || !step || (decision.kind !== "gate" && decision.kind !== "needs_human")) {
+      throw new DecisionResolveError(`La decisión ${decisionId} no tiene a ninguna corrida estacionada esperándola.`);
+    }
+    if (!decision.options.includes(option)) {
+      throw new DecisionResolveError(`"${option}" no es una opción de la decisión ${decisionId}: ${decision.options.join(", ")}.`);
+    }
+    closeDecision(tx, decisionId, { status: "answered", resolution: { option }, by });
+
+    if (run.parkReason === "gate") {
+      const { node } = jobOf(run, step);
+      if (node.type !== "gate") throw new DecisionResolveError(`El paso ${step.id} no es un gate.`);
+      leaveParking(tx, run, decisionId, (current) => advance(tx, current, step, node, option, undefined, undefined));
+    } else if (option === "cancel") {
+      return { runId: run.id, stepIds: cancelFamily(tx, run.id, by) };
+    } else if (option === "continue") {
+      // El paso listo sigue pending: al volver la corrida a running, el dispatcher lo toma.
+      leaveParking(tx, run, decisionId, () => {});
+    } else if (option === "retry") {
+      leaveParking(tx, run, decisionId, (current) =>
+        insertStep(tx, current, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined }),
+      );
+    } else {
+      const outcome = option.slice(FORCE.length);
+      const { node } = jobOf(run, step);
+      leaveParking(tx, run, decisionId, (current) => {
+        const edge = edgeFor(node, outcome);
+        if (edge === undefined) throw new DecisionResolveError(`El nodo "${step.nodeId}" no tiene edge para el outcome "${outcome}".`);
+        const taken = takeEdge(edge, `${step.nodeId}.${outcome}`, current.rounds, current.params);
+        if (taken.note !== undefined) openEdgeNote(tx, current, step, outcome, taken.note);
+        follow(tx, current, step, taken, 0);
+      });
+    }
+    return undefined;
   }
 
   // --- parallel --------------------------------------------------------------------------------
@@ -2081,7 +2180,7 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const child of finished) {
       const step = child.parentStepRunId === null ? undefined : selectStep(child.parentStepRunId);
       const parent = child.parentRunId === null ? undefined : store.db.select().from(runs).where(eq(runs.id, child.parentRunId)).get();
-      if (!step || !parent || parent.status !== "running") continue;
+      if (!step || !parent || !(ADVANCING_RUN_STATUSES as readonly string[]).includes(parent.status)) continue;
       const job = loadJob(parent, step);
       if (!job) continue;
       closeWaiting(
@@ -2093,24 +2192,81 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  function cancel(runId: RunId): void {
-    abortInFlight(store.tx((tx) => cancelFamily(tx, runId)), runId);
+  // --- comandos de una persona ----------------------------------------------------------------
+
+  function control(runId: RunId, cmd: "pause" | "resume" | "cancel", { by, now: immediately = false }: { by: Origin; now?: boolean }): void {
+    if (cmd === "cancel") abortInFlight(store.tx((tx) => cancelFamily(tx, runId, by)), new RunCanceled(runId));
+    else if (cmd === "pause") pause(runId, by, immediately);
+    else resume(runId, by);
     wake();
   }
 
-  /**
-   * Cancela, en la transacción de quien llama, la corrida y sus descendientes vivos: sus pasos quedan
-   * `canceled` y las decisiones que las estacionaban `superseded`. Devuelve los pasos cancelados, que
-   * `abortInFlight` interrumpe después.
-   */
-  function cancelFamily(tx: Tx, runId: RunId): StepRunId[] {
-    if (!tx.db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).get()) throw new RunNotFoundError(runId);
+  /** La corrida y todas sus descendientes (las de los subflujos), la corrida primero. */
+  function familyOf(tx: Tx, runId: RunId): RunId[] {
     const family = [runId];
     for (const id of family) {
       family.push(...tx.db.select({ id: runs.id }).from(runs).where(eq(runs.parentRunId, id)).all().map((r) => r.id));
     }
+    return family;
+  }
+
+  function runOrThrow(tx: Tx, runId: RunId): RunRow {
+    const run = tx.db.select().from(runs).where(eq(runs.id, runId)).get();
+    if (!run) throw new RunNotFoundError(runId);
+    return run;
+  }
+
+  /** Pasa a `to` las corridas de la familia que están en `from` y lo anota con quién lo pidió. Devuelve las que cambió. */
+  function moveFamily(tx: Tx, runId: RunId, from: RunRow["status"], to: RunRow["status"], by: Origin, extra: object = {}): RunRow[] {
+    const moved = tx.db
+      .update(runs)
+      .set({ status: to })
+      .where(and(inArray(runs.id, familyOf(tx, runId)), eq(runs.status, from)))
+      .returning()
+      .all();
+    for (const run of moved) tx.emit({ type: "run.status", origin: by, ...scopeOf(run), payload: { from, to, ...extra } });
+    return moved;
+  }
+
+  function pause(runId: RunId, by: Origin, immediately: boolean): void {
+    const interrupted = store.tx((tx) => {
+      const run = runOrThrow(tx, runId);
+      if (run.status === "running") moveFamily(tx, runId, "running", "paused", by, { now: immediately });
+      else if (run.status !== "paused") {
+        throw new RunCommandError(
+          run.status === "parked"
+            ? `La corrida ${runId} está estacionada: ya espera a una persona y no ocupa nada. Resuelve su decisión o cancélala.`
+            : `La corrida ${runId} está ${run.status}: solo se pausa una corrida que corre.`,
+        );
+      }
+      if (!immediately) return [];
+      // Los agentes de las corridas pausadas (también las que ya lo estaban) vuelven a pending con su sesión.
+      return tx.db
+        .select({ id: stepRuns.id })
+        .from(stepRuns)
+        .innerJoin(runs, eq(stepRuns.runId, runs.id))
+        .where(and(inArray(runs.id, familyOf(tx, runId)), eq(runs.status, "paused"), inArray(stepRuns.status, ["leased", "running"])))
+        .all()
+        .map((step) => step.id);
+    });
+    const interruption = new Interruption("pause", now());
+    for (const id of interrupted) if (agentSteps.has(id)) controllers.get(id)?.abort(interruption);
+  }
+
+  function resume(runId: RunId, by: Origin): void {
+    store.tx((tx) => {
+      const run = runOrThrow(tx, runId);
+      if (run.status === "paused") moveFamily(tx, runId, "paused", "running", by);
+      else if (run.status !== "running") {
+        throw new RunCommandError(`La corrida ${runId} está ${run.status}: solo se retoma una pausada.`);
+      }
+    });
+  }
+
+  function cancelFamily(tx: Tx, runId: RunId, by: Origin): StepRunId[] {
+    runOrThrow(tx, runId);
     const canceled: StepRunId[] = [];
-    for (const run of tx.db.select().from(runs).where(and(inArray(runs.id, family), inArray(runs.status, LIVE_RUN_STATUSES))).all()) {
+    for (const run of tx.db.select().from(runs).where(and(inArray(runs.id, familyOf(tx, runId)), inArray(runs.status, LIVE_RUN_STATUSES))).all()) {
       const steps = tx.db
         .update(stepRuns)
         .set({ status: "canceled", error: `La corrida ${runId} se canceló.`, owner: null, leaseUntil: null, notBefore: null })
@@ -2123,14 +2279,14 @@ export function createEngine(deps: EngineDeps): Engine {
         .from(decisions)
         .where(and(eq(decisions.runId, run.id), eq(decisions.status, "pending"), inArray(decisions.kind, ["gate", "needs_human"])))
         .all();
-      for (const { id } of blocking) closeDecision(tx, id, { status: "superseded", by: "core" });
+      for (const { id } of blocking) closeDecision(tx, id, { status: "superseded", by });
       const endedAt = now();
       tx.db.update(runs).set({ status: "canceled", parkReason: null, endedAt }).where(eq(runs.id, run.id)).run();
       recordRunMetrics(tx, run.id);
       subjects.ended(tx, run);
       tx.emit({
         type: "run.finished",
-        origin: "core",
+        origin: by,
         ...scopeOf(run),
         payload: { outcome: "canceled", costMicros: run.costMicros, minutes: (endedAt - run.startedAt) / 60_000 },
       });
@@ -2139,11 +2295,168 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** Lo que este proceso tiene en vuelo de esos pasos se interrumpe: su cierre ya no calza con su attempt y se descarta. */
-  function abortInFlight(stepIds: StepRunId[], runId: RunId): void {
+  function abortInFlight(stepIds: StepRunId[], reason: Error): void {
     for (const id of stepIds) {
       nextProbeAt.delete(id);
-      controllers.get(id)?.abort(new RunCanceled(runId));
+      controllers.get(id)?.abort(reason);
     }
+  }
+
+  function stepCommand(stepId: StepRunId, cmd: { retry: true } | { steer: string } | { force: string }, by: Origin): RunId {
+    const done = store.tx((tx) => {
+      const step = tx.db.select().from(stepRuns).where(eq(stepRuns.id, stepId)).get();
+      const run = step && tx.db.select().from(runs).where(eq(runs.id, step.runId)).get();
+      if (!step || !run) throw new StepNotFoundError(stepId);
+      if (run.status === "queued" || !LIVE_RUN_STATUSES.includes(run.status as (typeof LIVE_RUN_STATUSES)[number])) {
+        throw new RunCommandError(`La corrida ${run.id} está ${run.status}: solo se comanda un paso de una corrida viva.`);
+      }
+      let job: Job;
+      try {
+        job = jobOf(run, step);
+      } catch (error) {
+        throw new RunCommandError(`No se puede cargar el paso ${stepId}: ${describe(error)}`, { cause: error });
+      }
+      if ("retry" in cmd) return retryStep(tx, job, by);
+      if ("steer" in cmd) return steerStep(tx, job, cmd.steer, by);
+      return forceStep(tx, job, cmd.force, by);
+    });
+    abortInFlight(done.superseded, new StepSuperseded(stepId));
+    if (done.interrupt) controllers.get(stepId)?.abort(done.interrupt);
+    wake();
+    return done.runId;
+  }
+
+  /** Lo que `stepCommand` hace tras confirmar la transacción: qué pasos interrumpir y cuál es la corrida. */
+  interface Commanded {
+    runId: RunId;
+    /** Pasos que una persona reemplazó o cerró: su cierre tardío se descarta. */
+    superseded: StepRunId[];
+    /** El paso en curso que recibe un mensaje: vuelve a pending y retoma su sesión. */
+    interrupt?: Interruption;
+  }
+
+  function commanded(tx: Tx, { run, step }: Job, by: Origin, command: string, extra: object = {}, at: StepRow = step): void {
+    tx.emit({ type: "step.commanded", origin: by, ...scopeOf(run, at.id), payload: { ...stepPayload(at), command, ...extra } });
+  }
+
+  /** La decisión bloqueante abierta sobre la corrida. Hay una a lo más: un paso a la vez avanza una corrida. */
+  function blockingDecision(tx: Tx, runId: RunId) {
+    return tx.db
+      .select()
+      .from(decisions)
+      .where(and(eq(decisions.runId, runId), eq(decisions.status, "pending"), inArray(decisions.kind, ["gate", "needs_human"])))
+      .get();
+  }
+
+  /**
+   * "Reintentar desde acá": cancela lo que la corrida tiene en marcha (pasos, ramas y corridas hijas), cierra la
+   * decisión que la estacionaba y deja una visita nueva del nodo, con sesión nueva. Una corrida estacionada vuelve a
+   * la cola de su carril; una pausada sigue pausada.
+   */
+  function retryStep(tx: Tx, job: Job, by: Origin): Commanded {
+    const { run, step } = job;
+    if (job.parallel) {
+      throw new RunCommandError(`El paso "${step.nodeId}" es ${job.parallel.role === "join" ? "el join" : "una rama"} del parallel "${job.parallel.parent}": reintenta el parallel.`);
+    }
+    const decision = blockingDecision(tx, run.id);
+    const active = tx.db
+      .update(stepRuns)
+      .set({ status: "canceled", error: `${by} reintentó la corrida desde "${step.nodeId}".`, owner: null, leaseUntil: null, notBefore: null })
+      .where(and(eq(stepRuns.runId, run.id), inArray(stepRuns.status, ["pending", "leased", "running", "waiting"])))
+      .returning({ id: stepRuns.id })
+      .all()
+      .map((s) => s.id);
+    // Las corridas hijas de lo que se cancela (un nodo `flow` espera a la suya) no pueden seguir sueltas.
+    const children = tx.db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(and(inArray(runs.parentStepRunId, active), inArray(runs.status, LIVE_RUN_STATUSES)))
+      .all();
+    const superseded = [...active, ...children.flatMap((child) => cancelFamily(tx, child.id, by))];
+    if (decision) {
+      // Reintentar el paso que falló es justo la opción `retry` de su decisión.
+      const answered = decision.stepRunId === step.id && decision.options.includes("retry");
+      closeDecision(tx, decision.id, { status: answered ? "answered" : "superseded", ...(answered && { resolution: { option: "retry" } }), by });
+    }
+    commanded(tx, job, by, "retry");
+    const reopen = () => insertStep(tx, run, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined, error: RETRIED });
+    if (decision) leaveParking(tx, run, decision.id, reopen);
+    else reopen();
+    return { runId: run.id, superseded };
+  }
+
+  function steerStep(tx: Tx, job: Job, message: string, by: Origin): Commanded {
+    const { run, step, node } = job;
+    if (node.type !== "agent") throw new RunCommandError(`Solo un paso de agente recibe un mensaje: "${step.nodeId}" es un ${node.type}.`);
+    if (message.trim() === "") throw new RunCommandError("El mensaje para el agente está vacío.");
+    if (step.status === "leased" || step.status === "running") {
+      if (!controllers.has(step.id)) throw new RunCommandError(`El paso ${step.id} no está en curso en este core.`);
+      commanded(tx, job, by, "steer", { message });
+      return { runId: run.id, superseded: [], interrupt: new Interruption("steer", now()) };
+    }
+    if (step.status === "pending") {
+      tx.db.update(stepRuns).set({ error: STEERED, notBefore: null }).where(eq(stepRuns.id, step.id)).run();
+      commanded(tx, job, by, "steer", { message });
+      return { runId: run.id, superseded: [] };
+    }
+    const decision = blockingDecision(tx, run.id);
+    if (step.status === "failed" && run.status === "parked" && decision?.kind === "needs_human" && decision.stepRunId === step.id) {
+      // El paso nuevo retoma la última sesión del que falló, con el mensaje.
+      closeDecision(tx, decision.id, { status: "superseded", by });
+      leaveParking(tx, run, decision.id, (current) => {
+        const reopened = insertStep(tx, current, step.nodeId, {
+          visit: nextVisit(tx, run.id, step.nodeId),
+          round: step.round,
+          prev: step.prevStepRunId ?? undefined,
+          error: STEERED,
+        });
+        const session = lastSessionOf(step.id);
+        tx.emit({
+          type: "step.commanded",
+          origin: by,
+          ...scopeOf(run, reopened),
+          payload: { stepId: reopened, nodeId: step.nodeId, round: step.round, attempt: 0, command: "steer", message, ...(session && { session }) },
+        });
+      });
+      return { runId: run.id, superseded: [] };
+    }
+    throw new RunCommandError(
+      `El paso "${step.nodeId}" está ${step.status}: un mensaje solo llega a un agente en curso, pendiente o que falló y espera tu decisión. Para volver a correr un paso terminado, reintenta desde él.`,
+    );
+  }
+
+  function forceStep(tx: Tx, job: Job, outcome: string, by: Origin): Commanded {
+    const { run, step, node } = job;
+    if (node.type !== "action" && node.type !== "wait") {
+      throw new RunCommandError(`Solo se fuerza el resultado de un paso action o wait (nunca el de un agente): "${step.nodeId}" es un ${node.type}.`);
+    }
+    if (job.parallel) {
+      throw new RunCommandError(`El paso "${step.nodeId}" es una rama del parallel "${job.parallel.parent}": fuerza el parallel o reintenta.`);
+    }
+    const declared = Object.keys(node.on ?? {});
+    if (!declared.includes(outcome)) {
+      throw new RunCommandError(`El nodo "${step.nodeId}" no declara el outcome "${outcome}": ${declared.join(", ") || "ninguno"}.`);
+    }
+    const decision = blockingDecision(tx, run.id);
+    if (step.status === "failed" && run.status === "parked" && decision?.kind === "needs_human" && decision.stepRunId === step.id) {
+      commanded(tx, job, by, "force", { outcome });
+      resolveDecision(tx, decision.id, `${FORCE}${outcome}`, by);
+      return { runId: run.id, superseded: [] };
+    }
+    const open = ["pending", "leased", "running", "waiting"].includes(step.status);
+    if (!open || run.status === "parked") {
+      throw new RunCommandError(
+        run.status === "parked"
+          ? `La corrida ${run.id} está estacionada esperando una decisión: resuélvela, o reintenta desde el paso.`
+          : `El paso "${step.nodeId}" está ${step.status}: solo se fuerza el que la corrida tiene en marcha.`,
+      );
+    }
+    // Como `advance`, pero el paso no se ejecutó (o no terminó de esperar): lo cierra la persona.
+    const taken = takeEdge(edgeFor(node, outcome) as Edge, `${step.nodeId}.${outcome}`, run.rounds, run.params);
+    commanded(tx, job, by, "force", { outcome });
+    const cost = closeStep(tx, run, step, { status: "done", outcome, note: taken.note, from: ["pending", "leased", "running", "waiting"] });
+    follow(tx, tx.db.select().from(runs).where(eq(runs.id, run.id)).get() ?? run, step, taken, cost);
+    return { runId: run.id, superseded: [step.id] };
   }
 
   // --- lectura ---------------------------------------------------------------------------------
@@ -2205,10 +2518,10 @@ export function createEngine(deps: EngineDeps): Engine {
     closed = true;
     clearInterval(ticker);
     if (!opts) return void (await Promise.all(inFlight));
-    stoppingSince = now();
-    for (const id of agentSteps) controllers.get(id)?.abort(new CoreStopping());
+    const stopping = new Interruption("stop", now());
+    for (const id of agentSteps) controllers.get(id)?.abort(stopping);
     const abortAll = () => {
-      for (const controller of controllers.values()) controller.abort(new CoreStopping());
+      for (const controller of controllers.values()) controller.abort(stopping);
     };
     const grace = opts.graceMs > 0 ? setTimeout(abortAll, opts.graceMs) : undefined;
     if (!grace) abortAll();
@@ -2219,7 +2532,7 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  return { start, signal, waitKeys, resolveGate, cancel, getRun, listRuns, recover, wake, close };
+  return { start, signal, waitKeys, resolveGate, control, stepCommand, getRun, listRuns, recover, wake, close };
 }
 
 class StepTimeout extends Error {

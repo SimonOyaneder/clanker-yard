@@ -24,10 +24,10 @@ describe("contrato", () => {
     expect(Object.keys(contract.events).sort()).toEqual(["list", "stream"]);
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);
     expect(Object.keys(contract.issues).sort()).toEqual(["createLocal", "get", "list"]);
-    expect(Object.keys(contract.projects).sort()).toEqual(["create", "get", "list", "queue", "setParallel", "skipIssue", "summary", "update"]);
+    expect(Object.keys(contract.projects).sort()).toEqual(["create", "get", "list", "pause", "queue", "resume", "setParallel", "skipIssue", "summary", "update"]);
     expect(Object.keys(contract.prs)).toEqual(["get", "list", "refresh"]);
     expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "testRecipe"]);
-    expect(Object.keys(contract.runs).sort()).toEqual(["get", "list", "start", "step", "transcript"]);
+    expect(Object.keys(contract.runs).sort()).toEqual(["cancel", "forceOutcome", "get", "interrupt", "list", "pause", "resume", "retryStep", "start", "steerStep", "step", "transcript"]);
     expect(Object.keys(contract.decisions).sort()).toEqual(["get", "list", "resolve"]);
     expect(Object.keys(contract.defs).sort()).toEqual(["get", "list"]);
     expect(Object.keys(contract.metrics).sort()).toEqual(["byDay", "byModel", "byRole"]);

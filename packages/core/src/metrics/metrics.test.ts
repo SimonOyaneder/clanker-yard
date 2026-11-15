@@ -125,7 +125,7 @@ describe("al cerrar la corrida", () => {
 
     const failed = await h.startIn(projectA, "ENG-1");
     const canceled = h.flows.start("stuck", { type: "issue", id: "ENG-2" }, {}, { profile: "default", projectId: projectA });
-    h.flows.cancel(canceled);
+    h.flows.control(canceled, "cancel", { by: "ui" });
 
     const result = (id: RunId) => h.store.db.select().from(runMetrics).where(eq(runMetrics.runId, id)).get();
     expect(result(failed)).toMatchObject({ result: "failed", rounds: { review: 3 } });

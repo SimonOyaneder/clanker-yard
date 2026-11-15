@@ -3,8 +3,10 @@ import { Background, BackgroundVariant, Controls, MarkerType, type Node, ReactFl
 import "@xyflow/react/dist/style.css"
 import { useEffect, useMemo } from "react"
 import { FlowEdge, type FlowEdgeType } from "@/components/project/flow-edge"
-import { FlowNode, type FlowNodeData } from "@/components/project/flow-node"
+import { FlowNode, type FlowNodeData, type NodeCommands } from "@/components/project/flow-node"
+import { type RunCommands, useRunCommands } from "@/components/project/run-commands"
 import { useColorMode } from "@/hooks/use-color-mode"
+import { stepCaps } from "@/lib/run-commands"
 import { layoutShape, nodeStates, roundsOf, type GraphEdge, type GraphShape, type NodeState } from "@/lib/run-graph"
 
 const nodeTypes = { flow: FlowNode }
@@ -44,7 +46,20 @@ interface Selection {
   onCopySessionId: (stepId: StepRunId) => void
 }
 
-function toFlow(shape: GraphShape, run: RunDetail, now: number, { selected, onSelect, onCopySessionId }: Selection): { nodes: Node<FlowNodeData>[]; edges: FlowEdgeType[] } {
+// Lo que el menú de un nodo ofrece sobre su último paso: lo que el core aceptaría en su estado.
+function commandsOf(run: RunDetail, shape: GraphShape, nodeId: string, commands: RunCommands): NodeCommands | undefined {
+  const step = run.steps.findLast((s) => s.nodeId === nodeId)
+  if (!step) return undefined
+  const caps = stepCaps(run, shape, nodeId, step)
+  if (!caps.retry && !caps.interrupt && caps.force.length === 0) return undefined
+  return {
+    retry: caps.retry ? { label: caps.retry === "este" ? "Reintentar este paso" : "Reintentar desde acá", run: () => commands.retry(step.id, nodeId) } : undefined,
+    interrupt: caps.interrupt ? () => commands.interrupt(run.id) : undefined,
+    force: caps.force.length > 0 ? { outcomes: caps.force, run: (outcome) => commands.force(step.id, nodeId, outcome) } : undefined,
+  }
+}
+
+function toFlow(shape: GraphShape, run: RunDetail, now: number, { selected, onSelect, onCopySessionId }: Selection, commands: RunCommands): { nodes: Node<FlowNodeData>[]; edges: FlowEdgeType[] } {
   const boxes = layoutShape(shape)
   const states = nodeStates(shape, run, now)
   return {
@@ -62,6 +77,7 @@ function toFlow(shape: GraphShape, run: RunDetail, now: number, { selected, onSe
           state,
           onOpen: node.kind === "end" ? undefined : () => onSelect(node.id),
           onCopySessionId: state.stepId ? () => onCopySessionId(state.stepId!) : undefined,
+          commands: commandsOf(run, shape, node.id, commands),
         },
         selected: node.id === selected,
         draggable: false,
@@ -86,7 +102,8 @@ function FitOnResize() {
 // abre el panel de su paso.
 export function RunGraph({ run, now, shape, selected, onSelect, onCopySessionId }: { run: RunDetail; now: number; shape: GraphShape } & Selection) {
   const colorMode = useColorMode()
-  const { nodes, edges } = useMemo(() => toFlow(shape, run, now, { selected, onSelect, onCopySessionId }), [shape, run, now, selected, onSelect, onCopySessionId])
+  const commands = useRunCommands()
+  const { nodes, edges } = useMemo(() => toFlow(shape, run, now, { selected, onSelect, onCopySessionId }, commands), [shape, run, now, selected, onSelect, onCopySessionId, commands])
 
   return (
     <div

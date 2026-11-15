@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
+import { RunCommandsProvider } from "@/components/project/run-commands"
 import { RunView } from "@/components/project/run-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { createMemoryAppData } from "@/memory-app-data"
@@ -27,9 +28,11 @@ async function setup(node: string | null, tab: "graph" | "timeline" = "graph") {
   const onNodeChange = vi.fn()
   render(
     <AppDataProvider value={data}>
-      <TooltipProvider>
-        <RunView run={run} issue={undefined} tab={tab} onTabChange={() => {}} node={node} onNodeChange={onNodeChange} stepTab="transcript" onStepTab={() => {}} />
-      </TooltipProvider>
+      <RunCommandsProvider>
+        <TooltipProvider>
+          <RunView run={run} issue={undefined} tab={tab} onTabChange={() => {}} node={node} onNodeChange={onNodeChange} stepTab="transcript" onStepTab={() => {}} />
+        </TooltipProvider>
+      </RunCommandsProvider>
     </AppDataProvider>,
   )
   return { onNodeChange }

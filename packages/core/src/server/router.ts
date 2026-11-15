@@ -1,4 +1,4 @@
-import { API_MAJOR, type ClientOrigin, contract, type PrRef, type PrState, type ProjectId } from "@clanker/api";
+import { API_MAJOR, type ClientOrigin, contract, type PrRef, type PrState, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubPatError, githubPatForm } from "../github/pat";
 import { PrNotFoundError } from "../github/pr-query";
@@ -10,7 +10,7 @@ import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
-import { DecisionNotFoundError, DecisionResolveError, RunNotFoundError, RunStartError } from "../flows/engine";
+import { DecisionNotFoundError, DecisionResolveError, RunCommandError, RunNotFoundError, RunStartError } from "../flows/engine";
 import { createStepDetails, StepNotFoundError } from "../flows/step-detail";
 import { LegacyImportError, type LegacyImporter } from "../import/legacy";
 import { createMetrics } from "../metrics/metrics";
@@ -85,6 +85,15 @@ export function createRouter(deps: RouterDeps) {
     if (!project) throw new ORPCError("NOT_FOUND", { message: `No existe el proyecto ${id}.` });
     return project;
   };
+  /** `runs.pause|resume|cancel|interrupt`: el comando y la corrida como quedó. */
+  const controlRun = (id: RunId, cmd: "pause" | "resume" | "cancel", by: ClientOrigin, now?: boolean) =>
+    asApiError(() => {
+      flows.control(id, cmd, { by, now });
+      return flows.getRun(id);
+    });
+  /** `runs.retryStep|steerStep|forceOutcome`: el comando y la corrida del paso como quedó. */
+  const commandStep = (stepId: StepRunId, cmd: Parameters<Engine["stepCommand"]>[1], by: ClientOrigin) =>
+    asApiError(() => flows.getRun(flows.stepCommand(stepId, cmd, by)));
   /** Lee un PR de GitHub (`prs.get`, `prs.refresh`) y traduce sus errores a los de la API. */
   const readPr = async (ref: PrRef, read: (ref: PrRef) => Promise<PrState>): Promise<PrState> => {
     if (!deps.connections.list().some((c) => c.provider === "github" && c.account === ref.account)) {
@@ -224,6 +233,8 @@ export function createRouter(deps: RouterDeps) {
       update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
         asApiError(() => projects.update(id, patch, context.origin)),
       ),
+      pause: os.projects.pause.handler(({ input, context }) => asApiError(() => projects.pause(input.id, context.origin))),
+      resume: os.projects.resume.handler(({ input, context }) => asApiError(() => projects.resume(input.id, context.origin))),
       setParallel: os.projects.setParallel.handler(({ input: { id, parallel }, context }) =>
         asApiError(() => projects.update(id, { parallel }, context.origin)),
       ),
@@ -254,6 +265,13 @@ export function createRouter(deps: RouterDeps) {
       start: os.runs.start.handler(({ input, context }) =>
         asApiErrorAsync(() => runs.start(input, context.origin)),
       ),
+      pause: os.runs.pause.handler(({ input, context }) => controlRun(input.id, "pause", context.origin, input.now)),
+      resume: os.runs.resume.handler(({ input, context }) => controlRun(input.id, "resume", context.origin)),
+      cancel: os.runs.cancel.handler(({ input, context }) => controlRun(input.id, "cancel", context.origin)),
+      interrupt: os.runs.interrupt.handler(({ input, context }) => controlRun(input.id, "pause", context.origin, true)),
+      retryStep: os.runs.retryStep.handler(({ input, context }) => commandStep(input.stepId, { retry: true }, context.origin)),
+      steerStep: os.runs.steerStep.handler(({ input, context }) => commandStep(input.stepId, { steer: input.message }, context.origin)),
+      forceOutcome: os.runs.forceOutcome.handler(({ input, context }) => commandStep(input.stepId, { force: input.outcome }, context.origin)),
     },
     metrics: {
       byRole: os.metrics.byRole.handler(({ input }) => metrics.byRole(input)),
@@ -344,6 +362,7 @@ function toApiError(error: unknown): unknown {
     error instanceof IssueNotInProjectError ||
     error instanceof QueueUnavailableError ||
     error instanceof RunStartError ||
+    error instanceof RunCommandError ||
     error instanceof DecisionResolveError ||
     error instanceof InvalidRepoError ||
     error instanceof NotAGitRepoError ||

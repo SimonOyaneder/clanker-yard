@@ -1,20 +1,23 @@
 import type { AgentSessionId, RunDetail, Step, StepRunId } from "@clanker/api"
-import { X } from "lucide-react"
+import { ChevronDown, MessageSquarePlus, RotateCcw, Square, X, Zap } from "lucide-react"
 import { useCallback, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { Hint, Pill } from "@/components/common"
 import { ArtifactsSection, AttemptsSection, BriefSection, CommandsSection, ReportSection } from "@/components/project/step-sections"
 import { EmptyNote } from "@/components/project/step-parts"
+import { useRunCommands } from "@/components/project/run-commands"
 import { StepTranscript } from "@/components/project/step-transcript"
 import { stepLook } from "@/components/project/status"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useLiveQuery } from "@/hooks/use-live"
 import { copy } from "@/lib/clipboard"
 import { tone } from "@/lib/format"
-import type { GraphNode, GraphNodeKind } from "@/lib/run-graph"
+import { stepCaps, type StepCaps } from "@/lib/run-commands"
+import type { GraphNode, GraphNodeKind, GraphShape } from "@/lib/run-graph"
 
 export type StepTab = "transcript" | "command" | "brief" | "report" | "artifacts" | "attempts"
 
@@ -62,6 +65,7 @@ const stepLabel = (s: Step) => `visita ${s.visit}${s.round > 0 ? ` · ronda ${s.
 
 interface Props {
   run: RunDetail
+  shape: GraphShape
   node: GraphNode
   tab: StepTab
   onTab: (tab: StepTab) => void
@@ -71,12 +75,13 @@ interface Props {
 // El panel de un nodo del grafo: qué recibió, qué dijo y qué entregó. El selector de visita elige entre las
 // veces que el flujo pasó por el nodo (rondas) y el de intento entre las sesiones de esa visita. Sin elegir,
 // sigue a la última, así una corrida en vivo se ve avanzar.
-export function StepPanel({ run, node, tab, onTab, onClose }: Props) {
+export function StepPanel({ run, shape, node, tab, onTab, onClose }: Props) {
   const steps = run.steps.filter((s) => s.nodeId === node.id)
   const [pickedStep, setPickedStep] = useState<StepRunId | null>(null)
   const [pickedSession, setPickedSession] = useState<string | null>(null)
   const step = steps.find((s) => s.id === pickedStep) ?? steps.at(-1)
   const current = effectiveTab(tab, node.kind)
+  const caps = stepCaps(run, shape, node.id, steps.at(-1))
 
   return (
     <section aria-label={`Panel del paso ${node.label}`} className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
@@ -91,6 +96,7 @@ export function StepPanel({ run, node, tab, onTab, onClose }: Props) {
           </Hint>
         </div>
         {node.detail ? <p className="truncate font-mono text-xs text-muted-foreground">{node.detail}</p> : null}
+        {step ? <StepActions run={run} step={steps.at(-1)!} label={node.label} caps={caps} /> : null}
       </header>
 
       {!step ? (
@@ -103,6 +109,62 @@ export function StepPanel({ run, node, tab, onTab, onClose }: Props) {
         <StepBody key={step.id} step={step} node={node} steps={steps} tab={current} onTab={onTab} pickedStep={pickedStep} onPickStep={setPickedStep} pickedSession={pickedSession} onPickSession={setPickedSession} />
       )}
     </section>
+  )
+}
+
+// Lo que se le puede pedir al paso según su estado (los mismos casos que acepta el core). "Forzar resultado" solo
+// existe en pasos action y wait: la decisión es no pisar nunca lo que un agente dijo.
+function StepActions({ run, step, label, caps }: { run: RunDetail; step: Step; label: string; caps: StepCaps }) {
+  const commands = useRunCommands()
+  if (!caps.retry && !caps.interrupt && !caps.steer && caps.force.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+      {caps.retry ? (
+        <Hint
+          label={caps.retry === "este" ? "Vuelve a correr este paso con una sesión nueva; lo que la corrida tenía en marcha se cancela" : "Vuelve a correr desde este paso con una sesión nueva: lo que vino después se cancela"}
+          keys={step.status === "failed" ? "⇧⌘R" : undefined}
+          side="bottom"
+        >
+          <Button size="xs" variant="outline" onClick={() => commands.retry(step.id, label)}>
+            <RotateCcw /> {caps.retry === "este" ? "Reintentar" : "Reintentar desde acá"}
+          </Button>
+        </Hint>
+      ) : null}
+      {caps.interrupt ? (
+        <Hint label="Detiene al agente con su sesión guardada y pausa la corrida" keys="⌘." side="bottom">
+          <Button size="xs" variant="outline" onClick={() => commands.interrupt(run.id)}>
+            <Square /> Interrumpir
+          </Button>
+        </Hint>
+      ) : null}
+      {caps.steer ? (
+        <Hint label="Le deja un mensaje al agente y retoma su sesión con él" side="bottom">
+          <Button size="xs" variant="outline" onClick={() => commands.steer(step.id, label)}>
+            <MessageSquarePlus /> Mensaje al agente
+          </Button>
+        </Hint>
+      ) : null}
+      {caps.force.length > 0 ? (
+        <DropdownMenu>
+          <Hint label="El paso no se ejecuta y la corrida sigue por el edge del resultado que elijas. Queda registrado" side="bottom">
+            <DropdownMenuTrigger asChild>
+              <Button size="xs" variant="outline">
+                <Zap /> Forzar resultado <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+          </Hint>
+          <DropdownMenuContent align="start" className="w-44">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Resultados del nodo</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {caps.force.map((outcome) => (
+              <DropdownMenuItem key={outcome} className="font-mono text-[12.5px]" onSelect={() => commands.force(step.id, label, outcome)}>
+                {outcome}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
   )
 }
 

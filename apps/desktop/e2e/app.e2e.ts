@@ -172,6 +172,41 @@ test("el panel del paso muestra el transcript, el brief y el reporte del agente"
   await expect(page.getByRole("heading", { name: "Demo" })).toBeVisible()
 })
 
+test("interrumpir una corrida en curso la pausa con su sesión y retomarla la termina", async ({ window: page }) => {
+  await sidebar(page).getByRole("button", { name: "Demo" }).click()
+  await page.getByRole("listitem").filter({ hasText: "Saluda al sol" }).getByRole("button", { name: "Correr" }).click()
+  await page.getByRole("button", { name: "Ver", exact: true }).click()
+  await expect(node(page, "saludar").locator('[data-current="true"]')).toBeVisible()
+  await expect(page.getByRole("button", { name: "Pausar" })).toBeVisible()
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme)
+    await snap(page, "corrida-acciones", theme)
+  }
+
+  // Interrumpir detiene al agente y pide confirmación antes.
+  await page.getByRole("button", { name: "Interrumpir" }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Interrumpir" }).click()
+  await expect(page.getByText("pausada", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Retomar" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Pausar" })).toBeHidden()
+  await expect(page.getByText("se retoma").first()).toBeVisible()
+  // El panel del agente ofrece dejarle un mensaje y reintentar.
+  await node(page, "saludar").click()
+  const panel = page.getByRole("region", { name: "Panel del paso saludar" })
+  await expect(panel.getByRole("button", { name: "Mensaje al agente" })).toBeVisible()
+  await expect(panel.getByRole("button", { name: "Reintentar" })).toBeVisible()
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme)
+    await snap(page, "corrida-pausada", theme)
+  }
+  await page.keyboard.press("Escape")
+
+  await page.getByRole("button", { name: "Retomar" }).click()
+  await expect(page.getByText("terminó el flujo")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole("button", { name: "Retomar" })).toBeHidden()
+  await page.keyboard.press("Escape")
+})
+
 test("screenshots de cada vista en claro y oscuro", async ({ window: page }) => {
   for (const theme of ["light", "dark"] as const) {
     await setTheme(page, theme);

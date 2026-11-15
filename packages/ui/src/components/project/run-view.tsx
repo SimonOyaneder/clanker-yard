@@ -1,11 +1,14 @@
 import type { CachedIssue, RunDetail, Step } from "@clanker/api"
-import { Copy, GitBranch, GitMerge, ListTree, Network } from "lucide-react"
+import { Copy, Ellipsis, GitBranch, GitMerge, ListTree, Network, Octagon, Pause, Play, RotateCcw, Square } from "lucide-react"
 import { useMemo } from "react"
 import { Hint, Pill, SectionTitle, StatBar } from "@/components/common"
+import { useRunCommands } from "@/components/project/run-commands"
 import { RunGraph } from "@/components/project/run-graph"
 import { RunStatusPill, isLive, stepLook } from "@/components/project/status"
 import { StepPanel, type StepTab, useCopySessionId } from "@/components/project/step-panel"
+import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useNow } from "@/hooks/use-now"
@@ -13,6 +16,7 @@ import { copy } from "@/lib/clipboard"
 import { absolute, compactCount, costUsd, elapsed, issueKey, tone } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
 import { currentRound, type GraphNodeKind, shapeOf } from "@/lib/run-graph"
+import { type RunCaps, runCaps } from "@/lib/run-commands"
 import { cn } from "@/lib/utils"
 
 const OUTCOME = { done: "terminó el flujo", blocked: "terminó sin completar la issue", failed: "un paso falló sin salida" } as const
@@ -43,6 +47,7 @@ export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, step
   const failure = run.status === "failed" ? run.steps.findLast((s) => s.status === "failed" && s.error) : undefined
   const shape = useMemo(() => shapeOf(run.flowDef, run.steps), [run.flowDef, run.steps])
   const copySessionId = useCopySessionId()
+  const caps = useMemo(() => runCaps(run, shape), [run, shape])
   const open = shape.nodes.find((n) => n.id === node && n.kind !== "end")
   const round = currentRound(shape, run)
   const inputTokens = run.usage.input + run.usage.cacheRead + run.usage.cacheWrite
@@ -55,6 +60,7 @@ export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, step
           <span className="font-mono text-xs text-muted-foreground">{issue ? issueKey(issue) : `${run.subject.type}:${run.subject.id}`}</span>
           <RunStatusPill run={run} />
           {run.outcome ? <span className="text-xs text-muted-foreground">{OUTCOME[run.outcome as keyof typeof OUTCOME] ?? run.outcome}</span> : null}
+          <RunActions run={run} caps={caps} />
         </div>
         <h1 className="text-lg font-semibold">{issue?.title ?? "Issue fuera del caché"}</h1>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -151,12 +157,65 @@ export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, step
             <>
               <ResizableHandle withHandle />
               <ResizablePanel id="step" defaultSize={`${readPref(PANEL_SIZE_PREF, 40)}%`} minSize="28%" maxSize="70%" className="pl-3">
-                <StepPanel key={open.id} run={run} node={open} tab={stepTab} onTab={onStepTab} onClose={() => onNodeChange(null)} />
+                <StepPanel key={open.id} run={run} shape={shape} node={open} tab={stepTab} onTab={onStepTab} onClose={() => onNodeChange(null)} />
               </ResizablePanel>
             </>
           ) : null}
         </ResizablePanelGroup>
       </div>
+    </div>
+  )
+}
+
+// Los botones de la corrida: lo que se puede pedir según su estado. Cancelar va en "…" porque no se deshace.
+function RunActions({ run, caps }: { run: RunDetail; caps: RunCaps }) {
+  const commands = useRunCommands()
+  const { failedStep } = caps
+  return (
+    <div className="ml-auto flex items-center gap-1.5">
+      {failedStep ? (
+        <Hint label={`Vuelve a correr ${failedStep.nodeId} con una sesión nueva y sigue el flujo desde ahí`} keys="⇧⌘R">
+          <Button size="sm" onClick={() => commands.retry(failedStep.id, failedStep.nodeId)}>
+            <RotateCcw /> Reintentar paso
+          </Button>
+        </Hint>
+      ) : null}
+      {caps.resume ? (
+        <Hint label="Vuelve a despachar los pasos de la corrida; el agente interrumpido sigue su sesión" keys="⇧⌘.">
+          <Button size="sm" onClick={() => commands.resume(run.id)}>
+            <Play /> Retomar
+          </Button>
+        </Hint>
+      ) : null}
+      {caps.pause ? (
+        <Hint label="No despacha pasos nuevos; el agente en curso termina lo suyo. Sigue ocupando su cupo" keys="⇧⌘.">
+          <Button size="sm" variant="outline" onClick={() => commands.pause(run.id)}>
+            <Pause /> Pausar
+          </Button>
+        </Hint>
+      ) : null}
+      {caps.interrupt ? (
+        <Hint label="Detiene al agente en curso con su sesión guardada y pausa la corrida" keys="⌘.">
+          <Button size="sm" variant="outline" onClick={() => commands.interrupt(run.id)}>
+            <Square /> Interrumpir
+          </Button>
+        </Hint>
+      ) : null}
+      {caps.cancel ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label="Más acciones de la corrida">
+              <Ellipsis />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem variant="destructive" onSelect={() => commands.cancel(run.id)}>
+              <Octagon /> Cancelar corrida
+              <DropdownMenuShortcut>⇧⌘⌫</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </div>
   )
 }

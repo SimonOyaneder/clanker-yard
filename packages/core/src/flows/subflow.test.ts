@@ -313,7 +313,7 @@ describe("cancelar", () => {
     const runId = h.start("parent");
     await running;
     const [kid] = h.childrenOf(runId);
-    h.flows.cancel(runId);
+    h.flows.control(runId, "cancel", { by: "ui" });
 
     expect(h.flows.getRun(runId)).toMatchObject({ status: "canceled", outcome: null });
     expect(h.flows.getRun(kid?.id as RunId)).toMatchObject({ status: "canceled", outcome: null });
@@ -348,7 +348,7 @@ describe("cancelar", () => {
     h.save(parent({}, { start: "sub", nodes: { sub: { type: "flow", flow: "child", params: {}, on: ends } } }));
     const runId = h.start("parent");
     await running;
-    h.flows.cancel(runId);
+    h.flows.control(runId, "cancel", { by: "ui" });
 
     const [kid] = h.childrenOf(runId);
     await vi.waitFor(() => expect(h.store.events.since(0, { runId: kid?.id, types: ["agent.ended"] })).toHaveLength(1));
@@ -371,7 +371,7 @@ describe("cancelar", () => {
     const runId = h.start("parent");
     await running;
     const [kid] = h.childrenOf(runId);
-    h.flows.cancel(kid?.id as RunId);
+    h.flows.control(kid?.id as RunId, "cancel", { by: "ui" });
     await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("failed"));
 
     expect(h.flows.getRun(runId).steps[0]).toMatchObject({ nodeId: "sub", outcome: "failed", error: expect.stringContaining("se canceló") });
@@ -385,9 +385,9 @@ describe("cancelar", () => {
     const runId = h.start("parent");
     await h.finished(runId);
 
-    h.flows.cancel(runId);
+    h.flows.control(runId, "cancel", { by: "ui" });
 
     expect(h.flows.getRun(runId).status).toBe("done");
-    expect(() => h.flows.cancel("run_nope" as RunId)).toThrow(RunNotFoundError);
+    expect(() => h.flows.control("run_nope" as RunId, "cancel", { by: "ui" })).toThrow(RunNotFoundError);
   });
 });

@@ -2,6 +2,8 @@
 import type { QueueEntry } from "@clanker/api"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, expect, test, vi } from "vitest"
+import { AppDataProvider } from "@/app-data"
+import { RunCommandsProvider } from "@/components/project/run-commands"
 import { ProjectView } from "@/components/project/project-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
@@ -18,11 +20,15 @@ async function setup(entries: (issues: QueueEntry["issue"][]) => QueueEntry[]) {
   const startRun = vi.fn(() => Promise.resolve())
   const actions = { startRun, refresh: () => {}, openRun: () => {} } as unknown as AppActions
   render(
-    <AppActionsContext.Provider value={actions}>
-      <TooltipProvider>
-        <ProjectView project={project} runs={[]} issues={issues} queue={entries(issues)} />
-      </TooltipProvider>
-    </AppActionsContext.Provider>,
+    <AppDataProvider value={data}>
+      <RunCommandsProvider>
+        <AppActionsContext.Provider value={actions}>
+          <TooltipProvider>
+            <ProjectView project={project} runs={[]} issues={issues} queue={entries(issues)} />
+          </TooltipProvider>
+        </AppActionsContext.Provider>
+      </RunCommandsProvider>
+    </AppDataProvider>,
   )
   return { startRun, issues }
 }

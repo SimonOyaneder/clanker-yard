@@ -1,8 +1,9 @@
-import type { CachedIssue, ClankerProject, Run } from "@clanker/api"
-import { Bot, FileText, GitPullRequest, History, Keyboard, Layers, ListTree, MessageSquare, Network, PanelLeft, Paperclip, Play, Plug, Plus, RefreshCw, ScrollText, X } from "lucide-react"
+import type { CachedIssue, ClankerProject, Run, RunId } from "@clanker/api"
+import { Bot, FileText, GitPullRequest, History, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, Play, Plug, Plus, RefreshCw, RotateCcw, ScrollText, Square, X } from "lucide-react"
 import type { PullRequest } from "@/types"
 import type { RunTab } from "@/components/project/run-view"
 import type { StepTab } from "@/components/project/step-panel"
+import { useRunCommands } from "@/components/project/run-commands"
 import { RunStatusIcon, isLive } from "@/components/project/status"
 import {
   CommandDialog,
@@ -17,6 +18,7 @@ import {
 import { useHost } from "@/host"
 import { useAppActions } from "@/lib/app-context"
 import { issueKey } from "@/lib/format"
+import type { RunCaps } from "@/lib/run-commands"
 import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 
@@ -33,13 +35,16 @@ interface Props {
   onGoPrs: () => void
   /** Solo con una corrida abierta: cambia entre su grafo y su línea de tiempo. */
   onRunTab: ((tab: RunTab) => void) | null
+  /** Solo con una corrida abierta: qué se le puede pedir en su estado. */
+  runCaps: { id: RunId; caps: RunCaps } | null
   /** Solo con el panel de un paso abierto. */
   onStep: { onTab: (tab: StepTab) => void; onClose: () => void } | null
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onRunTab, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
+  const commands = useRunCommands()
   const host = useHost()
   const run = (fn: () => void) => () => {
     onOpenChange(false)
@@ -66,6 +71,45 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <CommandItem onSelect={run(() => onRunTab("timeline"))}>
               <ListTree /> Ver la línea de tiempo
               <CommandShortcut>L</CommandShortcut>
+            </CommandItem>
+            {runCaps?.caps.failedStep ? (
+              <CommandItem onSelect={run(() => commands.retry(runCaps.caps.failedStep!.id, runCaps.caps.failedStep!.nodeId))}>
+                <RotateCcw /> Reintentar el paso fallido
+                <CommandShortcut>⇧⌘R</CommandShortcut>
+              </CommandItem>
+            ) : null}
+            {runCaps?.caps.pause ? (
+              <CommandItem onSelect={run(() => commands.pause(runCaps.id))}>
+                <Pause /> Pausar la corrida
+                <CommandShortcut>⇧⌘.</CommandShortcut>
+              </CommandItem>
+            ) : null}
+            {runCaps?.caps.resume ? (
+              <CommandItem onSelect={run(() => commands.resume(runCaps.id))}>
+                <Play /> Retomar la corrida
+                <CommandShortcut>⇧⌘.</CommandShortcut>
+              </CommandItem>
+            ) : null}
+            {runCaps?.caps.interrupt ? (
+              <CommandItem onSelect={run(() => commands.interrupt(runCaps.id))}>
+                <Square /> Interrumpir al agente en curso
+                <CommandShortcut>⌘.</CommandShortcut>
+              </CommandItem>
+            ) : null}
+            {runCaps?.caps.cancel ? (
+              <CommandItem onSelect={run(() => commands.cancel(runCaps.id))}>
+                <Octagon /> Cancelar la corrida
+                <CommandShortcut>⇧⌘⌫</CommandShortcut>
+              </CommandItem>
+            ) : null}
+          </CommandGroup>
+        ) : null}
+
+        {current && !onRunTab && current.status !== "archived" ? (
+          <CommandGroup heading="Este proyecto">
+            <CommandItem onSelect={run(() => (current.status === "active" ? commands.pauseProject(current) : commands.resumeProject(current)))}>
+              {current.status === "active" ? <Pause /> : <Play />} {current.status === "active" ? "Pausar el proyecto" : "Reanudar el proyecto"}
+              <CommandShortcut>⇧⌘Y</CommandShortcut>
             </CommandItem>
           </CommandGroup>
         ) : null}

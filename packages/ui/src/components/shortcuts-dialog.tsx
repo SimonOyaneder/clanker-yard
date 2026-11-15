@@ -29,7 +29,15 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
       ["Ver el grafo del flujo", "G"],
       ["Ver la línea de tiempo", "L"],
       ["Abrir el panel del paso enfocado en el grafo", "⏎"],
+      ["Interrumpir al agente en curso (confirma)", "⌘."],
+      ["Pausar o retomar la corrida", "⇧⌘."],
+      ["Reintentar el paso fallido", "⇧⌘R"],
+      ["Cancelar la corrida (confirma)", "⇧⌘⌫"],
     ],
+  },
+  {
+    title: "Proyecto",
+    items: [["Pausar o reanudar el proyecto", "⇧⌘Y"]],
   },
   {
     title: "Panel del paso",

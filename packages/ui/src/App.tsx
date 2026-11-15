@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, RunId, RunStatus } from "@clanker/api"
+import type { CachedIssue, ClankerProject, RunDetail, RunId, RunStatus } from "@clanker/api"
 import { ChevronRight, Plus, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast, Toaster } from "sonner"
@@ -9,6 +9,7 @@ import { Shortcut } from "@/components/common"
 import { ConnectionsView } from "@/components/connections/connections-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { ProjectView, issuesById } from "@/components/project/project-view"
+import { RunCommandsProvider, useRunCommands } from "@/components/project/run-commands"
 import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
 import { RunView, type RunTab } from "@/components/project/run-view"
 import { PrsView } from "@/components/prs/prs-view"
@@ -27,6 +28,8 @@ import { connectionOf, needsAttention } from "@/lib/connections"
 import { useCoreState } from "@/lib/core-status"
 import { issueKey } from "@/lib/format"
 import { reviewStatus } from "@/lib/pr-status"
+import { runCaps } from "@/lib/run-commands"
+import { shapeOf } from "@/lib/run-graph"
 import { readPref, writePref } from "@/lib/prefs"
 import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
@@ -62,7 +65,9 @@ export function App({ appData, host }: { appData: AppData; host: Host }) {
       <HostProvider value={host}>
         <LiveProvider>
           <TooltipProvider delayDuration={400} skipDelayDuration={150}>
-            <Shell />
+            <RunCommandsProvider>
+              <Shell />
+            </RunCommandsProvider>
             <Toaster theme="system" position="bottom-right" closeButton toastOptions={{ className: "!text-[13px]" }} />
           </TooltipProvider>
         </LiveProvider>
@@ -82,6 +87,7 @@ function Shell() {
   const projectsQuery = useLiveQuery("projects", () => appData.projects())
   const liveRunsQuery = useLiveQuery("live-runs", () => appData.runs({ status: LIVE_STATUSES }))
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
+  const commands = useRunCommands()
   const connectionsQuery = useLiveQuery("connections", () => appData.connections())
   const connections = useMemo(() => connectionsQuery.data ?? [], [connectionsQuery.data])
   const claudePlan = useClaudePlan(connectionsQuery.data, connectionsQuery.reload)
@@ -358,6 +364,30 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey)
   }, [runId, module, setRunTab, stepNode])
 
+  // La corrida abierta, leída aquí para que sus atajos y la paleta sepan qué se le puede pedir.
+  const runQuery = useLiveQuery<RunDetail | undefined>(runId ? `run:${runId}` : "no-run", () => (runId ? appData.run(runId) : Promise.resolve(undefined)))
+  const openRunDetail = runId ? runQuery.data : undefined
+  const caps = useMemo(() => (openRunDetail ? runCaps(openRunDetail, shapeOf(openRunDetail.flowDef, openRunDetail.steps)) : null), [openRunDetail])
+
+  // ⌘. interrumpe, ⇧⌘. pausa o retoma, ⇧⌘R reintenta el paso fallido, ⇧⌘⌫ cancela la corrida abierta y ⇧⌘Y pausa o reanuda el proyecto.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.altKey || e.ctrlKey || module !== "projects") return
+      const run = runId && openRunDetail?.id === runId ? openRunDetail : undefined
+      if (!e.shiftKey && e.code === "Period" && run && caps?.interrupt) commands.interrupt(run.id)
+      else if (e.shiftKey && e.code === "Period" && run && caps?.pause) commands.pause(run.id)
+      else if (e.shiftKey && e.code === "Period" && run && caps?.resume) commands.resume(run.id)
+      else if (e.shiftKey && e.code === "KeyR" && caps?.failedStep) commands.retry(caps.failedStep.id, caps.failedStep.nodeId)
+      else if (e.shiftKey && e.key === "Backspace" && run && caps?.cancel) commands.cancel(run.id)
+      else if (e.shiftKey && e.code === "KeyY" && !runId && project?.status === "active") commands.pauseProject(project)
+      else if (e.shiftKey && e.code === "KeyY" && !runId && project?.status === "paused") commands.resumeProject(project)
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [module, runId, openRunDetail, caps, commands, project])
+
   const detail = projectData.data
   const openRun = runId && detail ? detail.runs.find((r) => r.id === runId) : undefined
   const openRunIssue = openRun && detail ? issuesById(detail.issues).get(openRun.subject.id) : undefined
@@ -453,7 +483,7 @@ function Shell() {
                     <Loading />
                   )
                 ) : runId ? (
-                  <RunPane key={runId} runId={runId} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />
+                  <RunPane key={runId} query={runQuery} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />
                 ) : (
                   <ProjectView project={project} runs={detail.runs} issues={detail.issues} queue={detail.queue} />
                 )}
@@ -475,6 +505,7 @@ function Shell() {
         prs={prs.data?.prs ?? []}
         onGoPrs={() => go({ module: "prs" })}
         onRunTab={runId && module === "projects" ? setRunTab : null}
+        runCaps={runId && module === "projects" && openRunDetail ? { id: openRunDetail.id, caps: caps! } : null}
         onStep={stepNode ? { onTab: setStepTab, onClose: () => setStepNode(null) } : null}
       />
       <NewProjectDialog
@@ -493,7 +524,7 @@ function Shell() {
 }
 
 function RunPane({
-  runId,
+  query: run,
   issue,
   tab,
   onTab,
@@ -503,7 +534,7 @@ function RunPane({
   onStepTab,
   onBack,
 }: {
-  runId: RunId
+  query: { data: RunDetail | undefined; error: string | null; reload: () => void }
   issue: CachedIssue | undefined
   tab: RunTab
   onTab: (tab: RunTab) => void
@@ -513,8 +544,6 @@ function RunPane({
   onStepTab: (tab: StepTab) => void
   onBack: () => void
 }) {
-  const appData = useAppData()
-  const run = useLiveQuery(`run:${runId}`, () => appData.run(runId))
   if (run.data) return <RunView run={run.data} issue={issue} tab={tab} onTabChange={onTab} node={node} onNodeChange={onNode} stepTab={stepTab} onStepTab={onStepTab} />
   if (run.error) {
     return (

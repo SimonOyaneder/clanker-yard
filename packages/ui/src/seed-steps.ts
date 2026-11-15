@@ -63,7 +63,7 @@ export function seedStep(step: Step, stepN: number, def: FlowDef["nodes"][string
         model: "sonnet",
         effort: "high",
         status: !last ? "error" : step.status === "done" ? "success" : step.status === "failed" ? "error_max_budget_usd" : "running",
-        error: !last ? "La app se cerró con la sesión en curso" : step.error,
+        error: !last ? "La sesión se interrumpió con el paso en curso; se retoma." : step.error,
         turns: 25,
         usage: { input: 42_000, output: 6_100, cacheRead: 380_000, cacheWrite: 21_000 },
         costMicros: step.costMicros,

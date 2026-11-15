@@ -89,6 +89,7 @@ export const EventType = z.enum([
   "step.waiting",
   "step.finished",
   "step.retrying",
+  "step.commanded",
   "agent.started",
   "agent.activity",
   "agent.usage",

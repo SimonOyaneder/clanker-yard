@@ -36,6 +36,14 @@ export interface Projects {
    * cambió y, si cambió el estado, `project.paused`, `project.resumed` o `project.archived`; sin cambios no emite nada.
    */
   update(id: ProjectId, patch: ProjectPatch, origin: Origin): ClankerProject;
+  /**
+   * Pausa el proyecto: el Scheduler deja de lanzar sus issues. Lo que ya corre (sus corridas, el carril de
+   * mantenimiento) y los demás proyectos no se tocan. Emite `project.paused`; ya pausado no emite nada. Lanza
+   * `ProjectNotFoundError` si no existe e `InvalidProjectError` si está archivado.
+   */
+  pause(id: ProjectId, origin: Origin): ClankerProject;
+  /** Lo contrario de `pause`: emite `project.resumed`. Los mismos errores. */
+  resume(id: ProjectId, origin: Origin): ClankerProject;
 }
 
 const STATUS_EVENT = {
@@ -93,7 +101,7 @@ export function createProjects(store: Store, defs: Defs): Projects {
 
   const withRepos = (db: Store["db"], row: ProjectRow): ClankerProject => ({ ...row, repos: boundRepos(db, row.id) });
 
-  return {
+  const projectsApi: Projects = {
     list: () => store.db.select().from(projects).orderBy(asc(projects.slug)).all().map((row) => withRepos(store.db, row)),
 
     get(id) {
@@ -181,6 +189,18 @@ export function createProjects(store: Store, defs: Defs): Projects {
         return withRepos(tx.db, row);
       });
     },
+
+    pause: (id, origin) => setStatus(id, "paused", origin),
+    resume: (id, origin) => setStatus(id, "active", origin),
   };
+
+  /** Pausar o retomar no desarchiva: `update` con `status` lo permitiría sin querer. */
+  function setStatus(id: ProjectId, status: "active" | "paused", origin: Origin): ClankerProject {
+    const current = store.db.select({ status: projects.status }).from(projects).where(eq(projects.id, id)).get();
+    if (!current) throw new ProjectNotFoundError(id);
+    if (current.status === "archived") throw new InvalidProjectError(`El proyecto ${id} está archivado: no se puede ${status === "paused" ? "pausar" : "retomar"}.`);
+    return projectsApi.update(id, { status }, origin);
+  }
+  return projectsApi;
 }
 

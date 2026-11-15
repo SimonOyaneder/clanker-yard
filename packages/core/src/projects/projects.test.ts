@@ -199,6 +199,27 @@ describe("update", () => {
     expect(events("project.updated")).toEqual([]);
   });
 
+  test("pause y resume cambian el estado con el actor en el evento; repetirlos no emite nada", () => {
+    expect(projects.pause(project.id, "mcp")).toMatchObject({ status: "paused" });
+    projects.pause(project.id, "mcp");
+    expect(projects.resume(project.id, "cli")).toMatchObject({ status: "active" });
+    projects.resume(project.id, "cli");
+
+    expect(events("project.paused", "project.resumed").map((e) => [e.type, e.origin, e.projectId])).toEqual([
+      ["project.paused", "mcp", project.id],
+      ["project.resumed", "cli", project.id],
+    ]);
+  });
+
+  test("pause y resume no desarchivan: un proyecto archivado se rechaza, y uno que no existe también", () => {
+    projects.update(project.id, { status: "archived" }, "ui");
+
+    expect(() => projects.pause(project.id, "ui")).toThrow(/archivado: no se puede pausar/);
+    expect(() => projects.resume(project.id, "ui")).toThrow(/archivado: no se puede retomar/);
+    expect(projects.get(project.id)?.status).toBe("archived");
+    expect(() => projects.pause(newId("prj"), "ui")).toThrow(ProjectNotFoundError);
+  });
+
   test("null borra el flujo por defecto; un flujo que no existe se rechaza", () => {
     defs.save({ kind: "flow", slug: "juguete", scope: "builtin", body: {}, source: "builtin" });
     expect(projects.update(project.id, { defaultFlowId: "juguete" }, "ui").defaultFlowId).toBe("juguete");
@@ -243,6 +264,18 @@ describe("API", () => {
     const missing = newId("prj") as ProjectId;
     await expect(client.projects.get({ id: missing })).rejects.toSatisfy(code("NOT_FOUND"));
     await expect(client.projects.update({ id: missing, name: "x" })).rejects.toSatisfy(code("NOT_FOUND"));
+  });
+
+  test("projects.pause y projects.resume; un archivado es BAD_REQUEST", async () => {
+    const client = api();
+    const demo = await client.projects.create({ slug: "demo", name: "Demo", tracker: "local" });
+
+    expect(await client.projects.pause({ id: demo.id })).toMatchObject({ status: "paused" });
+    expect(await client.projects.resume({ id: demo.id })).toMatchObject({ status: "active" });
+    expect(events("project.paused", "project.resumed").map((e) => e.origin)).toEqual(["ui", "ui"]);
+    await client.projects.update({ id: demo.id, status: "archived" });
+    await expect(client.projects.pause({ id: demo.id })).rejects.toSatisfy(code("BAD_REQUEST", /archivado/));
+    await expect(client.projects.resume({ id: newId("prj") as ProjectId })).rejects.toSatisfy(code("NOT_FOUND"));
   });
 
   test("runs.start rechaza lo que no puede lanzar con un mensaje accionable", async () => {

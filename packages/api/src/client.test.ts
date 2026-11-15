@@ -85,6 +85,12 @@ const router = os.router({
     update: os.projects.update.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    pause: os.projects.pause.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    resume: os.projects.resume.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     setParallel: os.projects.setParallel.handler(() => {
       throw new Error("no se usa en este test");
     }),
@@ -129,6 +135,27 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
     start: os.runs.start.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    pause: os.runs.pause.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    resume: os.runs.resume.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    cancel: os.runs.cancel.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    interrupt: os.runs.interrupt.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    retryStep: os.runs.retryStep.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    steerStep: os.runs.steerStep.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    forceOutcome: os.runs.forceOutcome.handler(() => {
       throw new Error("no se usa en este test");
     }),
   },

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
+import { AppDataProvider } from "@/app-data"
+import { RunCommandsProvider } from "@/components/project/run-commands"
 import { RunGraph } from "@/components/project/run-graph"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { shapeOf } from "@/lib/run-graph"
@@ -31,9 +33,13 @@ async function runGraphOf(index: number) {
 async function renderGraph(index: number, props: Partial<Pick<Parameters<typeof RunGraph>[0], "selected" | "onSelect">> = {}) {
   const run = await runGraphOf(index)
   return render(
-    <TooltipProvider>
-      <RunGraph run={run} now={NOW} shape={shapeOf(run.flowDef, run.steps)} selected={null} onSelect={() => {}} onCopySessionId={() => {}} {...props} />
-    </TooltipProvider>,
+    <AppDataProvider value={createMemoryAppData(NOW)}>
+      <RunCommandsProvider>
+        <TooltipProvider>
+          <RunGraph run={run} now={NOW} shape={shapeOf(run.flowDef, run.steps)} selected={null} onSelect={() => {}} onCopySessionId={() => {}} {...props} />
+        </TooltipProvider>
+      </RunCommandsProvider>
+    </AppDataProvider>,
   )
 }
 

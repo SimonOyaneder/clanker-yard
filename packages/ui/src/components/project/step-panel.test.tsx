@@ -3,6 +3,7 @@ import type { RunDetail } from "@clanker/api"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider, type AppData } from "@/app-data"
+import { RunCommandsProvider } from "@/components/project/run-commands"
 import { StepPanel, type StepTab } from "@/components/project/step-panel"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { shapeOf } from "@/lib/run-graph"
@@ -26,13 +27,16 @@ async function setup(nodeId: string, tab: StepTab, overrides: Partial<AppData> =
   const data = { ...createMemoryAppData(NOW), ...overrides }
   const [project] = await data.projects()
   const run: RunDetail = await data.run((await data.runs({ projectId: project!.id }))[0]!.id)
-  const node = shapeOf(run.flowDef, run.steps).nodes.find((n) => n.id === nodeId)!
+  const shape = shapeOf(run.flowDef, run.steps)
+  const node = shape.nodes.find((n) => n.id === nodeId)!
   const onTab = vi.fn()
   const view = (current: StepTab) => (
     <AppDataProvider value={data}>
-      <TooltipProvider>
-        <StepPanel run={run} node={node} tab={current} onTab={onTab} onClose={() => {}} />
-      </TooltipProvider>
+      <RunCommandsProvider>
+        <TooltipProvider>
+          <StepPanel run={run} shape={shape} node={node} tab={current} onTab={onTab} onClose={() => {}} />
+        </TooltipProvider>
+      </RunCommandsProvider>
     </AppDataProvider>
   )
   const result = render(view(tab))

@@ -56,6 +56,22 @@ export interface AppData {
   artifact(hash: ArtifactHash): Promise<string>
   /** Vuelve sin esperar: el progreso llega por `events`. */
   startRun(input: StartRun): Promise<RunDetail>
+  /** Pausa la corrida (con `now`, interrumpe a sus agentes y retoman su sesión al reanudar). Devuelve la corrida como quedó. */
+  pauseRun(id: RunId, opts?: { now?: boolean }): Promise<RunDetail>
+  resumeRun(id: RunId): Promise<RunDetail>
+  /** Cancela la corrida y sus hijas: no se puede deshacer. */
+  cancelRun(id: RunId): Promise<RunDetail>
+  /** Detiene lo que la corrida tiene en marcha con su sesión guardada: `resumeRun` la retoma. */
+  interruptRun(id: RunId): Promise<RunDetail>
+  /** El nodo del paso corre de nuevo como una visita nueva con sesión nueva, y lo que la corrida tenía en marcha se cancela. */
+  retryStep(stepId: StepRunId): Promise<RunDetail>
+  /** Le deja un mensaje al agente del paso y retoma su sesión con él. */
+  steerStep(stepId: StepRunId, message: string): Promise<RunDetail>
+  /** Sigue el edge de `outcome` sin ejecutar el paso: solo pasos action y wait. */
+  forceOutcome(stepId: StepRunId, outcome: string): Promise<RunDetail>
+  /** El Scheduler deja de lanzar sus issues; lo que ya corre sigue. */
+  pauseProject(id: ProjectId): Promise<ClankerProject>
+  resumeProject(id: ProjectId): Promise<ClankerProject>
   /**
    * Eventos con `seq > after` (los que ya están y después los nuevos, sin duplicados) hasta que `signal`
    * se aborta. La promesa resuelve cuando la conexión está abierta.

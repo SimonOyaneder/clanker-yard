@@ -131,7 +131,7 @@ describe("close con apagado", () => {
 
     expect(stepRow(a, runId, "plan")).toMatchObject({ status: "pending", attempt: 1, deferrals: 1, recoveries: 0 });
     const [session] = a.store.db.select().from(agentSessions).where(eq(agentSessions.stepRunId, stepRow(a, runId, "plan")!.id)).all();
-    expect(session).toMatchObject({ status: "error", error: expect.stringContaining("sesión en curso") });
+    expect(session).toMatchObject({ status: "error", error: expect.stringContaining("se interrumpió") });
 
     const b = boot({ reopen: a.home, bootId: "boot_B", script: () => Promise.resolve(okReport()) });
     expect(b.flows.recover()).toBe(0);

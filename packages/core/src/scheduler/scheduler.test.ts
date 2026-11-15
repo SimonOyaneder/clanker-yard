@@ -313,6 +313,34 @@ describe("lanzar issues por carril", () => {
     expect(h.status(issue)).toBeUndefined();
   });
 
+  test("pausar un proyecto no toca a otros proyectos ni al carril de mantenimiento", async () => {
+    const h = setup({ parallel: 2 });
+    const other = h.projects.create(NewProject.parse({ slug: "otro", name: "Otro", tracker: "local", parallel: 2, defaultFlowId: "dev" }), "cli");
+    const createIn = (projectId: ProjectId, title: string) => h.issues.createLocal({ projectId, title, priority: 3 }, "cli");
+    const statusIn = (projectId: ProjectId, issue: CachedIssue) => h.flows.listRuns({ projectId }).find((run) => run.subject.id === issue.id)?.status;
+    const mine = await h.create("de demo");
+    const theirs = await createIn(other.id, "de otro");
+    await h.scheduler.tick();
+    const rebase = h.flows.start("rebase", { type: "pr", id: "pr_1" }, undefined, { profile: "default", projectId: h.projectId });
+    expect([statusIn(h.projectId, mine), statusIn(other.id, theirs), h.flows.getRun(rebase).status]).toEqual(["running", "running", "running"]);
+
+    h.projects.pause(h.projectId, "ui");
+    const mineLater = await h.create("otra de demo");
+    const theirsLater = await createIn(other.id, "otra de otro");
+    await h.scheduler.tick();
+
+    // Lo del proyecto pausado que ya corría (también el mantenimiento) sigue; solo no sale nada nuevo de él.
+    expect([statusIn(h.projectId, mine), h.flows.getRun(rebase).status]).toEqual(["running", "running"]);
+    expect(statusIn(h.projectId, mineLater)).toBeUndefined();
+    expect([statusIn(other.id, theirs), statusIn(other.id, theirsLater)]).toEqual(["running", "running"]);
+    expect(h.projects.get(other.id)?.status).toBe("active");
+    expect(h.lanes.usage()).toMatchObject({ maintenance: { active: 1 } });
+
+    h.projects.resume(h.projectId, "ui");
+    await h.scheduler.tick();
+    expect(statusIn(h.projectId, mineLater)).toBe("running");
+  });
+
   test("tras un reinicio a mitad no lanza de más: cuenta las corridas que siguen vivas", async () => {
     const before = setup({ parallel: 2 });
     const [a, b, c] = [await before.create("a", 1), await before.create("b", 2), await before.create("c", 3)];

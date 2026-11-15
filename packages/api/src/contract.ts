@@ -180,6 +180,14 @@ const projects = {
   create: base.input(NewProject).output(ClankerProject),
   /** Cambia solo los campos presentes; las mismas validaciones que `create`. */
   update: base.input(ProjectPatch.extend({ id: ProjectId })).output(ClankerProject),
+  /**
+   * Pausa el proyecto: el Scheduler deja de lanzar sus issues. No toca a otros proyectos ni lo que ya corre (sus
+   * corridas y el carril de mantenimiento siguen). Emite `project.paused` con el actor. `NOT_FOUND` si no existe;
+   * `BAD_REQUEST` si está archivado.
+   */
+  pause: base.input(z.object({ id: ProjectId })).output(ClankerProject),
+  /** Lo contrario: el Scheduler vuelve a lanzar sus issues y emite `project.resumed`. Los mismos errores que `pause`. */
+  resume: base.input(z.object({ id: ProjectId })).output(ClankerProject),
   /** El cupo del carril dev de este proyecto (`parallel`). Rige de inmediato: el Scheduler lanza lo que quepa. */
   setParallel: base.input(z.object({ id: ProjectId, parallel: z.int().positive() })).output(ClankerProject),
   /**
@@ -278,6 +286,46 @@ const runs = {
    * el perfil, o el tracker no puede reclamar la issue; `NOT_FOUND` si el proyecto o la issue no existen.
    */
   start: base.input(StartRun).output(RunDetail),
+  /**
+   * Pausa la corrida y sus hijas que corren: no se despachan pasos nuevos y los agentes en curso terminan lo suyo
+   * (con `now`, se interrumpen y su paso vuelve a pending con su sesión lista para retomarse). Sigue ocupando su
+   * cupo y su sujeto. Quién lo pidió queda en los eventos `run.status`. `NOT_FOUND` si no existe; `BAD_REQUEST` si no
+   * corre (estacionada, terminada...). Pausar una ya pausada con `now` interrumpe a los agentes que sigan.
+   */
+  pause: base.input(z.object({ id: RunId, now: z.boolean().default(false) })).output(RunDetail),
+  /** Retoma una corrida pausada; una que ya corre no cambia. `NOT_FOUND` si no existe; `BAD_REQUEST` en cualquier otro estado. */
+  resume: base.input(z.object({ id: RunId })).output(RunDetail),
+  /**
+   * Cancela la corrida y todas sus hijas: sus pasos quedan `canceled`, los agentes se interrumpen (y su proceso
+   * cae a los 10 s si no cierra), las acciones reciben el abort de su señal, las decisiones que las estacionaban
+   * quedan `superseded` y cada corrida emite `run.finished` con outcome `canceled` y el actor. Una corrida que ya
+   * terminó no cambia. `NOT_FOUND` si no existe.
+   */
+  cancel: base.input(z.object({ id: RunId })).output(RunDetail),
+  /**
+   * Interrumpe lo que la corrida tiene en marcha: es `pause` con `now`. El agente en curso se detiene con su sesión
+   * guardada y `resume` la retoma donde iba, sin gastar intento.
+   */
+  interrupt: base.input(z.object({ id: RunId })).output(RunDetail),
+  /**
+   * "Reintentar desde acá": el nodo del paso corre de nuevo como una visita nueva con sesión nueva, y lo que la
+   * corrida tenía en marcha (el paso en curso, sus ramas, sus corridas hijas) se cancela. Cierra la decisión que
+   * la estacionaba. Devuelve la corrida del paso. `NOT_FOUND` si no existe el paso; `BAD_REQUEST` si su corrida no
+   * está viva o el paso es una rama o el join de un parallel (se reintenta el parallel).
+   */
+  retryStep: base.input(z.object({ stepId: StepRunId })).output(RunDetail),
+  /**
+   * Le deja un mensaje al agente de un paso y retoma su sesión con él: si está en curso lo interrumpe, si está pending
+   * lo marca, y si es el paso en que la corrida espera una decisión `needs_human`, la cierra y retoma la última
+   * sesión del paso. `BAD_REQUEST` si el paso no es de un agente o no está en uno de esos estados.
+   */
+  steerStep: base.input(z.object({ stepId: StepRunId, message: z.string().min(1) })).output(RunDetail),
+  /**
+   * Sigue el edge de `outcome` sin ejecutar el paso (o sin terminar de esperarlo). Solo pasos `action` y `wait`
+   * (decisión #44) y solo un `outcome` que el nodo declara. `BAD_REQUEST` con un agente, una rama de parallel, un
+   * outcome que el nodo no declara o un paso que la corrida ya no tiene en marcha.
+   */
+  forceOutcome: base.input(z.object({ stepId: StepRunId, outcome: z.string().min(1) })).output(RunDetail),
 };
 
 const imports = {

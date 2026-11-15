@@ -1,12 +1,30 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react"
-import { Bot, CircleCheck, Flag, GitFork, Hand, Hourglass, Merge, Terminal, Workflow, type LucideIcon } from "lucide-react"
+import { Bot, CircleCheck, Flag, GitFork, Hand, Hourglass, Merge, RotateCcw, Square, Terminal, Workflow, Zap, type LucideIcon } from "lucide-react"
 import { Hint, Pill } from "@/components/common"
 import { stepLook } from "@/components/project/status"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { copy } from "@/lib/clipboard"
 import { costUsd, elapsed, tone } from "@/lib/format"
 import { boxSize, type GraphNode, type GraphNodeKind, type NodeState } from "@/lib/run-graph"
 import { cn } from "@/lib/utils"
+
+/** Lo que el menú del nodo ofrece sobre su paso en una corrida; lo que no está, no se puede pedir en su estado. */
+export interface NodeCommands {
+  retry?: { label: string; run: () => void }
+  interrupt?: () => void
+  /** Los outcomes que declara el nodo. */
+  force?: { outcomes: string[]; run: (outcome: string) => void }
+}
 
 export interface FlowNodeData extends Record<string, unknown> {
   node: GraphNode
@@ -14,6 +32,7 @@ export interface FlowNodeData extends Record<string, unknown> {
   /** Abre el panel del paso. Sin él, la corrida no lo ofrece (el editor de flujos no tiene pasos). */
   onOpen?: () => void
   onCopySessionId?: () => void
+  commands?: NodeCommands
 }
 
 const KIND: Record<GraphNodeKind, { Icon: LucideIcon; hint: string }> = {
@@ -29,7 +48,7 @@ const KIND: Record<GraphNodeKind, { Icon: LucideIcon; hint: string }> = {
 
 // Un nodo del flujo en solo lectura. El editor de flujos usa este mismo componente con otro `data`.
 export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData }) {
-  const { node, state, onOpen, onCopySessionId } = data
+  const { node, state, onOpen, onCopySessionId, commands } = data
   const { Icon, hint } = KIND[node.kind]
   const look = stepLook(state.status)
   const reached = state.visits > 0
@@ -99,6 +118,33 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
             Copiar sessionId
           </ContextMenuItem>
         ) : null}
+        {commands?.retry || commands?.interrupt || commands?.force ? <ContextMenuSeparator /> : null}
+        {commands?.retry ? (
+          <ContextMenuItem onSelect={commands.retry.run}>
+            <RotateCcw /> {commands.retry.label}
+          </ContextMenuItem>
+        ) : null}
+        {commands?.interrupt ? (
+          <ContextMenuItem onSelect={commands.interrupt}>
+            <Square /> Interrumpir
+            <ContextMenuShortcut>⌘.</ContextMenuShortcut>
+          </ContextMenuItem>
+        ) : null}
+        {commands?.force ? (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              <Zap /> Forzar resultado
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="w-40">
+              {commands.force.outcomes.map((outcome) => (
+                <ContextMenuItem key={outcome} className="font-mono text-[12.5px]" onSelect={() => commands.force!.run(outcome)}>
+                  {outcome}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        ) : null}
+        <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => copy(node.label, "el nodo")}>Copiar nombre del nodo</ContextMenuItem>
         <ContextMenuItem disabled={!state.stepId} onSelect={() => state.stepId && copy(state.stepId, "el ID del paso")}>
           Copiar ID del paso

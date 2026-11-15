@@ -272,7 +272,7 @@ describe("préstamo del sujeto", () => {
     const borrower = h.start("rebase", PR);
     await vi.waitFor(() => expect(h.work.state.started).toBe(1));
 
-    h.flows.cancel(owner);
+    h.flows.control(owner, "cancel", { by: "ui" });
     expect(h.row(borrower)).toMatchObject({ status: "running", borrowedFromRunId: null });
     // Ya es la dueña: una corrida nueva sobre el PR espera, no pide prestado.
     expect(h.flows.getRun(h.start("council", PR)).status).toBe("queued");
@@ -287,7 +287,7 @@ describe("préstamo del sujeto", () => {
     const borrower = h.start("rebase", PR);
     await vi.waitFor(() => expect(h.work.state.started).toBe(1));
 
-    h.flows.cancel(borrower);
+    h.flows.control(borrower, "cancel", { by: "ui" });
     expect(h.events(borrower, "run.returned")).toHaveLength(1);
     expect(h.flows.getRun(owner).status).toBe("parked");
     expect(h.pendingDecision(owner)).toBeDefined();

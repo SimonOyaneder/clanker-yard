@@ -53,12 +53,12 @@ const init = { type: "system", subtype: "init", apiKeySource: "none", session_id
  * Como el SDK: lanza el proceso con `spawnClaudeCodeProcess`, anuncia la sesión y espera a que lo
  * aborten; entonces, tras su cierre ordenado, aborta la señal que le reenvía al spawn.
  */
-function sdkLike(launched: (pid: number) => void): QueryFn {
+function sdkLike(launched: (pid: number) => void, command: { command: string; args: string[] } = { command: "sleep", args: ["60"] }): QueryFn {
   return ({ options }: { options: Options }) =>
     (async function* () {
       const forwarded = new AbortController();
       options.abortController!.signal.addEventListener("abort", () => forwarded.abort(), { once: true });
-      const child = options.spawnClaudeCodeProcess!({ command: "sleep", args: ["60"], cwd: home, env: {}, signal: forwarded.signal });
+      const child = options.spawnClaudeCodeProcess!({ ...command, cwd: home, env: {}, signal: forwarded.signal });
       // `SpawnedProcess` no declara `pid`, pero lo que devuelve el spawn es un `ChildProcess`.
       const { pid } = child as unknown as { pid: number };
       pids.push(pid);
@@ -87,6 +87,28 @@ test("el proceso de Claude Code arranca en su propio grupo, queda en procs con s
   expect(process.kill(-pid, 0)).toBe(true);
 
   await run.interrupt();
+  await run.result;
+  await vi.waitFor(() => expect(rows()).toEqual([]));
+  expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+});
+
+test("un proceso que ignora el SIGTERM del interrupt cae con SIGKILL a los killAfterMs", async () => {
+  const procs = createProcs({ store, bootId: "boot_now" });
+  let pid = 0;
+  const runtime = createClaudeRuntime({
+    credentials: async () => subscriptionCredentials({ executable: "/bin/claude" }),
+    home,
+    procs,
+    killAfterMs: 300,
+    query: sdkLike((launched) => (pid = launched), { command: "sh", args: ["-c", "trap '' TERM; while :; do sleep 1; done"] }),
+  });
+  const run = await runtime.start(spec({ stepRunId: "stp_1" }));
+
+  await run.interrupt();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  // El SIGTERM ya salió y el proceso lo ignora: sigue vivo hasta que se cumple el plazo.
+  expect(process.kill(-pid, 0)).toBe(true);
+
   await run.result;
   await vi.waitFor(() => expect(rows()).toEqual([]));
   expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);

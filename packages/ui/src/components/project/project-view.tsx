@@ -1,6 +1,7 @@
 import type { CachedIssue, ClankerProject, QueueEntry, Run } from "@clanker/api"
-import { Copy, Play } from "lucide-react"
+import { Copy, Pause, Play } from "lucide-react"
 import { Ago, Hint, Pill, SectionTitle, StatBar } from "@/components/common"
+import { useRunCommands } from "@/components/project/run-commands"
 import { RunStatusIcon, RunStatusPill, isLive } from "@/components/project/status"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -43,6 +44,7 @@ export function ProjectView({ project, runs, issues, queue }: Props) {
   const now = useNow(inProgress.length > 0)
   const byId = issuesById(issues)
   const status = PROJECT_STATUS[project.status]
+  const commands = useRunCommands()
 
   return (
     <div className="flex flex-col gap-6">
@@ -52,6 +54,19 @@ export function ProjectView({ project, runs, issues, queue }: Props) {
           <Pill className={status.tone} hint={status.hint}>
             {status.label}
           </Pill>
+          {project.status === "active" ? (
+            <Hint label="El Scheduler deja de lanzar issues de este proyecto. Lo que ya corre, y los demás proyectos, siguen" keys="⇧⌘Y">
+              <Button size="sm" variant="outline" className="ml-auto" onClick={() => commands.pauseProject(project)}>
+                <Pause /> Pausar
+              </Button>
+            </Hint>
+          ) : project.status === "paused" ? (
+            <Hint label="El Scheduler vuelve a lanzar las issues de la cola" keys="⇧⌘Y">
+              <Button size="sm" className="ml-auto" onClick={() => commands.resumeProject(project)}>
+                <Play /> Reanudar
+              </Button>
+            </Hint>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <Pill className={tone.neutral} hint="Flujo con que corre una issue si no se pide otro.">

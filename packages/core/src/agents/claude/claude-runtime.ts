@@ -53,7 +53,12 @@ export interface ClaudeRuntimeOptions {
    * así el apagado del core y el arranque tras un crash lo matan con sus hijos. Sin él, lo lanza el SDK.
    */
   procs?: Procs;
+  /** Cuánto tarda en caer con SIGKILL el grupo de un proceso que siguió vivo tras su SIGTERM (cancelar, pausar, interrumpir). Por defecto `KILL_GROUP_AFTER_MS`. */
+  killAfterMs?: number;
 }
+
+/** Tras bajar el grupo de un agente con SIGTERM, lo que siga vivo a los 10 s cae con SIGKILL (`docs/design.html#d-flows`, "Cancelar"). */
+export const KILL_GROUP_AFTER_MS = 10_000;
 
 const DEFAULT_GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
 
@@ -89,18 +94,29 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
   function spawnIn(procs: Procs, stepRunId: string | undefined): Options["spawnClaudeCodeProcess"] {
     return ({ command, args, cwd, env, signal }) => {
       // Sin `signal` en `spawn`: Node solo mataría al líder. Cuando el SDK se rinde con su cierre
-      // ordenado, se baja el grupo completo (`bash` de las tools incluido).
+      // ordenado, se baja el grupo completo (`bash` de las tools incluido) y, si no cierra, a los 10 s con SIGKILL.
       const child = spawn(command, args, { cwd, env, detached: true, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
       procs.track(child, { kind: "agent", stepRunId });
       signal.addEventListener(
         "abort",
         () => {
           if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+          const pid = child.pid;
           try {
-            process.kill(-child.pid, "SIGTERM");
+            process.kill(-pid, "SIGTERM");
           } catch {
             // Terminó entre medio.
+            return;
           }
+          const hardKill = setTimeout(() => {
+            try {
+              process.kill(-pid, "SIGKILL");
+            } catch {
+              // Terminó entre medio.
+            }
+          }, options.killAfterMs ?? KILL_GROUP_AFTER_MS);
+          hardKill.unref();
+          child.once("close", () => clearTimeout(hardKill));
         },
         { once: true },
       );

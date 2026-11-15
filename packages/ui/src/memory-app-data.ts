@@ -215,6 +215,28 @@ export function createMemoryAppData(now = Date.now()): AppData {
     return found
   }
 
+  /** Cambia la corrida sin mutar la anterior: lo que la UI ya leyó no se mueve a escondidas. */
+  const update = (runId: string, change: (r: RunDetail) => Partial<RunDetail>): RunDetail => {
+    const at = runs.findIndex((r) => r.id === runId)
+    const updated = { ...runs[at]!, ...change(runs[at]!) }
+    runs[at] = updated
+    return updated
+  }
+  const OPEN: Step["status"][] = ["pending", "leased", "running", "waiting"]
+  const cancelOpen = (steps: Step[]): Step[] => steps.map((st) => (OPEN.includes(st.status) ? { ...st, status: "canceled", error: "Lo canceló una persona." } : st))
+  const ownerOf = (stepId: string) => {
+    const owner = runs.find((r) => r.steps.some((st) => st.id === stepId))
+    if (!owner) throw new Error(`No existe el paso ${stepId}`)
+    return { run: owner, step: owner.steps.find((st) => st.id === stepId)! }
+  }
+  const setProjectStatus = (projectId: ProjectId, status: ClankerProject["status"]) => {
+    const found = projectOf(projectId)
+    if (!found) throw new Error(`No existe el proyecto ${projectId}`)
+    if (found.status === "archived") throw new Error(`El proyecto ${found.name} está archivado.`)
+    found.status = status
+    return { ...found }
+  }
+
   return {
     projects: async () => projects.map((p) => ({ ...p })),
     createProject: async (input) => {
@@ -281,6 +303,45 @@ export function createMemoryAppData(now = Date.now()): AppData {
       runs.unshift(started)
       return started
     },
+    pauseRun: async (runId, opts) => {
+      const found = detailOf(runId)
+      if (found.status !== "running" && found.status !== "paused") throw new Error(`La corrida está ${found.status}: solo se pausa una corrida que corre.`)
+      return update(runId, (r) => ({
+        status: "paused",
+        steps: opts?.now ? r.steps.map((st) => (st.status === "running" || st.status === "leased" ? { ...st, status: "pending", error: "La corrida se pausó con este paso en curso; se retoma." } : st)) : r.steps,
+      }))
+    },
+    resumeRun: async (runId) => {
+      const found = detailOf(runId)
+      if (found.status !== "paused" && found.status !== "running") throw new Error(`La corrida está ${found.status}: solo se retoma una pausada.`)
+      return update(runId, () => ({ status: "running" }))
+    },
+    cancelRun: async (runId) => update(runId, (r) => (r.endedAt === null ? { status: "canceled", endedAt: Date.now(), steps: cancelOpen(r.steps) } : {})),
+    interruptRun: async (runId) => {
+      const found = detailOf(runId)
+      if (found.status !== "running" && found.status !== "paused") throw new Error(`La corrida está ${found.status}: solo se interrumpe una corrida que corre.`)
+      return update(runId, (r) => ({ status: "paused", steps: r.steps.map((st) => (st.status === "running" ? { ...st, status: "pending", error: "La corrida se pausó con este paso en curso; se retoma." } : st)) }))
+    },
+    retryStep: async (stepId) => {
+      const { run: owner, step: target } = ownerOf(stepId)
+      return update(owner.id, (r) => ({
+        status: r.status === "parked" ? "running" : r.status,
+        parkReason: null,
+        steps: [...cancelOpen(r.steps), step(nextId++, target.nodeId, "pending", { visit: Math.max(...r.steps.filter((st) => st.nodeId === target.nodeId).map((st) => st.visit)) + 1, round: target.round })],
+      }))
+    },
+    steerStep: async (stepId, message) => {
+      const { run: owner, step: target } = ownerOf(stepId)
+      if (!message.trim()) throw new Error("El mensaje para el agente está vacío.")
+      if (target.status === "done") throw new Error(`El paso "${target.nodeId}" está done: un mensaje solo llega a un agente en curso, pendiente o que falló.`)
+      return owner
+    },
+    forceOutcome: async (stepId, outcome) => {
+      const { run: owner, step: target } = ownerOf(stepId)
+      return update(owner.id, (r) => ({ steps: r.steps.map((st) => (st.id === target.id ? { ...st, status: "done", outcome, error: null } : st)) }))
+    },
+    pauseProject: async (projectId) => setProjectStatus(projectId, "paused"),
+    resumeProject: async (projectId) => setProjectStatus(projectId, "active"),
     events: async (_after, signal) => ({
       async *[Symbol.asyncIterator]() {
         await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }))

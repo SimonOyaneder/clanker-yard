@@ -220,11 +220,11 @@ describe("gate", () => {
 
     const runId = h.startIn("gated", "ENG-1");
     await h.finished(runId);
-    h.flows.cancel(runId);
+    h.flows.control(runId, "cancel", { by: "ui" });
 
     expect(h.flows.getRun(runId)).toMatchObject({ status: "canceled", parkReason: null });
     expect(h.stepStatuses(runId)[1]).toEqual(["ask", "canceled", null]);
-    expect(h.decisionsOf(runId)[0]).toMatchObject({ status: "superseded", resolvedBy: "core" });
+    expect(h.decisionsOf(runId)[0]).toMatchObject({ status: "superseded", resolvedBy: "ui" });
   });
 
   test("un gate en un subflujo estaciona la hija y el padre espera", async () => {
