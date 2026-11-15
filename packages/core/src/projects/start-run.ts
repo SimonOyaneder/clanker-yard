@@ -18,7 +18,7 @@ export interface RunStarterDeps {
   repos: Repos;
   issues: Issues;
   flows: Engine;
-  /** Los adapters que este core conoce, por id de tracker. */
+  /** Los adapters que este core conoce, por id de tracker (`local` y `linear`). */
   trackers: Readonly<Record<string, Tracker>>;
 }
 

@@ -10,6 +10,7 @@ import { createDecisions } from "./decisions/decisions";
 import { createDefs, type Defs } from "./defs/defs";
 import { createFlows } from "./flows/flows";
 import { createPacks } from "./packs/packs";
+import { createLinearTracker } from "./linear/tracker";
 import { createProcs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
 import { createRunStarter } from "./projects/start-run";
@@ -94,7 +95,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     packs: createPacks({ defs }),
     repos,
     recipeTester: createRecipeTester({ store, repos, dataDir }),
-    runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local } }),
+    runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local, linear: createLinearTracker({ connections: opts.connections }) } }),
     flows,
     artifacts,
     decisions: createDecisions(store),

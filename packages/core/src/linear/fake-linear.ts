@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createFakeWorkspace, type FakeWorkspace } from "./fake-workspace";
 import type { LinearEndpoints } from "./oauth";
 
 export interface FakeLinearOptions {
@@ -13,6 +14,8 @@ export interface FakeLinearOptions {
 
 export interface FakeLinear {
   endpoints: LinearEndpoints;
+  /** Los datos que sirve `/graphql` (equipos, issues, comentarios...), para armarlos desde el test. */
+  workspace: FakeWorkspace;
   /** Los bodies de `/oauth/token`, en orden. */
   tokenRequests: Record<string, string>[];
   /** Mientras tenga valor, `/oauth/token` contesta eso a un `refresh_token` sin validarlo. */
@@ -25,7 +28,8 @@ export interface FakeLinear {
 /**
  * Un Linear falso en 127.0.0.1 con lo justo del OAuth con PKCE: `/oauth/authorize` redirige con un código,
  * `/oauth/token` valida PKCE, `client_id` y `redirect_uri` y rota el refresh token (cada uno vale una vez, como
- * en Linear), y `/graphql` responde `organization` solo con un access token vigente.
+ * en Linear), y `/graphql` ejecuta las operaciones contra el esquema de Linear (`FakeWorkspace`) solo con un access
+ * token vigente.
  */
 export async function startFakeLinear({
   clientId,
@@ -38,6 +42,7 @@ export async function startFakeLinear({
   let issued = 0;
   let latest = { accessToken: "", refreshToken: "" };
   const tokenRequests: Record<string, string>[] = [];
+  const workspaceData = createFakeWorkspace({ workspace });
 
   function issue() {
     issued += 1;
@@ -55,6 +60,7 @@ export async function startFakeLinear({
 
   const fake: FakeLinear = {
     endpoints: { authorize: "", token: "", graphql: "" },
+    workspace: workspaceData,
     tokenRequests,
     refreshFailure: undefined,
     latest: () => latest,
@@ -119,7 +125,14 @@ export async function startFakeLinear({
     if (url.pathname === "/graphql" && req.method === "POST") {
       const token = req.headers.authorization?.replace(/^Bearer /, "") ?? "";
       if (!accessTokens.has(token)) return json(401, { errors: [{ message: "Unauthorized" }] });
-      return json(200, { data: { organization: { urlKey: workspace } } });
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      const { query, variables } = JSON.parse(Buffer.concat(chunks).toString()) as {
+        query: string;
+        variables?: Record<string, unknown>;
+      };
+      const result = await workspaceData.execute(query, variables);
+      return json(result.errors ? 400 : 200, result);
     }
     json(404, {});
   });

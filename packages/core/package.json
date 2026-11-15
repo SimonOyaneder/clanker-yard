@@ -25,6 +25,7 @@
   "devDependencies": {
     "@orpc/client": "^1.16.2",
     "drizzle-kit": "1.0.0-rc.5",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "graphql": "^17.1.0"
   }
 }
