@@ -20,6 +20,8 @@ export interface FakeRequest {
   /** La query string: `?head=a:b&state=all` es `{ head: "a:b", state: "all" }`. */
   query: Record<string, string>;
   authorization: string | undefined;
+  /** El header `If-None-Match` de un GET condicional. */
+  ifNoneMatch: string | undefined;
   /** El body JSON de un POST (GraphQL: `{ query, variables }`); `undefined` si no hay. */
   body: unknown;
 }
@@ -50,6 +52,7 @@ export async function startFakeGitHub(
       path: url.pathname,
       query: Object.fromEntries(url.searchParams),
       authorization: req.headers.authorization,
+      ifNoneMatch: req.headers["if-none-match"],
       body: text === "" ? undefined : JSON.parse(text),
     };
     requests.push(request);
@@ -91,88 +94,5 @@ export function healthyGitHub(
   return (request) => {
     const key = `${request.method} ${request.path}`;
     return key in overrides ? overrides[key] : routes[key];
-  };
-}
-
-/** Un PR del GitHub falso, con la forma de `GET /repos/{owner}/{repo}/pulls` (solo lo que el core lee). */
-export interface FakePull {
-  id: number;
-  node_id: string;
-  number: number;
-  state: "open" | "closed";
-  draft: boolean;
-  title: string;
-  body: string | null;
-  html_url: string;
-  head: { ref: string; sha: string; label: string };
-  base: { ref: string; label: string };
-}
-
-export interface FakePullsApi {
-  pulls: FakePull[];
-  respond(request: FakeRequest): RecordedResponse | undefined;
-}
-
-/**
- * Los PRs de un repo como los sirve la API REST: `GET .../pulls` filtra por `state` (por defecto
- * `open`), `head` (`owner:branch`) y `base`, y `POST .../pulls` abre uno numerado, en draft si se pide.
- * Como GitHub, rechaza con 422 un PR sin título, uno cuya branch no existe en el remoto (`branchSha`
- * da su sha, o `undefined`) y un segundo PR abierto de la misma branch a la misma base.
- */
-export function pullsApi({
-  repo,
-  branchSha,
-}: {
-  repo: string;
-  branchSha(branch: string): string | undefined;
-}): FakePullsApi {
-  const [owner] = repo.split("/") as [string];
-  const pulls: FakePull[] = [];
-  const invalid = (...errors: object[]): RecordedResponse => ({
-    status: 422,
-    headers: {},
-    body: { message: "Validation Failed", errors, documentation_url: "https://docs.github.com/rest/pulls/pulls#create-a-pull-request" },
-  });
-
-  return {
-    pulls,
-    respond({ method, path, query, body }) {
-      if (path !== `/repos/${repo}/pulls`) return undefined;
-      if (method === "GET") {
-        const { state = "open", head, base } = query;
-        const found = pulls.filter(
-          (pull) =>
-            (state === "all" || pull.state === state) &&
-            (head === undefined || pull.head.label === head) &&
-            (base === undefined || pull.base.ref === base),
-        );
-        return { status: 200, headers: {}, body: [...found].reverse() };
-      }
-      if (method !== "POST") return undefined;
-
-      const input = (body ?? {}) as { title?: string; head?: string; base?: string; body?: string; draft?: boolean };
-      if (!input.title) return invalid({ resource: "PullRequest", field: "title", code: "missing_field" });
-      const sha = input.head ? branchSha(input.head) : undefined;
-      if (!input.head || sha === undefined) return invalid({ resource: "PullRequest", field: "head", code: "invalid" });
-      if (!input.base) return invalid({ resource: "PullRequest", field: "base", code: "invalid" });
-      if (pulls.some((p) => p.state === "open" && p.head.ref === input.head && p.base.ref === input.base)) {
-        return invalid({ resource: "PullRequest", code: "custom", message: `A pull request already exists for ${owner}:${input.head}.` });
-      }
-      const number = pulls.length + 1;
-      const pull: FakePull = {
-        id: 5_000_000 + number,
-        node_id: `PR_kwDOfake${number}`,
-        number,
-        state: "open",
-        draft: input.draft ?? false,
-        title: input.title,
-        body: input.body ?? null,
-        html_url: `https://github.com/${repo}/pull/${number}`,
-        head: { ref: input.head, sha, label: `${owner}:${input.head}` },
-        base: { ref: input.base, label: `${owner}:${input.base}` },
-      };
-      pulls.push(pull);
-      return { status: 201, headers: {}, body: pull };
-    },
   };
 }

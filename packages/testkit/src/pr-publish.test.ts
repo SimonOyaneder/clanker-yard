@@ -19,16 +19,11 @@ import {
   openStore,
   PermanentActionError,
   prPublishAction,
-  pullsApi,
-  startFakeGitHub,
   workspaceAcquireAction,
-  healthyGitHub,
   type ActionCtx,
   type Askpass,
   type Connections,
   type Defs,
-  type FakeGitHub,
-  type FakePullsApi,
   type Flows,
   type PrPublishDeps,
   type Store,
@@ -38,9 +33,10 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { tempGitRepo, type TempGitRepo } from "./git";
+import { startGitHubSim, type GitHubSim } from "./github-sim";
 
 // Se prueba aquí y no en el core: necesita repos git reales (tempGitRepo) y un remoto bare. GitHub es el
-// falso local (`pullsApi`): nunca GitHub ni tokens reales.
+// simulado (`startGitHubSim`): nunca GitHub ni tokens reales.
 
 vi.setConfig({ testTimeout: 20_000 });
 
@@ -68,13 +64,11 @@ let repo: TempGitRepo;
 let askpass: Askpass;
 let connections: Connections;
 let workspaces: Workspaces;
-let github: FakeGitHub;
-let pulls: FakePullsApi;
+let github: GitHubSim;
 let defs: Defs;
 let deps: PrPublishDeps;
 let publish: ReturnType<typeof prPublishAction>;
 let lease: WorkspaceLease;
-let failPost: { status: number } | undefined;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-publish-"));
@@ -83,22 +77,7 @@ beforeEach(async () => {
     remote: true,
     commits: [{ message: "chore: base", files: { "a.txt": "a\n" } }],
   });
-  const remoteBranch = (branch: string): string | undefined => {
-    try {
-      return repo.git("--git-dir", repo.remoteDir!, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
-    } catch {
-      return undefined;
-    }
-  };
-  pulls = pullsApi({ repo: REPO, branchSha: remoteBranch });
-  const rest = healthyGitHub();
-  github = await startFakeGitHub((request) => {
-    if (failPost && request.method === "POST") {
-      return { status: failPost.status, headers: {}, body: { message: "Bad credentials", status: String(failPost.status) } };
-    }
-    return pulls.respond(request) ?? rest(request);
-  });
-  failPost = undefined;
+  github = await startGitHubSim({ origin: repo, repo: REPO, token: TOKEN });
 
   askpass = createAskpass();
   connections = createConnections(store, createFileSecrets({ dir: join(dataDir, "secrets") }), {
@@ -212,7 +191,7 @@ describe("pr.publish", () => {
       output: { pr: { account: ACCOUNT, repo: REPO, number: 1 }, url: `https://github.com/${REPO}/pull/1`, head: remoteSha() },
     });
     expect(commitsOnBranch()).toEqual(["feat: add feature"]);
-    expect(pulls.pulls).toMatchObject([
+    expect(github.pulls()).toMatchObject([
       { number: 1, draft: true, title: "[CLA-53] Add feature", head: { ref: BRANCH, sha: remoteSha() }, base: { ref: "main" } },
     ]);
     expect(remoteSha()).toBe(repo.git("-C", lease.path, "rev-parse", "HEAD"));
@@ -231,7 +210,7 @@ describe("pr.publish", () => {
 
     await publish.run(args({ plan: dirty, dependsOn: ["api#4250", "web#9"] }), durableCtx());
 
-    const [pull] = pulls.pulls;
+    const [pull] = github.pulls();
     expect(pull?.title).toBe("[CLA-53] Add feature");
     expect(pull?.body).toBe(
       ["Depende de api#4250, web#9", "", "## Contexto", "", "Por qué se hace.", "", "## Tests", "", "- [x] Tests unitarios"].join("\n"),
@@ -243,7 +222,7 @@ describe("pr.publish", () => {
 
     await publish.run(args({ plan: plan({ pr: { title: "t", body } }) }), durableCtx());
 
-    expect(pulls.pulls[0]?.body).toBe(["## Contexto", "x", "## Tests", "w"].join("\n"));
+    expect(github.pulls()[0]?.body).toBe(["## Contexto", "x", "## Tests", "w"].join("\n"));
   });
 
   test("un plan que no se puede aplicar vuelve al committer sin pushear ni abrir nada", async () => {
@@ -254,7 +233,7 @@ describe("pr.publish", () => {
     expect(result).toMatchObject({ outcome: "replan", output: { failures: expect.stringContaining("Hunks sin asignar") } });
     expect(commitsOnBranch()).toEqual([]);
     expect(() => remoteSha()).toThrow();
-    expect(pulls.pulls).toEqual([]);
+    expect(github.pulls()).toEqual([]);
   });
 
   test("sin cambios no hay nada que publicar: replan", async () => {
@@ -263,7 +242,7 @@ describe("pr.publish", () => {
     const result = await publish.run(args({ plan: plan({ commits: [] }) }), durableCtx());
 
     expect(result).toMatchObject({ outcome: "replan", output: { failures: expect.stringContaining("nada que publicar") } });
-    expect(pulls.pulls).toEqual([]);
+    expect(github.pulls()).toEqual([]);
   });
 
   test("si alguien más pusheó la branch, no se reintenta y no se abre el PR", async () => {
@@ -271,17 +250,17 @@ describe("pr.publish", () => {
 
     await expect(publish.run(args(), durableCtx())).rejects.toThrow(PermanentActionError);
 
-    expect(pulls.pulls).toEqual([]);
+    expect(github.pulls()).toEqual([]);
     expect(remoteSha()).toBe(lease.baseSha);
   });
 
   test("un 401 de GitHub deja la conexión revocada y el paso falla para reintentarse", async () => {
-    failPost = { status: 401 };
+    github.revokeToken();
 
     await expect(publish.run(args(), durableCtx())).rejects.toThrow();
 
     expect(connections.list()).toMatchObject([{ account: ACCOUNT, status: "revoked" }]);
-    expect(pulls.pulls).toEqual([]);
+    expect(github.pulls()).toEqual([]);
     expect(openedEvents()).toEqual([]);
   });
 
@@ -291,7 +270,7 @@ describe("pr.publish", () => {
 
     // Otra clave: el commit se reconoce, el push es noop y el PR se encuentra por su branch.
     expect(again).toMatchObject({ outcome: "ok", output: { pr: { number: 1 } } });
-    expect(pulls.pulls).toHaveLength(1);
+    expect(github.pulls()).toHaveLength(1);
     expect(posts()).toHaveLength(1);
     expect(openedEvents()).toHaveLength(1);
     expect(commitsOnBranch()).toEqual(["feat: add feature"]);
@@ -309,8 +288,8 @@ describe("un corte en cada etapa", () => {
     expect(result).toMatchObject({ outcome: "ok", output: { pr: { number: 1 }, head: remoteSha() } });
     expect(commitsOnBranch()).toEqual(["feat: add feature"]);
     expect(repo.git("--git-dir", repo.remoteDir!, "rev-list", "--count", `${lease.baseSha}..refs/heads/${BRANCH}`)).toBe("1");
-    expect(posts()).toHaveLength(pulls.pulls.length);
-    expect(pulls.pulls).toHaveLength(1);
+    expect(posts()).toHaveLength(github.pulls().length);
+    expect(github.pulls()).toHaveLength(1);
     expect(openedEvents()).toHaveLength(1);
     const rows = store.db.$client.prepare("SELECT number, owned FROM pull_requests").all();
     expect(rows).toEqual([{ number: 1, owned: 1 }]);
@@ -428,7 +407,7 @@ describe("en un flujo", () => {
     expect(openedEvents()).toMatchObject([
       { runId, subject: { type: "pr", id: row?.id }, payload: { repo: REPO, number: 1, url: `https://github.com/${REPO}/pull/1` } },
     ]);
-    expect(pulls.pulls).toMatchObject([{ number: 1, draft: true, head: { ref: "cla-53-flow" } }]);
+    expect(github.pulls()).toMatchObject([{ number: 1, draft: true, head: { ref: "cla-53-flow" } }]);
   });
 
   test("replan sigue el edge del flujo hacia el committer", async () => {
@@ -445,6 +424,6 @@ describe("en un flujo", () => {
 
     expect(flows.getRun(runId)).toMatchObject({ status: "failed", outcome: "blocked" });
     expect(flows.getRun(runId).steps.find((s) => s.nodeId === "publish")).toMatchObject({ outcome: "replan" });
-    expect(pulls.pulls).toEqual([]);
+    expect(github.pulls()).toEqual([]);
   });
 });

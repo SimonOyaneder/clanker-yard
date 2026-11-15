@@ -83,8 +83,10 @@ export type {
 export { LinearAuthError } from "./linear/oauth";
 export { GitHubPatError } from "./github/pat";
 export { PrNotFoundError } from "./github/pr-query";
-export { healthyGitHub, pullsApi, startFakeGitHub } from "./github/fake-github";
-export type { FakeGitHub, FakePull, FakePullsApi, FakeRequest, RecordedResponse } from "./github/fake-github";
+export { healthyGitHub, recorded, startFakeGitHub } from "./github/fake-github";
+export type { FakeGitHub, FakeRequest, RecordedResponse } from "./github/fake-github";
+export { graphqlNotFound, prGraphql } from "./github/fake-pr-graphql";
+export type { Actor, PrNode, RawComment, RawContext, RawReview, RawThread, ReviewState } from "./github/pr-query";
 export { buildPrState } from "./github/pr-state";
 export type { PrStateContext } from "./github/pr-state";
 export { createPrs } from "./github/prs";

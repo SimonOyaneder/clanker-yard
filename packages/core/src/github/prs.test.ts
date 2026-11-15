@@ -13,7 +13,8 @@ import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { healthyGitHub, startFakeGitHub, type FakeGitHub, type FakeRequest, type RecordedResponse } from "./fake-github";
 import { PrNotFoundError } from "./pr-query";
-import { bot, checkRun, graphqlNotFound, HEAD_SHA, prGraphql, prNode, review, thread, user } from "./pr-fixtures";
+import { graphqlNotFound, prGraphql } from "./fake-pr-graphql";
+import { bot, checkRun, HEAD_SHA, prNode, review, thread, user } from "./pr-fixtures";
 import { createPrs } from "./prs";
 
 const TOKEN = "github_pat_UNIQUE-0123456789";

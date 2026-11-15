@@ -9,3 +9,17 @@ export type { FakeRuntime, FakeRuntimeOptions } from "./fake-runtime";
 export type { RecipeResult } from "./fake-script";
 export { registerFlowStubs } from "./flow-stubs";
 export type { FlowStubs, FlowStubsOptions, StubResult } from "./flow-stubs";
+export { startGitHttpServer } from "./git-http";
+export { startGitHubSim } from "./github-sim";
+export type {
+  CheckOutcome,
+  Finding,
+  GitHubSim,
+  GitHubSimOptions,
+  QuotaResource,
+  SimPr,
+  SimPull,
+  StatusState,
+  ThreadRef,
+  Who,
+} from "./github-sim";
