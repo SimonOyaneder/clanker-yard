@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "headers": {},
+  "body": {
+    "total_count": 1,
+    "installations": [
+      {
+        "id": 1,
+        "app_id": 1,
+        "app_slug": "clanker-yard",
+        "account": { "login": "octocat", "id": 583231, "type": "User" },
+        "repository_selection": "selected",
+        "target_type": "User"
+      }
+    ]
+  }
+}

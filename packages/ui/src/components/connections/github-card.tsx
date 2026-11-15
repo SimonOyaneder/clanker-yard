@@ -1,6 +1,6 @@
 import type { Connection } from "@clanker/api"
-import { Check, Copy, ExternalLink, GitBranch, KeyRound, Loader2, Unplug, X } from "lucide-react"
-import { useState } from "react"
+import { AlertTriangle, Check, Copy, ExternalLink, GitBranch, KeyRound, Loader2, RefreshCw, Unplug, X } from "lucide-react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { Pill } from "@/components/common"
@@ -9,9 +9,11 @@ import { TokenField } from "@/components/connections/token-field"
 import { Button } from "@/components/ui/button"
 import { useGitHubDeviceFlow } from "@/hooks/use-github-device-flow"
 import { useLiveQuery } from "@/hooks/use-live"
+import { connectionSignature } from "@/hooks/use-linear-login"
+import { useNow } from "@/hooks/use-now"
 import { useHost } from "@/host"
 import { copy } from "@/lib/clipboard"
-import { expiryLabel, statusLook } from "@/lib/connections"
+import { codeCountdown, expiryLabel, statusLook } from "@/lib/connections"
 import { tone } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -27,6 +29,20 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
 
   const active = connection?.status === "active"
   const viaApp = connection?.auth === "app"
+  // Sin instalar, la App conecta pero ningún repo es visible. Se pide una vez por conexión (no por evento: es una llamada a GitHub);
+  // quien vuelve de instalarla la repite al volver a la ventana o con el botón.
+  const installations = useLiveQuery(
+    `github-installations:${connectionSignature(connection)}`,
+    async () => (active && viaApp ? appData.githubInstallations() : null),
+    { live: false },
+  )
+  const notInstalled = installations.data?.count === 0
+  useEffect(() => {
+    if (!notInstalled) return
+    window.addEventListener("focus", installations.reload)
+    return () => window.removeEventListener("focus", installations.reload)
+  }, [notInstalled, installations.reload])
+  const now = useNow(login.pending !== null)
   const showField = !login.pending && (!active || editing)
   const expiry = expiryLabel(connection)
   const createToken = () => form.data && host.openExternal(form.data.url)
@@ -56,14 +72,28 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
         account={connection ? `@${connection.account}` : undefined}
         status={statusLook(connection)}
         chips={
-          expiry ? (
-            <Pill
-              className={connection?.status !== "active" ? tone.red : connection.expiresSoon ? tone.amber : tone.neutral}
-              hint={viaApp ? "El refresh token de la GitHub App dura 6 meses y el core lo renueva solo con cada uso; si vence hay que volver a conectar." : "Los fine-grained PAT vencen en la fecha que elegiste al crearlos; hay que rotarlos a mano."}
-            >
-              {expiry}
-            </Pill>
-          ) : null
+          <>
+            {connection ? (
+              <Pill
+                className={tone.neutral}
+                hint={
+                  viaApp
+                    ? "Los agentes publican con la GitHub App: el token dura 8 horas y el core lo renueva solo. Para volver a un token personal, pega uno desde el menú."
+                    : "Los agentes publican con un fine-grained PAT que pegaste. Para cambiar a la GitHub App, pulsa Cambiar a la GitHub App: reemplaza este token."
+                }
+              >
+                {viaApp ? "GitHub App" : "Token personal"}
+              </Pill>
+            ) : null}
+            {expiry ? (
+              <Pill
+                className={connection?.status !== "active" ? tone.red : connection.expiresSoon ? tone.amber : tone.neutral}
+                hint={viaApp ? "El refresh token de la GitHub App dura 6 meses y el core lo renueva solo con cada uso; si vence hay que volver a conectar." : "Los fine-grained PAT vencen en la fecha que elegiste al crearlos; hay que rotarlos a mano."}
+              >
+                {expiry}
+              </Pill>
+            ) : null}
+          </>
         }
         primary={
           <>
@@ -74,43 +104,61 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
             ) : null}
             <Button size="sm" variant={active ? "outline" : "default"} disabled={login.pending !== null} onClick={() => void login.start()}>
               {login.pending ? <Loader2 className="animate-spin" /> : null}
-              {viaApp ? "Reconectar" : "Conectar con la GitHub App"}
+              {viaApp ? "Reconectar" : active ? "Cambiar a la GitHub App" : "Conectar con la GitHub App"}
             </Button>
           </>
         }
         menu={[
           { label: "Crear token con los permisos marcados", icon: <ExternalLink />, onSelect: createToken, disabled: !form.data },
-          { label: "Pegar un token nuevo", icon: <KeyRound />, onSelect: () => setEditing(true), disabled: !connection },
+          { label: viaApp ? "Cambiar a un token personal" : "Pegar un token nuevo", icon: <KeyRound />, onSelect: () => setEditing(true), disabled: !connection },
           { label: "Copiar cuenta", icon: <Copy />, onSelect: () => connection && copy(connection.account, "la cuenta de GitHub"), disabled: !connection },
           { label: "Desconectar", icon: <Unplug />, onSelect: () => setConfirming(true), destructive: true, disabled: !connection },
         ]}
       >
         {login.pending ? (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <p>
               Escribe este código en <span className="font-mono text-foreground">{login.pending.verificationUri}</span> y aprueba la GitHub App. Al aprobar, la cuenta aparece acá sola.
             </p>
-            <p className="font-mono text-2xl font-semibold tracking-widest" aria-label="Código de GitHub">
+            <p className="font-mono text-4xl font-semibold tracking-widest" aria-label="Código de GitHub">
               {login.pending.userCode}
             </p>
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+              <Loader2 className="size-3 animate-spin" /> Esperando la aprobación en GitHub · el código vence en {codeCountdown(login.pending.expiresAt, now)}
+            </p>
             <div className="flex gap-2">
-              <Button size="xs" variant="outline" onClick={() => login.pending && host.openExternal(login.pending.verificationUri)}>
-                <ExternalLink /> Abrir de nuevo
+              <Button size="sm" onClick={login.open}>
+                <Copy /> Copiar y abrir GitHub
               </Button>
-              <Button size="xs" variant="outline" onClick={() => login.pending && copy(login.pending.userCode, "el código de GitHub")}>
-                <Copy /> Copiar código
-              </Button>
-              <Button size="xs" variant="ghost" onClick={login.dismiss}>
+              <Button size="sm" variant="ghost" onClick={login.dismiss}>
                 Cancelar
               </Button>
             </div>
           </div>
         ) : viaApp && connection ? (
-          <p className={connection.status === "active" ? "text-muted-foreground" : "text-destructive"}>
-            {connection.status === "active"
-              ? "Conectado con la GitHub App: el token dura 8 horas y el core lo renueva solo. Los agentes publican con tu cuenta y solo ven los repos donde instalaste la App."
-              : "GitHub rechazó la renovación del token de la GitHub App. Lo que publica (push, PRs, comentarios) espera hasta que vuelvas a conectarla."}
-          </p>
+          <div className="flex flex-col gap-2">
+            <p className={connection.status === "active" ? "text-muted-foreground" : "text-destructive"}>{appStatusText(connection)}</p>
+            {notInstalled ? (
+              <div role="alert" className="flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5">
+                <p className="flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="size-3.5" /> La GitHub App no está instalada
+                </p>
+                <p className="text-muted-foreground">
+                  La cuenta conectó, pero sin instalar la App el token no ve ningún repo y las listas salen vacías. Instálala en tu cuenta y elige los repos (docs/github-app.md, paso 3).
+                </p>
+                <div className="flex gap-2">
+                  {installations.data?.installUrl ? (
+                    <Button size="xs" onClick={() => host.openExternal(installations.data!.installUrl!)}>
+                      <ExternalLink /> Instalar la GitHub App
+                    </Button>
+                  ) : null}
+                  <Button size="xs" variant="outline" onClick={installations.reload}>
+                    <RefreshCw /> Volver a revisar
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         ) : connection ? (
           <div className="flex flex-col gap-1.5">
             <span className="text-xs text-muted-foreground">Permisos comprobados con una lectura de prueba sobre un repo visible</span>
@@ -131,10 +179,15 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
         ) : (
           <p className="text-muted-foreground">Los agentes publican en GitHub con tu cuenta. Conecta la GitHub App (escribes un código en github.com) o crea un token con los permisos ya marcados, pégalo y pruébalo.</p>
         )}
-        {login.error ? (
-          <p role="alert" className="text-xs text-destructive">
-            {login.error}
-          </p>
+        {login.failure ? (
+          <div role="alert" className="flex items-center gap-2 text-xs text-destructive">
+            <p className="flex-1">{login.failure.message}</p>
+            {login.failure.reason !== "failed" ? (
+              <Button size="xs" variant="outline" onClick={() => void login.start()}>
+                Intentar de nuevo
+              </Button>
+            ) : null}
+          </div>
         ) : null}
         {showField ? (
           <TokenField
@@ -158,4 +211,15 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
       />
     </>
   )
+}
+
+function appStatusText(connection: Connection): string {
+  switch (connection.status) {
+    case "active":
+      return "Conectado con la GitHub App: el token dura 8 horas y el core lo renueva solo, y cada renovación estira el refresh token 6 meses. Los agentes publican con tu cuenta y solo ven los repos donde instalaste la App."
+    case "revoked":
+      return "GitHub rechazó la renovación del token de la GitHub App (la revocaste o pasaron 6 meses sin uso). Lo que publica (push, PRs, comentarios) espera hasta que vuelvas a conectarla."
+    case "expired":
+      return "El refresh token de la GitHub App venció (dura 6 meses). Lo que publica (push, PRs, comentarios) espera hasta que vuelvas a conectarla."
+  }
 }

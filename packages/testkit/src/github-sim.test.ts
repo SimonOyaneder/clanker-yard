@@ -515,6 +515,14 @@ describe("auth y cuota", () => {
     expect(connections.list()).toMatchObject([{ account: "octocat", status: "revoked" }]);
   });
 
+  test("GET /user/installations dice si la GitHub App está instalada, y setAppInstalled lo cambia", async () => {
+    expect((await api("GET", "/user/installations")).body.total_count).toBe(1);
+
+    sim.setAppInstalled(false);
+
+    expect((await api("GET", "/user/installations")).body).toEqual({ total_count: 0, installations: [] });
+  });
+
   test("cada respuesta informa la cuota de su recurso y baja de a una", async () => {
     sim.openPr({ head: BRANCH });
     const rest = await api("GET", `/repos/${REPO}/pulls/1`);

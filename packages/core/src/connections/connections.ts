@@ -1,5 +1,5 @@
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import type { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubAuth, GitHubDeviceFlow, Origin } from "@clanker/api";
+import type { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubAuth, GitHubDeviceFlow, GitHubInstallations, LoginFailure, Origin } from "@clanker/api";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { apiKeyCredentials, subscriptionCredentials, type ClaudeCredentials } from "../agents/claude/credentials";
 import type { QueryFn } from "../agents/claude/claude-runtime";
@@ -90,6 +90,8 @@ export class ClaudeSetupError extends Error {}
 export interface GitHubAppOptions {
   /** El Client ID de la App (no el App ID). Sin él `startDeviceFlow` no puede iniciar. */
   clientId: string;
+  /** El nombre corto de la App en github.com (`github.com/apps/<slug>`); con él `githubInstallations` da el link para instalarla. */
+  slug?: string;
   /** Dónde está el OAuth de GitHub; en tests, un servidor local. */
   endpoints?: GitHubOAuthEndpoints;
   /** Espera entre sondeos; en tests, un reloj falso. Default `setTimeout` (sin mantener vivo el proceso). */
@@ -126,11 +128,17 @@ export interface Connections {
    * token respetando `interval` y `slow_down`; al aprobar, pregunta de quién es el token, guarda la sesión
    * (access token de 8 h y refresh token que rota) en `Secrets`, conecta la cuenta con `auth: "app"` y emite
    * `connection.changed`. Si el usuario cancela, el código vence o GitHub rechaza algo, la cuenta no cambia
-   * y se emite un evento `error` con scope `github.device_flow`. Un `startDeviceFlow` nuevo cancela el que
-   * siga pendiente. Lanza `GitHubAuthError` si falta el `client_id` o GitHub rechaza el inicio (device flow
+   * y se emite `connection.login_failed` (`provider`, `reason` y `message`). Un `startDeviceFlow` nuevo cancela
+   * el que siga pendiente. Lanza `GitHubAuthError` si falta el `client_id` o GitHub rechaza el inicio (device flow
    * sin habilitar, `client_id` incorrecto).
    */
   startDeviceFlow(origin: Origin): Promise<GitHubDeviceFlow>;
+  /**
+   * Cuántas instalaciones de la GitHub App ve el token de la cuenta de GitHub conectada con la App
+   * (`GET /user/installations`). Con cero, conectar funcionó pero ningún repo es visible hasta que se
+   * instale (`docs/github-app.md`). Lanza si GitHub no está conectado con la App o GitHub falla.
+   */
+  githubInstallations(): Promise<GitHubInstallations>;
   /**
    * Inicia el login de Linear con OAuth y PKCE: levanta el loopback del redirect y devuelve el `url` que
    * el usuario abre en el navegador (el core no lo abre). Al aprobar, guarda los tokens en `Secrets`, conecta
@@ -524,7 +532,8 @@ export function createConnections(
 
   function reportDeviceFlowFailure(error: unknown, origin: Origin) {
     const message = error instanceof Error ? error.message : String(error);
-    store.tx((tx) => tx.emit({ type: "error", origin, payload: { scope: "github.device_flow", message } }));
+    const reason: LoginFailure = error instanceof GitHubAuthError && error.reason !== "rejected" ? error.reason : "failed";
+    store.tx((tx) => tx.emit({ type: "connection.login_failed", origin, payload: { provider: "github", reason, message } }));
   }
 
   const self: Connections = {
@@ -572,6 +581,14 @@ export function createConnections(
         })
         .finally(forget);
       return { userCode: code.userCode, verificationUri: code.verificationUri, expiresIn: Math.round((code.expiresAt - now()) / 1000) };
+    },
+
+    async githubInstallations() {
+      const row = store.db.select().from(connections).where(eq(connections.provider, "github")).get();
+      if (row?.auth !== "app") throw new GitHubAuthError("GitHub no está conectado con la GitHub App: conéctala primero.");
+      const { data } = await self.githubClient(row.account).request("GET /user/installations", { per_page: 1 });
+      const slug = githubApp?.slug;
+      return { count: data.total_count, ...(slug ? { installUrl: `https://github.com/apps/${slug}/installations/new` } : {}) };
     },
 
     async linearAuth(origin) {

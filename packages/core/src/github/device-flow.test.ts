@@ -25,6 +25,8 @@ let oauth: FakeGitHubOAuth;
 let api: FakeGitHub;
 let connections: Connections;
 let clock: number;
+/** Cuántas instalaciones de la App ve el token (`GET /user/installations`). */
+let installed: boolean;
 /** Las esperas que pidió el sondeo, en ms. */
 let sleeps: number[];
 /** Se llama en cada espera (n desde 1) antes de avanzar el reloj: el "usuario" actúa aquí. */
@@ -42,6 +44,7 @@ beforeEach(async () => {
   store = openStore({ path: join(dir, "clanker.db") });
   secrets = createFileSecrets({ dir: join(dir, "secrets") });
   clock = NOW;
+  installed = true;
   sleeps = [];
   onSleep = undefined;
   oauth = await startFakeGitHubOAuth({ clientId: CLIENT_ID, now: () => clock });
@@ -49,6 +52,7 @@ beforeEach(async () => {
   api = await startFakeGitHub((request) => {
     const bearer = request.authorization?.match(/^bearer (.+)$/i)?.[1];
     if (!bearer || !oauth.isAccessTokenValid(bearer)) return recorded("user.bad-credentials");
+    if (request.method === "GET" && request.path === "/user/installations") return recorded(installed ? "installations.ok" : "installations.empty");
     return request.method === "GET" && request.path === "/user" ? recorded("user.ok") : undefined;
   });
   connections = connectionsWith({ clientId: CLIENT_ID });
@@ -154,22 +158,22 @@ describe("startDeviceFlow", () => {
     expect(sleeps).toEqual([5000, 5000, 10_000, 10_000]);
   });
 
-  test("si el usuario cancela en GitHub no se conecta nada y queda un evento error", async () => {
+  test("si el usuario cancela en GitHub no se conecta nada y queda un connection.login_failed denied", async () => {
     onSleep = (n) => {
       if (n === 2) oauth.deny();
     };
-    const failed = next("error");
+    const failed = next("connection.login_failed");
     await connections.startDeviceFlow("ui");
 
-    expect((await failed).payload).toMatchObject({ scope: "github.device_flow", message: expect.stringContaining("Cancelaste") });
+    expect((await failed).payload).toMatchObject({ provider: "github", reason: "denied", message: expect.stringContaining("Cancelaste") });
     expect(connections.list()).toEqual([]);
   });
 
-  test("si nadie aprueba, el código vence y queda un evento error", async () => {
-    const failed = next("error");
+  test("si nadie aprueba, el código vence y queda un connection.login_failed expired", async () => {
+    const failed = next("connection.login_failed");
     await connections.startDeviceFlow("ui");
 
-    expect((await failed).payload).toMatchObject({ scope: "github.device_flow", message: expect.stringContaining("venció") });
+    expect((await failed).payload).toMatchObject({ provider: "github", reason: "expired", message: expect.stringContaining("venció") });
     expect(connections.list()).toEqual([]);
     // 900 s de código a 5 s por sondeo.
     expect(sleeps).toHaveLength(180);
@@ -225,7 +229,7 @@ describe("startDeviceFlow", () => {
     await connected;
 
     expect(connections.list()).toMatchObject([{ account: ACCOUNT, auth: "app" }]);
-    expect(store.events.since(0, { types: ["error"] })).toEqual([]);
+    expect(store.events.since(0, { types: ["error", "connection.login_failed"] })).toEqual([]);
   });
 
   test("device flow sin habilitar en la App: falla con el paso a seguir y sin sondear", async () => {
@@ -251,6 +255,32 @@ describe("startDeviceFlow", () => {
     expect(failure).toBeInstanceOf(GitHubAuthError);
     expect((failure as Error).message).toContain("CLANKER_GITHUB_APP_CLIENT_ID");
     expect(oauth.requests).toEqual([]);
+  });
+});
+
+describe("githubInstallations", () => {
+  test("con la App instalada cuenta la instalación; sin slug no hay link", async () => {
+    await connectApp();
+
+    expect(await connections.githubInstallations()).toEqual({ count: 1 });
+  });
+
+  test("sin instalar el token conecta pero cuenta cero, y con slug da el link para instalarla", async () => {
+    connections = createConnections(store, secrets, {
+      now: () => clock,
+      github: { baseUrl: api.baseUrl },
+      githubApp: { clientId: CLIENT_ID, slug: "clanker-yard", endpoints: oauth.endpoints, sleep },
+    });
+    installed = false;
+    await connectApp();
+
+    expect(await connections.githubInstallations()).toEqual({ count: 0, installUrl: "https://github.com/apps/clanker-yard/installations/new" });
+  });
+
+  test("una cuenta pegada con PAT no tiene instalaciones que revisar", async () => {
+    await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: "github_pat_x" }, "ui");
+
+    await expect(connections.githubInstallations()).rejects.toThrow(/GitHub App/);
   });
 });
 

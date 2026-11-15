@@ -60,6 +60,24 @@ export const GitHubDeviceFlow = z.object({
 });
 export type GitHubDeviceFlow = z.infer<typeof GitHubDeviceFlow>;
 
+/**
+ * Por qué terminó mal un login (`connection.login_failed`): `denied` es que el usuario canceló en el
+ * proveedor, `expired` que el código o el plazo venció sin aprobarse, `failed` cualquier otra cosa.
+ */
+export const LoginFailure = z.enum(["denied", "expired", "failed"]);
+export type LoginFailure = z.infer<typeof LoginFailure>;
+
+/**
+ * Si la GitHub App está instalada para la cuenta conectada. Sin instalación el token de usuario conecta
+ * bien pero no ve ningún repo.
+ */
+export const GitHubInstallations = z.object({
+  count: z.int().nonnegative(),
+  /** Dónde instalar la App; solo si el core sabe cómo se llama (`githubApp.slug`). */
+  installUrl: z.url().optional(),
+});
+export type GitHubInstallations = z.infer<typeof GitHubInstallations>;
+
 /** Con qué credencial corre Claude: el login de suscripción de quien instaló la app, o una API key. */
 export const ClaudeMode = z.enum(["subscription", "api-key"]);
 export type ClaudeMode = z.infer<typeof ClaudeMode>;

@@ -22,6 +22,9 @@ import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCH
 // `github_pat_demo` y el token del device flow del OAuth falso), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
 // esperar, escribe `<CLANKER_HOME>/demo-control.json` con `{ "clockDays": 40, "claude": "login_expired" }`: el
 // reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario.
+// Lo que GitHub haría del otro lado del device flow también sale de ese archivo, mientras la clave esté puesta:
+// `githubDeny` cancela el código pendiente, `githubRefresh: "rejected"` invalida los refresh tokens y
+// `githubInstalled: false` deja la GitHub App sin instalar.
 //
 // Con `DEMO_SCENARIO=prs` siembra los PRs de la vista de Stacks de PR (`prs-scenario.ts`) con el pack de ejemplo activado para
 // la org del simulador: un stack, riesgo alto, uno en cola, uno con la cola caída, uno en hold y una base combinada.
@@ -73,7 +76,14 @@ if (prsScenario) {
   writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [] }));
 }
 const linear = await startFakeLinear({ clientId: "demo-client" });
-const control = (): { clockDays?: number; claude?: FakeClaudeScenario; closeAlert?: boolean } => {
+const control = (): {
+  clockDays?: number;
+  claude?: FakeClaudeScenario;
+  closeAlert?: boolean;
+  githubDeny?: boolean;
+  githubRefresh?: "rejected";
+  githubInstalled?: boolean;
+} => {
   try {
     return JSON.parse(readFileSync(join(home, "demo-control.json"), "utf8"));
   } catch {
@@ -83,13 +93,20 @@ const control = (): { clockDays?: number; claude?: FakeClaudeScenario; closeAler
 // El reloj de las conexiones parte de una fecha fija: el PAT del simulador vence el 2026-12-20 y la demo no debe
 // depender del día en que se corre.
 const CLOCK_START = Date.UTC(2026, 10, 15, 12);
+const githubDoubles = setInterval(() => {
+  const { githubDeny, githubRefresh, githubInstalled } = control();
+  if (githubDeny) githubOAuth.deny();
+  if (githubRefresh === "rejected") githubOAuth.expireRefreshTokens();
+  github.setAppInstalled(githubInstalled !== false);
+}, 200);
+githubDoubles.unref();
 const claude = createFakeClaude({ scenario: () => control().claude ?? "ready" });
 const core = await startCore({
   store,
   dataDir: home,
   connections: createConnections(store, createFileSecrets({ dir: join(home, "secrets") }), {
     github: { baseUrl: github.baseUrl },
-    githubApp: { clientId: "Iv23liDEMO", endpoints: githubOAuth.endpoints },
+    githubApp: { clientId: "Iv23liDEMO", slug: "clanker-yard-demo", endpoints: githubOAuth.endpoints },
     linear: { clientId: "demo-client", redirectPort: 0, endpoints: linear.endpoints },
     claude: claude.options,
     now: () => CLOCK_START + (control().clockDays ?? 0) * 86_400_000,

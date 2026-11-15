@@ -50,6 +50,9 @@ const router = os.router({
     startDeviceFlow: os.connections.startDeviceFlow.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    githubInstallations: os.connections.githubInstallations.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     linearAuth: os.connections.linearAuth.handler(() => {
       throw new Error("no se usa en este test");
     }),

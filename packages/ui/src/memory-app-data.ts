@@ -532,6 +532,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       connect({ provider: "github", account: "octocat", scopes: [], status: "active", expiresAt: now + 183 * day, expiresSoon: false, auth: "app" })
       return { userCode: "WDJB-MJHT", verificationUri: "https://github.com/login/device", expiresIn: 900 }
     },
+    githubInstallations: async () => ({ count: 1 }),
     // No hay navegador ni redirect: la cuenta queda conectada de una vez.
     linearAuth: async () => {
       connect({ provider: "linear", account: "clanker-yard", scopes: ["read", "write"], status: "active", expiresAt: now + 30 * day, expiresSoon: false })

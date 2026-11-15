@@ -86,6 +86,7 @@ export function healthyGitHub(
   const routes: Record<string, RecordedResponse> = {
     "GET /user": recorded("user.ok"),
     "GET /user/repos": recorded("repos.ok"),
+    "GET /user/installations": recorded("installations.ok"),
     "GET /repos/octocat/secret-project/commits": recorded("probe.ok"),
     "GET /repos/octocat/secret-project/pulls": recorded("probe.ok"),
     "GET /repos/octocat/secret-project/issues": recorded("probe.ok"),

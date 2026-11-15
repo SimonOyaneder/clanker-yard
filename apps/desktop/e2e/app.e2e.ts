@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Page } from "@playwright/test";
+import type { ElectronApplication, Page } from "@playwright/test";
 import { expect, setTheme, snap, test } from "./harness";
 
 // La fila de la corrida de "Saluda al mundo" (la de la cola no tiene el pill del flujo).
@@ -188,7 +188,10 @@ test("screenshots de cada vista en claro y oscuro", async ({ window: page }) => 
 });
 
 // El estado de las conexiones del core de demo cambia con este archivo (ver `packages/testkit/scripts/demo-core.ts`).
-function setDemoControl(home: string, control: { clockDays?: number; claude?: string; closeAlert?: boolean }): void {
+function setDemoControl(
+  home: string,
+  control: { clockDays?: number; claude?: string; closeAlert?: boolean; githubDeny?: boolean; githubRefresh?: "rejected"; githubInstalled?: boolean },
+): void {
   writeFileSync(join(home, "demo-control.json"), JSON.stringify(control));
 }
 
@@ -231,6 +234,9 @@ test("pegar un PAT contra el GitHub falso deja el chip en verde", async ({ windo
   for (const permission of ["Contents", "Pull requests", "Issues", "Checks"]) await expect(github.getByText(new RegExp(`^${permission} · `))).toBeVisible();
   // Con el token aceptado el campo desaparece: no queda el secreto en pantalla.
   await expect(github.getByLabel("Fine-grained personal access token")).toBeHidden();
+  // La tarjeta dice con qué credencial publican los agentes y cómo cambiarla.
+  await expect(github.getByText("Token personal", { exact: true })).toBeVisible();
+  await expect(github.getByRole("button", { name: "Cambiar a la GitHub App" })).toBeVisible();
 });
 
 test("conectar con Linear espera la aprobación en el navegador y la cuenta aparece sola", async ({ app, window: page }) => {
@@ -401,28 +407,119 @@ test("las resueltas guardan lo que se eligió y sin pendientes la bandeja dice q
   await snapBoth(page, "bandeja-resueltas");
 });
 
-test("conectar con la GitHub App muestra el código, y al aprobarlo la cuenta aparece sola con su token", async ({ app, window: page }) => {
-  // El main solo abre https, así que la página del GitHub falso (http) no abre nada: lo recogemos del IPC y la abrimos nosotros.
+// La GitHub App por el device flow contra el OAuth falso del core de demo (`demo-control.json` hace de github.com: cancela,
+// invalida el refresh token o desinstala la App). El main solo abre https, así que la página del GitHub falso (http) no abre
+// nada: se recoge del IPC y la abrimos nosotros, que es aprobar.
+const openedUrl = (app: ElectronApplication) => app.evaluate(() => (globalThis as { openedUrl?: string }).openedUrl);
+const approve = async (app: ElectronApplication) => expect((await fetch((await openedUrl(app))!)).ok).toBe(true);
+const forgetOpened = (app: ElectronApplication) => app.evaluate(() => ((globalThis as { openedUrl?: string }).openedUrl = undefined));
+// El core de demo lee `demo-control.json` cada 200 ms: lo que hace "del lado de GitHub" no es instantáneo.
+const settle = (page: Page) => page.waitForTimeout(500);
+
+test("conectar con la GitHub App muestra el código en vivo, y al aprobarlo la cuenta aparece sola con su token", async ({ app, window: page }) => {
   await app.evaluate(({ ipcMain }) => {
-    (globalThis as { openedUrl?: string }).openedUrl = undefined;
     ipcMain.on("host:open-external", (_event, url: string) => ((globalThis as { openedUrl?: string }).openedUrl = url));
   });
+  await forgetOpened(app);
   await sidebar(page).getByRole("button", { name: "Conexiones" }).click();
   const github = card(page, "GitHub");
   await github.getByRole("button", { name: "Conectar con la GitHub App" }).click();
 
   await expect(github.getByLabel("Código de GitHub")).toHaveText("WDJB-MJHT");
   await expect(github.getByText("aprueba la GitHub App")).toBeVisible();
-  await snapBoth(page, "conexiones-github-app-codigo");
+  await expect(github.getByRole("status")).toContainText(/Esperando la aprobación en GitHub · el código vence en 1[45]:\d\d/);
+  await snapBoth(page, "github-app-esperando");
 
-  const openedUrl = () => app.evaluate(() => (globalThis as { openedUrl?: string }).openedUrl);
-  await expect.poll(openedUrl).toMatch(/\/login\/device$/);
+  // Pulsar el botón copia el código y abre github.com otra vez (al empezar ya lo hizo una vez).
+  await expect.poll(() => openedUrl(app)).toMatch(/\/login\/device$/);
+  await forgetOpened(app);
+  await github.getByRole("button", { name: "Copiar y abrir GitHub" }).click();
+  await expect.poll(() => openedUrl(app)).toMatch(/\/login\/device$/);
+  expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe("WDJB-MJHT");
   // Aprobar es abrir la página del código: el GitHub falso lo da por escrito y el core lo ve en el siguiente sondeo.
-  expect((await fetch((await openedUrl())!)).ok).toBe(true);
+  await approve(app);
 
   await expect(github.getByText("Conectado con la GitHub App")).toBeVisible();
   await expect(github.getByText("@octocat")).toBeVisible();
   await expect(github.getByText("conectada", { exact: true })).toBeVisible();
+  await expect(github.getByText("GitHub App", { exact: true })).toBeVisible();
   await expect(github.getByLabel("Fine-grained personal access token")).toBeHidden();
-  await snapBoth(page, "conexiones-github-app");
+  // Instalada: no hay aviso.
+  await expect(github.getByRole("alert")).toBeHidden();
+  await snapBoth(page, "github-app-conectado");
+
+  // Volver a un token personal está en el menú y abre el campo del PAT.
+  await github.getByRole("button", { name: "Más acciones de GitHub" }).click();
+  await page.getByRole("menuitem", { name: "Cambiar a un token personal" }).click();
+  await expect(github.getByLabel("Fine-grained personal access token")).toBeVisible();
+});
+
+test("si el usuario cancela en GitHub la tarjeta lo dice enseguida, sin esperar a que venza el código", async ({ home, window: page }) => {
+  const github = card(page, "GitHub");
+  setDemoControl(home, { githubDeny: true });
+  await github.getByRole("button", { name: "Reconectar" }).first().click();
+
+  await expect(github.getByRole("alert")).toContainText("Cancelaste la conexión en GitHub");
+  await expect(github.getByLabel("Código de GitHub")).toBeHidden();
+  await expect(github.getByRole("button", { name: "Intentar de nuevo" })).toBeVisible();
+  // La cuenta que ya estaba conectada no se toca.
+  await expect(github.getByText("conectada", { exact: true })).toBeVisible();
+  await snapBoth(page, "github-app-cancelado");
+});
+
+test("si el código vence sin aprobarse la tarjeta avisa y ofrece intentar de nuevo", async ({ home, window: page }) => {
+  const github = card(page, "GitHub");
+  setDemoControl(home, {});
+  await github.getByRole("button", { name: "Intentar de nuevo" }).click();
+  await expect(github.getByLabel("Código de GitHub")).toBeVisible();
+  // El reloj del core pasa de los 15 minutos del código: el siguiente sondeo lo da por vencido.
+  setDemoControl(home, { clockDays: 1 });
+
+  await expect(github.getByRole("alert")).toContainText("El código de GitHub venció");
+  await expect(github.getByLabel("Código de GitHub")).toBeHidden();
+  await snapBoth(page, "github-app-codigo-vencido");
+});
+
+test("sin instalar la App la cuenta conecta pero la tarjeta avisa y ofrece instalarla", async ({ home, app, window: page }) => {
+  const github = card(page, "GitHub");
+  setDemoControl(home, { githubInstalled: false });
+  await settle(page);
+  await sidebar(page).getByRole("button", { name: "Bandeja", exact: true }).click();
+  await sidebar(page).getByRole("button", { name: "Conexiones" }).click();
+
+  const warning = github.getByRole("alert").filter({ hasText: "La GitHub App no está instalada" });
+  await expect(warning).toBeVisible();
+  await snapBoth(page, "github-app-sin-instalar");
+
+  await forgetOpened(app);
+  await warning.getByRole("button", { name: "Instalar la GitHub App" }).click();
+  await expect.poll(() => openedUrl(app)).toBe("https://github.com/apps/clanker-yard-demo/installations/new");
+  // Al volver de instalarla, revisar de nuevo quita el aviso.
+  setDemoControl(home, {});
+  await settle(page);
+  await warning.getByRole("button", { name: "Volver a revisar" }).click();
+  await expect(warning).toBeHidden();
+});
+
+test("con el refresh token de la App vencido o rechazado, la tarjeta pide volver a conectar", async ({ home, window: page }) => {
+  const github = card(page, "GitHub");
+  // La lista de conexiones se relee con los eventos del core: probar Claude emite uno (y el reloj nuevo ya cuenta).
+  const reload = () => card(page, "Claude").getByRole("button", { name: "Probar", exact: true }).click();
+
+  // 250 días después, pasados los 6 meses del refresh token (se conectó con el reloj en el día 40), la cuenta está vencida.
+  setDemoControl(home, { clockDays: 250 });
+  await reload();
+  await expect(github.getByText("vencida", { exact: true })).toBeVisible();
+  await expect(github.getByText("El refresh token de la GitHub App venció")).toBeVisible();
+  await expect(github.getByRole("button", { name: "Reconectar" }).first()).toBeVisible();
+  await snapBoth(page, "github-app-vencido");
+
+  // En el día 41 el access token (8 h) ya no sirve y GitHub rechaza el refresh: al revisar la instalación el core la deja revocada.
+  setDemoControl(home, { clockDays: 41, githubRefresh: "rejected" });
+  await settle(page);
+  await reload();
+  await expect(github.getByText("revocada", { exact: true })).toBeVisible();
+  await expect(github.getByText("GitHub rechazó la renovación del token")).toBeVisible();
+  await expect(sidebar(page).getByLabel("Algo está vencido o caído")).toBeVisible();
+  await snapBoth(page, "github-app-revocado");
 });

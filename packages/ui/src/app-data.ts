@@ -16,6 +16,7 @@ import type {
   DecisionId,
   Event,
   GitHubDeviceFlow,
+  GitHubInstallations,
   GitHubPatForm,
   IssueId,
   IssueMetrics,
@@ -149,6 +150,8 @@ export interface AppData {
   setGithubPat(token: string): Promise<Connection>
   /** Inicia el device flow de la GitHub App: devuelve el código para escribir en github.com; la cuenta aparece sola (`connection.changed`) al aprobar. */
   startGithubDeviceFlow(): Promise<GitHubDeviceFlow>
+  /** Cuántas instalaciones de la GitHub App ve el token de la cuenta conectada con la App; con cero, los repos salen vacíos. */
+  githubInstallations(): Promise<GitHubInstallations>
   /** Inicia el login de Linear y devuelve el link para el navegador: lo abre el host y la cuenta aparece sola (`connection.changed`). */
   linearAuth(): Promise<string>
   /** Una llamada mínima a Claude: gasta un poco de cuota, así que solo la pide una persona o el refresco espaciado del plan. */

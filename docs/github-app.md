@@ -78,8 +78,10 @@ El core lee el `client_id` al arrancar, de dos lugares (el entorno gana):
 - `<dataDir>/config.json`:
 
   ```json
-  { "githubApp": { "clientId": "Iv23liXXXXXXXXXXXXXX" } }
+  { "githubApp": { "clientId": "Iv23liXXXXXXXXXXXXXX", "slug": "clanker-yard" } }
   ```
+
+  `slug` es opcional (el nombre corto de la App, el de `github.com/apps/<slug>`): con él, si la App no está instalada, la tarjeta de Conexiones ofrece el botón que abre la instalación. Variable `CLANKER_GITHUB_APP_SLUG`.
 
   El mismo archivo guarda el `client_id` de la OAuth app de Linear (`"linear": { "clientId": "..." }`, variable `CLANKER_LINEAR_CLIENT_ID`).
 
@@ -88,7 +90,7 @@ El core lee el `client_id` al arrancar, de dos lugares (el entorno gana):
 
 Un `config.json` que no es JSON, trae claves desconocidas o un `clientId` vacío hace fallar el arranque con el motivo y la ruta. Reinicia el core para que lo lea. ## 5. Conectar desde la app
 
-En Conexiones, GitHub, **Conectar con la GitHub App**: la app muestra un código (`WDJB-MJHT`) y abre https://github.com/login/device; escríbelo y aprueba. La cuenta aparece sola, con el badge "GitHub App". El core renueva el token (8 h) solo; si GitHub rechaza la renovación (revocaste la App o pasaron 6 meses sin uso), la conexión queda en rojo, lo que publica espera y basta con volver a pulsar el botón. Si el core responde que falta el `client_id` o que el device flow está deshabilitado, revisa los pasos 2 y 4. Se puede cambiar de PAT a App (y al revés) sobre la misma cuenta: la última que conectes reemplaza a la anterior.
+En Conexiones, GitHub, **Conectar con la GitHub App**: la app muestra el código en grande (`WDJB-MJHT`) con el tiempo que le queda, lo copia y abre https://github.com/login/device (**Copiar y abrir GitHub** lo repite); escríbelo y aprueba. La cuenta aparece sola, con el chip "GitHub App" (un PAT lleva "Token personal"). Si cancelas en GitHub o el código vence, la tarjeta lo dice enseguida y ofrece intentar de nuevo. Si la App no está instalada, la cuenta conecta pero la tarjeta avisa (el token no ve ningún repo hasta instalarla, paso 3) y tiene **Volver a revisar**. El core renueva el token (8 h) solo; si GitHub rechaza la renovación (revocaste la App o pasaron 6 meses sin uso), la conexión queda en rojo, lo que publica espera y basta con volver a pulsar el botón. Si el core responde que falta el `client_id` o que el device flow está deshabilitado, revisa los pasos 2 y 4. Se puede cambiar de PAT a App (y al revés) sobre la misma cuenta: la última que conectes reemplaza a la anterior.
 
 ## Después
 

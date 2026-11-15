@@ -7,6 +7,13 @@ import * as z from "zod";
  */
 export class GitHubAuthError extends Error {
   override name = "GitHubAuthError";
+  constructor(
+    message: string,
+    /** `denied`: el usuario canceló en github.com; `expired`: el código venció sin aprobarse; `rejected`: GitHub rechazó otra cosa. */
+    readonly reason: "denied" | "expired" | "rejected" = "rejected",
+  ) {
+    super(message);
+  }
 }
 
 export interface GitHubOAuthEndpoints {
@@ -160,7 +167,7 @@ export async function pollDeviceToken({ endpoints, clientId, code, now, sleep, s
       case "expired_token":
         throw expired(undefined);
       case "access_denied":
-        throw new GitHubAuthError("Cancelaste la conexión en GitHub. Vuelve a intentarlo desde Clanker Yard.");
+        throw new GitHubAuthError("Cancelaste la conexión en GitHub. Vuelve a intentarlo desde Clanker Yard.", "denied");
       default:
         throw new GitHubAuthError(startFailure(reply.error));
     }
@@ -169,7 +176,7 @@ export async function pollDeviceToken({ endpoints, clientId, code, now, sleep, s
 
 function expired(lastTransient: unknown): GitHubAuthError {
   const cause = lastTransient instanceof Error ? ` Último error de red: ${lastTransient.message}` : "";
-  return new GitHubAuthError(`El código de GitHub venció sin que lo aprobaras: vuelve a intentarlo.${cause}`);
+  return new GitHubAuthError(`El código de GitHub venció sin que lo aprobaras: vuelve a intentarlo.${cause}`, "expired");
 }
 
 /**

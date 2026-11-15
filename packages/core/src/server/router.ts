@@ -186,6 +186,16 @@ export function createRouter(deps: RouterDeps) {
           throw error;
         }
       }),
+      githubInstallations: os.connections.githubInstallations.handler(async () => {
+        try {
+          return await deps.connections.githubInstallations();
+        } catch (error) {
+          if (error instanceof GitHubAuthError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        }
+      }),
       linearAuth: os.connections.linearAuth.handler(async ({ context }) => {
         try {
           // `done` no se espera: el resultado llega como `connection.changed`, y un fallo se le muestra

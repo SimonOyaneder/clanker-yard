@@ -1,6 +1,6 @@
 import type { ClaudeStatus, Connection } from "@clanker/api"
 import { describe, expect, test } from "vitest"
-import { claudeLook, connectionOf, expiryLabel, needsAttention, statusLook, untilReset, usagePercent, usageTone } from "./connections"
+import { claudeLook, codeCountdown, connectionOf, expiryLabel, needsAttention, statusLook, untilReset, usagePercent, usageTone } from "./connections"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 const DAY = 86_400_000
@@ -77,5 +77,15 @@ describe("uso del plan", () => {
     expect(untilReset(NOW + 83 * 60_000, NOW)).toBe("1:23")
     expect(untilReset(NOW - 1, NOW)).toBeNull()
     expect(untilReset(undefined, NOW)).toBeNull()
+  })
+})
+
+describe("codeCountdown", () => {
+  test("minutos y segundos hasta que vence el código, sin bajar de 0:00", () => {
+    const now = Date.UTC(2026, 10, 15, 12)
+    expect(codeCountdown(now + 900_000, now)).toBe("15:00")
+    expect(codeCountdown(now + 872_300, now)).toBe("14:33")
+    expect(codeCountdown(now + 5_000, now)).toBe("0:05")
+    expect(codeCountdown(now - 1_000, now)).toBe("0:00")
   })
 })

@@ -167,6 +167,8 @@ export interface GitHubSim {
   quotaRemaining(resource: QuotaResource): number;
   /** Desde ahora, todo responde 401 `Bad credentials`. */
   revokeToken(): void;
+  /** Si la GitHub App está instalada para quien llama (`GET /user/installations`); por defecto sí. */
+  setAppInstalled(installed: boolean): void;
   close(): Promise<void>;
 }
 
@@ -274,6 +276,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     search: { remaining: QUOTA_LIMITS.search, reset: QUOTA_RESET },
   };
   let revoked = false;
+  let appInstalled = true;
   let clock = CLOCK_START;
   let nextId = 1000;
   const tick = () => new Date(++clock * 1000).toISOString().replace(".000Z", "Z");
@@ -770,6 +773,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
 
   function rest(request: FakeRequest): RecordedResponse | undefined {
     if (request.method === "GET" && request.path === "/search/issues") return searchIssues(request);
+    if (request.method === "GET" && request.path === "/user/installations") return recorded(appInstalled ? "installations.ok" : "installations.empty");
     const repoRoute = request.path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
     if (!repoRoute) return healthyGitHub()(request);
     if (`${repoRoute[1]}/${repoRoute[2]}` !== repo) return notFound();
@@ -966,6 +970,9 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     },
     revokeToken() {
       revoked = true;
+    },
+    setAppInstalled(installed) {
+      appInstalled = installed;
     },
     close: () => server.close(),
   };

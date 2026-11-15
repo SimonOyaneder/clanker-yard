@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { GITHUB_APP_CLIENT_ID_ENV, LINEAR_CLIENT_ID_ENV, readCoreConfig } from "./config";
+import { GITHUB_APP_CLIENT_ID_ENV, GITHUB_APP_SLUG_ENV, LINEAR_CLIENT_ID_ENV, readCoreConfig } from "./config";
 
 let dirs: string[] = [];
 
@@ -49,6 +49,12 @@ describe("readCoreConfig", () => {
     });
     expect(readCoreConfig(dataDir(), { [LINEAR_CLIENT_ID_ENV]: "lin-env" })).toEqual({ linear: { clientId: "lin-env" } });
     expect(readCoreConfig(dataDir(), { [LINEAR_CLIENT_ID_ENV]: " " })).toEqual({});
+  });
+
+  test("el slug de la GitHub App es opcional y el entorno lo pisa", () => {
+    const dir = dataDir(JSON.stringify({ githubApp: { clientId: "Iv23liFromFile", slug: "clanker-yard" } }));
+    expect(readCoreConfig(dir, {})).toEqual({ githubApp: { clientId: "Iv23liFromFile", slug: "clanker-yard" } });
+    expect(readCoreConfig(dir, { [GITHUB_APP_SLUG_ENV]: " otro-nombre " })).toEqual({ githubApp: { clientId: "Iv23liFromFile", slug: "otro-nombre" } });
   });
 
   test("un archivo sin githubApp es una config vacía", () => {

@@ -40,6 +40,12 @@ export function expiryLabel(connection: Connection | undefined, now = Date.now()
   return days === 0 ? "vence hoy" : `vence en ${days} d`
 }
 
+/** "14:32" para lo que falta hasta que venza el código del device flow; "0:00" si ya venció. */
+export function codeCountdown(expiresAt: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+}
+
 const CLAUDE: Record<ClaudeState, { label: string; tone: string; hint: string; down: boolean }> = {
   ready: { label: "lista", tone: tone.green, hint: "Claude respondió a la llamada de prueba.", down: false },
   not_installed: { label: "no instalado", tone: tone.red, hint: "No encuentro Claude Code en el PATH.", down: true },
