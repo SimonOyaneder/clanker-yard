@@ -164,6 +164,52 @@ export const agentSessions = sqliteTable(
 );
 
 /**
+ * Un turno de una sesión: un mensaje `assistant` (deduplicado por `message.id`). Los totales de la
+ * sesión se actualizan en la misma tx que la fila, y `seq` sigue contando si un resume reusa la sesión.
+ */
+export const agentTurns = sqliteTable(
+  "agent_turns",
+  {
+    sessionId: text("session_id").notNull(),
+    seq: integer().notNull(),
+    ts: integer().notNull(),
+    model: text().notNull(),
+    tokensIn: integer("tokens_in").notNull(),
+    tokensOut: integer("tokens_out").notNull(),
+    tokensCacheRead: integer("tokens_cache_read").notNull(),
+    /** Todo lo escrito en la caché (5 min y 1 h). */
+    tokensCacheWrite: integer("tokens_cache_write").notNull(),
+    /** La parte de `tokens_cache_write` que fue a la caché de 1 h. */
+    tokensCacheWrite1h: integer("tokens_cache_write_1h").notNull(),
+    /** Lo que costó el turno: el USD que dijo el runtime o su estimación con `model_prices`. */
+    costMicros: integer("cost_micros").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.sessionId, t.seq] }),
+    foreignKey({ columns: [t.sessionId], foreignColumns: [agentSessions.id] }),
+  ],
+);
+
+/**
+ * USD por millón de tokens, en micros (USD × 10⁶), para estimar el costo de un turno cuando el
+ * runtime no lo reporta. `model` es un nombre de familia (`opus`): sirve a todo id de modelo que
+ * lo contenga, y un precio más largo (`opus-4-8`) gana. Rige el de mayor `valid_from` anterior al turno.
+ */
+export const modelPrices = sqliteTable(
+  "model_prices",
+  {
+    model: text().notNull(),
+    input: integer().notNull(),
+    output: integer().notNull(),
+    cacheRead: integer("cache_read").notNull(),
+    cacheWrite5m: integer("cache_write_5m").notNull(),
+    cacheWrite1h: integer("cache_write_1h").notNull(),
+    validFrom: integer("valid_from").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.model, t.validFrom] })],
+);
+
+/**
  * Una cuenta conectada a un proveedor. Sin secretos: `secret_ref` es la clave bajo la que `Secrets`
  * guarda el token, nunca el token.
  */

@@ -57,6 +57,10 @@ export interface Usage {
   tokensOut: number;
   tokensCacheRead: number;
   tokensCacheWrite: number;
+  /**
+   * Lo que el runtime reporta. En un turno solo con `costPerTurn`; en el resultado, 0 si no lo
+   * sabe (un run cortado antes de su `result`) y entonces el core suma sus estimaciones por turno.
+   */
   costMicros: number;
   /** `estimate` con suscripción: el equivalente a precio de lista. */
   costSource: "runtime" | "estimate";
@@ -79,7 +83,16 @@ export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "tool_start"; tool: string; detail?: string }
   | { type: "tool_end"; tool: string }
-  | { type: "usage"; turn: number; usage: Usage }
+  | {
+      type: "usage";
+      turn: number;
+      /** Un turno es un mensaje `assistant` del modelo, ya deduplicado por su id. */
+      usage: Usage;
+      /** El id de modelo que respondió, para ponerle precio; sin él rige el de la sesión. */
+      model?: string;
+      /** La parte de `usage.tokensCacheWrite` que fue a la caché de 1 h; el resto es de 5 min. */
+      cacheWrite1hTokens?: number;
+    }
   | { type: "error"; kind: "login_expired" | "quota_exhausted" | "other"; message: string };
 
 export interface RunResult {

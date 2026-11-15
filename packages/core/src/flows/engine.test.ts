@@ -125,6 +125,35 @@ describe("un flujo action → agent → action", () => {
     expect(h.calls.map((c) => c.kind)).toEqual(["start", "resume"]);
     expect(h.flows.getRun(runId).status).toBe("done");
   });
+
+  test("el costo de la corrida es la suma del costo de sus pasos", async () => {
+    const costs = [300, 700];
+    const h = harness({
+      script: async () => ({
+        ...okReport(),
+        usage: { turns: 1, tokensIn: 1, tokensOut: 1, tokensCacheRead: 0, tokensCacheWrite: 0, costMicros: costs.shift() ?? 0, costSource: "runtime" },
+      }),
+    });
+    h.save({
+      schema: 1,
+      id: "two-costs",
+      name: "Dos costos",
+      trigger: { type: "manual" },
+      start: "plan",
+      nodes: {
+        plan: { type: "agent", role: "dev", mode: "plan", brief: {}, on: { ok: "implement", changes: "@failed" } },
+        implement: { type: "agent", role: "dev", mode: "plan", brief: {}, on: { ok: "@done", changes: "@failed" } },
+      },
+    });
+
+    const runId = h.start("two-costs");
+    await h.finished(runId);
+
+    const view = h.flows.getRun(runId);
+    expect(view.steps.map((s) => s.costMicros)).toEqual([300, 700]);
+    expect(view.costMicros).toBe(1000);
+    expect(view.costMicros).toBe(view.steps.reduce((sum, s) => sum + s.costMicros, 0));
+  });
 });
 
 describe("rondas", () => {

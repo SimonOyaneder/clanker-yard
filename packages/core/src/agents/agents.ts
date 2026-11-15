@@ -13,9 +13,13 @@ import { and, eq } from "drizzle-orm";
 import * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
-import { agentSessions, type DefPin } from "../store/schema";
-import type { Store } from "../store/store";
-import type { AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
+import { agentSessions, agentTurns, type DefPin } from "../store/schema";
+import type { Store, Tx } from "../store/store";
+import { estimateCostMicros } from "./pricing";
+import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
+
+/** Una diferencia mayor a este porcentaje entre la suma de los turnos y el total del runtime queda como evento `error`. */
+export const USAGE_MISMATCH_PERCENT = 2;
 
 /** `agent.activity` sale como máximo una vez por este intervalo y por sesión. */
 export const ACTIVITY_INTERVAL_MS = 2000;
@@ -274,27 +278,31 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     resumedFrom: string | undefined,
   ): Promise<Settled> {
     const sessionId = begin(c, agentRun, resumedFrom);
+    const turns = emptyUsage();
 
+    // Esperar a `observe` también con `result` rechazado: un turno que llega después de `end` no se cuenta.
+    const [observed, finished] = await Promise.allSettled([
+      observe(c, sessionId, agentRun, turns),
+      agentRun.result,
+    ]);
     let result: RunResult;
-    try {
-      const [, finished] = await Promise.all([
-        observe(c, sessionId, agentRun),
-        agentRun.result,
-      ]);
-      result = finished;
-    } catch (error) {
+    if (observed.status === "fulfilled" && finished.status === "fulfilled") {
+      result = finished.value;
+    } else {
+      const reason: unknown =
+        finished.status === "rejected" ? finished.reason : observed.status === "rejected" ? observed.reason : undefined;
       result = {
         status: "error",
         text: "",
-        usage: ZERO_USAGE,
-        message: `El runtime falló: ${error instanceof Error ? error.message : String(error)}`,
+        usage: emptyUsage(),
+        message: `El runtime falló: ${reason instanceof Error ? reason.message : String(reason)}`,
       };
     }
     lastActivity.delete(sessionId);
 
     if (result.status !== "success") {
       const message = result.message ?? `El runtime terminó con ${result.status}.`;
-      end(c, sessionId, result.status, result.usage, { error: message });
+      end(c, sessionId, result.status, result.usage, turns, { error: message });
       return {
         kind: "done",
         result: {
@@ -308,10 +316,10 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
 
     const checked = validateReport(c.mode, result.structured);
     if (!checked.ok) {
-      end(c, sessionId, "report_invalid", result.usage, { error: checked.problem });
+      end(c, sessionId, "report_invalid", result.usage, turns, { error: checked.problem });
       return { kind: "invalid", sessionId, problem: checked.problem };
     }
-    end(c, sessionId, "success", result.usage, { report: checked.report });
+    end(c, sessionId, "success", result.usage, turns, { report: checked.report });
     return { kind: "done", result: { status: "success", sessionId, report: checked.report } };
   }
 
@@ -362,8 +370,13 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     });
   }
 
-  async function observe(c: Conversation, sessionId: string, agentRun: AgentRun): Promise<void> {
+  /** `turns` acumula lo que ya se registró turno a turno; `end` lo reconcilia con el total del runtime. */
+  async function observe(c: Conversation, sessionId: string, agentRun: AgentRun, turns: Usage): Promise<void> {
     for await (const event of agentRun.events) {
+      if (event.type === "usage") {
+        store.tx((tx) => recordTurn(tx, c, sessionId, event, turns));
+        continue;
+      }
       if (event.type !== "tool_start") continue;
       const t = now();
       const last = lastActivity.get(sessionId);
@@ -380,14 +393,102 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     }
   }
 
-  /** Suma el uso de este run al de la fila: si el runtime retomó con el mismo id, es la misma fila. */
+  /**
+   * Guarda el turno y lo suma a los totales de la sesión en la misma tx. Con `costPerTurn` el USD es
+   * el del runtime; si no, sale de `model_prices` y la sesión queda `estimate` hasta que `end` reciba el total.
+   */
+  function recordTurn(
+    tx: Tx,
+    c: Conversation,
+    sessionId: string,
+    event: Extract<AgentEvent, { type: "usage" }>,
+    turns: Usage,
+  ): void {
+    const { usage } = event;
+    const ts = now();
+    const session = tx.db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).get();
+    if (!session) throw new Error(`Desapareció la sesión ${sessionId}.`);
+    const model = event.model ?? session.model;
+    const tokens = {
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut,
+      tokensCacheRead: usage.tokensCacheRead,
+      tokensCacheWrite: usage.tokensCacheWrite,
+      tokensCacheWrite1h: event.cacheWrite1hTokens ?? 0,
+    };
+    // Un resume que reusa la sesión sigue la cuenta: la fila ya cuenta los turnos de antes.
+    const seq = session.turns + 1;
+
+    let costMicros = usage.costMicros;
+    if (!runtime.capabilities.costPerTurn) {
+      const estimated = estimateCostMicros(tx.db, model, ts, tokens);
+      if (estimated === undefined) {
+        tx.emit({
+          type: "error",
+          origin: "core",
+          ...scope(c),
+          payload: {
+            scope: "agent.usage",
+            message: `No hay precio en model_prices para el modelo "${model}": el turno ${seq} de la sesión ${sessionId} quedó con costo 0.`,
+          },
+        });
+      }
+      costMicros = estimated ?? 0;
+    }
+
+    tx.db.insert(agentTurns).values({ sessionId, seq, ts, model, ...tokens, costMicros }).run();
+    tx.db
+      .update(agentSessions)
+      .set({
+        turns: seq,
+        tokensIn: session.tokensIn + tokens.tokensIn,
+        tokensOut: session.tokensOut + tokens.tokensOut,
+        tokensCacheRead: session.tokensCacheRead + tokens.tokensCacheRead,
+        tokensCacheWrite: session.tokensCacheWrite + tokens.tokensCacheWrite,
+        costMicros: session.costMicros + costMicros,
+        costSource: runtime.capabilities.costPerTurn ? usage.costSource : "estimate",
+      })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+    tx.emit({
+      type: "agent.usage",
+      origin: "core",
+      ...scope(c),
+      payload: {
+        sessionId,
+        turn: seq,
+        tokens: {
+          in: tokens.tokensIn,
+          out: tokens.tokensOut,
+          cacheRead: tokens.tokensCacheRead,
+          cacheWrite: tokens.tokensCacheWrite,
+        },
+        costMicros,
+      },
+    });
+    turns.turns += 1;
+    turns.tokensIn += tokens.tokensIn;
+    turns.tokensOut += tokens.tokensOut;
+    turns.tokensCacheRead += tokens.tokensCacheRead;
+    turns.tokensCacheWrite += tokens.tokensCacheWrite;
+    turns.costMicros += costMicros;
+  }
+
+  /**
+   * Cierra la sesión. El total del runtime (`total_cost_usd` menos lo que la sesión ya traía) manda
+   * sobre las estimaciones por turno: se suma solo la diferencia con lo que `recordTurn` ya sumó. Si el
+   * runtime no lo sabe (el run se cortó antes de su `result`) quedan las estimaciones.
+   */
   function end(
     c: Conversation,
     sessionId: string,
     status: (typeof agentSessions.$inferSelect)["status"],
-    usage: Usage,
+    reported: Usage,
+    turns: Usage,
     outcome: { report?: Report; error?: string },
   ): void {
+    const runtimeKnowsTotal = reported.costMicros > 0;
+    const spent = runtimeKnowsTotal ? reported : turns;
     store.tx((tx) => {
       const row = tx.db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).get();
       if (!row) throw new Error(`Desapareció la sesión ${sessionId}.`);
@@ -397,17 +498,31 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
           status,
           report: outcome.report ?? null,
           error: outcome.error ?? null,
-          turns: row.turns + usage.turns,
-          tokensIn: row.tokensIn + usage.tokensIn,
-          tokensOut: row.tokensOut + usage.tokensOut,
-          tokensCacheRead: row.tokensCacheRead + usage.tokensCacheRead,
-          tokensCacheWrite: row.tokensCacheWrite + usage.tokensCacheWrite,
-          costMicros: row.costMicros + usage.costMicros,
-          costSource: usage.costSource,
+          turns: row.turns + spent.turns - turns.turns,
+          tokensIn: row.tokensIn + spent.tokensIn - turns.tokensIn,
+          tokensOut: row.tokensOut + spent.tokensOut - turns.tokensOut,
+          tokensCacheRead: row.tokensCacheRead + spent.tokensCacheRead - turns.tokensCacheRead,
+          tokensCacheWrite: row.tokensCacheWrite + spent.tokensCacheWrite - turns.tokensCacheWrite,
+          costMicros: row.costMicros + spent.costMicros - turns.costMicros,
+          costSource: runtimeKnowsTotal ? reported.costSource : row.costSource,
           endedAt: now(),
         })
         .where(eq(agentSessions.id, sessionId))
         .run();
+      if (runtimeKnowsTotal && turns.turns > 0) {
+        const gap = Math.abs(reported.costMicros - turns.costMicros);
+        if (gap * 100 > reported.costMicros * USAGE_MISMATCH_PERCENT) {
+          tx.emit({
+            type: "error",
+            origin: "core",
+            ...scope(c),
+            payload: {
+              scope: "agent.usage",
+              message: `La suma de los turnos de la sesión ${sessionId} (${turns.costMicros} micros) difiere más de ${USAGE_MISMATCH_PERCENT}% del total del runtime (${reported.costMicros} micros).`,
+            },
+          });
+        }
+      }
       tx.emit({
         type: "agent.ended",
         origin: "core",
@@ -431,15 +546,17 @@ function interruptOnAbort(signal: AbortSignal | undefined, agentRun: AgentRun): 
   else signal.addEventListener("abort", interrupt, { once: true });
 }
 
-const ZERO_USAGE: Usage = {
-  turns: 0,
-  tokensIn: 0,
-  tokensOut: 0,
-  tokensCacheRead: 0,
-  tokensCacheWrite: 0,
-  costMicros: 0,
-  costSource: "runtime",
-};
+function emptyUsage(): Usage {
+  return {
+    turns: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    tokensCacheRead: 0,
+    tokensCacheWrite: 0,
+    costMicros: 0,
+    costSource: "runtime",
+  };
+}
 
 function scope(c: { placement: Placement; runId: Brief["run"]["id"] }) {
   return { projectId: c.placement.projectId, runId: c.runId, stepRunId: c.placement.stepRunId };

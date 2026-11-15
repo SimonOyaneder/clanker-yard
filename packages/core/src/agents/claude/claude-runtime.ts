@@ -147,16 +147,28 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     const tally = emptyUsage(credentials);
     const signals: Signals = { loginFailed: false };
     const toolNames = new Map<string, string>();
-    let turn: { id: string; usage: SDKUsage } | undefined;
+    let turn: { id: string; model: string; usage: SDKUsage } | undefined;
+    const counted = new Set<string>();
     let final: SDKResultMessage | undefined;
 
     // El uso de un mensaje en streaming no es final: se emite cuando llega otro id, con lo último visto.
+    // El SDK parte un mensaje en un `assistant` por bloque, todos con el mismo id y el mismo uso; si el
+    // de un subagente se intercala, el id reaparece después de emitido y no vuelve a contar.
     const flushTurn = () => {
       if (turn === undefined) return;
-      const usage = turnUsage(turn.usage, credentials);
-      addUsage(tally, usage);
-      events.push({ type: "usage", turn: tally.turns, usage });
+      const { id, model, usage: sdkUsage } = turn;
       turn = undefined;
+      if (counted.has(id)) return;
+      counted.add(id);
+      const usage = turnUsage(sdkUsage, credentials);
+      addUsage(tally, usage);
+      events.push({
+        type: "usage",
+        turn: tally.turns,
+        usage,
+        model,
+        cacheWrite1hTokens: sdkUsage.cache_creation?.ephemeral_1h_input_tokens ?? 0,
+      });
     };
 
     const onMessage = (message: SDKMessage) => {
@@ -168,7 +180,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         sessionReady(sessionId);
       } else if (message.type === "assistant") {
         if (turn?.id !== message.message.id) flushTurn();
-        turn = { id: message.message.id, usage: message.message.usage };
+        turn = { id: message.message.id, model: message.message.model, usage: message.message.usage };
         for (const block of message.message.content) {
           if (block.type === "text" && block.text !== "") {
             events.push({ type: "text", text: block.text });
