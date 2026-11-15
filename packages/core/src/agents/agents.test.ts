@@ -504,8 +504,9 @@ describe("selectRuntime", () => {
 
 describe("roles como datos", () => {
   test("ningún nombre de rol aparece en el código del módulo", () => {
+    // Como palabra, no como parte de una ruta: `/dev/null` no es el rol dev.
     const forbidden =
-      /\b(dev|techlead|committer|review-[a-z]+|bot-reviewer|judge|triage|plan-check|council)\b/i;
+      /(?<![\w/-])(dev|techlead|committer|review-[a-z]+|bot-reviewer|judge|triage|plan-check|council)(?![\w/])/i;
     const here = fileURLToPath(new URL(".", import.meta.url));
     const files = [
       ...readdirSync(here)
