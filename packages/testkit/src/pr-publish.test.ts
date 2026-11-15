@@ -264,6 +264,18 @@ describe("pr.publish", () => {
     expect(openedEvents()).toEqual([]);
   });
 
+  test("un PR que Watch ya había descubierto (sin owned) se adopta: queda del sistema y con pr.opened", async () => {
+    store.db.$client
+      .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'r1', 1, '', ?, 'main', '', 'open', 1, 0)")
+      .run(newId("pr"), BRANCH);
+
+    const ctx = durableCtx();
+    await publish.run(args(), ctx);
+
+    expect(store.db.$client.prepare("SELECT number, owned, run_id AS runId FROM pull_requests").all()).toEqual([{ number: 1, owned: 1, runId: ctx.runId }]);
+    expect(openedEvents()).toHaveLength(1);
+  });
+
   test("otra visita que llega con todo ya hecho no duplica commits, push ni PR", async () => {
     await publish.run(args(), durableCtx());
     const again = await publish.run(args(), durableCtx());

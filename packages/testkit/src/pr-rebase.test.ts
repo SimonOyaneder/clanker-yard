@@ -281,6 +281,16 @@ describe("rebase por conflicto de un PR abierto", () => {
     await expect(rebase(ws)).rejects.toThrow(/no tiene un PR abierto/);
     await expect(push(ws)).rejects.toThrow(/no tiene un PR abierto/);
   });
+  test("un PR que el sistema no abrió (lo descubrió Watch) no se rebasea ni se pushea", async () => {
+    elsewhere("main", { "b.txt": "b-main\n" });
+    const ws = await attach();
+    store.db.$client.prepare("UPDATE pull_requests SET owned = 0").run();
+    const before = remoteSha();
+
+    await expect(rebase(ws)).rejects.toThrow(/no lo abrió Clanker Yard/);
+    await expect(push(ws)).rejects.toThrow(PermanentActionError);
+    expect(remoteSha()).toBe(before);
+  });
 });
 
 describe("recipe.check con afterRebase", () => {

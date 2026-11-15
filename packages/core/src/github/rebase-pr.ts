@@ -20,7 +20,7 @@ export interface RebasePrDeps {
   prs: Pick<Prs, "get">;
 }
 
-/** El PR abierto de la branch del workspace, tal como lo registró `pr.publish`. */
+/** El PR abierto de la branch del workspace, tal como lo registró `pr.publish`; uno que el sistema no abrió no sirve. */
 function openPrOf(deps: RebasePrDeps, ws: { workspaceId: string; branch: string }) {
   const row = deps.store.db.select().from(workspaceRows).where(eq(workspaceRows.id, ws.workspaceId)).get();
   if (!row) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
@@ -33,6 +33,10 @@ function openPrOf(deps: RebasePrDeps, ws: { workspaceId: string; branch: string 
     .get();
   if (!pull || !row.remoteSha) {
     throw new PermanentActionError(`${ws.branch} no tiene un PR abierto pusheado: no hay un PR que rebasear.`);
+  }
+  // Watch también deja en `pull_requests` los PRs tuyos que el sistema no abrió: esos no se reescriben.
+  if (!pull.owned) {
+    throw new PermanentActionError(`El PR #${pull.number} de ${remote.repo} no lo abrió Clanker Yard: no se rebasea ni se pushea con force.`);
   }
   return { remote, ref: { account: remote.account, repo: remote.repo, number: pull.number } };
 }

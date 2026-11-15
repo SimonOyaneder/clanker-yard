@@ -155,24 +155,24 @@ function recordPull(
   const run = store.db.select().from(runs).where(eq(runs.id, ctx.runId)).get();
   store.tx((tx) => {
     const { db, emit } = tx;
+    const values = {
+      nodeId: pull.node_id,
+      headRef,
+      baseRef,
+      headSha: pull.head.sha,
+      state: pull.state,
+      isDraft: pull.draft,
+      issueId: run?.subjectType === "issue" ? run.subjectId : null,
+      runId: ctx.runId,
+      owned: true,
+      headChangedAt: Date.now(),
+    };
+    // Si Watch ya lo había descubierto (un reintento tras un corte entre abrirlo y guardarlo) la fila existe
+    // sin `owned`: se adopta. Una fila ya `owned` es un reintento de este mismo registro y no se toca.
     const saved = db
       .insert(pullRequests)
-      .values({
-        id: newId("pr"),
-        repoId,
-        number: pull.number,
-        nodeId: pull.node_id,
-        headRef,
-        baseRef,
-        headSha: pull.head.sha,
-        state: pull.state,
-        isDraft: pull.draft,
-        issueId: run?.subjectType === "issue" ? run.subjectId : null,
-        runId: ctx.runId,
-        owned: true,
-        headChangedAt: Date.now(),
-      })
-      .onConflictDoNothing()
+      .values({ id: newId("pr"), repoId, number: pull.number, ...values })
+      .onConflictDoUpdate({ target: [pullRequests.repoId, pullRequests.number], set: values, setWhere: eq(pullRequests.owned, false) })
       .returning({ id: pullRequests.id })
       .get();
     if (!saved) return;
