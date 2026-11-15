@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
@@ -8,6 +9,7 @@ import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { execLogged, type ExecResult } from "./exec";
 import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
+import { PermanentActionError } from "../flows/catalog";
 import { runs, workspaces } from "../store/schema";
 import type { Store } from "../store/store";
 
@@ -457,7 +459,9 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       );
     }
     try {
-      await git(cfg.path, ["check-ref-format", "--branch", branch]);
+      // Fuera del repo: el nombre no depende de él, y si su carpeta no está, ese es el error (y se
+      // reintenta), no un nombre inválido.
+      await git(tmpdir(), ["check-ref-format", "--branch", branch]);
     } catch (error) {
       throw new BranchNotAllowedError(`"${branch}" no es un nombre de branch válido.`, { cause: error });
     }
@@ -658,7 +662,8 @@ export const WorkspaceOutput = z.object({
 
 /**
  * La acción `workspace.acquire` para el motor de flujos (`registerAction`). El motor le pasa el
- * `runId` de la corrida en `ctx`; la salida es lo que los demás nodos leen como `$ws`.
+ * `runId` de la corrida en `ctx`; la salida es lo que los demás nodos leen como `$ws`. Una branch que
+ * no se puede usar (`BranchNotAllowedError`) es `PermanentActionError`: reintentar no la cambia.
  */
 export function workspaceAcquireAction(workspaces: Workspaces) {
   return {
@@ -667,10 +672,14 @@ export function workspaceAcquireAction(workspaces: Workspaces) {
     outcomes: ["ok"],
     effects: "local" as const,
     async run(args: z.infer<typeof WorkspaceAcquireArgs>, ctx: { runId: RunId }) {
-      const { workspaceId, path, branch, baseRef, baseSha, fencingToken } = await workspaces.acquire({
-        ...args,
-        runId: ctx.runId,
-      });
+      let lease: WorkspaceLease;
+      try {
+        lease = await workspaces.acquire({ ...args, runId: ctx.runId });
+      } catch (error) {
+        if (error instanceof BranchNotAllowedError) throw new PermanentActionError(error.message, { cause: error });
+        throw error;
+      }
+      const { workspaceId, path, branch, baseRef, baseSha, fencingToken } = lease;
       return { outcome: "ok", output: { workspaceId, path, branch, baseRef, baseSha, fencingToken } };
     },
   };

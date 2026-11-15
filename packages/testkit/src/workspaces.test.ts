@@ -14,6 +14,7 @@ import {
   LEASE_TTL_MS,
   newId,
   openStore,
+  PermanentActionError,
   StaleLeaseError,
   WorkspaceBusyError,
   workspaceAcquireAction,
@@ -336,6 +337,18 @@ describe("workspace.acquire", () => {
     expect(result.outcome).toBe("ok");
     expect(result.output).toMatchObject({ branch: "cla-1", baseRef: "main", fencingToken: 1 });
     expect(result.output).not.toHaveProperty("lost");
+  });
+
+  test("una branch que no se puede usar falla sin reintentos; una ocupada sí se reintenta", async () => {
+    const id = repo("r1");
+    const action = workspaceAcquireAction(workspaces);
+
+    await expect(action.run({ repo: id, branch: "release", base: "main" }, { runId: runA })).rejects.toBeInstanceOf(PermanentActionError);
+
+    await acquire(id, "cla-1", runA);
+    const busy = action.run({ repo: id, branch: "cla-1", base: "main" }, { runId: runB });
+    await expect(busy).rejects.toBeInstanceOf(WorkspaceBusyError);
+    await expect(busy).rejects.not.toBeInstanceOf(PermanentActionError);
   });
 });
 
