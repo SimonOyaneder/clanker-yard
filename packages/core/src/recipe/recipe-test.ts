@@ -1,14 +1,11 @@
-import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { renderTemplate, type Origin, type Recipe, type RecipeTestPhase, type RecipeTestResult, type RecipeTestStep, type RepoId, type TemplateVars } from "@clanker/api";
+import { git as runGit } from "../git/git";
 import type { Store } from "../store/store";
 import { excerpt, execStreaming } from "../workspaces/exec";
 import { RepoNotFoundError, type Repos } from "../workspaces/repos";
 import { readRecipe, RECIPE_PATH } from "./recipe";
-
-const execFileAsync = promisify(execFile);
 
 /** Una prueba que dura más se mata: un `setup` colgado no puede dejar la llamada abierta para siempre. */
 export const RECIPE_TEST_TIMEOUT_MS = 30 * 60_000;
@@ -158,10 +155,11 @@ function createOutputPump(emit: (text: string) => void) {
   };
 }
 
+/** El git del core (entorno mínimo: `worktree add` corre el hook post-checkout del repo), con su fallo como `RecipeTestError`. */
 async function git(cwd: string, ...args: string[]): Promise<void> {
   try {
-    await execFileAsync("git", args, { cwd });
+    await runGit(cwd, args);
   } catch (error) {
-    throw new RecipeTestError(`git ${args.join(" ")} falló en ${cwd}: ${(error as { stderr?: string }).stderr?.trim() ?? String(error)}`, { cause: error });
+    throw new RecipeTestError((error as Error).message, { cause: error });
   }
 }

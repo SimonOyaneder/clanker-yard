@@ -1,9 +1,6 @@
-import { execFile } from "node:child_process";
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import { git } from "../git/git";
 
 /** Lo que se sabe de un checkout de git sin que nadie lo haya registrado. */
 export interface RepoInfo {
@@ -18,12 +15,15 @@ export interface RepoInfo {
 /** La ruta no es la raíz de un repo de git: el mensaje dice qué pasó. */
 export class NotAGitRepoError extends Error {}
 
+/** Solo lee el repo del usuario: sin los locks opcionales que estorbarían a su git. */
+const READ_ONLY = { GIT_OPTIONAL_LOCKS: "0" };
+
 const GITHUB_REMOTE = /^(?:https:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/;
 
 /** Mira el repo de `path`, que debe ser su raíz. */
 export async function inspectRepo(path: string): Promise<RepoInfo> {
   const root = resolveDir(path);
-  const toplevel = await git(root, "rev-parse", "--show-toplevel").catch(() => {
+  const toplevel = await git(root, ["rev-parse", "--show-toplevel"], READ_ONLY).catch(() => {
     throw new NotAGitRepoError(`${root} no es un repo de git.`);
   });
   if (realpathSync(toplevel) !== root) {
@@ -34,7 +34,7 @@ export async function inspectRepo(path: string): Promise<RepoInfo> {
     // El nombre es el de la carpeta como se pidió, no el del destino de un symlink.
     name: basename(resolve(path)),
     defaultBranch: await defaultBranchOf(root),
-    remote: parseGitHubRemote(await git(root, "remote", "get-url", "origin").catch(() => "")),
+    remote: parseGitHubRemote(await git(root, ["remote", "get-url", "origin"], READ_ONLY).catch(() => "")),
   };
 }
 
@@ -62,20 +62,15 @@ function resolveDir(path: string): string {
 
 /** `origin/HEAD` si el clon lo tiene; si no, `main` o `master` si existen, y por último la branch actual. */
 async function defaultBranchOf(root: string): Promise<string> {
-  const originHead = await git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").catch(() => "");
+  const originHead = await git(root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], READ_ONLY).catch(() => "");
   if (originHead.startsWith("origin/")) return originHead.slice("origin/".length);
   for (const name of ["main", "master"]) {
-    if (await git(root, "rev-parse", "--verify", "--quiet", `refs/heads/${name}`).then(() => true, () => false)) return name;
+    if (await git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], READ_ONLY).then(() => true, () => false)) return name;
   }
-  return (await git(root, "symbolic-ref", "--short", "HEAD").catch(() => "")) || "main";
+  return (await git(root, ["symbolic-ref", "--short", "HEAD"], READ_ONLY).catch(() => "")) || "main";
 }
 
 export function parseGitHubRemote(url: string): string | null {
   const match = GITHUB_REMOTE.exec(url.trim());
   return match ? `${match[1]}/${match[2]}` : null;
-}
-
-async function git(cwd: string, ...args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
-  return stdout.trim();
 }

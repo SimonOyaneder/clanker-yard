@@ -1,10 +1,10 @@
-import { mkdirSync, readdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, type Client } from "@clanker/api";
 import { createConnections, createFileSecrets, openStore, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { seedDb, type TestHome } from "./home";
@@ -34,6 +34,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await core?.close();
   core = undefined;
   store.close();
@@ -163,6 +164,21 @@ describe("repos.testRecipe", () => {
     // El worktree desechable ya no existe ni en el repo ni en disco.
     expect(repo.git("worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(1);
     expect(readdirSync(join(home.path, "recipe-tests"))).toEqual([]);
+  });
+
+  test("el git de la prueba no les pasa los secretos del entorno del core al config del repo", async () => {
+    const repo = repoWith({ version: 1, setup: { worktree: ["true"] } });
+    // `core.fsmonitor` lo corre git al mirar el índice, y el config del repo lo puede escribir un agente.
+    const seen = join(scratchDir(), "fsmonitor-env");
+    const monitor = join(scratchDir(), "fsmonitor");
+    writeFileSync(monitor, `#!/bin/sh\necho "gh=$GH_TOKEN anthropic=$ANTHROPIC_API_KEY" >> ${seen}\n`, { mode: 0o755 });
+    repo.git("config", "core.fsmonitor", monitor);
+    vi.stubEnv("GH_TOKEN", "secreto");
+    vi.stubEnv("ANTHROPIC_API_KEY", "secreto");
+    const { id } = await client.repos.add({ path: repo.dir });
+
+    expect((await client.repos.testRecipe({ repoId: id })).ok).toBe(true);
+    expect(readFileSync(seen, "utf8")).not.toContain("secreto");
   });
 
   test("un comando rojo corta la prueba y se informa su exit y su salida", async () => {
