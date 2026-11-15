@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ import {
   openStore,
   PermanentActionError,
   StaleLeaseError,
+  WorktreeSetupError,
   WorkspaceBusyError,
   workspaceAcquireAction,
   workspaceReleaseAction,
@@ -53,12 +54,13 @@ beforeEach(() => {
   workspaces = workspacesOn(store);
 });
 
-function workspacesOn(store: Store): Workspaces {
+function workspacesOn(store: Store, worktreeSetup?: (dir: string) => readonly string[]): Workspaces {
   return createWorkspaces({
     store,
     dataDir,
     repos: (id) => ({ path: repoById.get(id)!.dir, defaultBranch: "main", protectedBranches: ["release"] }),
     identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    worktreeSetup,
     now: () => clock,
   });
 }
@@ -224,6 +226,58 @@ describe("acquire", () => {
     expect(taken.fencingToken).toBe(stale.fencingToken + 1);
     const expired = store.events.since(0).find((e) => e.type === "lease.expired");
     expect(expired?.payload).toMatchObject({ runId: runA, token: stale.fencingToken });
+  });
+});
+
+describe("setup.worktree", () => {
+  /** Los comandos de `setup.worktree` de cada worktree, con un contador de cuántas veces se pidieron. */
+  function withSetup(commands: string[]) {
+    const dirs: string[] = [];
+    workspaces = workspacesOn(store, (dir) => {
+      dirs.push(dir);
+      return commands;
+    });
+    return dirs;
+  }
+
+  test("corre al crear el worktree, dentro de él, y no al volver a tomar uno que ya existe", async () => {
+    const id = repo("r1");
+    const dirs = withSetup(["echo instalado > installed.txt", "pwd -P > where.txt"]);
+
+    const lease = await acquire(id, "cla-1");
+
+    expect(readFileSync(join(lease.path, "installed.txt"), "utf8")).toBe("instalado\n");
+    expect(readFileSync(join(lease.path, "where.txt"), "utf8").trim()).toBe(realpathSync(lease.path));
+    workspaces.release(lease);
+    await acquire(id, "cla-1", runB);
+    expect(dirs).toEqual([lease.path]);
+  });
+
+  test("si falla, el worktree y la branch se borran y el siguiente acquire lo intenta de cero", async () => {
+    const id = repo("r1");
+    const r = repoById.get(id)!;
+    withSetup(["echo cargando", "echo 'sin red' >&2; exit 7"]);
+
+    const error = await acquire(id, "cla-1").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(WorktreeSetupError);
+    expect((error as Error).message).toMatch(/setup\.worktree falló en .*: echo 'sin red' >&2; exit 7 \(exit 7\)\nsin red/);
+    expect(existsSync(join(dataDir, "worktrees", "r1", "cla-1"))).toBe(false);
+    expect(r.git("branch", "--list", "cla-1")).toBe("");
+    expect(r.git("worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(1);
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
+
+    withSetup(["echo ok > installed.txt"]);
+    const retry = await acquire(id, "cla-1");
+    expect(readFileSync(join(retry.path, "installed.txt"), "utf8")).toBe("ok\n");
+  });
+
+  test("sin worktreeSetup no corre nada", async () => {
+    const id = repo("r1");
+
+    const lease = await acquire(id, "cla-1");
+
+    expect(existsSync(join(lease.path, "installed.txt"))).toBe(false);
   });
 });
 

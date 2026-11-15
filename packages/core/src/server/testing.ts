@@ -11,6 +11,7 @@ import { createPacks } from "../packs/packs";
 import { createProjects } from "../projects/projects";
 import { createRunStarter } from "../projects/start-run";
 import { createRecipeTester } from "../recipe/recipe-test";
+import { createSlots } from "../slots/slots";
 import type { Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { createLocalTracker } from "../tracker/local";
@@ -44,7 +45,7 @@ export function apiDeps(
     projects,
     packs: createPacks({ defs }),
     repos,
-    recipeTester: createRecipeTester({ store, repos, dataDir }),
+    recipeTester: createRecipeTester({ store, repos, slots: createSlots({ store }), dataDir }),
     runs: createRunStarter({ store, defs, projects, repos, issues: createIssues(store, local), flows, trackers: { local } }),
     flows,
     artifacts,

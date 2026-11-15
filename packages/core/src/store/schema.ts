@@ -517,6 +517,32 @@ export const RUN_STATUSES = [
 export const PARK_REASONS = ["gate", "needs_human", "limit"] as const;
 export const LANES = ["dev", "maintenance"] as const;
 
+/**
+ * Un slot de entorno (DB, puertos) de un repo, global a todos los proyectos que lo usan. `idx` va de 1
+ * a N+M: 1..N son del pool `dev` y N+1..N+M del pool `maintenance` (`reserved_for`), con N y M de
+ * `slots` en la receta. Se toma con lease y fencing igual que un worktree.
+ */
+export const slots = sqliteTable(
+  "slots",
+  {
+    repoId: text("repo_id").notNull(),
+    idx: integer().notNull(),
+    /** El entorno de receta con `{{slot}}` ya sustituido, como lo dejó el último `setup.slot`. */
+    env: text({ mode: "json" }).$type<Record<string, string>>().notNull(),
+    reservedFor: text("reserved_for", { enum: LANES }).notNull(),
+    holderRunId: text("holder_run_id").$type<RunId>(),
+    /** El worktree que preparó el slot con `setup.slot`; NULL si nunca se preparó o su estado ya no se sabe. */
+    workspaceId: text("workspace_id"),
+    /** Hash de los archivos de `setup.slotKey` con los que se preparó. */
+    setupHash: text("setup_hash"),
+    leaseUntil: integer("lease_until"),
+    fencingToken: integer("fencing_token").notNull().default(0),
+    /** `setup.slot` empezó y no terminó: lo que haya en el slot no es confiable. */
+    dirty: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.repoId, t.idx] })],
+);
+
 /** Una versión fijada de una def: lo que la corrida usa aunque después se guarde otra. */
 export interface DefPin {
   id: string;

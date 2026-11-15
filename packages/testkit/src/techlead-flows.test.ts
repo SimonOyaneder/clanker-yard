@@ -10,6 +10,7 @@ import {
   createDefs,
   createFlows,
   createRecipes,
+  createSlots,
   createWorkspaces,
   openStore,
   workspaceAcquireAction,
@@ -79,7 +80,7 @@ function setup(options: SetupOptions = {}) {
     });
     flows.registerAction(workspaceAcquireAction(workspaces));
     flows.registerAction(workspaceSyncBaseAction(workspaces));
-    flows.registerAction(createRecipes({ store, defs, workspaces, artifacts }).checkAction);
+    flows.registerAction(createRecipes({ store, defs, workspaces, artifacts, slots: createSlots({ store }) }).checkAction);
     skip.push("workspace.acquire", "workspace.syncBase", "recipe.check");
   }
   const stubs = registerFlowStubs(flows, { script: options.script, skip });

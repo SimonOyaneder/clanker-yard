@@ -13,6 +13,7 @@ import {
   createGitRemote,
   createPacks,
   createRecipes,
+  createSlots,
   createWorkspaces,
   newId,
   openStore,
@@ -128,7 +129,7 @@ beforeEach(async () => {
   deps = {
     store,
     workspaces,
-    recipes: createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }) }),
+    recipes: createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) }),
     repos,
     connections,
     packs,

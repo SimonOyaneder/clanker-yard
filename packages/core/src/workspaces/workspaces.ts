@@ -53,6 +53,11 @@ export interface WorkspacesOptions {
   remote?: GitRemote;
   /** Donde se registran los comandos de `exec`, para matar los que deje un crash. */
   procs?: Procs;
+  /**
+   * Los comandos de `setup.worktree` de la receta que hay en `dir` (el worktree recién creado). Sin
+   * esto no se corre ninguno. Un error al leer la receta falla el `acquire`.
+   */
+  worktreeSetup?: (dir: string) => readonly string[];
   leaseTtlMs?: number;
   now?: () => number;
 }
@@ -162,6 +167,9 @@ export class WorkspaceBusyError extends Error {}
 /** El lease se perdió (venció y otra corrida lo tomó): la operación no se ejecutó. */
 export class StaleLeaseError extends Error {}
 
+/** `setup.worktree` falló: el worktree se borró, el próximo `acquire` lo crea de nuevo. */
+export class WorktreeSetupError extends Error {}
+
 /** La branch no se puede usar como workspace; el mensaje dice por qué. */
 export class BranchNotAllowedError extends Error {}
 
@@ -182,7 +190,7 @@ export type SyncBaseResult =
     };
 
 export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
-  const { store, dataDir, repos, identity, remote, procs, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
+  const { store, dataDir, repos, identity, remote, procs, worktreeSetup, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
   const logDir = opts.logDir ?? join(dataDir, "logs");
   const heartbeats = new Map<string, { timer: NodeJS.Timeout; workspaceId: string; runId: RunId; token: number }>();
   const repoLocks = new Map<string, Promise<unknown>>();
@@ -365,6 +373,8 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         baseSha = row.baseSha ?? (await resolveBase(cfg, row.baseRef));
       } else {
         ({ baseSha, remoteSha } = await withRepoLock(repo, () => createWorktree(cfg, row, claim.isNew)));
+        // Fuera del lock del repo: un `bundle install` largo no debe frenar el fetch ni los worktrees de otras corridas.
+        await setupWorktree(cfg, row, claim.isNew, runId, lost);
       }
       head = await git(row.path, ["rev-parse", "HEAD"]);
     } catch (error) {
@@ -444,6 +454,41 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       baseSha,
       ...(remoteExists && { remoteSha: await git(cfg.path, ["rev-parse", `refs/remotes/${REMOTE}/${row.branch}`]) }),
     };
+  }
+
+  /**
+   * Corre `setup.worktree` en el worktree recién creado. Si falla, lo borra (y la branch, si la creó este
+   * `acquire`): uno a medio preparar se reusaría tal cual en el próximo `acquire`.
+   */
+  async function setupWorktree(
+    cfg: RepoConfig,
+    row: typeof workspaces.$inferSelect,
+    isNew: boolean,
+    runId: RunId,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!worktreeSetup) return;
+    try {
+      for (const command of worktreeSetup(row.path)) {
+        const { exitCode, extract } = await execLogged({
+          cwd: row.path,
+          command,
+          env: {},
+          logPath: join(logDir, "runs", runId, "setup.worktree.log"),
+          signal,
+          onSpawn: procs && ((child) => procs.track(child, { kind: "recipe" })),
+        });
+        if (exitCode !== 0) {
+          throw new WorktreeSetupError(`setup.worktree falló en ${row.path}: ${command} (exit ${exitCode})\n${extract}`);
+        }
+      }
+    } catch (error) {
+      await withRepoLock(row.repoId, async () => {
+        await tryGit(cfg.path, ["worktree", "remove", "--force", "--force", row.path]);
+        if (isNew) await tryGit(cfg.path, ["branch", "-D", row.branch]);
+      });
+      throw error;
+    }
   }
 
   /**

@@ -8,6 +8,7 @@ import {
   createArtifacts,
   createDefs,
   createRecipes,
+  createSlots,
   createWorkspaces,
   newId,
   openStore,
@@ -335,7 +336,7 @@ describe("tras un rebase", () => {
     const moved = advanceOrigin({ "b.txt": "b-main\n" });
     await workspaces.syncBase(lease);
     const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
-    const recipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts });
+    const recipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts, slots: createSlots({ store }) });
     const { workspaceId, path, branch, baseSha, fencingToken } = lease;
     expect(baseSha).not.toBe(moved);
 

@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, mkdtempSync, rmSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, type Client } from "@clanker/api";
-import { createConnections, createFileSecrets, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createSlots, newId, openStore, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -132,9 +132,14 @@ describe("repos.testRecipe", () => {
       .since(0, { types: ["recipe.test_started", "recipe.test_output", "recipe.test_finished"] })
       .map((e) => ({ type: e.type, ...e.payload }));
 
-  test("corre requires, guard y setup con el slot 1 en un worktree desechable y emite la salida", async () => {
+  /** El slot que dejó la prueba: lo que `finishSetup` o un setup cortado escribieron en la base. */
+  const slotRow = (idx: number) =>
+    store.db.$client.prepare("SELECT reserved_for AS pool, holder_run_id AS holder, workspace_id AS workspaceId, setup_hash AS hash, dirty, env FROM slots WHERE idx = ?").get(idx);
+
+  test("corre requires, setup y guard con un slot de mantenimiento en un worktree desechable y emite la salida", async () => {
     const repo = repoWith({
       version: 1,
+      slots: { dev: 1, maintenance: 1 },
       env: { APP_DB: "app_{{slot}}" },
       requires: [{ name: "Git", check: "git --version" }],
       setup: {
@@ -150,11 +155,14 @@ describe("repos.testRecipe", () => {
     expect(result.ok).toBe(true);
     expect(result.steps.map((s) => [s.phase, s.ok])).toEqual([
       ["requires", true],
-      ["guard", true],
       ["setup.worktree", true],
+      ["guard", true],
       ["setup.slot", true],
     ]);
-    expect(result.steps.at(-1)!.extract).toBe("slot app_1 en 1");
+    expect(result.steps.at(-1)!.extract).toBe("slot app_2 en 2");
+    // Tomó el slot 2 (el único del pool de mantenimiento), lo soltó y lo dejó sin dueño de su preparación.
+    expect(slotRow(2)).toMatchObject({ pool: "maintenance", holder: null, workspaceId: null, hash: null, dirty: 0, env: '{"APP_DB":"app_2"}' });
+    expect(slotRow(1)).toMatchObject({ pool: "dev", holder: null });
     const log = events();
     const output = log.filter((e) => e.type === "recipe.test_output");
     expect(log[0]).toMatchObject({ type: "recipe.test_started", repoId: id });
@@ -228,13 +236,40 @@ describe("repos.testRecipe", () => {
   test("un guard que no resuelve lo esperado corta antes del setup", async () => {
     const repo = repoWith({
       version: 1,
+      slots: { dev: 1, maintenance: 1 },
       setup: { guard: { run: "printf otra_db", expect: "db_{{slot}}" }, slot: ["echo no-debe-correr"] },
     });
     const { id } = await client.repos.add({ path: repo.dir });
 
     const result = await client.repos.testRecipe({ repoId: id });
 
-    expect(result).toMatchObject({ ok: false, steps: [{ phase: "guard", ok: false, extract: 'se esperaba "db_1" y salió "otra_db"' }] });
+    expect(result).toMatchObject({ ok: false, steps: [{ phase: "guard", ok: false, extract: 'se esperaba "db_2" y salió "otra_db"' }] });
+    expect(slotRow(2)).toMatchObject({ holder: null, dirty: 0 });
+  });
+
+  test("un setup.slot rojo deja el slot sucio, pero suelto", async () => {
+    const repo = repoWith({ version: 1, slots: { dev: 1, maintenance: 1 }, setup: { slot: ["exit 4"] } });
+    const { id } = await client.repos.add({ path: repo.dir });
+
+    const result = await client.repos.testRecipe({ repoId: id });
+
+    expect(result.ok).toBe(false);
+    expect(slotRow(2)).toMatchObject({ holder: null, dirty: 1 });
+  });
+
+  test("con el pool de mantenimiento lleno falla sin esperar, aunque el de dev esté libre; sin slots, {{slot}} es un error de la receta", async () => {
+    const full = repoWith({ version: 1, slots: { dev: 1, maintenance: 1 }, setup: { slot: ["echo listo"] } });
+    const { id } = await client.repos.add({ path: full.dir });
+    const slots = createSlots({ store });
+    const busy = slots.tryAcquire({ repoId: id, lane: "maintenance", runId: newId("run"), pools: { dev: 1, maintenance: 1 } })!;
+    expect(busy).toBeDefined();
+
+    await expect(client.repos.testRecipe({ repoId: id })).rejects.toSatisfy(badRequest(/slots de mantenimiento .* ocupados/));
+    slots.release(busy);
+
+    const noSlots = repoWith({ version: 1, env: { APP_DB: "app_{{slot}}" } });
+    const { id: noSlotsId } = await client.repos.add({ path: noSlots.dir });
+    await expect(client.repos.testRecipe({ repoId: noSlotsId })).rejects.toSatisfy(badRequest(/\{\{slot\}\}.*define slots en la receta/));
   });
 
   test("sin receta, con receta inválida, repo desconocido y prueba en curso son errores", async () => {

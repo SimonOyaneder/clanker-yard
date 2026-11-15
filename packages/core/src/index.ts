@@ -120,7 +120,10 @@ export {
   workspaceAcquireAction,
   workspaceReleaseAction,
   workspaceSyncBaseAction,
+  WorktreeSetupError,
 } from "./workspaces/workspaces";
+export { createSlots } from "./slots/slots";
+export type { SlotLease, SlotPools, SlotPrepared, SlotRequest, Slots, SlotsOptions } from "./slots/slots";
 export { EXCERPT_MAX_LINES } from "./workspaces/exec";
 export type { ExecResult } from "./workspaces/exec";
 export { createRepos, InvalidRepoError, RepoNotFoundError } from "./workspaces/repos";

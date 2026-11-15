@@ -221,11 +221,11 @@ const repos = {
    */
   detect: base.input(z.object({ folder: z.string().min(1) })).output(z.array(DetectedRepo)),
   /**
-   * Corre la receta de un repo sobre un worktree desechable: `requires`, `setup.guard`, `setup.worktree`
-   * y `setup.slot`, con el slot 1 (todavía no hay pools de slots). La salida va en vivo por los eventos
+   * Corre la receta de un repo sobre un worktree desechable: `requires`, `setup.worktree`, `setup.guard`
+   * y `setup.slot`, con un slot libre del pool de mantenimiento (si la receta define `slots`). La salida va en vivo por los eventos
    * `recipe.test_started`, `recipe.test_output` y `recipe.test_finished` (payload con `repoId`) y la
    * llamada vuelve al terminar. `BAD_REQUEST` si el repo no tiene receta o es inválida, o si ya hay una
-   * prueba en curso de ese repo; `NOT_FOUND` si no está registrado.
+   * prueba en curso de ese repo, o si los slots de mantenimiento están ocupados; `NOT_FOUND` si no está registrado.
    */
   testRecipe: base.input(z.object({ repoId: RepoId })).output(RecipeTestResult),
 };

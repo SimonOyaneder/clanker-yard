@@ -86,7 +86,7 @@ export function renderTemplate(template: string, vars: TemplateVars, opts: { she
     if (!known) throw new Error(unknownVariable(name));
     if (name.startsWith("slot")) {
       if (vars.slot === undefined) {
-        throw new Error(`La receta usa {{${name}}} pero este comando no tiene slot: pásalo como slot.`);
+        throw new Error(`La receta usa {{${name}}} pero este comando no tiene slot: define slots en la receta o pásalo como slot.`);
       }
       return String(vars.slot + Number(known[1] ?? 0));
     }

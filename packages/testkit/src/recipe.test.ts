@@ -8,6 +8,7 @@ import {
   createDefs,
   createFlows,
   createRecipes,
+  createSlots,
   createWorkspaces,
   DefValidationError,
   EXCERPT_MAX_LINES,
@@ -18,6 +19,7 @@ import {
   type ActionCtx,
   type Artifacts,
   type Recipes,
+  type Slots,
   type Store,
   type WorkspaceLease,
   type Workspaces,
@@ -35,6 +37,7 @@ let dataDir: string;
 let store: Store;
 let artifacts: Artifacts;
 let workspaces: Workspaces;
+let slots: Slots;
 let recipes: Recipes;
 let repo: TempGitRepo | undefined;
 let lease: WorkspaceLease | undefined;
@@ -49,7 +52,8 @@ beforeEach(() => {
     repos: () => ({ path: repo!.dir, defaultBranch: "main" }),
     identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
   });
-  recipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts });
+  slots = createSlots({ store });
+  recipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts, slots });
 });
 
 afterEach(() => {
@@ -130,7 +134,7 @@ describe("leer la receta", () => {
 
   test("el validador del kind recipe queda registrado en las defs", () => {
     const defs = createDefs(store);
-    createRecipes({ store, defs, workspaces, artifacts });
+    createRecipes({ store, defs, workspaces, artifacts, slots });
     expect(() => defs.save({ kind: "recipe", slug: "r", scope: "user", body: { version: 2 }, source: "ui" })).toThrow(DefValidationError);
     expect(defs.save({ kind: "recipe", slug: "r", scope: "user", body: { version: 1 }, source: "ui" }).version).toBe(1);
   });
@@ -465,7 +469,7 @@ describe("recipe.check con el runtime fake", () => {
     await worktree({}, { version: 1, commands: { test: "no se corre" }, checks: ["test"] });
     const defs = createDefs(store);
     const runtime = createFakeRuntime({ fixtures, speed: Infinity });
-    const fakeRecipes = createRecipes({ store, defs, workspaces, artifacts, fake: runtime });
+    const fakeRecipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: runtime });
     const flows = createFlows({
       store,
       defs,
@@ -501,5 +505,171 @@ describe("recipe.check con el runtime fake", () => {
     expect(existsSync(join(dataDir, "logs", "runs", started))).toBe(false);
 
     await flows.close();
+  });
+});
+
+describe("recipe.check con slots", () => {
+  const pools = { dev: 2, maintenance: 1 };
+  const setups = () => join(dataDir, "setups.log");
+  const setupRuns = () => (existsSync(setups()) ? readFileSync(setups(), "utf8").trim().split("\n").length : 0);
+  const recipeWith = (setup: Record<string, unknown> = {}) => ({
+    version: 1,
+    slots: pools,
+    env: { DB: "db_{{slot}}" },
+    setup: { slot: [`echo "slot {{slot}}" >> ${setups()}`], slotKey: ["db/structure.sql"], ...setup },
+    commands: { env: "echo $DB" },
+    checks: ["env"],
+  });
+  const slotRow = (idx: number) =>
+    store.db.$client.prepare("SELECT holder_run_id AS holder, workspace_id AS workspaceId, dirty FROM slots WHERE idx = ?").get(idx) as {
+      holder: string | null;
+      workspaceId: string | null;
+      dirty: number;
+    };
+
+  /** La corrida en la base, sin pasar por el motor: `recipe.check` solo mira su carril. */
+  function seedRun(lane: "dev" | "maintenance") {
+    const sqlite = store.db.$client;
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    sqlite
+      .prepare(
+        `INSERT INTO runs (id, subject_type, subject_id, flow_def_id, flow_version, roles, lane, status, writes, params, rounds, started_at)
+         VALUES (?, 'issue', 'CLA-42', 'def_x', 1, '{}', ?, 'running', 1, '{}', '{}', 0)`,
+      )
+      .run(runId, lane);
+    sqlite.exec("PRAGMA foreign_keys = ON");
+  }
+
+  const outputOf = (result: { output?: unknown }) => result.output as { failures: string; checks: { name: string; artifact: string }[] };
+
+  test("toma un slot del pool del carril de la corrida, renderiza {{slot}} con él y lo suelta al terminar", async () => {
+    await worktree({ "db/structure.sql": "v1\n" }, recipeWith());
+    seedRun("maintenance");
+
+    const result = await check();
+
+    expect(result.outcome).toBe("ok");
+    // Con dev: 2 y maintenance: 1, el pool de mantenimiento es el slot 3.
+    expect(artifactText(outputOf(result).checks[0]!.artifact)).toBe("db_3");
+    expect(slotRow(3)).toMatchObject({ holder: null, workspaceId: lease!.workspaceId, dirty: 0 });
+    expect(slotRow(1)).toMatchObject({ holder: null, workspaceId: null });
+  });
+
+  test("lo suelta también cuando un check está rojo o el paso se cancela a medio comando", async () => {
+    await worktree({}, { ...recipeWith(), commands: { env: "exit 1", slow: "sleep 30" } });
+    seedRun("dev");
+    expect((await check()).outcome).toBe("fail");
+    expect(slotRow(1).holder).toBeNull();
+
+    write(".clanker/recipe.json", JSON.stringify({ ...recipeWith(), commands: { slow: "sleep 30" }, checks: ["slow"] }));
+    const controller = new AbortController();
+    const running = recipes.checkAction.run({ ws: lease!, scope: "all" }, ctx(controller.signal));
+    await vi.waitFor(() => expect(slotRow(1).holder).toBe(runId));
+
+    controller.abort(new Error("cancelada"));
+
+    await expect(running).rejects.toThrow("cancelada");
+    expect(slotRow(1).holder).toBeNull();
+  });
+
+  test("el pool dev lleno no impide el check de una corrida de mantenimiento", async () => {
+    await worktree({}, recipeWith());
+    seedRun("maintenance");
+    slots.tryAcquire({ repoId: "r1", lane: "dev", runId: newId("run"), pools });
+    slots.tryAcquire({ repoId: "r1", lane: "dev", runId: newId("run"), pools });
+
+    const result = await check();
+
+    expect(result.outcome).toBe("ok");
+    expect(artifactText(outputOf(result).checks[0]!.artifact)).toBe("db_3");
+  });
+
+  test("cambiar un archivo de slotKey dispara setup.slot, y sin cambios no se repite", async () => {
+    await worktree({ "db/structure.sql": "v1\n" }, recipeWith());
+    seedRun("dev");
+
+    await check();
+    expect(setupRuns()).toBe(1);
+    await check();
+    expect(setupRuns()).toBe(1);
+
+    write("db/structure.sql", "v2\n");
+    await check();
+    expect(setupRuns()).toBe(2);
+    expect(readFileSync(setups(), "utf8")).toBe("slot 1\nslot 1\n");
+    // Borrar el archivo también cambia el hash.
+    rmSync(join(lease!.path, "db/structure.sql"));
+    await check();
+    expect(setupRuns()).toBe(3);
+  });
+
+  test("un slot que preparó otro worktree se prepara de nuevo", async () => {
+    await worktree({ "db/structure.sql": "v1\n" }, recipeWith());
+    seedRun("dev");
+    await check();
+    store.db.$client.prepare("UPDATE slots SET workspace_id = 'ws_otro' WHERE idx = 1").run();
+
+    await check();
+
+    expect(setupRuns()).toBe(2);
+    expect(slotRow(1).workspaceId).toBe(lease!.workspaceId);
+  });
+
+  test("un guard que no calza aborta sin correr setup.slot ni ensuciar el slot", async () => {
+    await worktree({}, recipeWith({ guard: { run: "printf otra_db", expect: "db_{{slot}}" } }));
+    seedRun("dev");
+
+    const error = await check().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(PermanentActionError);
+    expect((error as Error).message).toBe('setup.guard no calza en el slot 1: se esperaba "db_1" y salió "otra_db". No se corrió setup.slot ni se borró nada.');
+    expect(setupRuns()).toBe(0);
+    expect(slotRow(1)).toMatchObject({ holder: null, dirty: 0, workspaceId: null });
+  });
+
+  test("un guard que calza deja correr setup.slot, con el entorno del slot", async () => {
+    await worktree({}, recipeWith({ guard: { run: 'printf "$DB"', expect: "db_{{slot}}" } }));
+    seedRun("dev");
+
+    expect((await check()).outcome).toBe("ok");
+    expect(setupRuns()).toBe(1);
+  });
+
+  test("un setup.slot rojo da fail con su extracto, no corre los checks y deja el slot sucio hasta que se arregla", async () => {
+    await worktree({ "db/structure.sql": "roto\n" }, recipeWith({ slot: ["echo cargando", "echo 'syntax error' >&2; exit 3"] }));
+    seedRun("dev");
+
+    const result = await check();
+
+    expect(result.outcome).toBe("fail");
+    expect(outputOf(result)).toMatchObject({ failures: "[setup.slot] echo 'syntax error' >&2; exit 3 exit 3\nsyntax error", checks: [] });
+    expect(slotRow(1)).toMatchObject({ holder: null, dirty: 1 });
+
+    write(".clanker/recipe.json", JSON.stringify(recipeWith()));
+    expect((await check()).outcome).toBe("ok");
+    expect(slotRow(1)).toMatchObject({ dirty: 0, workspaceId: lease!.workspaceId });
+  });
+
+  test("con slot explícito no usa los pools ni corre el setup", async () => {
+    await worktree({}, recipeWith());
+
+    const result = await check("changed", 7);
+
+    expect(artifactText(outputOf(result).checks[0]!.artifact)).toBe("db_7");
+    expect(setupRuns()).toBe(0);
+    expect(store.db.$client.prepare("SELECT count(*) AS n FROM slots").get()).toEqual({ n: 0 });
+  });
+
+  test("una receta sin slots no toma ninguno", async () => {
+    await worktree({}, { version: 1, commands: { t: "true" }, checks: ["t"] });
+
+    expect((await check()).outcome).toBe("ok");
+    expect(store.db.$client.prepare("SELECT count(*) AS n FROM slots").get()).toEqual({ n: 0 });
+  });
+
+  test("sin su corrida en la base no se sabe el carril: error permanente", async () => {
+    await worktree({}, recipeWith());
+
+    await expect(check()).rejects.toBeInstanceOf(PermanentActionError);
   });
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Recipe, renderTemplate, templateVariables, type TemplateVars } from "@clanker/api";
@@ -7,7 +8,8 @@ import type { Artifacts } from "../artifacts/artifacts";
 import type { Defs } from "../defs/defs";
 import { DefValidationError } from "../defs/defs";
 import { PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
-import { agentSessions, stepRuns } from "../store/schema";
+import type { SlotLease, Slots } from "../slots/slots";
+import { agentSessions, runs, stepRuns, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
 import { excerpt } from "../workspaces/exec";
 import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
@@ -24,6 +26,8 @@ export interface RecipesOptions {
   defs: Defs;
   workspaces: Workspaces;
   artifacts: Artifacts;
+  /** Los pools de slots: `recipe.check` toma uno del carril de su corrida cuando la receta define `slots`. */
+  slots: Slots;
   /** Con el runtime `fake`: `recipe.check` no corre los comandos, usa los resultados del guion. */
   fake?: ScriptedRecipe;
 }
@@ -53,7 +57,11 @@ const CheckArgs = z.object({
   ws: WorkspaceOutput,
   /** `changed`: `{{files}}` son los archivos que cambió la issue; `all`: `{{files}}` queda vacío. */
   scope: z.enum(["changed", "all"]),
-  /** El slot de entorno del worktree, para `{{slot}}`. Sin él, una receta que lo usa falla. */
+  /**
+   * El slot de entorno, para `{{slot}}`, cuando quien llama ya lo tiene y lo prepara. Sin él, si la receta
+   * define `slots`, la acción toma uno del pool del carril de su corrida y lo suelta al terminar; si no
+   * los define, una receta que usa `{{slot}}` falla.
+   */
   slot: z.int().positive().optional(),
 });
 
@@ -70,7 +78,7 @@ export interface CommandRun {
 const SPEC_FILE = /(^|\/)(specs?|tests?|__tests__)\/|[._-](spec|test)\.[^/]+$/;
 
 /** Un repo sin receta: ni entorno, ni wrap, ni checks. */
-const NO_RECIPE: Pick<Recipe, "env" | "wrap" | "commands" | "checks"> = { env: {}, wrap: undefined, commands: {}, checks: [] };
+const NO_RECIPE = Recipe.parse({ version: 1 });
 
 /** `.clanker/recipe.json` no es JSON. */
 export class RecipeSyntaxError extends Error {}
@@ -105,7 +113,7 @@ export function readRecipe(dir: string): Recipe | undefined {
   return parsed.data;
 }
 
-export function createRecipes({ store, defs, workspaces, artifacts, fake }: RecipesOptions): Recipes {
+export function createRecipes({ store, defs, workspaces, artifacts, slots, fake }: RecipesOptions): Recipes {
   defs.register("recipe", Recipe);
 
   /** Lo que cambió la issue: commits desde la base, cambios sin commit y archivos nuevos. Sin los borrados. */
@@ -134,20 +142,9 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
     return session.ref;
   }
 
-  async function runCommand(
-    ws: WorkspaceRef,
-    recipe: Pick<Recipe, "env" | "wrap" | "commands">,
-    name: string,
-    { files, slot }: { files: string[]; slot?: number },
-    ctx: ActionCtx,
-  ): Promise<CommandRun> {
-    const vars: TemplateVars = {
-      slot,
-      worktree: ws.path,
-      branch: ws.branch,
-      files,
-      envKeys: Object.keys(recipe.env),
-    };
+  /** El entorno, el prefijo y el sustituidor de variables de la receta para un comando con este `slot` y estos `files`. */
+  function rendering(ws: WorkspaceRef, recipe: Pick<Recipe, "env" | "wrap">, { slot, files }: { slot?: number; files: string[] }) {
+    const vars: TemplateVars = { slot, worktree: ws.path, branch: ws.branch, files, envKeys: Object.keys(recipe.env) };
     // Un `{{slot}}` sin slot no se arregla reintentando.
     const render = (template: string, shell: boolean) => {
       try {
@@ -156,8 +153,21 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
         throw asPermanent(error);
       }
     };
-    const env = Object.fromEntries(Object.entries(recipe.env).map(([key, value]) => [key, render(value, false)]));
-    const wrap = recipe.wrap === undefined ? [] : [render(recipe.wrap, true)];
+    return {
+      render,
+      env: Object.fromEntries(Object.entries(recipe.env).map(([key, value]) => [key, render(value, false)])),
+      wrap: recipe.wrap === undefined ? [] : [render(recipe.wrap, true)],
+    };
+  }
+
+  async function runCommand(
+    ws: WorkspaceRef,
+    recipe: Pick<Recipe, "env" | "wrap" | "commands">,
+    name: string,
+    opts: { files: string[]; slot?: number },
+    ctx: ActionCtx,
+  ): Promise<CommandRun> {
+    const { render, env, wrap } = rendering(ws, recipe, opts);
     const command = [...wrap, render(recipe.commands[name]!, true)].join(" ");
 
     let exitCode: number;
@@ -179,6 +189,59 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
     return { name, ok: exitCode === 0, exitCode, extract, artifact };
   }
 
+  /** El slot del pool del carril de la corrida, para el worktree `ws`. */
+  function acquireSlot(ws: WorkspaceRef, pools: NonNullable<Recipe["slots"]>, ctx: ActionCtx): Promise<SlotLease> {
+    const run = store.db.select({ lane: runs.lane }).from(runs).where(eq(runs.id, ctx.runId)).get();
+    const workspace = store.db.select({ repoId: workspaceRows.repoId }).from(workspaceRows).where(eq(workspaceRows.id, ws.workspaceId)).get();
+    if (!run || !workspace) {
+      throw new PermanentActionError(
+        `No se puede tomar un slot: ${run ? `el workspace ${ws.workspaceId}` : `la corrida ${ctx.runId}`} no existe en la base.`,
+      );
+    }
+    return slots.acquire({ repoId: workspace.repoId, lane: run.lane, runId: ctx.runId, pools, workspaceId: ws.workspaceId }, ctx.signal);
+  }
+
+  /**
+   * Deja el slot listo para `ws`. Si lo preparó otro worktree, cambió el hash de `setup.slotKey` o un
+   * setup anterior quedó a medias, corre `setup.guard` y recién después `setup.slot`: un guard que no calza
+   * aborta (`PermanentActionError`) sin borrar nada. Devuelve el extracto del comando de `setup.slot` que
+   * falló, o `undefined` si el slot quedó listo.
+   */
+  async function prepareSlot(
+    ws: WorkspaceRef,
+    recipe: Recipe,
+    lease: SlotLease,
+    ctx: ActionCtx,
+  ): Promise<string | undefined> {
+    const setup = recipe.setup;
+    if (!setup || setup.slot.length === 0) return undefined;
+    const setupHash = slotKeyHash(ws.path, setup.slotKey);
+    if (!lease.dirty && lease.workspaceId === ws.workspaceId && lease.setupHash === setupHash) return undefined;
+
+    const { render, env, wrap } = rendering(ws, recipe, { slot: lease.idx, files: [] });
+    const run = (template: string) =>
+      workspaces.exec(ws, [...wrap, render(template, true)].join(" "), { runId: ctx.runId, stepId: ctx.stepId, env, signal: ctx.signal });
+
+    if (setup.guard) {
+      const expected = render(setup.guard.expect, false);
+      const { exitCode, extract } = await run(setup.guard.run);
+      if (exitCode !== 0 || extract.trim() !== expected) {
+        throw new PermanentActionError(
+          `setup.guard no calza en el slot ${lease.idx}: se esperaba "${expected}" y ` +
+            `${exitCode === 0 ? `salió "${extract.trim()}"` : `el comando salió con exit ${exitCode}\n${extract}`}. ` +
+            "No se corrió setup.slot ni se borró nada.",
+        );
+      }
+    }
+    slots.startSetup(lease);
+    for (const command of setup.slot) {
+      const { exitCode, extract } = await run(command);
+      if (exitCode !== 0) return `[setup.slot] ${command} exit ${exitCode}\n${extract}`;
+    }
+    slots.finishSetup(lease, { workspaceId: ws.workspaceId, setupHash, env });
+    return undefined;
+  }
+
   const checkAction: Recipes["checkAction"] = {
     name: "recipe.check",
     args: CheckArgs,
@@ -192,35 +255,67 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
         // Una receta mal escrita no se arregla reintentando.
         throw asPermanent(error);
       }
-      const changed = await changedFiles(ws, workspaces.baseSha(ws));
-      const files = scope === "changed" ? changed : [];
+      // Con `slot` ya viene preparado por quien llama. Si no, el slot es de este paso: se toma aquí y se
+      // suelta al terminar (también si falla), así una corrida que se estaciona nunca lo conserva.
+      const lease = slot === undefined && recipe.slots ? await acquireSlot(ws, recipe.slots, ctx) : undefined;
+      try {
+        // Si el lease del slot se pierde, los comandos se matan.
+        const stepCtx = lease ? { ...ctx, signal: AbortSignal.any([ctx.signal, lease.lost]) } : ctx;
+        const changed = await changedFiles(ws, workspaces.baseSha(ws));
+        const files = scope === "changed" ? changed : [];
+        const specsChanged = changed.filter((file) => SPEC_FILE.test(file));
 
-      // Se corre en orden y se corta en el primer rojo: los checks siguientes casi siempre dependen de los
-      // anteriores (un typecheck roto llena de ruido el lint y los tests), y así el agente recibe un solo extracto.
-      const checks: Array<CommandRun | { name: string; skipped: true }> = [];
-      for (const name of recipe.checks) {
-        if (scope === "changed" && changed.length === 0 && templateVariables(recipe.commands[name]!).includes("files")) {
-          checks.push({ name, skipped: true });
-          continue;
+        // Con el runtime `fake` no se corre ningún comando, tampoco el setup.
+        const setupFailure = lease && !fake ? await prepareSlot(ws, recipe, lease, stepCtx) : undefined;
+        if (setupFailure !== undefined) return { outcome: "fail", output: { failures: setupFailure, specsChanged, checks: [] } };
+
+        // Se corre en orden y se corta en el primer rojo: los checks siguientes casi siempre dependen de los
+        // anteriores (un typecheck roto llena de ruido el lint y los tests), y así el agente recibe un solo extracto.
+        const checks: Array<CommandRun | { name: string; skipped: true }> = [];
+        for (const name of recipe.checks) {
+          if (scope === "changed" && changed.length === 0 && templateVariables(recipe.commands[name]!).includes("files")) {
+            checks.push({ name, skipped: true });
+            continue;
+          }
+          const result = await ctx.once(`check:${name}`, () =>
+            runCommand(ws, recipe, name, { files, slot: slot ?? lease?.idx }, stepCtx),
+          );
+          checks.push(result);
+          if (!result.ok) break;
         }
-        const result = await ctx.once(`check:${name}`, () => runCommand(ws, recipe, name, { files, slot }, ctx));
-        checks.push(result);
-        if (!result.ok) break;
-      }
 
-      const failed = checks.find((c): c is CommandRun => "ok" in c && !c.ok);
-      return {
-        outcome: failed ? "fail" : "ok",
-        output: {
-          failures: failed ? `[${failed.name}] exit ${failed.exitCode}\n${failed.extract}` : "",
-          specsChanged: changed.filter((file) => SPEC_FILE.test(file)),
-          checks: checks.map((c) => ("ok" in c ? { name: c.name, ok: c.ok, exitCode: c.exitCode, artifact: c.artifact } : c)),
-        },
-      };
+        const failed = checks.find((c): c is CommandRun => "ok" in c && !c.ok);
+        return {
+          outcome: failed ? "fail" : "ok",
+          output: {
+            failures: failed ? `[${failed.name}] exit ${failed.exitCode}\n${failed.extract}` : "",
+            specsChanged,
+            checks: checks.map((c) => ("ok" in c ? { name: c.name, ok: c.ok, exitCode: c.exitCode, artifact: c.artifact } : c)),
+          },
+        };
+      } finally {
+        if (lease) slots.release(lease);
+      }
     },
   };
 
   return { read: readRecipe, checkAction, runCommand };
+}
+
+/** El hash de los archivos de `setup.slotKey` en `dir`: nombre y contenido de cada uno, o que no existe. */
+function slotKeyHash(dir: string, files: readonly string[]): string {
+  const hash = createHash("sha256");
+  for (const file of files) {
+    let content: Buffer | string;
+    try {
+      content = readFileSync(join(dir, file));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw asPermanent(error);
+      content = "\0missing";
+    }
+    hash.update(`${file}\0`).update(content).update("\0");
+  }
+  return hash.digest("hex");
 }
 
 function asPermanent(error: unknown): PermanentActionError {

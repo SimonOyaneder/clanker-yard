@@ -14,7 +14,9 @@ import { createLinearTracker } from "./linear/tracker";
 import { createProcs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
 import { createRunStarter } from "./projects/start-run";
+import { readRecipe } from "./recipe/recipe";
 import { createRecipeTester } from "./recipe/recipe-test";
+import { createSlots } from "./slots/slots";
 import { startServer, type CoreServer, type StartServerOptions } from "./server/server";
 import { newId } from "./store/conventions";
 import type { Store } from "./store/store";
@@ -60,7 +62,15 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const procs = createProcs({ store, bootId });
   const repos = createRepos(store);
-  const workspaces = createWorkspaces({ store, dataDir, repos: repos.config, identity: GIT_IDENTITY, procs });
+  const slots = createSlots({ store });
+  const workspaces = createWorkspaces({
+    store,
+    dataDir,
+    repos: repos.config,
+    identity: GIT_IDENTITY,
+    procs,
+    worktreeSetup: (dir) => readRecipe(dir)?.setup?.worktree ?? [],
+  });
   const flows = createFlows({
     store,
     defs,
@@ -69,7 +79,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     roles: roleInfoOf(defs),
     workspaceOf: workspaces.held,
     bootId,
-    onClockJump: workspaces.extendLeases,
+    onClockJump: () => {
+      workspaces.extendLeases();
+      slots.extendLeases();
+    },
   });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
@@ -79,7 +92,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   // Antes de aceptar trabajo, en este orden: sin procesos de un core anterior que sigan escribiendo,
   // con los worktrees de las corridas vivas todavía suyos, y recién entonces los pasos se reabren.
   const orphans = procs.killOrphans();
-  const leases = workspaces.recover();
+  const leases = workspaces.recover() + slots.recover();
   const steps = flows.recover();
   if (orphans + leases + steps > 0) {
     store.tx((tx) => tx.emit({ type: "core.recovered", origin: "core", payload: { steps, leases, orphans } }));
@@ -95,7 +108,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     projects,
     packs: createPacks({ defs }),
     repos,
-    recipeTester: createRecipeTester({ store, repos, dataDir, procs }),
+    recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
     runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local, linear: createLinearTracker({ connections: opts.connections }) } }),
     flows,
     artifacts,
