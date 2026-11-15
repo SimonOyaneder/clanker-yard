@@ -10,6 +10,7 @@ import { createRouterClient, getEventMeta } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
+import { createArtifacts, INLINE_MAX_BYTES } from "../artifacts/artifacts";
 import { readSchemaVersion } from "../store/migrate";
 import { openStore, type Store } from "../store/store";
 import { startServer, type CoreServer } from "./server";
@@ -18,6 +19,7 @@ let store: Store;
 let connections: Connections;
 let secretsDir: string;
 let server: CoreServer | undefined;
+let dataDir = "/tmp/clanker";
 const onShutdown = vi.fn();
 
 beforeEach(() => {
@@ -32,6 +34,8 @@ afterEach(async () => {
   store.close();
   rmSync(secretsDir, { recursive: true, force: true });
   onShutdown.mockReset();
+  if (dataDir !== "/tmp/clanker") rmSync(dataDir, { recursive: true, force: true });
+  dataDir = "/tmp/clanker";
 });
 
 async function start(allowedOrigins?: string[]): Promise<CoreServer> {
@@ -39,7 +43,7 @@ async function start(allowedOrigins?: string[]): Promise<CoreServer> {
     store,
     connections,
     coreVersion: "1.2.3",
-    dataDir: "/tmp/clanker",
+    dataDir,
     onShutdown,
     allowedOrigins,
   });
@@ -168,6 +172,36 @@ describe("system", () => {
     expect(store.events.since(0).map((e) => [e.type, e.origin])).toEqual([
       ["core.stopping", "cli"],
     ]);
+  });
+});
+
+describe("artifacts", () => {
+  test("get devuelve el contenido guardado, grande o chico, con su metadata", async () => {
+    dataDir = mkdtempSync(join(tmpdir(), "clanker-core-"));
+    const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
+    const small = artifacts.put("plan: hacer X", "brief");
+    const big = artifacts.put("l".repeat(INLINE_MAX_BYTES + 1), "log_excerpt");
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+    const smallGot = await client.artifacts.get({ hash: small });
+    expect(smallGot).toMatchObject({ hash: small, kind: "brief", size: 13 });
+    expect(await smallGot.content.text()).toBe("plan: hacer X");
+    const bigGot = await client.artifacts.get({ hash: big });
+    expect(bigGot).toMatchObject({ kind: "log_excerpt", size: INLINE_MAX_BYTES + 1 });
+    expect((await bigGot.content.text()).length).toBe(INLINE_MAX_BYTES + 1);
+  });
+
+  test("un hash que no existe es NOT_FOUND y uno mal formado, BAD_REQUEST", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+    await expect(client.artifacts.get({ hash: "0".repeat(64) })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(client.artifacts.get({ hash: "../../etc/passwd" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
   });
 });
 

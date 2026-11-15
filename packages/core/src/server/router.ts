@@ -2,6 +2,8 @@ import { API_MAJOR, type ClientOrigin, contract } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubPatError, githubPatForm } from "../github/pat";
 import type { Connections } from "../connections/connections";
+import { join } from "node:path";
+import { createArtifacts } from "../artifacts/artifacts";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
 import { eventsAfter } from "./event-stream";
@@ -28,6 +30,7 @@ const os = implement(contract).$context<CoreContext>();
 export function createRouter(deps: RouterDeps) {
   const { store } = deps;
   const schemaVersion = readSchemaVersion(store.db.$client);
+  const artifacts = createArtifacts({ store, dir: join(deps.dataDir, "artifacts") });
   const platform = process.platform;
   if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
     throw new Error(
@@ -75,6 +78,16 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       githubPatForm: os.connections.githubPatForm.handler(() => githubPatForm()),
+    },
+    artifacts: {
+      get: os.artifacts.get.handler(({ input }) => {
+        const artifact = artifacts.get(input.hash);
+        if (!artifact) {
+          throw new ORPCError("NOT_FOUND", { message: `No existe el artefacto ${input.hash}.` });
+        }
+        const { content, ...meta } = artifact;
+        return { ...meta, content: new Blob([content], { type: artifact.mime }) };
+      }),
     },
     events: {
       list: os.events.list.handler(({ input }) =>

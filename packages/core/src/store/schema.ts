@@ -1,4 +1,6 @@
 import type {
+  ArtifactHash,
+  ArtifactKind,
   ConnectionProvider,
   ConnectionStatus,
   Event,
@@ -11,6 +13,7 @@ import type {
 } from "@clanker/api";
 import { sql } from "drizzle-orm";
 import {
+  blob,
   check,
   foreignKey,
   index,
@@ -213,3 +216,30 @@ export const syncCursors = sqliteTable("sync_cursors", {
   /** ms epoch en que se renueva la cuota. */
   resetAt: integer("reset_at"),
 });
+
+/** Contenido direccionado por su SHA-256: el mismo contenido es una sola fila. */
+export const artifacts = sqliteTable("artifacts", {
+  hash: text().$type<ArtifactHash>().primaryKey(),
+  kind: text().$type<ArtifactKind>().notNull(),
+  mime: text().notNull(),
+  size: integer().notNull(),
+  /** El contenido si pesa lo que admite `artifacts.ts`; si no, es NULL y vive en `artifacts/ab/cd…`. */
+  body: blob({ mode: "buffer" }),
+  /** Último `put` de este contenido: el GC cuenta los 30 días desde aquí, no desde la primera vez. */
+  lastPutAt: integer("last_put_at").notNull(),
+});
+
+/** Quién usa un artefacto y para qué. Mientras tenga alguna ref, el GC no lo toca. */
+export const artifactRefs = sqliteTable(
+  "artifact_refs",
+  {
+    hash: text()
+      .$type<ArtifactHash>()
+      .notNull()
+      .references(() => artifacts.hash),
+    ownerType: text("owner_type").notNull(),
+    ownerId: text("owner_id").notNull(),
+    role: text().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.hash, t.ownerType, t.ownerId, t.role] })],
+);

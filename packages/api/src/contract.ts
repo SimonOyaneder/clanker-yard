@@ -1,7 +1,7 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
 import { Connection, GitHubPatForm } from "./connections";
-import { Event, EventFilter } from "./domain";
+import { ArtifactHash, ArtifactKind, Event, EventFilter } from "./domain";
 
 /**
  * Convención `.meta({ mcp })` (`docs/design.html#d-data`, "Tools MCP desde el mismo contrato").
@@ -107,5 +107,18 @@ const connections = {
   githubPatForm: base.output(GitHubPatForm),
 };
 
-export const contract = { system, events, connections };
+const artifacts = {
+  /** El contenido tal cual se guardó. Si no existe ese hash, falla con `NOT_FOUND`. */
+  get: base.input(z.object({ hash: ArtifactHash })).output(
+    z.object({
+      hash: ArtifactHash,
+      kind: ArtifactKind,
+      mime: z.string(),
+      size: z.int().nonnegative(),
+      content: z.instanceof(Blob),
+    }),
+  ),
+};
+
+export const contract = { system, events, connections, artifacts };
 export type Contract = typeof contract;

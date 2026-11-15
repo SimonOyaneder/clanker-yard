@@ -15,6 +15,22 @@ export type RunId = z.infer<typeof RunId>;
 export const StepRunId = prefixedId("stp");
 export type StepRunId = z.infer<typeof StepRunId>;
 
+/** SHA-256 del contenido en hex: la identidad de un artefacto. */
+export const ArtifactHash = z
+  .string()
+  .regex(/^[0-9a-f]{64}$/, "debe ser un SHA-256 en hex (64 caracteres)");
+export type ArtifactHash = z.infer<typeof ArtifactHash>;
+
+export const ArtifactKind = z.enum([
+  "brief",
+  "report",
+  "log_excerpt",
+  "pr_body",
+  "snapshot",
+  "legacy",
+]);
+export type ArtifactKind = z.infer<typeof ArtifactKind>;
+
 /** Sobre qué trabaja una corrida o a qué se refiere un evento. */
 export const SubjectRef = z.object({
   type: z.enum(["issue", "pr"]),

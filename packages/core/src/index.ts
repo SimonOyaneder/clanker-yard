@@ -5,6 +5,9 @@ export { SchemaTooNewError } from "./store/migrate";
 export { openStore } from "./store/store";
 export type { NewEvent, OpenStoreOptions, Store, Tx } from "./store/store";
 
+export { createArtifacts, GC_MAX_AGE_MS, INLINE_MAX_BYTES } from "./artifacts/artifacts";
+export type { Artifact, ArtifactOwner, Artifacts, ArtifactsOptions } from "./artifacts/artifacts";
+
 export { createDefs, DefValidationError } from "./defs/defs";
 export type { Def, DefIssue, DefKind, DefScope, DefVersion, Defs, SaveDef } from "./defs/defs";
 

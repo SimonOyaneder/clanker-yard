@@ -44,6 +44,15 @@ const router = os.router({
       permissions: [],
     })),
   },
+  artifacts: {
+    get: os.artifacts.get.handler(({ input }) => ({
+      hash: input.hash,
+      kind: "report" as const,
+      mime: "text/plain",
+      size: 2,
+      content: new Blob(["ok"]),
+    })),
+  },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
     stream: os.events.stream.handler(async function* ({ input }) {
