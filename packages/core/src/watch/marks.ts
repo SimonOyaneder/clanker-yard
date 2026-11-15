@@ -16,12 +16,16 @@ export type PrEventType = Extract<
   | "pr.merged"
   | "pr.base_rewritten"
   | "pr.human"
+  | "pr.approvedWithComments"
   | "pr.mergeReady"
   | "pr.mergeFailed"
 >;
 
 /** La marca que no es un evento: la punta que Watch ya evaluó de un PR. */
 const HEAD = "head";
+/** Las marcas de `approvalEpoch`: estuvo aprobado en la época `n`, y dejó de estarlo. */
+const APPROVED = "approved";
+const UNAPPROVED = "unapproved";
 
 /** Inserta las marcas que faltan. Devuelve las claves nuevas, en el orden recibido. */
 export function recordMarks(tx: Tx, prId: string, kind: string, keys: readonly string[], at: number): string[] {
@@ -41,6 +45,20 @@ export function lastEvaluatedHead(db: StoreDb, prId: string): string | undefined
 }
 
 export const markHead = (tx: Tx, prId: string, sha: string, at: number) => recordMarks(tx, prId, HEAD, [sha], at);
+
+/**
+ * La aprobación de hoy del PR, numerada: sube cada vez que el PR la perdía (pidieron cambios, la
+ * descartaron) y se vuelve a aprobar, que es cuando un aprobado con comentarios es otro hecho. Es el
+ * `approved` del vigilante, que vuelve a `false` al perder la aprobación. Se llama en cada evaluación de
+ * un PR abierto, con si hoy está aprobado.
+ */
+export function approvalEpoch(tx: Tx, prId: string, approved: boolean, at: number): number {
+  const marks = (kind: string) => tx.db.select({ key: watchMarks.key }).from(watchMarks).where(and(eq(watchMarks.prId, prId), eq(watchMarks.kind, kind))).all();
+  const epoch = marks(UNAPPROVED).length;
+  if (approved) recordMarks(tx, prId, APPROVED, [String(epoch)], at);
+  else if (marks(APPROVED).some(({ key }) => key === String(epoch))) recordMarks(tx, prId, UNAPPROVED, [String(epoch)], at);
+  return epoch;
+}
 
 export interface PrEventInput {
   type: PrEventType;

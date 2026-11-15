@@ -112,6 +112,7 @@ export const EventType = z.enum([
   "pr.merged",
   "pr.base_rewritten",
   "pr.human",
+  "pr.approvedWithComments",
   "pr.mergeReady",
   "pr.mergeFailed",
   "pr.commented",

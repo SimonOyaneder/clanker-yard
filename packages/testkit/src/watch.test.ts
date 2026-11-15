@@ -474,6 +474,8 @@ describe("eventos", () => {
     expect(emitted("pr.comment").map((e) => e.payload.threadIds)).toEqual([[first.commentId], [second.commentId]]);
     expect(emitted("pr.ci").map((e) => e.payload.state)).toEqual(["green", "red"]);
 
+    // Un humano que habla en un draft no avisa hasta que sale de draft (ver `watch-parity.test.ts`).
+    pr.setDraft(false);
     pr.comment("ana", "otra cosa");
     await wake(31 * SECOND);
     expect(emitted("pr.human").map((e) => (e.payload.talk as unknown[]).length)).toEqual([1, 1]);

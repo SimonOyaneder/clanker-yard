@@ -421,6 +421,22 @@ describe("talk", () => {
     ]);
   });
 
+  test("como el vigilante: el primer comentario de un thread humano sin resolver cuenta, sus respuestas, los resueltos y los del bot, la cuenta o el council no", () => {
+    const state = build(
+      prNode({
+        reviewThreads: [
+          thread(user("ana"), "esto está raro", { replies: [[user("beto"), "yo también lo vi"]], at: "2026-11-10T12:00:00Z" }),
+          thread(user("caro"), "ya quedó", { resolved: true, at: "2026-11-10T12:10:00Z" }),
+          thread(user(VIEWER), "lo dije yo", { at: "2026-11-10T12:20:00Z" }),
+          thread(bot("review-bot[bot]"), "bug posible", { at: "2026-11-10T12:30:00Z" }),
+          thread(user("dani"), "[clanker-council] 🟡 mueve esto", { at: "2026-11-10T12:40:00Z" }),
+        ],
+      }),
+    );
+
+    expect(state.talk).toEqual([{ kind: "comment", author: "ana", at: "2026-11-10T12:00:00Z", excerpt: "esto está raro" }]);
+  });
+
   test("sin pack, una review sin texto sigue siendo silenciosa pero un LGTM escrito cuenta", () => {
     const state = build(
       prNode({ reviews: [review(user("ana"), "APPROVED", { body: "" }), review(user("beto"), "APPROVED", { body: "LGTM" })] }),

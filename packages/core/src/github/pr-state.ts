@@ -241,9 +241,10 @@ export function answered(thread: RawThread, prefix: string | undefined): boolean
 /**
  * Lo que dijeron los humanos, como el vigilante (`clanker-loop watch`): una review que pide cambios, o
  * con texto que no es un "LGTM" solo (`silentReviewBody`, sin distinguir mayúsculas), de cualquier
- * estado menos las sin enviar (una descartada con texto sigue contando), y cada comentario de la
- * conversación. Un texto de solo espacios es texto. Lo que lleva el prefijo del council no cuenta, sea
- * de quien sea: es la review del council, no un humano esperando respuesta.
+ * estado menos las sin enviar (una descartada con texto sigue contando), cada comentario de la
+ * conversación y el primer comentario de cada thread sin resolver (sus respuestas no). Un texto de solo
+ * espacios es texto. Lo que lleva el prefijo del council no cuenta, sea de quien sea: es la review del
+ * council, no un humano esperando respuesta.
  */
 function talkOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: string): PrState["talk"] {
   const silent = pack.actors.silentReviewBody === undefined ? undefined : new RegExp(pack.actors.silentReviewBody, "i");
@@ -262,6 +263,11 @@ function talkOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: stri
   for (const comment of node.comments) {
     if (!isHuman(comment.author) || comment.author.login === viewer || (council && comment.body.startsWith(council))) continue;
     talk.push({ kind: "comment", author: comment.author.login, at: comment.createdAt, excerpt: excerptOf(comment.body) });
+  }
+  for (const { isResolved, comments } of node.reviewThreads) {
+    const first = comments.nodes[0];
+    if (isResolved || !first || !isHuman(first.author) || first.author.login === viewer || (council && first.body.startsWith(council))) continue;
+    talk.push({ kind: "comment", author: first.author.login, at: first.createdAt, excerpt: excerptOf(first.body) });
   }
   return talk.sort((a, b) => a.at.localeCompare(b.at));
 }

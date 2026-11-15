@@ -57,12 +57,13 @@ export function comment(by: Actor | null, body: string, at = "2026-11-10T10:00:0
   return { body, createdAt: at, author: by };
 }
 
-export function thread(by: Actor | null, body: string, opts: { resolved?: boolean; replies?: [Actor, string][] } = {}): RawThread {
+export function thread(by: Actor | null, body: string, opts: { resolved?: boolean; replies?: [Actor, string][]; at?: string } = {}): RawThread {
+  const at = opts.at ?? "2026-11-10T10:00:00Z";
   const comments = [[by, body] as const, ...(opts.replies ?? [])];
   return {
     id: `PRRT_kwDOfixture${nextId++}`,
     isResolved: opts.resolved ?? false,
-    comments: { nodes: comments.map(([author, text]) => ({ fullDatabaseId: String(nextId++), body: text, author })) },
+    comments: { nodes: comments.map(([author, text]) => ({ fullDatabaseId: String(nextId++), body: text, createdAt: at, author })) },
   };
 }
 

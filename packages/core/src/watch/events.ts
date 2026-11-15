@@ -6,7 +6,7 @@ import { pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Repos } from "../workspaces/repos";
 import type { Workspaces } from "../workspaces/workspaces";
-import { emitOnce, lastEvaluatedHead, markHead, recordMarks, type PrEventInput } from "./marks";
+import { approvalEpoch, emitOnce, lastEvaluatedHead, markHead, recordMarks, type PrEventInput } from "./marks";
 import type { ErrorReporter } from "./report";
 
 // Los eventos de Watch (`docs/design.html#d-ops`, "Watch: eventos y qué disparan"): de lo que cambió en un
@@ -71,10 +71,13 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
       facts.push({ type: "pr.base_rewritten", keys: [`${from}>${state.headSha}`], payload: () => ({ from, to: state.headSha }) });
     }
     store.tx((tx) => {
+      if (state.state === "open") facts.push(...approvalFacts(state, approvalEpoch(tx, row.id, isApproved(state), at)));
       for (const fact of facts) {
         const input = { ...fact, payload: (fresh: string[]) => ({ repo: ref.repo, number: ref.number, ...fact.payload(fresh) }) };
         // La primera vez que se ve un PR solo se siembra: lo que ya estaba ahí no es un cambio.
         if (known === undefined && !fact.emitOnFirstRead) recordMarks(tx, row.id, fact.type, fact.keys, at);
+        // Un humano que habla en un draft no avisa: sus marcas esperan a que salga de draft (el vigilante calla los comentarios de un draft y los suelta después).
+        else if (state.state === "draft" && fact.type === "pr.human") continue;
         else emitOnce(tx, row, input, at);
       }
       markHead(tx, row.id, state.headSha, at);
@@ -158,4 +161,25 @@ export function mergeFactsOf({ merge, headSha, state }: PrState): PrEventInput[]
     facts.push({ type: "pr.mergeFailed", keys: [headSha], emitOnFirstRead: true, payload: () => ({ sha: headSha }) });
   }
   return facts;
+}
+
+/** Aprobado como lo entiende el vigilante: la decisión de GitHub y al menos un aprobador humano. */
+const isApproved = ({ reviewDecision, approvers }: PrState) => reviewDecision === "approved" && approvers.length > 0;
+
+/**
+ * Un PR que se aprueba con humanos que hablaron (reviews con texto, comentarios, threads sin resolver) lo
+ * anuncia una vez por aprobación (`epoch`, ver `approvalEpoch`): el `⚠️ aprobado-con-comentarios` del
+ * vigilante, que también sale en la primera lectura. Solo para PRs abiertos: en draft no hay aprobación que contar.
+ */
+function approvalFacts(state: PrState, epoch: number): PrEventInput[] {
+  if (!isApproved(state) || state.talk.length === 0) return [];
+  const authors = [...new Set(state.talk.map((t) => t.author))].sort();
+  return [
+    {
+      type: "pr.approvedWithComments",
+      keys: [String(epoch)],
+      emitOnFirstRead: true,
+      payload: () => ({ approvers: state.approvers, authors, comments: state.talk.length }),
+    },
+  ];
 }

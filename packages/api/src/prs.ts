@@ -130,7 +130,7 @@ export const PrState = z.object({
     /** Hubo algún thread de council, aunque ya esté resuelto. */
     councilEver: z.boolean(),
   }),
-  /** Lo que los humanos dijeron en reviews y comentarios del PR (con cuerpo), de la más antigua a la más reciente. */
+  /** Lo que los humanos dijeron en reviews, comentarios y threads sin resolver del PR (con cuerpo), de lo más antiguo a lo más reciente. */
   talk: z.array(PrTalk),
   labels: z.array(PrLabel),
   /** Una entrada por señal del pack presente en el PR: id de la señal → nivel (`risk` → `high`). */

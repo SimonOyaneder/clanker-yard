@@ -124,6 +124,8 @@ export interface SimPr {
   /** Un label del PR, como los que pone un bot o una persona (`risk:high`). */
   label(name: string, opts?: { color?: string; description?: string }): void;
   setDraft(draft: boolean): void;
+  /** Cambia la base del PR (la branch tiene que existir en el bare). */
+  setBase(base: string): void;
   /**
    * Mergea el PR: queda cerrado y mergeado. El commit del merge es `sha` (un squash que otro dejó en la
    * base del bare) o, sin él, el head de hoy.
@@ -576,6 +578,10 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       },
       setDraft(draft) {
         pr.draft = draft;
+      },
+      setBase(base) {
+        if (branchSha(base) === undefined) throw new Error(`El bare no tiene la branch ${base}.`);
+        pr.base = base;
       },
       merge({ sha } = {}) {
         pr.state = "closed";
