@@ -1,0 +1,109 @@
+import * as z from "zod";
+
+// Crockford base32, 26 caracteres: el ULID que va después del prefijo.
+const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
+/** Id de texto con prefijo y ULID, por ejemplo `run_01J...`. */
+function prefixedId<const P extends string>(prefix: P) {
+  return z.templateLiteral([`${prefix}_`, z.string().regex(ULID)]);
+}
+
+export const ProjectId = prefixedId("prj");
+export const RunId = prefixedId("run");
+export const StepRunId = prefixedId("stp");
+
+/** Sobre qué trabaja una corrida o a qué se refiere un evento. */
+export const SubjectRef = z.object({
+  type: z.enum(["issue", "pr"]),
+  id: z.string().min(1),
+});
+export type SubjectRef = z.infer<typeof SubjectRef>;
+
+/** Quién originó una llamada o un evento. `ui`, `cli` y `mcp` llegan en `x-clanker-origin`. */
+export const Origin = z.enum(["core", "ui", "cli", "mcp", "watch", "import"]);
+export type Origin = z.infer<typeof Origin>;
+
+/** Quién puede declararse en `x-clanker-origin`: los clientes de la API. */
+export const ClientOrigin = Origin.extract(["ui", "cli", "mcp"]);
+export type ClientOrigin = z.infer<typeof ClientOrigin>;
+
+/** Taxonomía `entidad.verbo` de `docs/design.html#d-data`. */
+export const EventType = z.enum([
+  "core.started",
+  "core.stopping",
+  "core.recovered",
+  "project.created",
+  "project.updated",
+  "project.paused",
+  "project.resumed",
+  "project.archived",
+  "def.versioned",
+  "def.archived",
+  "def.restored",
+  "issue.synced",
+  "issue.queued",
+  "issue.claimed",
+  "issue.skipped",
+  "run.started",
+  "run.status",
+  "run.parked",
+  "run.requeued",
+  "run.borrowed",
+  "run.returned",
+  "run.finished",
+  "step.started",
+  "step.waiting",
+  "step.finished",
+  "step.retrying",
+  "agent.started",
+  "agent.activity",
+  "agent.usage",
+  "agent.ended",
+  "lease.acquired",
+  "lease.released",
+  "lease.expired",
+  "pr.opened",
+  "pr.changed",
+  "pr.merged",
+  "pr.commented",
+  "pr.thread_resolved",
+  "pr.overlap",
+  "decision.opened",
+  "decision.resolved",
+  "learning.proposed",
+  "learning.approved",
+  "learning.rejected",
+  "connection.changed",
+  "sync.rate_limited",
+  "breaker.opened",
+  "breaker.closed",
+  "import.completed",
+  "error",
+]);
+export type EventType = z.infer<typeof EventType>;
+
+/**
+ * Un evento de la tabla `events` (append-only). `payload` es mínimo: ids y lo que cambió;
+ * el detalle se lee de las tablas.
+ */
+export const Event = z.object({
+  seq: z.int().positive(),
+  /** ms epoch */
+  ts: z.int().nonnegative(),
+  type: EventType,
+  origin: Origin,
+  projectId: ProjectId.optional(),
+  runId: RunId.optional(),
+  stepRunId: StepRunId.optional(),
+  subject: SubjectRef.optional(),
+  payload: z.record(z.string(), z.unknown()),
+});
+export type Event = z.infer<typeof Event>;
+
+/** Filtro de `events.list` y `events.stream`; los campos presentes se combinan con AND. */
+export const EventFilter = z.object({
+  types: z.array(EventType).min(1).optional(),
+  projectId: ProjectId.optional(),
+  runId: RunId.optional(),
+});
+export type EventFilter = z.infer<typeof EventFilter>;

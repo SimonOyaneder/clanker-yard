@@ -1,1 +1,3 @@
-export const name = "@clanker/api";
+export * from "./client";
+export * from "./contract";
+export * from "./domain";
