@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc --noEmit", "clanker": "tsx src/main.ts" },
+  "bin": { "clanker": "dist/clanker.js" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.ts",
+    "clanker": "tsx src/main.ts"
+  },
   "dependencies": { "@clanker/api": "*" },
-  "devDependencies": { "tsx": "^4.23.15" }
+  "devDependencies": { "esbuild": "^0.28.2", "tsx": "^4.23.15" }
 }

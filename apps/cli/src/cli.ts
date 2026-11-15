@@ -1,0 +1,56 @@
+import type { Client } from "@clanker/api";
+import { events } from "./events";
+import { metricsCompareCommand } from "./metrics-compare";
+import { projectsList } from "./projects";
+import { runsGet, runsStart } from "./runs";
+import { status } from "./status";
+
+/** Lo que un comando necesita del mundo; `main.ts` lo arma con el core real y los tests con uno de prueba. */
+export interface CliContext {
+  /** El cliente del core. Lo levanta si no corre, así que un comando lo pide después de validar sus argumentos. */
+  client(): Promise<Client>;
+  /** Una línea de salida. */
+  write(line: string): void;
+  readFile(path: string): string;
+  /** Se aborta con Ctrl+C: es lo que termina un `events tail --follow`. */
+  signal: AbortSignal;
+}
+
+export interface Command {
+  /** `clanker <comando> <args>`, tal como se muestra en la ayuda y en los errores de uso. */
+  usage: string;
+  run(args: string[], ctx: CliContext): Promise<void>;
+}
+
+const commands: Record<string, Command> = {
+  status,
+  "projects list": projectsList,
+  "runs start": runsStart,
+  "runs get": runsGet,
+  "events tail": events,
+  "metrics compare": metricsCompareCommand,
+};
+
+const help = `Uso:\n${Object.values(commands)
+  .map((c) => `  ${c.usage}`)
+  .join("\n")}`;
+
+/** Ejecuta un comando; lanza con un mensaje listo para mostrar si algo falla. */
+export async function runCli(argv: string[], ctx: CliContext): Promise<void> {
+  const [first, second] = argv;
+  if (first === undefined || first === "--help" || first === "-h" || first === "help") return ctx.write(help);
+
+  const name = Object.hasOwn(commands, first) ? first : `${first} ${second}`;
+  const command = Object.hasOwn(commands, name) ? commands[name] : undefined;
+  if (!command) throw new Error(`Comando desconocido: clanker ${argv.slice(0, 2).join(" ")}\n${help}`);
+
+  try {
+    await command.run(argv.slice(name.split(" ").length), ctx);
+  } catch (error) {
+    // Un flag mal puesto (`parseArgs`) se explica mejor con el uso del comando.
+    if ((error as NodeJS.ErrnoException).code?.startsWith("ERR_PARSE_ARGS")) {
+      throw new Error(`${(error as Error).message.split(".")[0]}.\nUso: ${command.usage}`);
+    }
+    throw error;
+  }
+}

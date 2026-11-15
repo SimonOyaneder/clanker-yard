@@ -1,19 +1,22 @@
 import { readFileSync } from "node:fs";
-import { clankerDirs, connectToCore } from "@clanker/api/node";
-import { METRICS_COMPARE_USAGE, metricsCompare } from "./metrics-compare";
+import { runCli } from "./cli";
+import { connectCore } from "./core-client";
 
-async function main(argv: string[]): Promise<string> {
-  const [group, command, ...args] = argv;
-  if (group !== "metrics" || command !== "compare") throw new Error(METRICS_COMPARE_USAGE);
-  const core = await connectToCore(clankerDirs().dataDir, "cli");
-  if (!core) throw new Error("No hay un core corriendo: abre Clanker Yard e inténtalo de nuevo.");
-  return metricsCompare(args, { client: core.client, readFile: (path) => readFileSync(path, "utf8") });
-}
+const interrupt = new AbortController();
+// Un segundo Ctrl+C mata el proceso aunque el comando no escuche la señal.
+process.on("SIGINT", () => (interrupt.signal.aborted ? process.exit(130) : interrupt.abort()));
 
-main(process.argv.slice(2)).then(
-  (out) => console.log(out),
+let client: ReturnType<typeof connectCore> | undefined;
+
+runCli(process.argv.slice(2), {
+  client: () => (client ??= connectCore()),
+  write: (line) => console.log(line),
+  readFile: (path) => readFileSync(path, "utf8"),
+  signal: interrupt.signal,
+}).then(
+  () => process.exit(),
   (error: unknown) => {
     console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
+    process.exit(1);
   },
 );

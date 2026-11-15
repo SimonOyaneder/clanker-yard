@@ -208,6 +208,14 @@ Se prueba en `packages/testkit/src/prepare-push.test.ts` y, el guard de council 
 
 `recordRunMetrics(tx, runId)` (`packages/core/src/metrics/record.ts`) llena `run_metrics` y `run_role_costs` en la misma tx que cierra la corrida (`@fin` o cancelación), desde `runs.rounds`, los `step_runs` (outcomes por nodo) y `step_usage` y las `agent_sessions` de sus pasos (costo y tokens por rol, modelo y effort; `step_usage` acumula lo que cada paso consumió de su sesión, y es de donde `closeStep` saca el costo del paso: un resume con el mismo id de sesión no deja su costo en el paso original). Todo lo que consume la UI sale de ahí vía `createMetrics` (`metrics.byRole|byDay|byModel`, `projects.summary`): los costos suman todas las corridas, hijas de subflujo incluidas; los conteos (`runs`), solo las raíz. Los días son del cierre, en la zona `utcOffsetMinutes`. La importación del loop viejo (`parseLegacyMetrics`, `@clanker/api`) escribe estas mismas tablas. `clanker metrics compare --legacy <metrics.jsonl>` (`apps/cli`, `npm run clanker -w @clanker/cli -- ...`) compara promedios por rol contra lo que lleva el core.
 
+## CLI
+
+`apps/cli` es el binario `clanker`: `status`, `projects list`, `runs start <proyecto> <issue>`, `runs get <id>`, `events tail [-f]` y `metrics compare`; todos aceptan `--json` (`events tail` imprime una línea JSON por evento). `clanker --help` los lista. Cada comando es un `Command` (`src/cli.ts`) que recibe el `CliContext` (cliente, salida, lectura de archivos, señal de Ctrl+C), así que se prueba con un cliente de mentira sin tocar `main.ts`. Para sumar uno, agrégalo a `commands` en `cli.ts`.
+
+`connectCore` (`src/core-client.ts`) usa `ensureCore` con origin `cli`: si no hay core corriendo, lo lanza desde `packages/core/dist/main.js` (`npm run build -w @clanker/core`; `CLANKER_CORE_ENTRY` apunta a otro bundle). Para probarlo sin instalar nada: `npm run clanker -w @clanker/cli -- status` (con `CLANKER_HOME=$(mktemp -d)` delante no toca tus datos). Para tener `clanker` en el PATH: `npm run build -w @clanker/cli && npm link -w @clanker/cli`.
+
+Los tests de comandos usan un cliente de mentira (`cli.test.ts`); `core.test.ts` corre el binario empaquetado contra el core real (arranque con `status`) y los comandos contra el core de demo del testkit lanzado como proceso (la CLI no importa el testkit ni el core).
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:

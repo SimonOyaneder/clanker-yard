@@ -1,5 +1,8 @@
 import { parseArgs } from "node:util";
 import { type Client, type LegacyMetricsRow, parseLegacyMetrics, type RoleMetrics } from "@clanker/api";
+import type { Command } from "./cli";
+import { formatTable, usd } from "./format";
+import { projectBySlug } from "./projects";
 
 /** Corridas en que actuó el rol y lo que gastó en promedio en cada una. */
 interface RoleAverage {
@@ -44,7 +47,6 @@ export function compareByRole(legacy: readonly LegacyMetricsRow[], current: read
   });
 }
 
-const usd = (n: number) => `$${n.toFixed(2)}`;
 const tokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n)));
 const percent = (n: number) => `${n > 0 ? "+" : ""}${n.toFixed(0)}%`;
 
@@ -55,10 +57,7 @@ export function formatComparison(rows: readonly RoleComparison[]): string {
     ["Rol", "Loop n", "Loop USD", "Loop tokens", "Yard n", "Yard USD", "Yard tokens", "Δ USD"],
     ...rows.map((r) => [r.role, ...side(r.legacy), ...side(r.current), r.usdChangePercent === null ? "-" : percent(r.usdChangePercent)]),
   ];
-  const widths = table[0]!.map((_, i) => Math.max(...table.map((row) => row[i]!.length)));
-  return table
-    .map((row) => row.map((cell, i) => (i === 0 ? cell.padEnd(widths[i]!) : cell.padStart(widths[i]!))).join("  "))
-    .join("\n");
+  return formatTable(table, 1);
 }
 
 export interface MetricsCompareDeps {
@@ -66,7 +65,7 @@ export interface MetricsCompareDeps {
   readFile(path: string): string;
 }
 
-export const METRICS_COMPARE_USAGE = "Uso: clanker metrics compare --legacy <metrics.jsonl> [--project <slug>] [--legacy-project <slug>] [--json]";
+export const METRICS_COMPARE_USAGE = "clanker metrics compare --legacy <metrics.jsonl> [--project <slug>] [--legacy-project <slug>] [--json]";
 
 /**
  * `clanker metrics compare`: lee el `metrics.jsonl` del loop actual y lo compara, rol por rol, con lo
@@ -83,17 +82,19 @@ export async function metricsCompare(args: string[], { client, readFile }: Metri
       json: { type: "boolean" },
     },
   });
-  if (!values.legacy) throw new Error(`Falta --legacy. ${METRICS_COMPARE_USAGE}`);
+  if (!values.legacy) throw new Error(`Falta --legacy. Uso: ${METRICS_COMPARE_USAGE}`);
 
   const legacyProject = values["legacy-project"];
   const legacy = parseLegacyMetrics(readFile(values.legacy)).filter((r) => legacyProject === undefined || r.project === legacyProject);
 
-  let projectId;
-  if (values.project !== undefined) {
-    const project = (await client.projects.list()).find((p) => p.slug === values.project);
-    if (!project) throw new Error(`No existe el proyecto "${values.project}" en Clanker Yard.`);
-    projectId = project.id;
-  }
+  const projectId = values.project === undefined ? undefined : (await projectBySlug(client, values.project)).id;
   const rows = compareByRole(legacy, await client.metrics.byRole({ projectId }));
   return values.json ? JSON.stringify(rows, null, 2) : formatComparison(rows);
 }
+
+export const metricsCompareCommand: Command = {
+  usage: METRICS_COMPARE_USAGE,
+  async run(args, ctx) {
+    ctx.write(await metricsCompare(args, { client: await ctx.client(), readFile: ctx.readFile }));
+  },
+};
