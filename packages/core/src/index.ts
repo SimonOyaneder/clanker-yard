@@ -12,6 +12,8 @@ export type { Artifact, ArtifactOwner, Artifacts, ArtifactsOptions } from "./art
 
 export { createDefs, DefValidationError } from "./defs/defs";
 export { closeDecision, openDecision } from "./decisions/decisions";
+export { createLearnings, proposeLearning } from "./learnings/learnings";
+export type { BriefScope, Learnings } from "./learnings/learnings";
 export type { Def, DefIssue, DefScope, DefVersion, Defs, SaveDef } from "./defs/defs";
 
 export { createPacks, PackLoadError } from "./packs/packs";
@@ -26,6 +28,7 @@ export type {
   RunRequest,
 } from "./agents/agents";
 export { acceptanceCriteria, createBriefs, RUN_DIR } from "./agents/brief";
+export { createStepBriefs } from "./agents/step-brief";
 export type { BriefRequest, Briefs, PreparedBrief, PreviousReport } from "./agents/brief";
 export { listHunks } from "./git/tree";
 export type { Hunk } from "./git/tree";

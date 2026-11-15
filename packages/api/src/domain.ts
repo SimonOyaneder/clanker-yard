@@ -22,6 +22,8 @@ export const AgentSessionId = prefixedId("ses");
 export type AgentSessionId = z.infer<typeof AgentSessionId>;
 export const DecisionId = prefixedId("dec");
 export type DecisionId = z.infer<typeof DecisionId>;
+export const LearningId = prefixedId("lrn");
+export type LearningId = z.infer<typeof LearningId>;
 
 /** SHA-256 del contenido en hex: la identidad de un artefacto. */
 export const ArtifactHash = z

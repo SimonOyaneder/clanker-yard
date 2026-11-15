@@ -13,6 +13,7 @@ import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
 import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
+import { LearningNotFoundError, LearningUpdateError, type Learnings } from "../learnings/learnings";
 import type { Engine } from "../flows/engine";
 import type { Flows } from "../flows/flows";
 import { DecisionNotFoundError, DecisionResolveError, RunCommandError, RunNotFoundError, RunStartError } from "../flows/engine";
@@ -67,6 +68,7 @@ export interface RouterDeps {
   onPrChange?: PrCacheDeps["onChange"];
   artifacts: Artifacts;
   decisions: Decisions;
+  learnings: Learnings;
   defs: Defs;
   /** `imports.legacy`. */
   legacyImport: LegacyImporter;
@@ -340,6 +342,18 @@ export function createRouter(deps: RouterDeps) {
         }),
       ),
     },
+    learnings: {
+      list: os.learnings.list.handler(({ input }) => deps.learnings.list(input)),
+      get: os.learnings.get.handler(({ input }) => {
+        const learning = deps.learnings.get(input.id);
+        if (!learning) throw new ORPCError("NOT_FOUND", { message: new LearningNotFoundError(input.id).message });
+        return learning;
+      }),
+      propose: os.learnings.propose.handler(({ input, context }) => deps.learnings.propose(input, context.origin)),
+      approve: os.learnings.approve.handler(({ input, context }) => asApiError(() => deps.learnings.approve(input.id, context.origin))),
+      reject: os.learnings.reject.handler(({ input, context }) => asApiError(() => deps.learnings.reject(input.id, context.origin))),
+      update: os.learnings.update.handler(({ input }) => asApiError(() => deps.learnings.update(input))),
+    },
     defs: {
       list: os.defs.list.handler(({ input }) => deps.defs.list(input.kind, { includeArchived: input.includeArchived })),
       get: os.defs.get.handler(({ input }) => {
@@ -397,6 +411,7 @@ function toApiError(error: unknown): unknown {
     error instanceof ProjectNotFoundError ||
     error instanceof RunNotFoundError ||
     error instanceof DecisionNotFoundError ||
+    error instanceof LearningNotFoundError ||
     error instanceof StepNotFoundError ||
     error instanceof DefNotFoundError ||
     error instanceof SessionNotFoundError ||
@@ -412,6 +427,7 @@ function toApiError(error: unknown): unknown {
     error instanceof RunStartError ||
     error instanceof RunCommandError ||
     error instanceof DecisionResolveError ||
+    error instanceof LearningUpdateError ||
     error instanceof InvalidRepoError ||
     error instanceof NotAGitRepoError ||
     error instanceof PrCommandError ||

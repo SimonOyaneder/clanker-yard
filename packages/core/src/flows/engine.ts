@@ -20,6 +20,7 @@ import type { Artifacts } from "../artifacts/artifacts";
 import { GITHUB_SCOPE, repoScope, runtimeScope, type Breakers } from "../breakers/breakers";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import type { Defs } from "../defs/defs";
+import { proposeLearning } from "../learnings/learnings";
 import { recordRunMetrics } from "../metrics/record";
 import { microsToUsd, newId, usdToMicros } from "../store/conventions";
 import { actionEffects, agentSessions, decisions, projects, runs, stepRuns, stepUsage, type DefPin } from "../store/schema";
@@ -157,6 +158,9 @@ export interface StepBriefRequest {
   /** Cuántas veces entró la corrida a este nodo, desde 1. */
   visit: number;
   mode: string;
+  /** El slug del rol del nodo y el proyecto de la corrida: con el repo del worktree, deciden qué learnings entran. */
+  role: string;
+  projectId?: ProjectId;
   /** El brief del nodo con sus refs resueltas. */
   payload: unknown;
   /** La corrida y sus padres: el worktree y los reportes previos pueden ser de cualquiera. */
@@ -348,8 +352,8 @@ class StaleStepError extends Error {}
 
 /** Cómo terminó una ejecución, antes de decidir qué hace el motor con ella. */
 type Settled =
-  /** Un outcome del nodo, o `error`/`timeout`/`skipped`: sigue su edge. `notes` son las `decisions` del reporte del agente. */
-  | { kind: "outcome"; outcome: string; output?: unknown; error?: string; notes?: Note[] }
+  /** Un outcome del nodo, o `error`/`timeout`/`skipped`: sigue su edge. `reported` es lo que el reporte del agente le deja a una persona. */
+  | { kind: "outcome"; outcome: string; output?: unknown; error?: string; reported?: Reported }
   /** Una excepción: se reintenta según `retry`. */
   | { kind: "failed"; error: string }
   /** El agente se pasó de su tope: un reintento con el perfil escalado y un handoff, sin gastar el `retry` del nodo. */
@@ -359,10 +363,10 @@ type Settled =
   /** Un parallel que abrió sus ramas: el padre espera y lo cierra la transacción de la última rama. */
   | { kind: "waiting" };
 
-/** Una nota que el agente dejó en su reporte (`Report.decisions`). */
-interface Note {
-  title: string;
-  body: string;
+/** Lo que un agente dejó en su reporte para una persona (`Report.decisions` y `Report.learnings`): ninguna cosa bloquea a la corrida. */
+interface Reported {
+  notes: { title: string; body: string }[];
+  learnings: string[];
 }
 
 interface Job {
@@ -1134,7 +1138,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
     const briefRun: Brief["run"] = { id: run.id, subject: { type: run.subjectType, id: run.subjectId }, round: step.round, attempt: step.attempt };
     const brief: Brief = briefFor
-      ? await briefFor({ run: briefRun, nodeId: step.nodeId, visit: step.visit, mode: node.mode, payload, lineage: lineage(run) })
+      ? await briefFor({ run: briefRun, nodeId: step.nodeId, visit: step.visit, mode: node.mode, role: node.role, projectId: run.projectId ?? undefined, payload, lineage: lineage(run) })
       : { run: briefRun, worktree: workspace.path, base: workspace.base, mode: node.mode, artifacts: {}, payload };
     // Tras pasarse del tope el paso reintenta con el perfil escalado y una sesión nueva con handoff.
     const escalated = step.error === ESCALATED;
@@ -1180,7 +1184,7 @@ export function createEngine(deps: EngineDeps): Engine {
   function fromAgentResult(result: AgentResult): Settled {
     switch (result.status) {
       case "success":
-        return { kind: "outcome", outcome: result.report.outcome, output: result.report.payload, notes: result.report.decisions };
+        return { kind: "outcome", outcome: result.report.outcome, output: result.report.payload, reported: { notes: result.report.decisions ?? [], learnings: result.report.learnings ?? [] } };
       case "error":
         return { kind: "failed", error: result.message };
       case "login_expired":
@@ -1392,7 +1396,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ? undefined
             : artifacts.put(JSON.stringify(settled.output), "report", { mime: "application/json" });
         if (outputHash) artifacts.ref(outputHash, { type: "step_run", id: job.step.id, role: "output" });
-        transition(job, settled.outcome, outputHash, settled.error, settled.notes);
+        transition(job, settled.outcome, outputHash, settled.error, settled.reported);
         return;
       }
       case "failed": {
@@ -1460,7 +1464,7 @@ export function createEngine(deps: EngineDeps): Engine {
     outcome: string,
     outputHash: ArtifactHash | undefined,
     error: string | undefined,
-    notes?: Note[],
+    reported?: Reported,
   ): void {
     const { step, node, parallel } = job;
     const failed = outcome === "error" || outcome === "timeout";
@@ -1473,9 +1477,9 @@ export function createEngine(deps: EngineDeps): Engine {
     store.tx((tx) => {
       const run = tx.db.select().from(runs).where(eq(runs.id, step.runId)).get();
       if (!run) throw new Error(`Desapareció la corrida ${step.runId}.`);
-      if (!parallel || !parent) return advance(tx, run, step, node, outcome, outputHash, error, notes);
+      if (!parallel || !parent) return advance(tx, run, step, node, outcome, outputHash, error, reported);
 
-      closeStep(tx, run, step, { status: failed ? "failed" : "done", outcome, outputHash, message: error, notes });
+      closeStep(tx, run, step, { status: failed ? "failed" : "done", outcome, outputHash, message: error, reported });
       // El cierre sumó su costo a la corrida: `advance` parte de la fila al día.
       const current = tx.db.select().from(runs).where(eq(runs.id, run.id)).get() ?? run;
       const parentNode = parallelOf(job.flow, parallel.parent);
@@ -1496,7 +1500,7 @@ export function createEngine(deps: EngineDeps): Engine {
     outcome: string,
     outputHash: ArtifactHash | undefined,
     error: string | undefined,
-    notes?: Note[],
+    reported?: Reported,
   ): void {
     const edge = edgeFor(node, outcome);
     const taken = edge === undefined ? undefined : takeEdge(edge, `${step.nodeId}.${outcome}`, run.rounds, run.params);
@@ -1507,7 +1511,7 @@ export function createEngine(deps: EngineDeps): Engine {
       outputHash,
       message,
       note: taken?.note,
-      notes,
+      reported,
     });
 
     if (!taken) return parkForHuman(tx, run, step, node, message ?? "");
@@ -1555,8 +1559,8 @@ export function createEngine(deps: EngineDeps): Engine {
       note?: string;
       /** En qué estados está el paso que se cierra; por defecto, el de uno que se ejecutó. Una persona puede cerrar uno pending. */
       from?: StepRow["status"][];
-      /** Las notas del reporte del agente. */
-      notes?: Note[];
+      /** Lo que el reporte del agente le deja a una persona. */
+      reported?: Reported;
     },
   ): number {
     const cost = Number(
@@ -1594,7 +1598,15 @@ export function createEngine(deps: EngineDeps): Engine {
     // Notas que no bloquean: la corrida sigue por su edge, el humano las ve en la bandeja.
     const scope = scopeOf(run, step.id);
     if (closing.note !== undefined) openEdgeNote(tx, run, step, closing.outcome, closing.note);
-    for (const note of closing.notes ?? []) openDecision(tx, { ...scope, kind: "review_note", ...note });
+    for (const note of closing.reported?.notes ?? []) openDecision(tx, { ...scope, kind: "review_note", ...note });
+    // Un learning aplica a un proyecto: la corrida sin uno no tiene a quién proponérselo.
+    const { projectId } = run;
+    if (projectId) {
+      for (const raw of closing.reported?.learnings ?? []) {
+        const text = raw.trim();
+        if (text) proposeLearning(tx, { projectId, text, source: "agent", sourceRunId: run.id, origin: "core" });
+      }
+    }
     if (cost > 0) {
       tx.db.update(runs).set({ costMicros: sql`${runs.costMicros} + ${cost}` }).where(eq(runs.id, run.id)).run();
     }

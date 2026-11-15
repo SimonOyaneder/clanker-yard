@@ -218,6 +218,24 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
   },
+  learnings: {
+    list: os.learnings.list.handler(() => []),
+    get: os.learnings.get.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    propose: os.learnings.propose.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    approve: os.learnings.approve.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    reject: os.learnings.reject.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    update: os.learnings.update.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+  },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
     stream: os.events.stream.handler(async function* ({ input }) {

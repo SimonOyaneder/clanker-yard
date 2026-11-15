@@ -12,6 +12,7 @@ import type { Connections } from "./connections/connections";
 import { createBreakers } from "./breakers/breakers";
 import { environmentProbe } from "./breakers/probes";
 import { createDecisions } from "./decisions/decisions";
+import { createLearnings } from "./learnings/learnings";
 import { createDefs, type Defs } from "./defs/defs";
 import { createFlows } from "./flows/flows";
 import { createAskpass } from "./git/askpass";
@@ -179,6 +180,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     { types: ["breaker.opened"] },
   );
+  const learnings = createLearnings(store);
   const flows = createFlows({
     store,
     environment: { breakers, runtime: runtime.id },
@@ -189,7 +191,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     roles: roleInfoOf(defs),
     workspaceOf: workspaces.held,
     handOverWorkspaces: workspaces.handOver,
-    briefFor: createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, trackers }),
+    briefFor: createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, learnings, trackers }),
     bootId,
     // Con Watch avisando por `signal`, el sondeo de un wait es solo la red de seguridad (cuesta GraphQL).
     ...(opts.watch && { probeEverySec: WATCH_SAFETY_PROBE_SEC }),
@@ -316,6 +318,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     onPrChange,
     artifacts,
     decisions: createDecisions(store),
+    learnings,
     defs,
     legacyImport: createLegacyImporter({ store, defs }),
     bootId,

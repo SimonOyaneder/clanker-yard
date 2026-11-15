@@ -1,10 +1,11 @@
-import type { Brief, IssueId } from "@clanker/api";
+import type { Brief, IssueId, RepoId } from "@clanker/api";
 import { and, eq } from "drizzle-orm";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { StepBriefRequest } from "../flows/engine";
 import { artifactRefs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
+import type { Learnings } from "../learnings/learnings";
 import type { Tracker } from "../tracker/tracker";
 import type { Workspaces } from "../workspaces/workspaces";
 import type { Briefs } from "./brief";
@@ -15,6 +16,7 @@ export interface StepBriefsDeps {
   briefs: Briefs;
   artifacts: Artifacts;
   issues: Pick<Issues, "get">;
+  learnings: Pick<Learnings, "forBrief">;
   /** Los adapters por id de tracker: de ahí sale el detalle de la issue del sujeto. */
   trackers: Readonly<Record<string, Tracker>>;
 }
@@ -26,7 +28,7 @@ export interface StepBriefsDeps {
  * worktree: el snapshot de cada paso queda como artefacto de la corrida (`snapshot/<nodo>/<visita>/<intento>`)
  * y el siguiente paso del nodo parte del más reciente.
  */
-export function createStepBriefs({ store, workspaces, briefs, artifacts, issues, trackers }: StepBriefsDeps) {
+export function createStepBriefs({ store, workspaces, briefs, artifacts, issues, learnings, trackers }: StepBriefsDeps) {
   function lastSnapshot(request: StepBriefRequest): string | undefined {
     const prefix = `snapshot/${request.nodeId}/`;
     const found = store.db
@@ -58,6 +60,7 @@ export function createStepBriefs({ store, workspaces, briefs, artifacts, issues,
       mode: request.mode,
       issue,
       since: lastSnapshot(request),
+      learnings: learnings.forBrief({ projectId: request.projectId, repoId: held.repoId as RepoId, role: request.role }),
       payload: request.payload,
     });
     const role = `snapshot/${request.nodeId}/${request.visit}/${request.run.attempt}`;

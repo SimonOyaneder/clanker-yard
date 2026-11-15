@@ -27,6 +27,7 @@ export interface StartServerOptions extends Pick<
   | "onPrChange"
   | "artifacts"
   | "decisions"
+  | "learnings"
   | "defs"
   | "legacyImport"
   | "coreVersion"

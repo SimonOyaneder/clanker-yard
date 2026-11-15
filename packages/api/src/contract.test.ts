@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 import { type Contract, type Event, contract } from "./index";
 
 describe("contrato", () => {
-  test("exporta los routers system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, defs, metrics e imports con sus procedimientos", () => {
+  test("exporta los routers system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, learnings, defs, metrics e imports con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual([
       "artifacts",
       "connections",
@@ -12,6 +12,7 @@ describe("contrato", () => {
       "events",
       "imports",
       "issues",
+      "learnings",
       "metrics",
       "projects",
       "prs",
@@ -29,6 +30,7 @@ describe("contrato", () => {
     expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "testRecipe"]);
     expect(Object.keys(contract.runs).sort()).toEqual(["cancel", "forceOutcome", "get", "interrupt", "list", "pause", "resume", "retryStep", "start", "steerStep", "step", "transcript"]);
     expect(Object.keys(contract.decisions).sort()).toEqual(["get", "list", "resolve"]);
+    expect(Object.keys(contract.learnings).sort()).toEqual(["approve", "get", "list", "propose", "reject", "update"]);
     expect(Object.keys(contract.defs).sort()).toEqual(["archive", "create", "get", "list", "restore", "update"]);
     expect(Object.keys(contract.metrics).sort()).toEqual(["byDay", "byIssue", "byModel", "byRole", "byStep"]);
     expect(Object.keys(contract.imports)).toEqual(["legacy"]);
@@ -42,6 +44,7 @@ describe("contrato", () => {
       ...Object.values(contract.repos),
       ...Object.values(contract.runs),
       ...Object.values(contract.decisions),
+      ...Object.values(contract.learnings),
       ...Object.values(contract.defs),
       ...Object.values(contract.metrics),
       ...Object.values(contract.imports),

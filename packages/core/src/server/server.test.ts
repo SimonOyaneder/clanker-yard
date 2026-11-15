@@ -657,3 +657,43 @@ describe("en proceso", () => {
     expect(seqs).toEqual([1]);
   });
 });
+
+describe("learnings", () => {
+  const projectId = "prj_01J0000000000000000000000A";
+
+  test("propose, approve, update y reject por la API, con el origin de quien llama en los eventos", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+
+    const proposed = await client.learnings.propose({ projectId, text: "Corre `npm run lint` antes del push" });
+    expect(proposed).toMatchObject({ projectId, repoId: null, status: "proposed", source: "human", roles: [], tags: [] });
+    expect(await client.learnings.propose({ projectId, text: "Corre `npm run lint` antes del push" })).toEqual(proposed);
+
+    expect(await client.learnings.update({ id: proposed.id, roles: ["dev"] })).toMatchObject({ roles: ["dev"], status: "proposed" });
+    expect(await client.learnings.approve({ id: proposed.id })).toMatchObject({ status: "approved" });
+    expect((await client.learnings.list({ status: ["approved"] })).map((l) => l.id)).toEqual([proposed.id]);
+    expect(await client.learnings.get({ id: proposed.id })).toMatchObject({ status: "approved" });
+    expect(await client.learnings.reject({ id: proposed.id })).toMatchObject({ status: "archived" });
+
+    expect(store.events.since(0, { types: ["learning.proposed", "learning.approved", "learning.rejected"] }).map((e) => [e.type, e.origin])).toEqual([
+      ["learning.proposed", "cli"],
+      ["learning.approved", "cli"],
+      ["learning.rejected", "cli"],
+    ]);
+  });
+
+  test("un id que no existe es NOT_FOUND y un pedido sin alcance o con un texto repetido, BAD_REQUEST", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+    const missing = "lrn_01J0000000000000000000000A";
+
+    await expect(client.learnings.get({ id: missing })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(client.learnings.approve({ id: missing })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(client.learnings.reject({ id: missing })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(client.learnings.update({ id: missing, text: "x" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(client.learnings.propose({ text: "sin alcance" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await client.learnings.propose({ projectId, text: "uno" });
+    const other = await client.learnings.propose({ projectId, text: "otro" });
+    await expect(client.learnings.update({ id: other.id, text: "uno" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});

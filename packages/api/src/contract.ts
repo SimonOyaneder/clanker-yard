@@ -8,6 +8,7 @@ import {
   Event,
   EventFilter,
   IssueId,
+  LearningId,
   ProjectId,
   RepoId,
   RunId,
@@ -15,6 +16,7 @@ import {
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
 import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
+import { Learning, LearningFilter, LearningPatch, NewLearning } from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
@@ -526,6 +528,33 @@ const decisions = {
     .output(Decision),
 };
 
+const learnings = {
+  /** De la más reciente a la más antigua. Sin filtro trae todos, rechazados y archivados incluidos. */
+  list: base.input(LearningFilter.default({})).output(z.array(Learning)),
+  /** `NOT_FOUND` si no existe. */
+  get: base.input(z.object({ id: LearningId })).output(Learning),
+  /**
+   * Deja un learning de una persona en `proposed` y emite `learning.proposed`. Si el mismo texto ya existe en
+   * ese alcance, devuelve el que había (cualquiera sea su estado) y no emite nada. `BAD_REQUEST` si no trae
+   * exactamente uno de `projectId` o `repoId`.
+   */
+  propose: base.input(NewLearning).output(Learning),
+  /**
+   * Un `proposed`, `rejected` o `archived` pasa a `approved`: desde la próxima corrida entra a los briefs de
+   * su alcance y sus roles. Emite `learning.approved`. Uno ya aprobado se devuelve igual, sin evento.
+   * `NOT_FOUND` si no existe.
+   */
+  approve: base.input(z.object({ id: LearningId })).output(Learning),
+  /**
+   * Un `proposed` pasa a `rejected` y uno `approved` a `archived` (se retira): ninguno entra a un brief.
+   * Emite `learning.rejected`. Uno que ya está `rejected` o `archived` se devuelve igual, sin evento.
+   * `NOT_FOUND` si no existe.
+   */
+  reject: base.input(z.object({ id: LearningId })).output(Learning),
+  /** Cambia texto, roles o tags, en cualquier estado; los campos que faltan quedan como estaban. `NOT_FOUND` si no existe; `BAD_REQUEST` si el texto nuevo ya existe en su alcance. */
+  update: base.input(LearningPatch).output(Learning),
+};
+
 /** Flujos, roles, perfiles, recetas y packs: lo versionado en `defs`, leído por kind. */
 const defs = {
   /** Las vigentes del kind con su versión vigente, por slug; las archivadas solo con `includeArchived`. */
@@ -572,5 +601,5 @@ const defs = {
   restore: base.input(DefArchive).output(DefRecord),
 };
 
-export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, metrics, defs, imports };
+export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, learnings, metrics, defs, imports };
 export type Contract = typeof contract;

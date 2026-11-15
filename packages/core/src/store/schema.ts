@@ -12,6 +12,7 @@ import type {
   IssueId,
   IssueFilter,
   IssueRef,
+  LearningId,
   Milestone,
   Origin,
   Person,
@@ -796,6 +797,39 @@ export const decisions = sqliteTable(
     check("decisions_options_json", sql`json_valid(${t.options})`),
     check("decisions_subject_json", sql`${t.subject} IS NULL OR json_valid(${t.subject})`),
     check("decisions_resolution_json", sql`${t.resolution} IS NULL OR json_valid(${t.resolution})`),
+  ],
+);
+
+export const LEARNING_STATUSES = ["proposed", "approved", "rejected", "archived"] as const;
+export const LEARNING_SOURCES = ["agent", "human", "import"] as const;
+
+/**
+ * Lo que un agente futuro necesita saber. Su alcance es `project_id` o `repo_id` (uno de los dos) y
+ * `roles` vacío es todos los roles. Sin FK, como `decisions`: sobrevive a su corrida y a su proyecto.
+ * El mismo texto no se repite en un alcance (`learnings_scope_text`): proponer lo que ya existe, en
+ * cualquier estado, no lo duplica ni resucita lo que se rechazó.
+ */
+export const learnings = sqliteTable(
+  "learnings",
+  {
+    id: text().$type<LearningId>().primaryKey(),
+    projectId: text("project_id").$type<ProjectId>(),
+    repoId: text("repo_id").$type<RepoId>(),
+    text: text().notNull(),
+    roles: text({ mode: "json" }).$type<string[]>().notNull(),
+    tags: text({ mode: "json" }).$type<string[]>().notNull(),
+    status: text({ enum: LEARNING_STATUSES }).notNull(),
+    source: text({ enum: LEARNING_SOURCES }).notNull(),
+    sourceRunId: text("source_run_id").$type<RunId>(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    index("learnings_project_status").on(t.projectId, t.status),
+    index("learnings_repo_status").on(t.repoId, t.status),
+    uniqueIndex("learnings_scope_text").on(sql`coalesce(${t.projectId}, '')`, sql`coalesce(${t.repoId}, '')`, t.text),
+    check("learnings_one_scope", sql`(${t.projectId} IS NULL) != (${t.repoId} IS NULL)`),
+    check("learnings_roles_json", sql`json_valid(${t.roles})`),
+    check("learnings_tags_json", sql`json_valid(${t.tags})`),
   ],
 );
 
