@@ -56,6 +56,7 @@ function setup(opts: TempGitRepoOptions = {}, { remote = true } = {}) {
   repo = tempGitRepo({ remote: true, ...opts });
   const fakeRemote: GitRemote = {
     push: () => Promise.reject(new Error("no se usa")),
+    lsRemote: () => Promise.reject(new Error("no se usa")),
     fetch: ({ cwd }) => {
       fetches += 1;
       if (fetchOutcome === "ok") execFileSync("git", ["fetch", "origin"], { cwd, stdio: "pipe" });

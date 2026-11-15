@@ -163,6 +163,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
     linearEndpoint: linear?.endpoints.graphql,
     coreVersion: "0.0.0",
     onShutdown: () => {},
+    watch: true,
   });
   const client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
 

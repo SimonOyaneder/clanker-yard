@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { RunId } from "./domain";
 
 // El estado normalizado de un PR (`docs/design.html#d-ops`, interface PrState). Es genérico: lo que
 // depende de la organización (quién es el bot de review, qué checks cuentan, qué labels son señales)
@@ -124,3 +125,27 @@ export function reviewStatusOf(pr: PrState): ReviewStatus {
   if (pr.reviewDecision === "review_required" && pr.state === "open") return "pending";
   return "none";
 }
+
+/** Un PR del caché de Watch (`pull_requests`): lo último que se leyó de él, sin ir a GitHub. */
+export const CachedPr = z.object({
+  ref: PrRef,
+  /** Lo abrió el sistema (`pr.publish`); los demás los descubrió la búsqueda de tus PRs. */
+  owned: z.boolean(),
+  /** El sujeto de la corrida que lo abrió. */
+  issueId: z.string().nullable(),
+  runId: RunId.nullable(),
+  /** `null` mientras Watch no lo haya leído ni una vez. */
+  state: PrState.nullable(),
+  /** ms epoch de la última lectura de `state`. */
+  readAt: z.number().nullable(),
+});
+export type CachedPr = z.infer<typeof CachedPr>;
+
+export const PrFilter = z.object({
+  /** `owner/repo` */
+  repo: z.string().optional(),
+  owned: z.boolean().optional(),
+  /** El estado de GitHub del PR (`draft` cuenta como `open`). */
+  state: z.enum(["open", "closed", "merged"]).optional(),
+});
+export type PrFilter = z.infer<typeof PrFilter>;

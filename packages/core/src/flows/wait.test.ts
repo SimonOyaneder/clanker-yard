@@ -84,6 +84,22 @@ describe("wait", () => {
     ]);
   });
 
+  test("waitKeys da la clave de cada wait que espera ahora, y deja de darla cuando se cierra", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.save(flow());
+    expect(h.flows.waitKeys()).toEqual([]);
+
+    h.start("ci", { type: "issue", id: "ENG-7" }, { pr: 7 });
+    h.start("ci", { type: "issue", id: "ENG-8" }, { pr: 8 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.flows.waitKeys().sort()).toEqual(["pr:7:ci", "pr:8:ci"]);
+
+    h.flows.signal({ type: "pr.ci", pr: 7, state: "ok", failures: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.flows.waitKeys()).toEqual(["pr:8:ci"]);
+  });
+
   test("signal despierta solo a los waits que calzan", async () => {
     vi.useFakeTimers();
     const h = harness();

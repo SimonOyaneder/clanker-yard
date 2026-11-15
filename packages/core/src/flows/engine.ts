@@ -57,7 +57,7 @@ const HANDOFF_NOTICE =
 const FORCE = "force:";
 export const TICK_MS = 5000;
 export const DEFAULT_MAX_AGENTS = 4;
-/** Cada cuánto se sondea un wait mientras no exista Watch que avise con `signal`. */
+/** Cada cuánto se sondea un wait con `probe`; Watch avisa antes con `signal`, así que el sondeo es la red de seguridad. */
 export const DEFAULT_PROBE_EVERY_SEC = 60;
 /** Un valor resuelto de más de esto no entra al brief: va a artifacts y el brief recibe `{ artifact, size }`. */
 export const OUTPUT_INLINE_MAX_BYTES = 16 * 1024;
@@ -190,6 +190,8 @@ export interface Engine {
    * el outcome que devuelve. Los waits que no calzan siguen esperando.
    */
   signal(event: ExternalEvent): void;
+  /** Las claves (`WaitDef.key`) de los waits que esperan ahora en corridas activas: qué mira Watch con más cuidado. */
+  waitKeys(): string[];
   /**
    * Resuelve la decisión que tiene estacionada a una corrida. Un gate se cierra con la opción como
    * outcome del paso. En un `needs_human` la opción es `retry` (el nodo vuelve a correr como una visita
@@ -1520,6 +1522,16 @@ export function createEngine(deps: EngineDeps): Engine {
     wake();
   }
 
+  function waitKeys(): string[] {
+    return store.db
+      .select({ key: stepRuns.waitKey })
+      .from(stepRuns)
+      .innerJoin(runs, eq(stepRuns.runId, runs.id))
+      .where(and(eq(stepRuns.status, "waiting"), isNotNull(stepRuns.waitKey), eq(runs.status, "running")))
+      .all()
+      .flatMap(({ key }) => key ?? []);
+  }
+
   /** Los waits que esperan en corridas activas. */
   function waitingSteps(): Job[] {
     return store.db
@@ -2145,7 +2157,7 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  return { start, signal, resolveGate, cancel, getRun, listRuns, recover, close };
+  return { start, signal, waitKeys, resolveGate, cancel, getRun, listRuns, recover, close };
 }
 
 class StepTimeout extends Error {

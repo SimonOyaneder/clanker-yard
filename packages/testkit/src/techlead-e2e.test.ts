@@ -54,6 +54,13 @@ describe("techlead-clasico de punta a punta", () => {
     expect(scenario.repo.git("--git-dir", scenario.repo.remoteDir!, "show", `${pull!.head.ref}:src/transfer.ts`)).toContain("got ${amount}");
     expect(pr.headSha()).toBe(log[0]!.sha);
 
+    // Watch corre con el core real: el PR que se publicó entra al caché con su detalle (el head puede ir
+    // atrás de un force push reciente: el siguiente sondeo lo alcanza).
+    await vi.waitFor(async () => {
+      const [cached] = await client.prs.list({});
+      expect(cached).toMatchObject({ owned: true, state: { state: "draft" } });
+    }, { timeout: 15_000, interval: 250 });
+
     // El hallazgo se respondió una vez, con el sha del commit que quedó pusheado, y se resolvió.
     const [thread] = pr.node().reviewThreads;
     const bodies = thread!.comments.nodes.map((c) => c.body.split("\n")[0]);

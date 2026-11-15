@@ -9,8 +9,10 @@ import { createPacks, type Packs } from "../packs/packs";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createRouter } from "../server/router";
 import { apiDeps } from "../server/testing";
+import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
+import { createRepos, type Repos } from "../workspaces/repos";
 import { healthyGitHub, startFakeGitHub, type FakeGitHub, type FakeRequest, type RecordedResponse } from "./fake-github";
 import { PrNotFoundError } from "./pr-query";
 import { graphqlNotFound, prGraphql } from "./fake-pr-graphql";
@@ -189,12 +191,13 @@ describe("prs.get", () => {
 });
 
 describe("API", () => {
-  async function clientFor(connections: Connections) {
+  async function clientFor(connections: Connections, repos?: Repos) {
     const router = createRouter({
       store,
       connections,
       issues: createIssues(store),
       ...apiDeps(store, dir),
+      ...(repos && { repos }),
       packs,
       coreVersion: "0",
       bootId: "boot",
@@ -210,6 +213,29 @@ describe("API", () => {
     const client = await clientFor(connections);
 
     expect(await client.prs.get(REPO)).toMatchObject({ key: "api#4251", state: "draft", mergeable: "clean" });
+  });
+
+  test("prs.list sirve el caché sin ir a GitHub y prs.refresh lo pone al día", async () => {
+    const connections = await connect(prGraphql(prNode({ isDraft: true })));
+    const repos = createRepos(store, { remote: (repo) => ({ url: `https://example.invalid/${repo}.git`, repo, account: "octocat" }) });
+    const repoId = repos.add({ name: "api", path: "/tmp/api", remote: "acme/api" });
+    store.tx((tx) =>
+      tx.db
+        .insert(pullRequests)
+        .values({ id: "pr_1", repoId, number: 4251, nodeId: "PR_1", headRef: "feat/x", baseRef: "main", headSha: HEAD_SHA, state: "open", isDraft: false, owned: true })
+        .run(),
+    );
+    const client = await clientFor(connections, repos);
+
+    expect(await client.prs.list({})).toEqual([{ ref: REPO, owned: true, issueId: null, runId: null, state: null, readAt: null }]);
+    expect(graphqlRequests()).toEqual([]);
+
+    expect(await client.prs.refresh(REPO)).toMatchObject({ state: "draft" });
+
+    const [cached] = await client.prs.list({ state: "open" });
+    expect(cached).toMatchObject({ ref: REPO, state: { state: "draft", key: "api#4251" } });
+    expect(cached?.readAt).toBeGreaterThan(0);
+    expect(await client.prs.list({ state: "merged" })).toEqual([]);
   });
 
   test("un PR que no existe es NOT_FOUND y una cuenta no conectada es BAD_REQUEST", async () => {

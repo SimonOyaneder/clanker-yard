@@ -31,6 +31,9 @@ export interface GitHubClientOptions extends GitHubApiOptions {
 
 export type GitHubClient = Octokit;
 
+/** La clave de `sync_cursors` con la cuota de un recurso (`core`, `graphql`, `search`...) de una cuenta. */
+export const rateKey = (account: string, resource: string): string => `rate:github:${account}:${resource}`;
+
 /** `true` si GitHub rechazó la request por cuota (primaria o secundaria), no por permisos. */
 export function isRateLimited(error: unknown): error is RequestError {
   return error instanceof RequestError && rateLimitReset(error.status, error.response?.headers) !== undefined;
@@ -39,10 +42,13 @@ export function isRateLimited(error: unknown): error is RequestError {
 /**
  * El único punto por donde sale una request a GitHub. Pone el token de `tokens` en cada una, reintenta
  * una vez con `refresh` si GitHub responde 401 y, con `quota`, registra la cuota en `sync_cursors`
- * y emite `sync.rate_limited` cuando GitHub corta.
+ * y emite `sync.rate_limited` cuando GitHub corta. Las requests de un cliente (una cuenta) salen en
+ * serie, nunca en paralelo, como pide GitHub ("Best practices for using the REST API"). El segundo entre
+ * escrituras lo guardan las acciones que escriben en ráfaga (`pr-feedback.ts`).
  */
 export function createGitHubClient({ tokens, quota, baseUrl, fetch }: GitHubClientOptions): GitHubClient {
   const octokit = new Octokit({ baseUrl, request: { fetch } });
+  const inSeries = createSeries();
 
   octokit.hook.wrap("request", async (request, options) => {
     options.headers.authorization = `bearer ${await tokens.token()}`;
@@ -56,6 +62,9 @@ export function createGitHubClient({ tokens, quota, baseUrl, fetch }: GitHubClie
     }
   });
 
+  // Último en registrarse = más externo: el turno cubre también el reintento tras el 401.
+  octokit.hook.wrap("request", (request, options) => inSeries(async () => request(options)));
+
   if (quota) {
     octokit.hook.after("request", (response) => recordQuota(quota, response.status, response.headers, response.data));
     octokit.hook.error("request", (error) => {
@@ -68,6 +77,16 @@ export function createGitHubClient({ tokens, quota, baseUrl, fetch }: GitHubClie
   return octokit;
 }
 
+/** Una cola: cada tarea espera a que termine la anterior, falle o no. */
+function createSeries() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(task: () => Promise<T>): Promise<T> => {
+    const result = tail.then(task);
+    tail = result.catch(() => undefined);
+    return result;
+  };
+}
+
 type Headers = Record<string, string | number | undefined>;
 
 function recordQuota(
@@ -78,12 +97,13 @@ function recordQuota(
 ) {
   const remaining = numberHeader(headers["x-ratelimit-remaining"]);
   const reset = numberHeader(headers["x-ratelimit-reset"]);
+  const limit = numberHeader(headers["x-ratelimit-limit"]);
   const limitedUntil = rateLimitReset(status, headers, body);
   if (remaining === undefined && limitedUntil === undefined) return;
   store.tx((tx) => {
     if (remaining !== undefined && reset !== undefined) {
-      const key = `rate:github:${account}:${headers["x-ratelimit-resource"] ?? "core"}`;
-      const values = { checkedAt: Date.now(), rateRemaining: remaining, resetAt: reset * 1000 };
+      const key = rateKey(account, String(headers["x-ratelimit-resource"] ?? "core"));
+      const values = { checkedAt: Date.now(), rateRemaining: remaining, resetAt: reset * 1000, rateLimit: limit ?? null };
       tx.db
         .insert(syncCursors)
         .values({ key, ...values })

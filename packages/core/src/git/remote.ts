@@ -48,6 +48,11 @@ export interface GitRemote {
   push(request: PushRequest): Promise<PushOutcome>;
   /** Trae todas las branches a `refs/remotes/origin/*`. */
   fetch(target: RemoteTarget): Promise<FetchOutcome>;
+  /**
+   * La punta de cada branch del remoto (`git ls-remote --heads`): `{ branch: sha }`. No gasta cuota de la
+   * API de GitHub. `unauthorized` si GitHub respondió 401 y la conexión quedó revocada.
+   */
+  lsRemote(target: RemoteTarget): Promise<Record<string, string> | "unauthorized">;
 }
 
 export interface GitRemoteOptions {
@@ -119,6 +124,21 @@ export function createGitRemote({ askpass, connections, procs }: GitRemoteOption
       if (fetched.ok) return "ok";
       if (fetched.reason === "unauthorized") return "unauthorized";
       throw failure(target, args, fetched.stderr);
+    },
+
+    async lsRemote(target) {
+      const args = [...NO_HOOKS, "ls-remote", "--heads", target.url];
+      const listed = await run(target, args);
+      if (!listed.ok) {
+        if (listed.reason === "unauthorized") return "unauthorized";
+        throw failure(target, args, listed.stderr);
+      }
+      const heads: Record<string, string> = {};
+      for (const line of listed.stdout.split("\n")) {
+        const [sha, ref] = line.split("\t");
+        if (sha && ref?.startsWith("refs/heads/")) heads[ref.slice("refs/heads/".length)] = sha;
+      }
+      return heads;
     },
   };
 }

@@ -170,6 +170,7 @@ function recordPull(
         issueId: run?.subjectType === "issue" ? run.subjectId : null,
         runId: ctx.runId,
         owned: true,
+        headChangedAt: Date.now(),
       })
       .onConflictDoNothing()
       .returning({ id: pullRequests.id })

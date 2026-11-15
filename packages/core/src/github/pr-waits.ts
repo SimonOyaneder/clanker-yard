@@ -12,12 +12,29 @@ const PrEvent = z.object({ pr: PrRef, state: PrState });
 
 const sameRepoPr = (a: PrRef, b: PrRef) => a.repo === b.repo && a.number === b.number;
 
+/** Los tipos de evento que cierran estos waits: el `name` de cada uno. */
+const PR_EVENT_TYPES = ["pr.botReview", "pr.ci", "pr.merged"] as const;
+
+/**
+ * El hecho que Watch entrega a `flows.signal` cada vez que cambia el `PrState` de un PR: uno por tipo de
+ * wait, todos con el mismo estado. Cada wait decide con su propia regla si eso es lo que esperaba.
+ */
+export function signalPr(signal: (event: ExternalEvent) => void, pr: PrRef, state: PrState): void {
+  for (const type of PR_EVENT_TYPES) signal({ type, pr, state });
+}
+
+/** Cuál PR espera un wait según su clave (`WaitDef.key`), o `undefined` si no es de un PR. */
+export function prOfWaitKey(key: string): { repo: string; number: number } | undefined {
+  const match = /^pr:([^/\s#]+\/[^/\s#]+)#(\d+):/.exec(key);
+  return match ? { repo: match[1]!, number: Number(match[2]) } : undefined;
+}
+
 /**
  * Un wait sobre el estado de un PR. `decide` mira el `PrState` y devuelve el resultado o `undefined` si lo
  * esperado todavía no pasó; `match` lo aplica al estado del evento y `probe` al que lee `prs.get`.
  */
 function prWait<A extends z.ZodObject<{ pr: typeof PrRef }>>(wait: {
-  name: "pr.botReview" | "pr.ci" | "pr.merged";
+  name: (typeof PR_EVENT_TYPES)[number];
   args: A;
   outcomes: string[];
   key: string;

@@ -347,6 +347,27 @@ describe("fetch", () => {
   });
 });
 
+describe("ls-remote", () => {
+  const remote = () => createGitRemote({ askpass, connections });
+
+  test("da la punta de cada branch con el token de la conexión", async () => {
+    await setup(TOKEN, { branches: { feat: [{ message: "feat: algo" }] } });
+
+    const heads = await remote().lsRemote({ cwd: repo.dir, url: server!.url, account: ACCOUNT });
+
+    expect(heads).toEqual({ main: remoteSha("main"), feat: remoteSha("feat") });
+    expect(Buffer.from(server!.authorizations.at(-1)!.replace("Basic ", ""), "base64").toString()).toBe(`${ACCOUNT}:${TOKEN}`);
+  });
+
+  test("un 401 deja la conexión revocada", async () => {
+    await setup("otro-token");
+
+    expect(await remote().lsRemote({ cwd: repo.dir, url: server!.url, account: ACCOUNT })).toBe("unauthorized");
+
+    expect(connections.list()).toMatchObject([{ status: "revoked" }]);
+  });
+});
+
 describe("askpass", () => {
   /** Lo que git hace con `GIT_ASKPASS`: corre el script con el prompt como argumento. */
   async function ask(env: Record<string, string>, prompt: string) {

@@ -86,6 +86,7 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
       runtimes: [createClaudeRuntime({ credentials: connections.claudeCredentials, home: opts.dataDir, procs })],
       coreVersion: pkg.version,
       onShutdown: ({ drain }) => setImmediate(() => shutdown("system.shutdown", { drain })),
+      watch: true,
     });
     const { server } = core;
     store.tx((tx) => {

@@ -576,6 +576,28 @@ describe("ETags", () => {
     expect(changed.headers.get("etag")).not.toBe(etag);
   });
 
+  test("una review, un comentario y una respuesta mueven updated_at y el etag del PR; un check o resolver un thread no", async () => {
+    const pr = sim.openPr({ head: BRANCH });
+    const path = `/repos/${REPO}/pulls/1`;
+    const [thread] = pr.botFindings(["Falta validar el monto"]);
+    const read = async () => {
+      const { body, headers } = await api("GET", path);
+      return `${body.updated_at} ${headers.get("etag")}`;
+    };
+    const moves = async (act: () => void) => {
+      const before = await read();
+      act();
+      return (await read()) !== before;
+    };
+
+    expect(await moves(() => pr.review("ana", "COMMENTED", { body: "ojo" }))).toBe(true);
+    expect(await moves(() => pr.comment("ana", "hola"))).toBe(true);
+    expect(await moves(() => pr.thread("ana", "acá también"))).toBe(true);
+    expect(await moves(() => pr.reply(thread!.id, "ana", "gracias"))).toBe(true);
+    expect(await moves(() => pr.resolve(thread!.id))).toBe(false);
+    expect(await moves(() => pr.check("lint", "success"))).toBe(false);
+  });
+
   test("el listado y los comentarios también tienen etag, y un push nuevo cambia el del PR", async () => {
     sim.openPr({ head: BRANCH });
     const list = await api("GET", `/repos/${REPO}/pulls`);
@@ -585,6 +607,42 @@ describe("ETags", () => {
     pushCommit(BRANCH, "fixup! feat: change");
 
     expect((await api("GET", `/repos/${REPO}/pulls/1`, undefined, { "if-none-match": pull.headers.get("etag")! })).status).toBe(200);
+  });
+});
+
+describe("búsqueda y mergeabilidad", () => {
+  test("GET /search/issues lista los PRs abiertos de quien llama y gasta la cuota de search (30)", async () => {
+    sim.openPr({ head: BRANCH });
+    sim.openPr({ head: "sin-cambios", author: "otra-persona" });
+    sim.pr(1).merge();
+    const query = encodeURIComponent("is:pr author:@me is:open");
+
+    const open = await api("GET", `/search/issues?q=${query}`);
+    expect(open.body.items).toEqual([]);
+    expect(open.headers.get("x-ratelimit-resource")).toBe("search");
+    expect(open.headers.get("x-ratelimit-limit")).toBe("30");
+    expect(open.headers.get("x-ratelimit-remaining")).toBe("29");
+
+    const mine = sim.openPr({ head: BRANCH });
+    const found = await api("GET", `/search/issues?q=${query}`);
+    expect(found.body.items.map((i: { number: number; repository_url: string }) => [i.number, i.repository_url])).toEqual([
+      [mine.number, `https://api.github.com/repos/${REPO}`],
+    ]);
+    const again = await api("GET", `/search/issues?q=${query}`, undefined, { "if-none-match": found.headers.get("etag")! });
+    expect(again.status).toBe(304);
+    expect(sim.quotaRemaining("search")).toBe(28);
+    expect(sim.quotaRemaining("core")).toBe(5000);
+  });
+
+  test("mergeableUnknown: GraphQL da UNKNOWN las veces pedidas y REST mientras tanto mergeable null", async () => {
+    const pr = sim.openPr({ head: BRANCH });
+    pr.mergeableUnknown(2);
+
+    expect((await api("GET", `/repos/${REPO}/pulls/1`)).body).toMatchObject({ mergeable: null, mergeable_state: "unknown" });
+    expect((await prState(1)).mergeable).toBe("unknown");
+    expect((await prState(1)).mergeable).toBe("unknown");
+    expect((await prState(1)).mergeable).toBe("clean");
+    expect((await api("GET", `/repos/${REPO}/pulls/1`)).body).toMatchObject({ mergeable: true, mergeable_state: "clean" });
   });
 });
 

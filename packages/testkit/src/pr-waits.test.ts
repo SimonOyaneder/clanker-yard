@@ -12,6 +12,7 @@ import {
   createPacks,
   createPrs,
   openStore,
+  prOfWaitKey,
   prWaits,
   reviewRequestBotAction,
   type Connections,
@@ -349,5 +350,15 @@ describe("pr.merged", () => {
     const result = await run(mergedFlow(0.3));
 
     expect(result.steps).toEqual([["merged", "timeout"]]);
+  });
+});
+
+describe("clave de un wait", () => {
+  test("prOfWaitKey devuelve el PR de la clave de cada wait de PR, y nada para otra clave", () => {
+    const waits = prWaits(createPrs({ connections, packs }));
+
+    const keys = [waits.botReview.key({ pr: PR, after: 0 }), waits.ci.key({ pr: PR }), waits.merged.key({ pr: PR })];
+    for (const key of keys) expect(prOfWaitKey(key)).toEqual({ repo: REPO, number: 1 });
+    expect(prOfWaitKey("issue:CLA-1:queued")).toBeUndefined();
   });
 });

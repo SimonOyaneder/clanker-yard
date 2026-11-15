@@ -1,7 +1,9 @@
-import { API_MAJOR, type ClientOrigin, contract, type ProjectId } from "@clanker/api";
+import { API_MAJOR, type ClientOrigin, contract, type PrRef, type PrState, type ProjectId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubPatError, githubPatForm } from "../github/pat";
 import { PrNotFoundError } from "../github/pr-query";
+import { createPrCache } from "../github/pr-cache";
+import { signalPr } from "../github/pr-waits";
 import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
@@ -67,10 +69,25 @@ export function createRouter(deps: RouterDeps) {
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
   const prs = createPrs({ connections: deps.connections, packs: deps.packs });
+  const prCache = createPrCache({ store, repos, prs, onChange: (ref, state) => signalPr(flows.signal, ref, state) });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
     if (!project) throw new ORPCError("NOT_FOUND", { message: `No existe el proyecto ${id}.` });
     return project;
+  };
+  /** Lee un PR de GitHub (`prs.get`, `prs.refresh`) y traduce sus errores a los de la API. */
+  const readPr = async (ref: PrRef, read: (ref: PrRef) => Promise<PrState>): Promise<PrState> => {
+    if (!deps.connections.list().some((c) => c.provider === "github" && c.account === ref.account)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `No hay una cuenta github conectada como "${ref.account}": conéctala primero.`,
+      });
+    }
+    try {
+      return await read(ref);
+    } catch (error) {
+      if (error instanceof PrNotFoundError) throw new ORPCError("NOT_FOUND", { message: error.message, cause: error });
+      throw error;
+    }
   };
   const platform = process.platform;
   if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
@@ -195,19 +212,9 @@ export function createRouter(deps: RouterDeps) {
       summary: os.projects.summary.handler(({ input }) => metrics.summary(projectOrNotFound(input.id).id)),
     },
     prs: {
-      get: os.prs.get.handler(async ({ input }) => {
-        if (!deps.connections.list().some((c) => c.provider === "github" && c.account === input.account)) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: `No hay una cuenta github conectada como "${input.account}": conéctala primero.`,
-          });
-        }
-        try {
-          return await prs.get(input);
-        } catch (error) {
-          if (error instanceof PrNotFoundError) throw new ORPCError("NOT_FOUND", { message: error.message, cause: error });
-          throw error;
-        }
-      }),
+      get: os.prs.get.handler(({ input }) => readPr(input, prs.get)),
+      list: os.prs.list.handler(({ input }) => prCache.list(input)),
+      refresh: os.prs.refresh.handler(({ input }) => readPr(input, prCache.refresh)),
     },
     repos: {
       list: os.repos.list.handler(() => repos.list()),

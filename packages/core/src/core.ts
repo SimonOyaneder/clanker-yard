@@ -15,7 +15,8 @@ import { createFlows } from "./flows/flows";
 import { createAskpass } from "./git/askpass";
 import { createGitRemote } from "./git/remote";
 import { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
-import { prWaits } from "./github/pr-waits";
+import { createPrCache } from "./github/pr-cache";
+import { prWaits, signalPr } from "./github/pr-waits";
 import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/publish";
 import { stackRestackAction } from "./github/restack";
@@ -36,6 +37,7 @@ import { newId } from "./store/conventions";
 import type { Store } from "./store/store";
 import { createIssues } from "./tracker/issues";
 import { createLocalTracker } from "./tracker/local";
+import { createWatch } from "./watch/watch";
 import { createRepos } from "./workspaces/repos";
 import {
   createWorkspaces,
@@ -51,6 +53,9 @@ const DRAIN_MS = 60_000;
 const KILL_AFTER_MS = 10_000;
 /** Lo que tarda en soltarse un paso después de SIGKILL; pasado esto se deja atrás y el próximo arranque lo recupera. */
 const SETTLE_MS = 5_000;
+
+/** Con Watch encendido, cada cuánto se sondea un wait además de sus señales: la reconciliación de 10 min del diseño. */
+const WATCH_SAFETY_PROBE_SEC = 600;
 
 /** Autor y committer de lo que el core hace con git en un worktree. */
 const GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
@@ -75,6 +80,11 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   gitUrl?: (repo: string) => string;
   /** El GraphQL de Linear. Por defecto el real; un test lo apunta a `startFakeLinear`. */
   linearEndpoint?: string;
+  /**
+   * Enciende Watch, el polling de PRs (`watch.start()`). Es lo que corre el core real (`runCore`); por defecto
+   * está apagado para que un test que levanta el core contra el GitHub simulado no reciba requests que no pidió.
+   */
+  watch?: boolean;
 }
 
 export interface Core {
@@ -106,13 +116,14 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const slots = createSlots({ store });
   const askpass = createAskpass();
+  const gitRemote = createGitRemote({ askpass, connections: opts.connections, procs });
   const workspaces = createWorkspaces({
     store,
     dataDir,
     repos: repos.config,
     identity: GIT_IDENTITY,
     procs,
-    remote: createGitRemote({ askpass, connections: opts.connections, procs }),
+    remote: gitRemote,
     worktreeSetup: (dir) => readRecipe(dir)?.setup?.worktree ?? [],
   });
   const local = createLocalTracker(store);
@@ -129,12 +140,23 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     handOverWorkspaces: workspaces.handOver,
     briefFor: createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, trackers }),
     bootId,
+    // Con Watch avisando por `signal`, el sondeo de un wait es solo la red de seguridad (cuesta GraphQL).
+    ...(opts.watch && { probeEverySec: WATCH_SAFETY_PROBE_SEC }),
     onClockJump: () => {
       workspaces.extendLeases();
       slots.extendLeases();
     },
   });
   const prs = createPrs({ connections: opts.connections, packs });
+  const prCache = createPrCache({ store, repos, prs, onChange: (ref, state) => signalPr(flows.signal, ref, state) });
+  const watch = createWatch({
+    store,
+    connections: opts.connections,
+    repos,
+    cache: prCache,
+    remote: gitRemote,
+    waitKeys: flows.waitKeys,
+  });
   const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtime) ? runtime : undefined });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceAttachAction(workspaces));
@@ -182,6 +204,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     { types: ["run.returned"] },
   );
+  if (opts.watch) watch.start();
   const server = await startServer({
     store,
     connections: opts.connections,
@@ -206,6 +229,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   return {
     server,
     async close({ drain } = { drain: false }) {
+      await watch.stop();
       const graceMs = drain ? DRAIN_MS : 0;
       const stopped = flows.close({ graceMs });
       // Con `drain`, hasta que las acciones terminen solas; sin él, el SIGTERM sale de inmediato.

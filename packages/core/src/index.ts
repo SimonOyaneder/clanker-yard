@@ -95,6 +95,10 @@ export type { Actor, PrNode, RawComment, RawContext, RawReview, RawThread, Revie
 export { buildPrState } from "./github/pr-state";
 export type { PrStateContext } from "./github/pr-state";
 export { createPrs } from "./github/prs";
+export { createPrCache } from "./github/pr-cache";
+export type { PrCache } from "./github/pr-cache";
+export { createWatch, WATCH_TICK_MS } from "./watch/watch";
+export type { Watch, WatchDeps } from "./watch/watch";
 export type { Prs } from "./github/prs";
 export type {
   GitHubApiOptions,
@@ -171,7 +175,7 @@ export { createRecipeTester, RecipeTestError } from "./recipe/recipe-test";
 export type { RecipeTester, RecipeTesterOptions } from "./recipe/recipe-test";
 
 export { commitsApplyAction } from "./commits/apply";
-export { prWaits } from "./github/pr-waits";
+export { prOfWaitKey, prWaits, signalPr } from "./github/pr-waits";
 export { prPublishAction } from "./github/publish";
 export type { PrPublishDeps } from "./github/publish";
 export { prPushFixupsAction } from "./github/push-fixups";

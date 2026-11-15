@@ -94,6 +94,10 @@ const router = os.router({
     get: os.prs.get.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    list: os.prs.list.handler(() => []),
+    refresh: os.prs.refresh.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
   },
   repos: {
     list: os.repos.list.handler(() => []),

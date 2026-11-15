@@ -40,6 +40,7 @@ beforeEach(() => {
   });
   const remote: GitRemote = {
     push: () => Promise.reject(new Error("no se usa")),
+    lsRemote: () => Promise.reject(new Error("no se usa")),
     fetch: ({ cwd }) => {
       execFileSync("git", ["fetch", "origin"], { cwd, stdio: "pipe" });
       return Promise.resolve("ok");

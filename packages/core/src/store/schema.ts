@@ -15,6 +15,7 @@ import type {
   Origin,
   Person,
   Priority,
+  PrState,
   ProjectId,
   ProjectStatus,
   RepoId,
@@ -361,7 +362,11 @@ export const projectRepos = sqliteTable(
   ],
 );
 
-/** Estado de polling y cuota por recurso: ETags (`etag`, `cursor`) y la última cuota que GitHub informó. */
+/**
+ * Estado de polling y cuota por recurso (`docs/design.html#d-ops`). Lo que Watch pide con ETag guarda el
+ * suyo en `etag:github:<cuenta>:<ruta>`; `refs:<owner/repo>` guarda en `cursor` las puntas de las
+ * branches del último `git ls-remote`; la cuota de GitHub va en `rate:github:<cuenta>:<recurso>`.
+ */
 export const syncCursors = sqliteTable("sync_cursors", {
   /** URL o recurso; la cuota de GitHub usa `rate:github:<cuenta>:<recurso>`. */
   key: text().primaryKey(),
@@ -371,6 +376,8 @@ export const syncCursors = sqliteTable("sync_cursors", {
   rateRemaining: integer("rate_remaining"),
   /** ms epoch en que se renueva la cuota. */
   resetAt: integer("reset_at"),
+  /** El tope del recurso (`x-ratelimit-limit`): con él se sabe qué fracción de la cuota queda. */
+  rateLimit: integer("rate_limit"),
 });
 
 /** Contenido direccionado por su SHA-256: el mismo contenido es una sola fila. */
@@ -762,10 +769,12 @@ export const decisions = sqliteTable(
 export const PR_STATES = ["open", "closed", "merged"] as const;
 
 /**
- * Un PR de GitHub que el core conoce (`docs/design.html#d-data`). Hoy solo lo escribe `pr.publish`; las
- * columnas que lee el polling (`review`, `ci`, `mergeable`, `signals`...) llegan con Watch. `owned` es
- * 1 si lo abrió el sistema: solo esos se restackean, rebasean o responden. `repo_id` e `issue_id` no
- * tienen FK, como `runs.subject_id`. `state` es el de GitHub y `is_draft` va aparte.
+ * Un PR de GitHub que el core conoce (`docs/design.html#d-data`). Lo abre `pr.publish` (`owned`) o lo
+ * descubre Watch en la búsqueda de tus PRs; Watch lo mantiene al día. `owned` es 1 si lo abrió el
+ * sistema: solo esos se restackean, rebasean o responden. `repo_id` e `issue_id` no tienen FK, como
+ * `runs.subject_id`. `state` es el de GitHub y `is_draft` va aparte. `detail` es el último `PrState`
+ * que se leyó (JSON, lo que sirve `prs.list`) y `detail_at` cuándo; `head_changed_at` es cuándo se vio
+ * moverse el head (un PR con push reciente es "caliente" para el polling).
  */
 export const pullRequests = sqliteTable(
   "pull_requests",
@@ -782,6 +791,9 @@ export const pullRequests = sqliteTable(
     issueId: text("issue_id"),
     runId: text("run_id").$type<RunId>(),
     owned: integer({ mode: "boolean" }).notNull().default(false),
+    detail: text({ mode: "json" }).$type<PrState>(),
+    detailAt: integer("detail_at"),
+    headChangedAt: integer("head_changed_at"),
   },
   (t) => [uniqueIndex("pull_requests_repo_number").on(t.repoId, t.number)],
 );

@@ -29,6 +29,8 @@ export interface Repos {
   get(id: string): Repo | undefined;
   /** Por nombre. */
   list(): Repo[];
+  /** El repo registrado cuyo remoto de GitHub es `owner/name` (si hay varios checkouts, el primero por nombre). */
+  byRemote(remote: string): Repo | undefined;
   /** Los repos de git de `folder` con el estado de su receta, registrados o no. */
   detect(folder: string): Promise<DetectedRepo[]>;
   /** La configuración que Workspaces necesita de un repo. Lanza si el id no existe. */
@@ -60,6 +62,8 @@ export function createRepos(store: Store, { remote: remoteOf }: ReposOptions = {
       return repoId.success ? store.db.select().from(repos).where(eq(repos.id, repoId.data)).get() : undefined;
     },
     list: () => store.db.select().from(repos).orderBy(asc(repos.name), asc(repos.id)).all(),
+    byRemote: (remote) =>
+      store.db.select().from(repos).where(eq(repos.remote, remote)).orderBy(asc(repos.name), asc(repos.id)).get(),
     async detect(folder) {
       return (await findRepos(folder)).map((info) => ({
         ...info,

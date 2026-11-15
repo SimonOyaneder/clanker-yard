@@ -23,15 +23,15 @@ import type { TempGitRepo } from "./git";
 // La mensajería es la de la API real (docs.github.com/rest, docs.github.com/graphql): lo que el simulador
 // no sabe responder es un 404 o un error de GraphQL que lo dice, nunca un 200 inventado.
 
-/** Primeros 5000 requests de la cuota primaria; GitHub informa `x-ratelimit-*` en cada respuesta. */
-const QUOTA_LIMIT = 5000;
+/** El tope de cada cuota: 5000 por hora en REST y GraphQL, 30 por minuto en search. GitHub informa `x-ratelimit-*` en cada respuesta. */
+const QUOTA_LIMITS = { core: 5000, graphql: 5000, search: 30 } as const;
 /** 2026-11-15 00:00:00 UTC en segundos: el reloj arranca ahí y avanza un segundo por evento. */
 const CLOCK_START = Date.UTC(2026, 10, 15) / 1000;
 const QUOTA_RESET = 1_795_000_000;
 /** El id de usuario que trae el fixture `rate-limited`. */
 const USER_ID = 583231;
 
-export type QuotaResource = "core" | "graphql";
+export type QuotaResource = keyof typeof QUOTA_LIMITS;
 /** Resultado de un check, con los nombres de la conclusión de la REST API; `pending` es un check en curso. */
 export type CheckOutcome =
   | "pending"
@@ -126,6 +126,11 @@ export interface SimPr {
    * base del bare) o, sin él, el head de hoy.
    */
   merge(opts?: { sha?: string }): void;
+  /**
+   * GitHub calcula la mergeabilidad aparte: las próximas `reads` lecturas de detalle por GraphQL (y la
+   * REST mientras tanto) la dan en `UNKNOWN` (`mergeable: null` en REST) y después ya sabe responder.
+   */
+  mergeableUnknown(reads: number): void;
 }
 
 export interface GitHubSim {
@@ -148,6 +153,8 @@ export interface GitHubSim {
   onComment(listener: (pr: SimPr, body: string) => void): () => void;
   /** Fija la cuota de un recurso; con `remaining: 0` GitHub corta con el error de cuota primaria. */
   setQuota(resource: QuotaResource, quota: { remaining: number; resetAt?: number }): void;
+  /** Cuánta cuota le queda hoy a un recurso: una request con ETag que da 304 no la gasta. */
+  quotaRemaining(resource: QuotaResource): number;
   /** Desde ahora, todo responde 401 `Bad credentials`. */
   revokeToken(): void;
   close(): Promise<void>;
@@ -198,6 +205,8 @@ interface PrData {
   /** Checks por commit: un commit nuevo empieza sin ninguno. */
   contexts: Map<string, RawContext[]>;
   requested: Actor[];
+  /** Cuántas lecturas de detalle por GraphQL siguen viendo la mergeabilidad en `UNKNOWN`. */
+  unknownReads: number;
 }
 
 const DOCS = "https://docs.github.com/rest";
@@ -247,8 +256,9 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   const requiredChecks = new Set<string>();
   const commentListeners = new Set<(pr: SimPr, body: string) => void>();
   const quotas: Record<QuotaResource, { remaining: number; reset: number }> = {
-    core: { remaining: QUOTA_LIMIT, reset: QUOTA_RESET },
-    graphql: { remaining: QUOTA_LIMIT, reset: QUOTA_RESET },
+    core: { remaining: QUOTA_LIMITS.core, reset: QUOTA_RESET },
+    graphql: { remaining: QUOTA_LIMITS.graphql, reset: QUOTA_RESET },
+    search: { remaining: QUOTA_LIMITS.search, reset: QUOTA_RESET },
   };
   let revoked = false;
   let clock = CLOCK_START;
@@ -446,6 +456,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       threads: [],
       contexts: new Map(),
       requested: [],
+      unknownReads: 0,
     };
     prs.push(pr);
     return pr;
@@ -467,10 +478,16 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   }
 
   function handle(pr: PrData): SimPr {
-    const addReview = (by: Actor, state: ReviewState, body: string, sha: string) =>
-      pr.reviews.push({ id: id(), state, body, author: by, submittedAt: tick(), sha });
+    // Una review, un comentario de review o un comentario de la conversación mueven `updated_at` del PR; un
+    // check o resolver un thread no (`docs/watch-updated-at.md`).
+    const addReview = (by: Actor, state: ReviewState, body: string, sha: string) => {
+      const submittedAt = tick();
+      pr.reviews.push({ id: id(), state, body, author: by, submittedAt, sha });
+      pr.updatedAt = submittedAt;
+    };
     const addThread = (by: Who, body: string, opts: { path?: string; line?: number; resolved?: boolean }): ThreadRef => {
       const first = newComment(by, body, { path: opts.path ?? "src/index.ts", line: opts.line ?? 1 });
+      pr.updatedAt = first.createdAt;
       pr.threads.push(newThread(first, opts.resolved));
       return { id: `PRRT_kwDOfake${first.id}`, commentId: first.id };
     };
@@ -506,12 +523,18 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       councilThread: (body, { by = viewer, ...opts } = {}) => addThread(by, `${councilPrefix}${body}`, opts),
       reply(threadId, by, body) {
         const thread = threadOf(threadId);
-        thread.comments.push(newComment(by, body, { path: thread.comments[0]!.path, line: thread.comments[0]!.line }));
+        const reply = newComment(by, body, { path: thread.comments[0]!.path, line: thread.comments[0]!.line });
+        thread.comments.push(reply);
+        pr.updatedAt = reply.createdAt;
       },
       resolve(threadId, resolved = true) {
         threadOf(threadId).resolved = resolved;
       },
-      comment: (by, body) => void pr.issueComments.push(newComment(by, body)),
+      comment(by, body) {
+        const comment = newComment(by, body);
+        pr.issueComments.push(comment);
+        pr.updatedAt = comment.createdAt;
+      },
       check,
       status(context, state, { required = requiredChecks.has(context), sha = headSha(pr) } = {}) {
         if (required) requiredChecks.add(context);
@@ -529,6 +552,9 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         pr.state = "closed";
         pr.closedAt = pr.merged?.at ?? tick();
         pr.merged ??= { at: pr.closedAt, sha: sha ?? headSha(pr) };
+      },
+      mergeableUnknown(reads) {
+        pr.unknownReads = reads;
       },
     };
   }
@@ -576,11 +602,12 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         const found = pr();
         if (!found) return notFound();
         const { mergeable, mergeStateStatus } = mergeability(found);
+        const computing = found.unknownReads > 0;
         return json(200, {
           ...pullJson(found),
           merged: found.merged !== null,
-          mergeable: mergeable === "MERGEABLE",
-          mergeable_state: mergeStateStatus.toLowerCase(),
+          mergeable: computing ? null : mergeable === "MERGEABLE",
+          mergeable_state: computing ? "unknown" : mergeStateStatus.toLowerCase(),
         });
       },
     ],
@@ -641,6 +668,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         const first = thread.comments[0]!;
         const reply = newComment(viewer, text, { path: first.path, line: first.line });
         thread.comments.push(reply);
+        found.updatedAt = reply.createdAt;
         return json(201, reviewCommentJson(reply, found, first.id));
       },
     ],
@@ -691,7 +719,25 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     ],
   ];
 
+  /** `GET /search/issues` con los calificadores que Watch usa: `is:pr`, `is:open|closed` y `author:@me`. */
+  function searchIssues({ query }: FakeRequest): RecordedResponse {
+    const terms = (query.q ?? "").split(/\s+/);
+    const items = prs
+      .filter((p) => terms.includes("is:pr") && (!terms.includes("is:open") || p.state === "open") && (!terms.includes("is:closed") || p.state === "closed"))
+      .filter((p) => !terms.includes("author:@me") || p.author.login === account)
+      .map((p) => ({
+        number: p.number,
+        title: p.title,
+        state: p.state,
+        user: userJson(p.author),
+        repository_url: `https://api.github.com/repos/${repo}`,
+        pull_request: { url: `https://api.github.com/repos/${repo}/pulls/${p.number}` },
+      }));
+    return json(200, { total_count: items.length, incomplete_results: false, items });
+  }
+
   function rest(request: FakeRequest): RecordedResponse | undefined {
+    if (request.method === "GET" && request.path === "/search/issues") return searchIssues(request);
     const repoRoute = request.path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
     if (!repoRoute) return healthyGitHub()(request);
     if (`${repoRoute[1]}/${repoRoute[2]}` !== repo) return notFound();
@@ -730,6 +776,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       const first = found.thread.comments[0]!;
       const reply = newComment(viewer, input.body ?? "", { path: first.path, line: first.line });
       found.thread.comments.push(reply);
+      found.pr.updatedAt = reply.createdAt;
       return { key, data: { comment: { id: reply.nodeId, fullDatabaseId: String(reply.id), body: reply.body, createdAt: reply.createdAt, author: withAvatar(viewer) } } };
     }
     found.thread.resolved = field.name.value === "resolveReviewThread";
@@ -774,7 +821,12 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       if (!pr) {
         return graphqlNotFoundAt({ repository: { pullRequest: null } }, ["repository", "pullRequest"], `Could not resolve to a PullRequest with the number of ${number}.`);
       }
-      return prGraphql(node(pr), { id: pr.nodeId })(request)!;
+      const detail = node(pr);
+      if (pr.unknownReads > 0) {
+        pr.unknownReads -= 1;
+        return prGraphql({ ...detail, mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN" }, { id: pr.nodeId })(request)!;
+      }
+      return prGraphql(detail, { id: pr.nodeId })(request)!;
     }
     if (queryName === "PrThreads" || queryName === "PrContexts") {
       const pr = prs.find((p) => p.nodeId === variables.id);
@@ -787,7 +839,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   // --- el servidor: auth, cuota, ETags ---
 
   function respond(request: FakeRequest): RecordedResponse {
-    const resource: QuotaResource = request.path === "/graphql" ? "graphql" : "core";
+    const resource: QuotaResource = request.path === "/graphql" ? "graphql" : request.path.startsWith("/search/") ? "search" : "core";
     const bearer = request.authorization?.match(/^(?:bearer|token) (.+)$/i)?.[1];
     if (revoked || !bearer || (token !== undefined && bearer !== token)) {
       return withQuota(recorded("user.bad-credentials"), resource, false);
@@ -815,9 +867,9 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       ...response,
       headers: {
         ...response.headers,
-        "x-ratelimit-limit": String(QUOTA_LIMIT),
+        "x-ratelimit-limit": String(QUOTA_LIMITS[resource]),
         "x-ratelimit-remaining": String(quota.remaining),
-        "x-ratelimit-used": String(QUOTA_LIMIT - quota.remaining),
+        "x-ratelimit-used": String(QUOTA_LIMITS[resource] - quota.remaining),
         "x-ratelimit-reset": String(quota.reset),
         "x-ratelimit-resource": resource,
       },
@@ -851,6 +903,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       commentListeners.add(listener);
       return () => commentListeners.delete(listener);
     },
+    quotaRemaining: (resource) => quotas[resource].remaining,
     setQuota(resource, { remaining, resetAt }) {
       quotas[resource] = { remaining, reset: resetAt === undefined ? quotas[resource].reset : Math.floor(resetAt / 1000) };
     },

@@ -17,7 +17,7 @@ import { Decision, DecisionFilter } from "./decisions";
 import { DefFilter, DefRecord, DefRef } from "./defs";
 import { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectSummary, RoleMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
-import { PrRef, PrState } from "./prs";
+import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
@@ -187,6 +187,16 @@ const prs = {
    * si la cuenta no está conectada.
    */
   get: base.input(PrRef).output(PrState),
+  /**
+   * Los PRs que Watch conoce, del caché de `pull_requests` y sin tocar GitHub: los que abrió el sistema
+   * y los que descubrió en tu búsqueda de PRs abiertos, ordenados por repo y número.
+   */
+  list: base.input(PrFilter.default({})).output(z.array(CachedPr)),
+  /**
+   * Como `get`, pero además deja el resultado en el caché y, si el estado cambió, avisa a los waits que
+   * esperan este PR: sirve para no esperar al polling. Los mismos errores que `get`.
+   */
+  refresh: base.input(PrRef).output(PrState),
 };
 
 const repos = {

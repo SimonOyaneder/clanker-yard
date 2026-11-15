@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { createRouterClient, ORPCError } from "@orpc/server";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
@@ -227,6 +228,7 @@ describe("cliente de GitHub", () => {
         etag: null,
         rateRemaining: 4999,
         resetAt: 1_795_000_000_000,
+        rateLimit: 5000,
       }),
     ]);
   });
@@ -308,6 +310,25 @@ describe("cliente de GitHub", () => {
     expect(data.login).toBe("octocat");
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(fake.requests.map((r) => r.authorization)).toEqual(["bearer token-viejo", "bearer token-nuevo"]);
+  });
+
+  test("las requests de un cliente salen en serie, y una que falla no frena a las demás", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const answers = [404, 200, 200];
+    const slowFetch = async () => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await delay(15);
+      inFlight -= 1;
+      return new Response("{}", { status: answers.shift(), headers: { "content-type": "application/json" } });
+    };
+    const client = createGitHubClient({ baseUrl: "http://github.invalid", fetch: slowFetch, tokens: { kind: "pat", token: async () => "x" } });
+
+    const results = await Promise.allSettled([client.request("GET /user"), client.request("GET /user"), client.request("GET /user")]);
+
+    expect(results.map((r) => r.status)).toEqual(["rejected", "fulfilled", "fulfilled"]);
+    expect(most).toBe(1);
   });
 
   test("sin refresh, un 401 sube tal cual", async () => {
