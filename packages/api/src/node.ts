@@ -155,12 +155,12 @@ export interface EnsureCoreOptions {
   apiMajor?: number;
   /** Cuánto esperar a un core nuevo, por defecto 15 s. */
   timeoutMs?: number;
-  /** Cuánto esperar a que un core con otro `apiMajor` termine de apagarse (drain), por defecto 70 s. */
+  /** Cuánto esperar a que un core con otro `apiMajor` termine de apagarse (drain), por defecto 90 s: 60 s de acciones, 10 s de SIGKILL y lo que tarden los pasos en soltarse. */
   shutdownTimeoutMs?: number;
 }
 
 const START_TIMEOUT_MS = 15_000;
-const SHUTDOWN_TIMEOUT_MS = 70_000;
+const SHUTDOWN_TIMEOUT_MS = 90_000;
 const POLL_MS = 50;
 
 /**
@@ -171,22 +171,36 @@ const POLL_MS = 50;
  */
 export async function ensureCore(opts: EnsureCoreOptions): Promise<CoreConnection> {
   const { dataDir, origin } = opts;
-  const running = await connectToCore(dataDir, origin);
   const apiMajor = opts.apiMajor ?? API_MAJOR;
-  if (running?.health.apiMajor === apiMajor) return running;
-
-  if (running) {
-    await running.client.system.shutdown({ drain: true });
-    await waitUntil(
-      () => !isPidAlive(running.info.pid),
-      opts.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS,
-      `El core ${running.info.pid} (apiMajor ${running.health.apiMajor}) no terminó de apagarse`,
-    );
+  // Una vuelta de más: otra app (de otro `apiMajor`) pudo haber lanzado su core entre nuestro apagado y nuestro lanzamiento.
+  let foreign: CoreConnection | undefined;
+  for (let round = 0; round < 2; round++) {
+    const running = await connectToCore(dataDir, origin);
+    if (running?.health.apiMajor === apiMajor) return running;
+    if (running) {
+      await running.client.system.shutdown({ drain: true });
+      await waitUntil(
+        () => !isPidAlive(running.info.pid),
+        opts.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS,
+        `El core ${running.info.pid} (apiMajor ${running.health.apiMajor}) no terminó de apagarse`,
+      );
+    }
+    const launched = await launchCore(opts, (running ?? foreign)?.info.bootId);
+    if (!launched.foreign || launched.core.health.apiMajor === apiMajor) return launched.core;
+    foreign = launched.core;
   }
-  return launchCore(opts, running?.info.bootId);
+  throw new Error(
+    `El core que quedó corriendo en ${dataDir} tiene apiMajor ${foreign?.health.apiMajor} y este cliente espera ${apiMajor}: ` +
+      "otra versión de la app lo vuelve a lanzar. Ciérrala o detén ese core.",
+  );
 }
 
-async function launchCore(opts: EnsureCoreOptions, previousBootId?: string): Promise<CoreConnection> {
+/**
+ * Lanza un core y espera a uno sano con otro `bootId`. `foreign`: el que contestó no es el que lanzamos
+ * (nuestro proceso salió con 0 porque otra llamada, quizá de otra versión de la app, ya lo había
+ * lanzado), así que nada garantiza que sea de nuestro `apiMajor`.
+ */
+async function launchCore(opts: EnsureCoreOptions, previousBootId?: string): Promise<{ core: CoreConnection; foreign: boolean }> {
   const { dataDir, origin } = opts;
   mkdirSync(dataDir, { recursive: true });
   const args = [opts.entry, "--data-dir", dataDir];
@@ -210,7 +224,7 @@ async function launchCore(opts: EnsureCoreOptions, previousBootId?: string): Pro
   while (Date.now() < deadline) {
     if (launchError) throw coreStartError(opts, launchError.message);
     const core = await connectToCore(dataDir, origin);
-    if (core && core.info.bootId !== previousBootId) return core;
+    if (core && core.info.bootId !== previousBootId) return { core, foreign: core.info.pid !== child.pid };
     await sleep(POLL_MS);
   }
   throw coreStartError(opts, `no respondió health en ${timeoutMs} ms`);

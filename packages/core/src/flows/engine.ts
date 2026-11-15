@@ -12,7 +12,7 @@ import {
   type StepRunId,
   type SubjectRef,
 } from "@clanker/api";
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
 import { closeDecision, openDecision } from "../decisions/decisions";
@@ -220,8 +220,14 @@ export interface Engine {
    * pierde. Un gate no necesita nada: su corrida sigue parked con la decisión abierta, y su plazo lo vence el tick. Devuelve cuántos pasos tocó.
    */
   recover(): number;
-  /** Deja de despachar y espera a los pasos en curso. */
-  close(): Promise<void>;
+  /**
+   * Deja de despachar y espera a los pasos en curso. Sin `graceMs` solo espera. Con `graceMs` es el
+   * apagado del core: interrumpe de inmediato a los agentes, da hasta `graceMs` a las acciones y
+   * después aborta lo que quede. Cada paso cortado vuelve a `pending` sin gastar intento, con su sesión
+   * lista para retomarse, igual que tras un crash pero sin contar como corte. Resuelve cuando ya no
+   * queda nada en vuelo.
+   */
+  close(opts?: { graceMs: number }): Promise<void>;
 }
 
 /** `start` rechazó el pedido (flujo o perfil que no existen, params inválidos): no se creó nada y el mensaje dice qué cambiar. */
@@ -248,6 +254,13 @@ export class RunNotFoundError extends Error {
 class RunCanceled extends Error {
   constructor(runId: RunId) {
     super(`La corrida ${runId} se canceló.`);
+  }
+}
+
+/** El `reason` del abort de los pasos en vuelo cuando el core se apaga: no es un fallo del paso, que vuelve a pending. */
+class CoreStopping extends Error {
+  constructor() {
+    super("El core se apagó con este paso en curso.");
   }
 }
 
@@ -314,6 +327,9 @@ export function createEngine(deps: EngineDeps): Engine {
   const nextProbeAt = new Map<StepRunId, number>();
   /** El abort de cada paso que este proceso ejecuta, para que `cancel` lo interrumpa. */
   const controllers = new Map<StepRunId, AbortController>();
+  const agentSteps = new Set<StepRunId>();
+  /** Desde cuándo se apaga el core: las sesiones que terminaron después las interrumpió el apagado. */
+  let stoppingSince: number | undefined;
   const probing = new Set<StepRunId>();
   const subjects = createSubjects(deps);
   let activeAgents = 0;
@@ -766,6 +782,7 @@ export function createEngine(deps: EngineDeps): Engine {
   async function execute(job: Job): Promise<void> {
     const controller = new AbortController();
     controllers.set(job.step.id, controller);
+    if (job.node.type === "agent") agentSteps.add(job.step.id);
     // Un timer no lanza: si el latido falla o el lease ya es de otro attempt, se interrumpe el paso en
     // vez de dejarlo corriendo sin lease (un agente de un intento anterior no puede seguir escribiendo).
     const renew = setInterval(() => {
@@ -791,7 +808,8 @@ export function createEngine(deps: EngineDeps): Engine {
         if (error instanceof StaleStepError) throw error;
         settled = { kind: "failed", error: describe(error) };
       }
-      if (settled.kind !== "waiting") settle(job, settled);
+      if (settled.kind === "failed" && controller.signal.reason instanceof CoreStopping) reopenAfterStop(job);
+      else if (settled.kind !== "waiting") settle(job, settled);
     } catch (error) {
       if (error instanceof StaleStepError) return;
       console.error(`No se pudo cerrar el paso ${job.step.id} (${job.step.nodeId}):`, error);
@@ -799,7 +817,39 @@ export function createEngine(deps: EngineDeps): Engine {
     } finally {
       clearInterval(renew);
       controllers.delete(job.step.id);
+      agentSteps.delete(job.step.id);
     }
+  }
+
+  /**
+   * El core se apagó con el paso en curso: vuelve a pending como tras un corte, pero sin sumar a
+   * `recoveries` (un apagado limpio no cuenta para el loop de crash) y sin gastar intento. La sesión
+   * que el apagado interrumpió queda marcada para que `performAgent` la retome.
+   */
+  function reopenAfterStop(job: Job): void {
+    store.tx((tx) => {
+      const reopened = tx.db
+        .update(stepRuns)
+        .set({ status: "pending", owner: null, leaseUntil: null, notBefore: null, deferrals: sql`${stepRuns.deferrals} + 1`, error: RESUMED_AFTER_CUT })
+        .where(and(eq(stepRuns.id, job.step.id), eq(stepRuns.attempt, job.step.attempt), inArray(stepRuns.status, ["leased", "running"])))
+        .returning({ id: stepRuns.id })
+        .get();
+      if (!reopened) throw new StaleStepError(job.step.id);
+      const interrupted = tx.db
+        .select({ id: agentSessions.id })
+        .from(agentSessions)
+        .where(and(eq(agentSessions.stepRunId, job.step.id), eq(agentSessions.status, "error"), gte(agentSessions.endedAt, stoppingSince ?? 0)))
+        .orderBy(desc(agentSessions.id))
+        .limit(1)
+        .get();
+      if (interrupted) tx.db.update(agentSessions).set({ error: SESSION_CUT }).where(eq(agentSessions.id, interrupted.id)).run();
+      tx.emit({
+        type: "step.retrying",
+        origin: "core",
+        ...scopeOf(job.run, job.step.id),
+        payload: { ...stepPayload(job.step), error: RESUMED_AFTER_CUT },
+      });
+    });
   }
 
   /**
@@ -2077,10 +2127,22 @@ export function createEngine(deps: EngineDeps): Engine {
       .map(viewOf);
   }
 
-  async function close(): Promise<void> {
+  async function close(opts?: { graceMs: number }): Promise<void> {
     closed = true;
     clearInterval(ticker);
-    await Promise.all(inFlight);
+    if (!opts) return void (await Promise.all(inFlight));
+    stoppingSince = now();
+    for (const id of agentSteps) controllers.get(id)?.abort(new CoreStopping());
+    const abortAll = () => {
+      for (const controller of controllers.values()) controller.abort(new CoreStopping());
+    };
+    const grace = opts.graceMs > 0 ? setTimeout(abortAll, opts.graceMs) : undefined;
+    if (!grace) abortAll();
+    try {
+      await Promise.all(inFlight);
+    } finally {
+      clearTimeout(grace);
+    }
   }
 
   return { start, signal, resolveGate, cancel, getRun, listRuns, recover, close };

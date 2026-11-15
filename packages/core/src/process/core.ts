@@ -10,6 +10,8 @@ import { createConnections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createKeychainSecrets } from "../secrets/keychain";
 import type { Secrets } from "../secrets/secrets";
+import { createProcs } from "../procs/procs";
+import { newId } from "../store/conventions";
 import { meta } from "../store/schema";
 import { openStore } from "../store/store";
 import { acquireCoreLock } from "./lock";
@@ -55,14 +57,15 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
     });
 
     let stopping: Promise<void> | undefined;
-    const shutdown = (reason: string) => {
+    // `core.json` y el lock se borran al final: mientras el core drena sigue siendo el dueño de este directorio.
+    const shutdown = (reason: string, { drain }: { drain: boolean }) => {
       stopping ??= (async () => {
-        log.write("info", `apagando (${reason})`);
+        log.write("info", `apagando (${reason}, drain ${drain})`);
         try {
-          removeCoreJson(opts.dataDir);
-          await core.close();
+          await core.close({ drain });
           store.db.$client.exec("PRAGMA wal_checkpoint(TRUNCATE)");
           store.close();
+          removeCoreJson(opts.dataDir);
           lock.release();
           process.exit(0);
         } catch (error) {
@@ -71,15 +74,17 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
       })();
     };
 
-    // `system.shutdown({ drain })` todavía no interrumpe a los agentes: el cierre espera un momento a los pasos en curso.
     const connections = createConnections(store, secretsFor(opts));
+    // Los procesos de los agentes se registran en `procs` desde el runtime, que se arma antes que el core.
+    const procs = createProcs({ store, bootId: newId("boot") });
     const core = await startCore({
       store,
       dataDir: opts.dataDir,
       connections,
-      runtimes: [createClaudeRuntime({ credentials: connections.claudeCredentials, home: opts.dataDir })],
+      procs,
+      runtimes: [createClaudeRuntime({ credentials: connections.claudeCredentials, home: opts.dataDir, procs })],
       coreVersion: pkg.version,
-      onShutdown: () => setImmediate(() => shutdown("system.shutdown")),
+      onShutdown: ({ drain }) => setImmediate(() => shutdown("system.shutdown", { drain })),
     });
     const { server } = core;
     store.tx((tx) => {
@@ -90,8 +95,8 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
         .run();
       tx.emit({ type: "core.started", origin: "core", payload: { bootId: server.bootId } });
     });
-    process.once("SIGTERM", () => shutdown("SIGTERM"));
-    process.once("SIGINT", () => shutdown("SIGINT"));
+    process.once("SIGTERM", () => shutdown("SIGTERM", { drain: false }));
+    process.once("SIGINT", () => shutdown("SIGINT", { drain: false }));
 
     writeCoreJson(opts.dataDir, {
       pid: process.pid,

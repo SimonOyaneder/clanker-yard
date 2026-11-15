@@ -90,4 +90,47 @@ describe("procs", () => {
     await closed;
     expect(rows()).toEqual([]);
   });
+
+  test("stop manda SIGTERM al grupo de lo que este core lanzó y deja procs vacío", async () => {
+    store = openStore({ path: ":memory:" });
+    const procs = createProcs({ store, bootId: "boot_now" });
+    const child = sleeper();
+    const dead = exited(child);
+    procs.track(child, { kind: "agent", stepRunId: "stp_1" });
+
+    await procs.stop(5_000);
+
+    expect(await dead).toBe("SIGTERM");
+    expect(rows()).toEqual([]);
+  });
+
+  test("stop mata con SIGKILL al que ignora SIGTERM pasado el plazo", async () => {
+    store = openStore({ path: ":memory:" });
+    const procs = createProcs({ store, bootId: "boot_now" });
+    const stubborn = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); console.log('listo')"], {
+      detached: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    children.push(stubborn);
+    await new Promise((resolve) => stubborn.stdout!.once("data", resolve));
+    const dead = exited(stubborn);
+    procs.track(stubborn, { kind: "git" });
+
+    await procs.stop(300);
+
+    expect(await dead).toBe("SIGKILL");
+    expect(rows()).toEqual([]);
+  });
+
+  test("stop no toca a un proceso que este core no lanzó", async () => {
+    store = openStore({ path: ":memory:" });
+    const stranger = sleeper();
+    const mine = sleeper();
+    const procs = createProcs({ store, bootId: "boot_now" });
+    procs.track(mine, { kind: "recipe" });
+
+    await procs.stop(5_000);
+
+    expect(() => process.kill(stranger.pid!, 0)).not.toThrow();
+  });
 });

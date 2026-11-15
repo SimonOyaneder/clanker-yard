@@ -1,10 +1,8 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import type { Connections } from "../connections/connections";
+import type { Procs } from "../procs/procs";
 import type { Askpass } from "./askpass";
 import { pickEnv } from "./git";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Lo único que git hereda del entorno del core, que puede traer `GH_TOKEN` y otros tokens de la shell
@@ -55,22 +53,18 @@ export interface GitRemote {
 export interface GitRemoteOptions {
   askpass: Askpass;
   connections: Pick<Connections, "token" | "markRevoked">;
+  /** Donde se registra cada `git` de red (puede colgarse), para que el apagado y un arranque tras un crash lo maten. */
+  procs?: Procs;
 }
 
-export function createGitRemote({ askpass, connections }: GitRemoteOptions): GitRemote {
+export function createGitRemote({ askpass, connections, procs }: GitRemoteOptions): GitRemote {
   /** `credential.helper=` vacío: el Keychain no puede contestar con otra cuenta. */
   async function run({ cwd, url, account }: RemoteTarget, args: string[]) {
     const token = await connections.token("github", account);
     const session = await askpass.issue({ username: account, password: token }, url);
     try {
-      const { stdout } = await execFileAsync("git", ["-c", "credential.helper=", ...args], {
-        cwd,
-        env: { ...pickEnv(INHERITED_ENV), ...session.env },
-        encoding: "utf8",
-      });
-      return { ok: true as const, stdout: stdout.trimEnd() };
-    } catch (error) {
-      const { stderr = "" } = error as { stderr?: string };
+      const { code, stdout, stderr } = await runGit(cwd, ["-c", "credential.helper=", ...args], { ...pickEnv(INHERITED_ENV), ...session.env });
+      if (code === 0) return { ok: true as const, stdout: stdout.trimEnd() };
       if (UNAUTHORIZED.test(stderr)) {
         connections.markRevoked("github", account, "core");
         return { ok: false as const, reason: "unauthorized" as const, stderr };
@@ -79,6 +73,21 @@ export function createGitRemote({ askpass, connections }: GitRemoteOptions): Git
     } finally {
       session.revoke();
     }
+  }
+
+  /** `git` en su propio grupo de procesos y registrado en `procs`: un fetch o push colgado no sobrevive al core. */
+  function runGit(cwd: string, args: string[], env: Record<string, string>) {
+    return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn("git", args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+      procs?.track(child, { kind: "git" });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8").on("data", (text: string) => (stdout += text));
+      child.stderr.setEncoding("utf8").on("data", (text: string) => (stderr += text));
+      // No se pudo lanzar `git`: sale como cualquier otro fallo, con el motivo como stderr.
+      child.once("error", (error) => resolve({ code: null, stdout, stderr: error.message }));
+      child.once("close", (code) => resolve({ code, stdout, stderr }));
+    });
   }
 
   function failure(target: RemoteTarget, args: string[], stderr: string): Error {

@@ -56,13 +56,15 @@ export interface RunSpec {
   /** Opcionales: sin tope por defecto. */
   maxBudgetUsd?: number;
   maxTurns?: number;
+  /** El paso que lanza el run: un runtime que lanza procesos lo anota en `procs` para poder matarlos. */
+  stepRunId?: string;
 }
 
 /**
  * Lo que cambia al retomar: el esquema del reporte depende del modo del mensaje, y el contexto se
  * vuelve a leer (retomar también es un lanzamiento).
  */
-export type ResumeSpec = Pick<RunSpec, "outputSchema" | "maxBudgetUsd" | "maxTurns" | "native" | "references">;
+export type ResumeSpec = Pick<RunSpec, "outputSchema" | "maxBudgetUsd" | "maxTurns" | "native" | "references" | "stepRunId">;
 
 /**
  * Lo gastado por este run, no el acumulado de la sesión: un runtime cuyo resume arrastra el

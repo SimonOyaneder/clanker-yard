@@ -23,7 +23,7 @@ import { prPushLeaseAction, workspaceRebaseAction } from "./github/rebase-pr";
 import { githubRemote } from "./github/remote-config";
 import { createPacks } from "./packs/packs";
 import { createLinearTracker } from "./linear/tracker";
-import { createProcs } from "./procs/procs";
+import { createProcs, type Procs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
 import { createRunStarter } from "./projects/start-run";
 import { createProjectQueue } from "./scheduler/project-queue";
@@ -44,8 +44,12 @@ import {
   workspaceSyncBaseAction,
 } from "./workspaces/workspaces";
 
-/** Cuánto espera el cierre a que terminen los pasos en curso antes de dejarlos atrás. */
-const DRAIN_MS = 10_000;
+/** Cuánto espera un apagado con `drain` a las acciones en curso antes de abortarlas (`docs/design.html#d-data`). */
+const DRAIN_MS = 60_000;
+/** De SIGTERM a SIGKILL sobre los procesos que lanzó el core. */
+const KILL_AFTER_MS = 10_000;
+/** Lo que tarda en soltarse un paso después de SIGKILL; pasado esto se deja atrás y el próximo arranque lo recupera. */
+const SETTLE_MS = 5_000;
 
 /** Autor y committer de lo que el core hace con git en un worktree. */
 const GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
@@ -59,6 +63,11 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   runtimes: readonly AgentRuntime[];
   /** De aquí sale `CORE_RUNTIME`. Por defecto, `process.env`. */
   env?: Record<string, string | undefined>;
+  /**
+   * Quien lanza el core crea `procs` cuando un runtime necesita registrar sus procesos (`createClaudeRuntime`).
+   * Sin él, el core crea el suyo.
+   */
+  procs?: Procs;
   /** Carpeta de packs instalados (una subcarpeta por pack). Por defecto, `<dataDir>/packs`. */
   packsDir?: string;
   /** La URL de git de un repo de GitHub `owner/name`. Por defecto `https://github.com/<repo>.git`; un test la apunta a un bare local. */
@@ -69,8 +78,14 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
 
 export interface Core {
   server: CoreServer;
-  /** Cierra el servidor, deja de despachar pasos y espera un momento a los que están corriendo. No cierra el store. */
-  close(): Promise<void>;
+  /**
+   * El apagado limpio (`docs/design.html#d-data`): deja de despachar, interrumpe a los agentes, con `drain`
+   * espera hasta 60 s a las acciones en curso (sin él las aborta de una vez), manda SIGTERM al grupo de cada
+   * proceso que lanzó el core y SIGKILL a los 10 s, devuelve los pasos cortados a pending con su sesión,
+   * y recién entonces cierra el servidor. El servidor sigue contestando mientras tanto, así un cliente
+   * que consulta ve un core vivo y no uno que se fue sin avisar. No cierra el store.
+   */
+  close(opts?: { drain: boolean }): Promise<void>;
 }
 
 /**
@@ -80,14 +95,14 @@ export interface Core {
  */
 export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const { store, dataDir } = opts;
-  const bootId = newId("boot");
+  const procs = opts.procs ?? createProcs({ store, bootId: newId("boot") });
+  const { bootId } = procs;
   const runtime = selectRuntime(opts.runtimes, opts.env);
   const defs = createDefs(store);
   const packs = createPacks({ defs });
   const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
   const agents = createAgents({ store, defs, runtime, packs, remoteOf: (repoId) => repos.get(repoId)?.remote });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
-  const procs = createProcs({ store, bootId });
   const slots = createSlots({ store });
   const askpass = createAskpass();
   const workspaces = createWorkspaces({
@@ -96,7 +111,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     repos: repos.config,
     identity: GIT_IDENTITY,
     procs,
-    remote: createGitRemote({ askpass, connections: opts.connections }),
+    remote: createGitRemote({ askpass, connections: opts.connections, procs }),
     worktreeSetup: (dir) => readRecipe(dir)?.setup?.worktree ?? [],
   });
   const local = createLocalTracker(store);
@@ -188,9 +203,14 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
 
   return {
     server,
-    async close() {
+    async close({ drain } = { drain: false }) {
+      const graceMs = drain ? DRAIN_MS : 0;
+      const stopped = flows.close({ graceMs });
+      // Con `drain`, hasta que las acciones terminen solas; sin él, el SIGTERM sale de inmediato.
+      await Promise.race([stopped, delay(graceMs, undefined, { ref: false })]);
+      await procs.stop(KILL_AFTER_MS);
+      await Promise.race([stopped, delay(SETTLE_MS, undefined, { ref: false })]);
       await server.close();
-      await Promise.race([flows.close(), delay(DRAIN_MS, undefined, { ref: false })]);
       stopReleasing();
       stopRereading();
       await askpass.close();

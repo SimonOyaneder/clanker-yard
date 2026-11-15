@@ -61,6 +61,8 @@ export interface RunCtx {
   /** El id de la sesión que se retoma. */
   resume?: string;
   logCompaction: HookCallback;
+  /** Cómo se lanza el proceso de Claude Code; sin él, el SDK lo lanza a su manera. */
+  spawn?: Options["spawnClaudeCodeProcess"];
 }
 
 /** RunSpec → Options del SDK (`docs/design.html#d-agents`, "Adapter Claude"). */
@@ -97,5 +99,6 @@ export function toOptions(spec: RunSpec, ctx: RunCtx): Options {
     env: ctx.env,
     ...(ctx.executable === undefined ? {} : { pathToClaudeCodeExecutable: ctx.executable }),
     abortController: ctx.abort,
+    ...(ctx.spawn === undefined ? {} : { spawnClaudeCodeProcess: ctx.spawn }),
   };
 }

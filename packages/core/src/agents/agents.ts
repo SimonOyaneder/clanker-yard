@@ -212,6 +212,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       tools: role.tools ?? "all",
       outputSchema: outputSchemaFor(mode),
       ...budget,
+      stepRunId: req.stepRunId,
     };
     const agentRun = await runtime.start(spec);
     interruptOnAbort(req.signal, agentRun);
@@ -256,7 +257,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     const agentRun = await runtime.resume(
       { runtime: runtime.id, sessionId: session.sessionRef, cwd: session.cwd },
       promptFor(mode, req.brief, req.notice),
-      { outputSchema: outputSchemaFor(mode), ...budget, ...resolved },
+      { outputSchema: outputSchemaFor(mode), ...budget, ...resolved, stepRunId: req.stepRunId },
     );
     interruptOnAbort(req.signal, agentRun);
     return converse(
@@ -290,7 +291,12 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     const retry = await runtime.resume(
       first.ref,
       `tu reporte no cumple el esquema: ${attempt.problem}`,
-      { outputSchema: outputSchemaFor(conversation.mode), ...conversation.budget, ...conversation.context },
+      {
+        outputSchema: outputSchemaFor(conversation.mode),
+        ...conversation.budget,
+        ...conversation.context,
+        stepRunId: conversation.placement.stepRunId,
+      },
     );
     const second = await settle(conversation, retry, attempt.sessionId);
     return second.kind === "invalid"

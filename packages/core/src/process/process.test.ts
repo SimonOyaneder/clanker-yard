@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createClient } from "@clanker/api";
 import { connectToCore, ensureCore, isPidAlive, readCoreJson } from "@clanker/api/node";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { buildCore } from "../../scripts/build";
@@ -56,6 +57,44 @@ async function deadPid(): Promise<number> {
   return child.pid!;
 }
 
+/**
+ * Un repo git con una receta cuyo `requires` deja un `sleep` corriendo: `repos.testRecipe` lo lanza como
+ * hijo del core. El hijo escribe su pid en un archivo (`exec` mantiene el pid del `sh`, que lidera el grupo).
+ */
+function holdingRepo(home: string, shellPrefix = ""): { path: string; pidFile: string } {
+  const path = join(home, "repo");
+  const pidFile = join(home, "child.pid");
+  mkdirSync(join(path, ".clanker"), { recursive: true });
+  const check = `${shellPrefix}echo $$ > '${pidFile}'; exec sleep 300`;
+  writeFileSync(join(path, ".clanker", "recipe.json"), JSON.stringify({ version: 1, requires: [{ name: "hold", check }] }));
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: path, env, stdio: "ignore" });
+  git("init", "-q", "-b", "main");
+  git("add", "--all");
+  git("-c", "user.name=t", "-c", "user.email=t@t.invalid", "commit", "-q", "-m", "chore: initial commit");
+  return { path, pidFile };
+}
+
+/** Pide la prueba de la receta de `repo` al core y espera a que su hijo `sleep` esté corriendo; devuelve su pid. */
+async function startHeldChild(core: Awaited<ReturnType<typeof ensure>>, repo: { path: string; pidFile: string }): Promise<number> {
+  const client = createClient({ url: `http://127.0.0.1:${core.info.port}/rpc`, token: core.info.token, origin: "cli" });
+  const { id } = await client.repos.add({ path: repo.path });
+  // La llamada queda abierta mientras el hijo vive; muere con el core.
+  void client.repos.testRecipe({ repoId: id }).catch(() => {});
+  await vi.waitFor(() => expect(readFileSync(repo.pidFile, "utf8").trim()).toMatch(/^\d+$/), { timeout: 10_000 });
+  const pid = Number.parseInt(readFileSync(repo.pidFile, "utf8"), 10);
+  expect(isPidAlive(pid)).toBe(true);
+  return pid;
+}
+
+const killGroup = (pid: number) => {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // Ya terminó.
+  }
+};
+
 describe("ensureCore", () => {
   test("dos llamadas concurrentes dejan un solo core vivo", async () => {
     const home = tempHome();
@@ -86,6 +125,91 @@ describe("ensureCore", () => {
     expect(next.info.pid).not.toBe(old.info.pid);
     expect(isPidAlive(old.info.pid)).toBe(false);
   });
+});
+
+describe("ensureCore con un core de otra versión", () => {
+  test("si el core que contesta lo lanzó otro y tiene otro apiMajor, lo reemplaza; si vuelve a pasar, falla con un error accionable", async () => {
+    const home = tempHome();
+    // Un lanzador que sale con 0 después de dejar un core corriendo: como otra app que ganó la carrera.
+    const other = join(home, "other-launcher.mjs");
+    writeFileSync(
+      other,
+      `import { spawn } from "node:child_process";
+spawn(process.execPath, [${JSON.stringify(entry)}, "--data-dir", ${JSON.stringify(home)}], { detached: true, stdio: "ignore" }).unref();
+`,
+    );
+    const old = await ensure(home);
+
+    await expect(
+      ensureCore({ dataDir: home, logDir: join(home, "logs"), entry: other, origin: "cli", apiMajor: old.health.apiMajor + 1 }),
+    ).rejects.toThrow(/apiMajor \d+ y este cliente espera \d+/);
+    // Se lo apagó y se lo volvió a encontrar una vez: nunca se aceptó en silencio.
+    expect(isPidAlive(old.info.pid)).toBe(false);
+  }, 60_000);
+});
+
+describe("procesos hijos", () => {
+  test("si el core muere con SIGKILL, su hijo sigue vivo hasta que el próximo core lo mata", async () => {
+    const home = tempHome();
+    const repo = holdingRepo(home);
+    const first = await ensure(home);
+    const child = await startHeldChild(first, repo);
+
+    process.kill(first.info.pid, "SIGKILL");
+    await vi.waitFor(() => expect(isPidAlive(first.info.pid)).toBe(false), { timeout: 10_000 });
+    try {
+      expect(isPidAlive(child)).toBe(true);
+
+      const second = await ensure(home);
+
+      expect(second.info.bootId).not.toBe(first.info.bootId);
+      await vi.waitFor(() => expect(isPidAlive(child)).toBe(false), { timeout: 10_000 });
+    } finally {
+      killGroup(child);
+    }
+  }, 40_000);
+
+  test("SIGTERM manda SIGTERM al grupo del hijo, borra core.json y core.lock y sale", async () => {
+    const home = tempHome();
+    const repo = holdingRepo(home);
+    const core = await ensure(home);
+    const child = await startHeldChild(core, repo);
+
+    process.kill(core.info.pid, "SIGTERM");
+
+    try {
+      await vi.waitFor(() => expect(isPidAlive(core.info.pid)).toBe(false), { timeout: 15_000 });
+      expect(isPidAlive(child)).toBe(false);
+      expect(readCoreJson(home)).toBeUndefined();
+      expect(() => statSync(join(home, "core.lock"))).toThrow(/ENOENT/);
+    } finally {
+      killGroup(child);
+    }
+  }, 40_000);
+
+  test("un hijo que ignora SIGTERM muere con SIGKILL a los 10 s y core.json sigue ahí mientras tanto", async () => {
+    const home = tempHome();
+    const repo = holdingRepo(home, "trap '' TERM; ");
+    const core = await ensure(home);
+    const child = await startHeldChild(core, repo);
+
+    process.kill(core.info.pid, "SIGTERM");
+
+    try {
+      // El core todavía está apagándose: sigue siendo el dueño del directorio y contesta health.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(isPidAlive(core.info.pid)).toBe(true);
+      expect(isPidAlive(child)).toBe(true);
+      expect(readCoreJson(home)?.bootId).toBe(core.info.bootId);
+      expect((await connectToCore(home, "cli"))?.info.bootId).toBe(core.info.bootId);
+
+      await vi.waitFor(() => expect(isPidAlive(core.info.pid)).toBe(false), { timeout: 20_000 });
+      expect(isPidAlive(child)).toBe(false);
+      expect(readCoreJson(home)).toBeUndefined();
+    } finally {
+      killGroup(child);
+    }
+  }, 40_000);
 });
 
 describe("core", () => {

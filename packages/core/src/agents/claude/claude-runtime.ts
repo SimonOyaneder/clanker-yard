@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -8,6 +9,7 @@ import {
   type SDKMessage,
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { Procs } from "../../procs/procs";
 import { usdToMicros } from "../../store/conventions";
 import type {
   AgentEvent,
@@ -46,6 +48,11 @@ export interface ClaudeRuntimeOptions {
   /** El entorno del core; de él solo se heredan PATH, HOME, USER, LANG y CLAUDE_CONFIG_DIR. */
   baseEnv?: Record<string, string | undefined>;
   query?: QueryFn;
+  /**
+   * Con `procs`, cada proceso de Claude Code arranca en su propio grupo y queda registrado (`kind: "agent"`):
+   * así el apagado del core y el arranque tras un crash lo matan con sus hijos. Sin él, lo lanza el SDK.
+   */
+  procs?: Procs;
 }
 
 const DEFAULT_GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
@@ -77,6 +84,29 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     transcripts: join(home, "transcripts"),
     sessions: join(home, "agent-sessions"),
   };
+
+  /** Lo que el SDK llama para lanzar `claude`: el mismo `spawn` de siempre, pero con grupo propio y en `procs`. */
+  function spawnIn(procs: Procs, stepRunId: string | undefined): Options["spawnClaudeCodeProcess"] {
+    return ({ command, args, cwd, env, signal }) => {
+      // Sin `signal` en `spawn`: Node solo mataría al líder. Cuando el SDK se rinde con su cierre
+      // ordenado, se baja el grupo completo (`bash` de las tools incluido).
+      const child = spawn(command, args, { cwd, env, detached: true, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+      procs.track(child, { kind: "agent", stepRunId });
+      signal.addEventListener(
+        "abort",
+        () => {
+          if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+          try {
+            process.kill(-child.pid, "SIGTERM");
+          } catch {
+            // Terminó entre medio.
+          }
+        },
+        { once: true },
+      );
+      return child;
+    };
+  }
 
   let prepared: Promise<void> | undefined;
   function prepare(): Promise<void> {
@@ -143,6 +173,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         abort,
         resume: resumeId,
         logCompaction,
+        spawn: options.procs && spawnIn(options.procs, spec.stepRunId),
       }),
     });
 
@@ -282,7 +313,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     async start(spec) {
       await prepare();
       const run = await launch(spec, spec.prompt, undefined);
-      const stored: StoredSession = { spec: { ...spec, native: undefined, references: [] } };
+      const stored: StoredSession = { spec: { ...spec, native: undefined, references: [], stepRunId: undefined } };
       await writeFile(storedOf(run.ref.sessionId), JSON.stringify(stored));
       return run;
     },
