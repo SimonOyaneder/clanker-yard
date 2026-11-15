@@ -206,4 +206,30 @@ describe("commits del agente", () => {
     // El worktree sigue como lo dejó el agente: sin `x.txt`.
     expect(git("status", "--porcelain")).toBe(" D x.txt");
   });
+
+  test("se rechazan si un mensaje no es Conventional Commits o lo firma una IA; un fixup! se lee sin su prefijo", async () => {
+    const known = commit("feat: uno", "x.txt", "1\n");
+    commit("fixup! feat: uno", "x.txt", "1 corregido\n");
+    commit("arreglos varios", "y.txt", "2\n");
+    commit("feat: tres\n\nCo-Authored-By: Claude <noreply@anthropic.com>", "z.txt", "3\n");
+
+    const result = await prepare(known);
+
+    expect(result).toMatchObject({ outcome: "replan" });
+    const failures = result.outcome === "replan" ? result.failures : "";
+    expect(failures).toMatch(/"arreglos varios": el mensaje no cumple/);
+    expect(failures).toMatch(/"feat: tres": el mensaje firma el commit como hecho por una IA/);
+    expect(failures).not.toMatch(/fixup!/);
+    expect(head()).toBe(known);
+    expect(git("status", "--porcelain").split("\n").sort()).toEqual([" M x.txt", "?? y.txt", "?? z.txt"]);
+  });
+
+  test("con el patrón del pack, se acepta un mensaje que lo cumple", async () => {
+    const known = commit("feat: uno", "x.txt", "1\n");
+    commit("CLA-1 dos", "y.txt", "2\n");
+
+    const result = await preparePush(workspaces, lease, { knownSha: known, base: lease.baseSha, council: false, messagePattern: "^CLA-\\d+ " });
+
+    expect(result).toEqual({ outcome: "ok", head: head(), squashed: false });
+  });
 });

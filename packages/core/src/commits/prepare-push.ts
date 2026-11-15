@@ -1,5 +1,6 @@
 import { GitError, isAncestor } from "../git/git";
 import { snapshotTree } from "../git/tree";
+import { cleanMessage, CONVENTIONAL_COMMIT } from "./apply";
 import { FIXUP_PREFIX } from "./route";
 import { excerpt } from "../workspaces/exec";
 import type { Workspaces, WorkspaceRef } from "../workspaces/workspaces";
@@ -14,6 +15,8 @@ export interface PreparePushOptions {
   base: string;
   /** El PR tuvo threads `[clanker-council]`: sus `fixup!` quedan visibles, no se reescribe nada. */
   council: boolean;
+  /** Regex que debe cumplir la primera línea de cada commit del agente (sin `fixup! `). Por defecto, Conventional Commits. */
+  messagePattern?: string;
 }
 
 /**
@@ -33,8 +36,9 @@ export type PreparePushResult =
  * el agente haya hecho por su cuenta y deja la branch sin `fixup!` (autosquash local) salvo en un PR
  * con council. No pushea: el push con lease es `workspaces.push`, que con council tampoco fuerza.
  *
- * Un commit del agente se acepta si `HEAD` desciende de `knownSha` y su árbol es el del worktree
- * (nada quedó sin commitear). Si no, la branch vuelve a `knownSha` con `reset --mixed`: el worktree
+ * Un commit del agente se acepta si `HEAD` desciende de `knownSha`, su árbol es el del worktree
+ * (nada quedó sin commitear) y cada mensaje cumple `messagePattern` sin líneas de atribución a una IA,
+ * como los de `commits.apply` (el agente puede commitear con su propia firma). Si no, la branch vuelve a `knownSha` con `reset --mixed`: el worktree
  * no cambia y el committer recibe todo el trabajo del agente como un diff por commitear.
  *
  * El squash pasa por `rebase --interactive --autosquash` con el editor de la secuencia en `true`
@@ -48,16 +52,16 @@ export type PreparePushResult =
 export async function preparePush(
   workspaces: Workspaces,
   ws: WorkspaceRef,
-  { knownSha, base, council }: PreparePushOptions,
+  { knownSha, base, council, messagePattern }: PreparePushOptions,
 ): Promise<PreparePushResult> {
-  const rejected = await reconcile(workspaces, ws, knownSha);
+  const rejected = await reconcile(workspaces, ws, knownSha, messagePattern);
   if (rejected !== undefined) return { outcome: "replan", failures: rejected };
   if (council) return { outcome: "ok", head: await workspaces.git(ws, "rev-parse", "HEAD"), squashed: false };
   return squash(workspaces, ws, base);
 }
 
 /** Por qué los commits del agente no se aceptan; `undefined` si se aceptan (o no hay ninguno). */
-async function reconcile(workspaces: Workspaces, ws: WorkspaceRef, knownSha: string): Promise<string | undefined> {
+async function reconcile(workspaces: Workspaces, ws: WorkspaceRef, knownSha: string, messagePattern: string | undefined): Promise<string | undefined> {
   const head = await workspaces.git(ws, "rev-parse", "HEAD");
   if (head === knownSha) return undefined;
 
@@ -67,11 +71,35 @@ async function reconcile(workspaces: Workspaces, ws: WorkspaceRef, knownSha: str
   } else if ((await snapshotTree(ws.path)) !== (await workspaces.git(ws, "rev-parse", "HEAD^{tree}"))) {
     const stat = await workspaces.git(ws, "diff", "--stat", "HEAD");
     reason = `El árbol de HEAD ${head.slice(0, 9)} no es el del worktree: el agente dejó cambios sin commitear.\n${excerpt(stat)}`;
+  } else {
+    reason = await messageProblems(workspaces, ws, knownSha, messagePattern);
   }
   if (reason === undefined) return undefined;
 
   await workspaces.git(ws, "reset", "--quiet", "--mixed", knownSha);
   return reason;
+}
+
+/**
+ * Los commits del agente cuyo mensaje no cumple el patrón o lleva una línea de atribución a una IA. Un merge
+ * no se revisa: su mensaje lo escribe git, y deshacerlo convertiría lo que trajo de la base en un diff a rutear.
+ */
+async function messageProblems(workspaces: Workspaces, ws: WorkspaceRef, knownSha: string, messagePattern: string | undefined): Promise<string | undefined> {
+  const pattern = messagePattern === undefined ? CONVENTIONAL_COMMIT : new RegExp(messagePattern);
+  const log = await workspaces.git(ws, "log", "--no-merges", "--format=%h%x00%B%x1e", `${knownSha}..HEAD`);
+  const problems: string[] = [];
+  for (const entry of log.split("\x1e")) {
+    const [sha, body = ""] = entry.trim().split("\0");
+    if (!sha) continue;
+    const message = body.trim();
+    const subject = message.split("\n")[0]!;
+    let target = subject;
+    while (target.startsWith(FIXUP_PREFIX)) target = target.slice(FIXUP_PREFIX.length);
+    if (!pattern.test(target)) problems.push(`${sha} "${subject}": el mensaje no cumple ${pattern}`);
+    else if (cleanMessage(message) !== message) problems.push(`${sha} "${subject}": el mensaje firma el commit como hecho por una IA`);
+  }
+  if (problems.length === 0) return undefined;
+  return `Commits del agente con un mensaje que no se puede pushear; su trabajo vuelve sin commitear:\n${problems.join("\n")}`;
 }
 
 async function squash(workspaces: Workspaces, ws: WorkspaceRef, base: string): Promise<PreparePushResult> {

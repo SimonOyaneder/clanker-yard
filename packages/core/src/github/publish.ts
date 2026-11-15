@@ -83,7 +83,7 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     }
 
     const pushed = await ctx.once("push", async () => {
-      const prepared = await preparePush(workspaces, ws, { knownSha: tip, base: workspaces.baseSha(ws), council: false });
+      const prepared = await preparePush(workspaces, ws, { knownSha: tip, base: workspaces.baseSha(ws), council: false, messagePattern: args.messagePattern });
       if (prepared.outcome === "replan") return { replan: prepared.failures };
       if (prepared.outcome === "squash-failed") throw new PermanentActionError(prepared.failures);
       await pushOrThrow(workspaces, ws, remote.account, { council: false });

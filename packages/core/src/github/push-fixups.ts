@@ -141,7 +141,7 @@ export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof Pus
     { knownSha, base }: { knownSha: string; base: string },
   ): Promise<Committed> {
     // `replan` aquí es "vuelve a la última punta conocida": lo que el agente hizo queda sin commitear y se rutea.
-    await preparePush(workspaces, ws, { knownSha, base, council: true });
+    await preparePush(workspaces, ws, { knownSha, base, council: true, messagePattern });
     const head = await workspaces.git(ws, "rev-parse", "HEAD");
     const saved = await snapshotTree(ws.path);
     const hunks = listHunks(await diffBetween(ws.path, head, saved));
