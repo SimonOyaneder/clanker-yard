@@ -1,5 +1,6 @@
 export { startCore } from "./core";
 export type { Core, StartCoreOptions } from "./core";
+export type { DevTools } from "./server/dev-router";
 export { startServer } from "./server/server";
 export type { CoreServer, StartServerOptions } from "./server/server";
 export { microsToUsd, newId, usdToMicros } from "./store/conventions";

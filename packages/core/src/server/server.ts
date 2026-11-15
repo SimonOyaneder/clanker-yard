@@ -7,6 +7,7 @@ import { ORPCError, onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
 import { newId } from "../store/conventions";
 import { createMcpHandler } from "../mcp/server";
+import { createDevRouter, type DevTools } from "./dev-router";
 import { createRouter, type CoreContext, type CoreRouter, type RouterDeps } from "./router";
 
 export interface StartServerOptions extends Pick<
@@ -44,6 +45,8 @@ export interface StartServerOptions extends Pick<
    * (que `core.json` no tiene) distingue a la app de un agente.
    */
   uiKeyHash?: string;
+  /** Monta el router `dev` y sus tools MCP (`DevTools`). Sin él un core nunca los sirve. */
+  dev?: DevTools;
 }
 
 export interface CoreServer {
@@ -81,8 +84,9 @@ export async function startServer(opts: StartServerOptions): Promise<CoreServer>
   const bootId = opts.bootId ?? newId("boot");
   const allowedOrigins = new Set(opts.allowedOrigins);
   const router = createRouter({ ...opts, bootId, startedAt: Date.now() });
-  const mcp = createMcpHandler(router, opts.coreVersion);
-  const handler = new RPCHandler(router, {
+  const served = opts.dev ? { ...router, dev: createDevRouter({ flows: opts.flows, dev: opts.dev }) } : router;
+  const mcp = createMcpHandler(served, opts.coreVersion, { dev: opts.dev !== undefined });
+  const handler = new RPCHandler(served, {
     interceptors: [
       onError((error) => {
         if (!(error instanceof ORPCError)) console.error(error);

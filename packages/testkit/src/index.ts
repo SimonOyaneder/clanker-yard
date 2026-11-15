@@ -27,6 +27,8 @@ export type {
 } from "./github-sim";
 export { startTechleadScenario, writeTechleadFixture } from "./techlead-scenario";
 export type { BotTurn, RunDetail, TechleadScenario, TechleadScenarioOptions } from "./techlead-scenario";
+export { createDevKit } from "./dev-tools";
+export type { DevKit } from "./dev-tools";
 export { seedLanes } from "./lanes-scenario";
 export { seedSummary, SUMMARY_PROJECT_SLUG } from "./summary-scenario";
 export { seedPrs, PR_BRANCHES } from "./prs-scenario";

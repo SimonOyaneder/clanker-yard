@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Event, MCP_KIND_SCHEMAS, StepDetail, type McpKind } from "@clanker/api";
+import { contract, devContract, Event, MCP_KIND_SCHEMAS, StepDetail, type McpKind } from "@clanker/api";
 import { McpServer, ResourceTemplate, type CallToolResult, type ReadResourceResult } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { createRouterClient, ORPCError } from "@orpc/server";
 import * as z from "zod";
+import type { DevRouter } from "../server/dev-router";
 import type { CoreRouter } from "../server/router";
 import { generateMcp, type McpPlan, type McpRoute, type McpTool } from "./generate";
 
@@ -15,10 +16,15 @@ type Call = (route: McpRoute, input: unknown) => Promise<unknown>;
 /**
  * El MCP de la app (`docs/design.html#mcp`): un `McpServer` por request, sin sesión, armado desde el
  * contrato (`generateMcp`) y que llama al router en proceso con origin `mcp`: la misma validación y los
- * mismos eventos que la UI. Falla al crearse si el contrato está mal marcado.
+ * mismos eventos que la UI. Falla al crearse si el contrato está mal marcado. Con `dev`, `router` trae además el
+ * router `dev` y el MCP suma sus tools (`devContract`).
  */
-export function createMcpHandler(router: CoreRouter, coreVersion: string): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
-  const plan = generateMcp();
+export function createMcpHandler(
+  router: CoreRouter | (CoreRouter & { dev: DevRouter }),
+  coreVersion: string,
+  { dev }: { dev: boolean },
+): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+  const plan = generateMcp(dev ? { ...contract, dev: devContract } : contract);
   const client = createRouterClient(router, { context: { origin: "mcp" } });
   const call: Call = (route, input) => procedureAt(client, route.path)(route.hasInput ? input : undefined);
 

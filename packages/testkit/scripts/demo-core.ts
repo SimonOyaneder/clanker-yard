@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startCore, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core";
-import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
+import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
 // y tres repos git temporales (sin receta, con una válida y con una inválida). Publica `core.json` en
@@ -22,6 +22,8 @@ import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCH
 // `github_pat_demo` y el token del device flow del OAuth falso), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
 // esperar, escribe `<CLANKER_HOME>/demo-control.json` con `{ "clockDays": 40, "claude": "login_expired" }`: el
 // reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario.
+// Un agente que desarrolla la app hace lo mismo por MCP con el router `dev` (`inject_step_result`, `load_fixture`,
+// `advance_clock`): el demo es el único core que lo monta (`createDevKit`).
 // Lo que GitHub haría del otro lado del device flow también sale de ese archivo, mientras la clave esté puesta:
 // `githubDeny` cancela el código pendiente, `githubRefresh: "rejected"` invalida los refresh tokens y
 // `githubInstalled: false` deja la GitHub App sin instalar.
@@ -93,6 +95,9 @@ const control = (): {
 // El reloj de las conexiones parte de una fecha fija: el PAT del simulador vence el 2026-12-20 y la demo no debe
 // depender del día en que se corre.
 const CLOCK_START = Date.UTC(2026, 10, 15, 12);
+// El demo es el core de desarrollo: monta el router `dev` y sus tools MCP (`inject_step_result`, `load_fixture`,
+// `advance_clock`). Su reloj es el de las conexiones: `clockDays` de `demo-control.json` y lo que adelanta `advance_clock`.
+const devKit = createDevKit({ store, api: () => client, clockStart: CLOCK_START, clockOffset: () => (control().clockDays ?? 0) * 86_400_000 });
 const githubDoubles = setInterval(() => {
   const { githubDeny, githubRefresh, githubInstalled } = control();
   if (githubDeny) githubOAuth.deny();
@@ -109,12 +114,13 @@ const core = await startCore({
     githubApp: { clientId: "Iv23liDEMO", slug: "clanker-yard-demo", endpoints: githubOAuth.endpoints },
     linear: { clientId: "demo-client", redirectPort: 0, endpoints: linear.endpoints },
     claude: claude.options,
-    now: () => CLOCK_START + (control().clockDays ?? 0) * 86_400_000,
+    now: devKit.now,
   }),
   runtimes: [createFakeRuntime({ fixtures, transcripts: join(home, "transcripts") })],
   env: { CORE_RUNTIME: "fake" },
   // La demo deja las issues en la cola para lanzarlas a mano desde la UI.
   scheduler: false,
+  dev: devKit.dev,
   coreVersion: "0.0.0-demo",
   // La app con `CLANKER_HOME` usa esta misma llave, así que se conecta a la demo en vez de reemplazarla.
   uiKeyHash: hashUiKey(isolatedUiKey(home)),

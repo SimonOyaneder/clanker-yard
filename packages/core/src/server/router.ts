@@ -409,7 +409,7 @@ export function createRouter(deps: RouterDeps) {
 export type CoreRouter = ReturnType<typeof createRouter>;
 
 /** Los errores de un pedido inválido o de algo que no existe llegan al cliente con su mensaje; el resto es un bug del core. */
-function asApiError<T>(fn: () => T): T {
+export function asApiError<T>(fn: () => T): T {
   try {
     return fn();
   } catch (error) {
