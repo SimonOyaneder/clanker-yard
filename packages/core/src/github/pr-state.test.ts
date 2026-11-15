@@ -12,7 +12,7 @@ const acme: ResolvedPack = {
   ...PackSettings.parse({
     actors: {
       ignore: "\\[bot\\]$|^(coverage-bot|linear-code|release-bot|merge-queue|deploy-bot|github-actions|review-bot|codecov|dependabot)$",
-      silentReviewBody: "^\\s*(lgtm|looks good to me|:shipit:|👍|✅|🚀)?[\\s!.]*$",
+      silentReviewBody: "^\\s*(lgtm|looks good to me|:shipit:|👍|✅|🚀)[\\s!.]*$",
     },
     signals: [
       {
@@ -180,7 +180,8 @@ describe("threads", () => {
       }),
     );
 
-    expect(state.threads).toEqual({ humanOpen: 2, humanResolved: 1, botOpen: 1, councilOpen: [], councilEver: false });
+    // `unresolved` cuenta todo thread abierto, también el de un bot que no es el de review, el de una cuenta borrada y el del usuario.
+    expect(state.threads).toEqual({ unresolved: 6, humanOpen: 2, humanResolved: 1, botOpen: 1, councilOpen: [], councilEver: false });
   });
 
   test("council abierto: el id de su primer comentario, y no cuenta como humano aunque lo escriba el usuario", () => {
@@ -188,6 +189,7 @@ describe("threads", () => {
     const state = build(prNode({ reviewThreads: [open, thread(user(VIEWER), "[clanker-council] ya aplicado", { resolved: true })] }));
 
     expect(state.threads).toEqual({
+      unresolved: 1,
       humanOpen: 0,
       humanResolved: 0,
       botOpen: 0,
@@ -216,7 +218,7 @@ describe("threads", () => {
       noPack,
     );
 
-    expect(state.threads).toEqual({ humanOpen: 2, humanResolved: 0, botOpen: 0, councilOpen: [], councilEver: false });
+    expect(state.threads).toEqual({ unresolved: 3, humanOpen: 2, humanResolved: 0, botOpen: 0, councilOpen: [], councilEver: false });
   });
 });
 
@@ -385,6 +387,27 @@ describe("talk", () => {
       { kind: "review", author: "ana", at: "2026-11-10T12:00:00Z", excerpt: "una duda sobre el nombre" },
       { kind: "changes", author: "beto", at: "2026-11-10T14:00:00Z", excerpt: "" },
       { kind: "review", author: "eli", at: "2026-11-10T15:00:00Z", excerpt: "Se ve bien, solo un nit en el test" },
+    ]);
+  });
+
+  test("como el vigilante: un texto de solo espacios es texto, una review descartada con texto sigue contando y lo del council no cuenta", () => {
+    const state = build(
+      prNode({
+        reviews: [
+          review(user("ana"), "COMMENTED", { body: "  \n ", at: "2026-11-10T10:00:00Z" }),
+          review(user("beto"), "DISMISSED", { body: "revisa esto", at: "2026-11-10T11:00:00Z" }),
+          review(user("caro"), "DISMISSED", { body: "", at: "2026-11-10T12:00:00Z" }),
+          review(user("dani"), "COMMENTED", { body: "[clanker-council] 🟡 mueve esto", at: "2026-11-10T13:00:00Z" }),
+          review(user("eli"), "CHANGES_REQUESTED", { body: "[clanker-council] cambios", at: "2026-11-10T14:00:00Z" }),
+        ],
+        comments: [comment(user("fer"), "[clanker-council] 🟡 otro", "2026-11-10T15:00:00Z"), comment(user("gus"), "va", "2026-11-10T16:00:00Z")],
+      }),
+    );
+
+    expect(state.talk.map((t) => [t.kind, t.author])).toEqual([
+      ["review", "ana"],
+      ["review", "beto"],
+      ["comment", "gus"],
     ]);
   });
 

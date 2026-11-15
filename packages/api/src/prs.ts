@@ -87,6 +87,8 @@ export const PrState = z.object({
     flaky: z.array(z.string()),
   }),
   threads: z.object({
+    /** Todos los threads sin resolver, de quien sean (humanos, bots, council, la cuenta conectada): los "hilos sin resolver" de Clanker Control. */
+    unresolved: z.int().nonnegative(),
     humanOpen: z.int().nonnegative(),
     humanResolved: z.int().nonnegative(),
     botOpen: z.int().nonnegative(),
@@ -102,3 +104,23 @@ export const PrState = z.object({
   signals: z.record(z.string(), z.string()),
 });
 export type PrState = z.infer<typeof PrState>;
+
+/** Qué tan de tu lado está la pelota en un PR: lo primero que se mira para decidir cuál abrir. */
+export type ReviewStatus = "changes" | "pending" | "approved" | "none";
+
+/**
+ * El estado de review de un PR abierto o en draft, con las reglas de `reviewStatus` de Clanker Control:
+ * pedir cambios o tener algo sin resolver o comentado manda sobre una aprobación a medias.
+ */
+export function reviewStatusOf(pr: PrState): ReviewStatus {
+  if (pr.state !== "open" && pr.state !== "draft") return "none";
+  if (pr.reviewDecision === "changes_requested") return "changes";
+  const kinds = new Set(pr.reviewers.map((r) => r.state));
+  if (kinds.has("changes_requested")) return "changes";
+  if (pr.reviewDecision === "approved" && kinds.has("approved")) return "approved";
+  if (kinds.has("pending")) return "pending";
+  if (kinds.has("commented") || pr.threads.unresolved > 0) return "changes";
+  if (kinds.has("approved")) return "approved";
+  if (pr.reviewDecision === "review_required" && pr.state === "open") return "pending";
+  return "none";
+}

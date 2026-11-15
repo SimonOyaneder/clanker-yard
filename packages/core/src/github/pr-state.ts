@@ -161,8 +161,9 @@ function ciOf(node: PrNode, { ciRules }: ResolvedPack): PrState["ci"] {
  */
 function threadsOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: string): PrState["threads"] {
   const prefix = pack.conventions.councilPrefix;
-  const threads: PrState["threads"] = { humanOpen: 0, humanResolved: 0, botOpen: 0, councilOpen: [], councilEver: false };
+  const threads: PrState["threads"] = { unresolved: 0, humanOpen: 0, humanResolved: 0, botOpen: 0, councilOpen: [], councilEver: false };
   for (const thread of node.reviewThreads) {
+    if (!thread.isResolved) threads.unresolved++;
     const first = thread.comments.nodes[0];
     if (!first) continue;
     const login = first.author?.login;
@@ -186,26 +187,29 @@ function answered(thread: RawThread, prefix: string | undefined): boolean {
 }
 
 /**
- * Lo que dijeron los humanos. Una review aprobada o comentada sin texto (o que calza con
- * `silentReviewBody`, sin distinguir mayúsculas: un "LGTM" solo) no cuenta; una que pide cambios siempre.
+ * Lo que dijeron los humanos, como el vigilante (`clanker-loop watch`): una review que pide cambios, o
+ * con texto que no es un "LGTM" solo (`silentReviewBody`, sin distinguir mayúsculas), de cualquier
+ * estado menos las sin enviar (una descartada con texto sigue contando), y cada comentario de la
+ * conversación. Un texto de solo espacios es texto. Lo que lleva el prefijo del council no cuenta, sea
+ * de quien sea: es la review del council, no un humano esperando respuesta.
  */
 function talkOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: string): PrState["talk"] {
   const silent = pack.actors.silentReviewBody === undefined ? undefined : new RegExp(pack.actors.silentReviewBody, "i");
+  const council = pack.conventions.councilPrefix;
   const talk: PrState["talk"] = [];
   for (const review of node.reviews) {
     const { author, state, body } = review;
-    if (!isHuman(author) || author.login === viewer || !review.submittedAt) continue;
-    if (state === "PENDING" || state === "DISMISSED") continue;
+    if (!isHuman(author) || author.login === viewer || !review.submittedAt || state === "PENDING") continue;
+    if (council && body.startsWith(council)) continue;
     if (state === "CHANGES_REQUESTED") {
       talk.push({ kind: "changes", author: author.login, at: review.submittedAt, excerpt: excerptOf(body) });
-    } else if (body.trim() !== "" && !silent?.test(body)) {
+    } else if (body !== "" && !silent?.test(body)) {
       talk.push({ kind: "review", author: author.login, at: review.submittedAt, excerpt: excerptOf(body) });
     }
   }
   for (const comment of node.comments) {
-    if (isHuman(comment.author) && comment.author.login !== viewer) {
-      talk.push({ kind: "comment", author: comment.author.login, at: comment.createdAt, excerpt: excerptOf(comment.body) });
-    }
+    if (!isHuman(comment.author) || comment.author.login === viewer || (council && comment.body.startsWith(council))) continue;
+    talk.push({ kind: "comment", author: comment.author.login, at: comment.createdAt, excerpt: excerptOf(comment.body) });
   }
   return talk.sort((a, b) => a.at.localeCompare(b.at));
 }

@@ -76,14 +76,20 @@ async function setup({ pack = PACK, draft = true }: { pack?: object | null; draf
   return { sim, pr, ref, pauses, comment: prCommentAction(deps), reply: prReplyAction(deps), resolve: prResolveThreadAction(deps), requestBot: reviewRequestBotAction(deps) };
 }
 
-/** Un paso del motor: la `key` es la misma en todos los reintentos de una visita. */
-const ctx = (key = "run_1:reply:1"): ActionCtx => ({
-  runId: newId("run"),
-  stepId: newId("stp"),
-  key,
-  signal: new AbortController().signal,
-  once: (_stage, fn) => fn(),
-});
+/** Un paso del motor: la `key` es la misma en todos los reintentos de una visita, y `once` recuerda las etapas hechas. */
+const ctx = (key = "run_1:reply:1"): ActionCtx => {
+  const done = new Map<string, unknown>();
+  return {
+    runId: newId("run"),
+    stepId: newId("stp"),
+    key,
+    signal: new AbortController().signal,
+    once: async <T>(stage: string, fn: () => Promise<T>) => {
+      if (!done.has(stage)) done.set(stage, await fn());
+      return done.get(stage) as T;
+    },
+  };
+};
 
 const conversation = (pr: SimPr) => pr.node().comments.map((c) => c.body);
 const threadOf = (pr: SimPr, commentId: number) => pr.node().reviewThreads.find((t) => t.comments.nodes[0]!.fullDatabaseId === String(commentId))!;
@@ -146,16 +152,17 @@ describe("review.requestBot", () => {
 
     const result = await requestBot.run(requestBot.args.parse({ pr: ref }), ctx("run_1:bot-req:1"));
 
-    expect(conversation(pr)).toEqual(["/review\n\n<!-- clanker:run_1:bot-req:1 -->"]);
+    expect(conversation(pr)).toEqual(["/review"]);
     expect(result).toEqual({ outcome: "ok", output: { requestedAt: Date.parse(pr.node().comments[0]!.createdAt) } });
   });
 
-  test("re-ejecutar no duplica el comando y devuelve el mismo requestedAt", async () => {
+  test("re-ejecutar el paso no duplica el comando y devuelve el mismo requestedAt", async () => {
     const { pr, ref, requestBot } = await setup();
     const args = requestBot.args.parse({ pr: ref });
+    const step = ctx("run_1:bot-req:1");
 
-    const first = await requestBot.run(args, ctx("run_1:bot-req:1"));
-    const again = await requestBot.run(args, ctx("run_1:bot-req:1"));
+    const first = await requestBot.run(args, step);
+    const again = await requestBot.run(args, step);
 
     expect(again).toEqual(first);
     expect(conversation(pr)).toHaveLength(1);
@@ -186,7 +193,7 @@ describe("pr.reply", () => {
     ]);
     expect(bodies(pr, rejected!.commentId)[1]).toMatch(/^\[clanker\] falso positivo, el monto ya se valida en `Transfer`\n\n<!-- clanker:/);
     expect(pr.node().reviewThreads.map((t) => t.isResolved)).toEqual([true, true]);
-    expect(conversation(pr)).toEqual(["/review\n\n<!-- clanker:run_1:reply-fixed:1:bot -->"]);
+    expect(conversation(pr)).toEqual(["/review"]);
     expect(result.output).toEqual({
       replied: [String(fixed!.commentId), String(rejected!.commentId)],
       resolved: [String(fixed!.commentId), String(rejected!.commentId)],
@@ -201,9 +208,10 @@ describe("pr.reply", () => {
     const [thread] = pr.botFindings(["Falta validar el monto"]);
     const args = reply.args.parse({ pr: ref, triage: { items: [{ id: String(thread!.commentId), reply: "no aplica" }] }, rerequestBot: true });
 
-    await reply.run(args, ctx());
+    const step = ctx();
+    await reply.run(args, step);
     pr.resolve(thread!.id, false);
-    await reply.run(args, ctx());
+    await reply.run(args, step);
 
     expect(bodies(pr, thread!.commentId)).toHaveLength(2);
     expect(conversation(pr)).toHaveLength(1);

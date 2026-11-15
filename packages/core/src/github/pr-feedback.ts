@@ -59,7 +59,7 @@ function spaced(deps: PrFeedbackDeps, signal: AbortSignal) {
   };
 }
 
-/** La marca que identifica un comentario del core: sin ella un reintento lo duplicaría. */
+/** La marca que identifica un comentario o respuesta del core: sin ella un reintento lo duplicaría. */
 const markerOf = (key: string) => `<!-- clanker:${key} -->`;
 
 /** El texto sin líneas que lo firmen como hecho por una IA, con el prefijo de comentarios del pack. */
@@ -67,33 +67,46 @@ const withPrefix = (pack: ResolvedPack, text: string) => `${pack.conventions.com
 
 const IssueComment = z.object({ id: z.number(), body: z.string().nullable(), created_at: z.string(), html_url: z.string() });
 
+const COMMENTS_ROUTE = "/repos/{owner}/{repo}/issues/{issue_number}/comments";
+
+async function postComment({ client, owner, name, number }: Target, body: string, write: ReturnType<typeof spaced>) {
+  const { data } = await write(() => client.request(`POST ${COMMENTS_ROUTE}`, { owner, repo: name, issue_number: number, body }));
+  return IssueComment.parse(data);
+}
+
 /** Publica un comentario de la conversación del PR salvo que ya exista uno con la marca de `key`. */
 async function ensureComment(
-  { client, owner, name, number }: Target,
+  target: Target,
   { key, body }: { key: string; body: string },
   write: ReturnType<typeof spaced>,
 ): Promise<{ created: boolean; comment: z.infer<typeof IssueComment> }> {
+  const { client, owner, name, number } = target;
   const marker = markerOf(key);
-  const route = "/repos/{owner}/{repo}/issues/{issue_number}/comments";
   const PAGE = 100;
   for (let page = 1; ; page++) {
-    const { data } = await client.request(`GET ${route}`, { owner, repo: name, issue_number: number, per_page: PAGE, page });
+    const { data } = await client.request(`GET ${COMMENTS_ROUTE}`, { owner, repo: name, issue_number: number, per_page: PAGE, page });
     const comments = z.array(IssueComment).parse(data);
     const found = comments.find((c) => c.body?.includes(marker));
     if (found) return { created: false, comment: found };
     if (comments.length < PAGE) break;
   }
-  const { data } = await write(() => client.request(`POST ${route}`, { owner, repo: name, issue_number: number, body: `${body}\n\n${marker}` }));
-  return { created: true, comment: IssueComment.parse(data) };
+  return { created: true, comment: await postComment(target, `${body}\n\n${marker}`, write) };
 }
 
-/** Pide la review al bot del pack con su comentario de petición. `undefined`: el pack no tiene bot. */
-async function requestBot(target: Target, key: string, write: ReturnType<typeof spaced>): Promise<{ requestedAt: number } | undefined> {
+/**
+ * Pide la review al bot del pack con su comando exacto, sin prefijo ni marca HTML: el clanker-loop
+ * comenta `/review` solo, y lo que el bot hace con otro texto en el comentario no está a la vista (el
+ * disparador de Acme apenas exige que lo contenga). Sin marca no se puede buscar antes de publicar:
+ * que un reintento no lo duplique lo da `ctx.once`, y si el proceso muere entre el comentario y el
+ * guardado, el reintento comenta otra vez. `undefined`: el pack no tiene bot.
+ */
+async function requestBot(target: Target, ctx: ActionCtx, write: ReturnType<typeof spaced>): Promise<{ requestedAt: number } | undefined> {
   const bot = target.pack.reviewBot;
   if (!bot) return undefined;
-  // El texto es el comando del bot tal cual: sin prefijo, o el bot no lo reconocería.
-  const { comment } = await ensureComment(target, { key, body: bot.request.body }, write);
-  return { requestedAt: Date.parse(comment.created_at) };
+  return ctx.once("requestBot", async () => {
+    const comment = await postComment(target, bot.request.body, write);
+    return { requestedAt: Date.parse(comment.created_at) };
+  });
 }
 
 const RESOLVE_THREAD = `mutation ResolveThread($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id isResolved } } }`;
@@ -243,7 +256,7 @@ export function prReplyAction(deps: PrFeedbackDeps): ActionDef<typeof ReplyArgs>
           }
         }
 
-        const requested = args.rerequestBot ? await requestBot(target, `${ctx.key}:bot`, write) : undefined;
+        const requested = args.rerequestBot ? await requestBot(target, ctx, write) : undefined;
         return { outcome: "ok", output: { ...out, ...requested } };
       }),
   };
@@ -263,7 +276,7 @@ export function reviewRequestBotAction(deps: PrFeedbackDeps): ActionDef<typeof R
     outcomes: ["ok", "none"],
     effects: "remote",
     run: async (args, ctx: ActionCtx): Promise<ActionResult> => {
-      const requested = await onPr(deps, args.pr, (target) => requestBot(target, ctx.key, spaced(deps, ctx.signal)));
+      const requested = await onPr(deps, args.pr, (target) => requestBot(target, ctx, spaced(deps, ctx.signal)));
       return requested ? { outcome: "ok", output: requested } : { outcome: "none" };
     },
   };
