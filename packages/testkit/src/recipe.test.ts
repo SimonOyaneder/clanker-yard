@@ -200,13 +200,18 @@ describe("ws.exec", () => {
     await worktree();
     const controller = new AbortController();
     const running = workspaces.exec(lease!, "sleep 30 & echo $! > child.pid; wait", { runId, stepId, signal: controller.signal });
-    await vi.waitFor(() => expect(existsSync(join(lease!.path, "child.pid"))).toBe(true));
+    // El archivo existe desde que `>` lo abre, antes de que `echo` escriba: se espera el pid, no el archivo.
+    // Un pid vacío sería 0, y `kill(0, 0)` apunta al grupo del propio test y nunca lanza.
+    const child = await vi.waitFor(() => {
+      const pid = Number(readFileSync(join(lease!.path, "child.pid"), "utf8"));
+      expect(pid).toBeGreaterThan(0);
+      return pid;
+    });
 
     controller.abort(new Error("timeout"));
 
     await expect(running).rejects.toThrow("timeout");
-    const child = Number(readFileSync(join(lease!.path, "child.pid"), "utf8"));
-    await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow());
+    await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow(), { timeout: 5000 });
   });
 });
 

@@ -21,12 +21,16 @@ import {
   type WorkspaceLease,
   type Workspaces,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 
 // Se prueba aquí y no en el core por la misma razón que workspaces.test.ts: testkit puede importar
 // el core y el core no puede importar testkit. Todo corre contra un servidor git HTTP local con
 // Basic auth sobre un bare temporal; nunca contra GitHub ni con tokens reales.
+
+// Cada test lanza varios git contra el servidor HTTP: solos tardan 1 a 3 s, y con la suite en paralelo
+// pasaban los 5 s del default.
+vi.setConfig({ testTimeout: 20_000 });
 
 const execFileAsync = promisify(execFile);
 const TOKEN = "github_pat_UNIQUE-0123456789";
