@@ -835,6 +835,23 @@ describe("contexto del rol", () => {
     ]);
   });
 
+  test("cada aviso sale una vez por corrida aunque la corrida lance varios pasos, y otra corrida vuelve a avisar", async () => {
+    const { store, agents, request } = withContext([
+      { result: { structured: validReport } },
+      { result: { structured: validReport } },
+      { result: { structured: validReport } },
+    ]);
+    const req = request();
+
+    await agents.run(req);
+    await agents.run(req);
+    expect(warnings(store)).toHaveLength(2);
+
+    const other = request();
+    await agents.run(other);
+    expect(warnings(store).map((e) => e.runId)).toEqual([req.brief.run.id, req.brief.run.id, other.brief.run.id, other.brief.run.id]);
+  });
+
   test("retomar la sesión vuelve a leer el archivo: lo editado vale desde ese lanzamiento", async () => {
     const { agents, calls, request, worktree } = withContext([
       { result: { structured: validReport } },

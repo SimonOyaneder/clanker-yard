@@ -25,6 +25,8 @@ import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec
 /** Una diferencia mayor a este porcentaje entre la suma de los turnos y el total del runtime queda como evento `error`. */
 export const USAGE_MISMATCH_PERCENT = 2;
 
+const WARNED_RUNS_KEPT = 200;
+
 /** `agent.activity` sale como máximo una vez por este intervalo y por sesión. */
 export const ACTIVITY_INTERVAL_MS = 2000;
 
@@ -133,6 +135,8 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
   const context: ContextResolver = createContextResolver({ defs, packs, remoteOf, userDir });
 
   const lastActivity = new Map<string, number>();
+  /** Los avisos de contexto ya emitidos por corrida; se guardan las últimas `WARNED_RUNS_KEPT`. */
+  const warnedContext = new Map<string, Set<string>>();
 
   /** Todo lo que se necesita para llevar una sesión desde que parte hasta que entrega su reporte. */
   interface Conversation {
@@ -292,16 +296,27 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     };
   }
 
-  /** Lo que falta de las fuentes de contexto avisa en la corrida y no detiene al agente. */
+  /**
+   * Lo que falta de las fuentes de contexto avisa en la corrida y no detiene al agente. Cada aviso
+   * (rol y fuente) sale una vez por corrida: cada paso lo repetiría.
+   */
   async function resolveContext(req: RunRequest | ResumeRequest, roleSlug: string, role: Role, cwd: string) {
     const resolved = await context.resolve({ role: roleSlug, sources: role.context, cwd, repoId: req.repoId });
-    if (resolved.warnings.length > 0) {
+    const runId = req.brief.run.id;
+    const seen = warnedContext.get(runId) ?? new Set<string>();
+    // Reinsertar deja a la corrida activa al final: se descartan las más viejas.
+    warnedContext.delete(runId);
+    warnedContext.set(runId, seen);
+    if (warnedContext.size > WARNED_RUNS_KEPT) warnedContext.delete(warnedContext.keys().next().value!);
+    const fresh = resolved.warnings.filter((message) => !seen.has(message));
+    if (fresh.length > 0) {
+      for (const message of fresh) seen.add(message);
       store.tx((tx) => {
-        for (const message of resolved.warnings) {
+        for (const message of fresh) {
           tx.emit({
             type: "error",
             origin: "core",
-            ...scope({ placement: req, runId: req.brief.run.id }),
+            ...scope({ placement: req, runId }),
             payload: { scope: "agent.context", message },
           });
         }

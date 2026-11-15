@@ -113,7 +113,7 @@ Un pack (`docs/design.html#packs`) es lo propio de una org (señales de PR, bot 
 `createContextResolver` (`packages/core/src/agents/context.ts`, `docs/design.html#contexto`) convierte `Role.context` y el `conventions.context` del pack en `{ native, references, warnings }` en cada lanzamiento y cada `resume`, leyendo siempre el archivo original: una skill o regla editada vale desde el siguiente lanzamiento. Qué fuente va a dónde está en su TSDoc.
 
 - Las skills (`native.skills`) se le piden a Claude por nombre, sin copiarlas; los archivos (`repo:`, `file:`, `rule:`, paquetes `context`) van a `references`.
-- Un archivo, paquete o skill que falta no detiene al agente: queda en `warnings` y sale un evento `error` con `scope: "agent.context"`. Los roles de la plantilla (`lore`, `commits`, `bug-rubric`, `test-rules`) avisan mientras nadie guarde esos paquetes (nada de la app crea defs `context` todavía).
+- Un archivo, paquete o skill que falta no detiene al agente: queda en `warnings` y sale un evento `error` con `scope: "agent.context"`, una vez por rol y fuente en cada corrida (los pasos siguientes no lo repiten). Los roles de la plantilla (`lore`, `commits`, `bug-rubric`, `test-rules`) avisan mientras nadie guarde esos paquetes (nada de la app crea defs `context` todavía).
 - Los hooks del usuario siguen apagados salvo `Role.hooks`.
 
 ## Git remoto (push y fetch)
