@@ -13,6 +13,7 @@ import { pullRequests, runs, workspaces as workspaceRows } from "../store/schema
 import type { Store } from "../store/store";
 import type { RepoConfig, Workspaces } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
+import { pushOrThrow } from "./push";
 
 const PublishArgs = ApplyArgs.extend({
   /** El reporte del committer: de él lee los commits (como `commits.apply`) y el título y cuerpo del PR. */
@@ -84,13 +85,7 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
       const prepared = await preparePush(workspaces, ws, { knownSha: tip, base: workspaces.baseSha(ws), council: false });
       if (prepared.outcome === "replan") return { replan: prepared.failures };
       if (prepared.outcome === "squash-failed") throw new PermanentActionError(prepared.failures);
-      const outcome = await workspaces.push(ws);
-      if (outcome === "lease-rejected") {
-        throw new PermanentActionError(`${ws.branch} ya no está donde el core la dejó en el remoto: alguien más pusheó.`);
-      }
-      if (outcome === "unauthorized") {
-        throw new Error(`GitHub rechazó el token de ${remote.account}: reconecta la cuenta para publicar ${ws.branch}.`);
-      }
+      await pushOrThrow(workspaces, ws, remote.account, { council: false });
       return { head: prepared.head };
     });
     if ("replan" in pushed) return { outcome: "replan", output: { failures: pushed.replan } };

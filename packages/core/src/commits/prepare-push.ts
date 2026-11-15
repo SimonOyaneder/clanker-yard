@@ -1,5 +1,6 @@
 import { GitError, isAncestor } from "../git/git";
 import { snapshotTree } from "../git/tree";
+import { FIXUP_PREFIX } from "./route";
 import { excerpt } from "../workspaces/exec";
 import type { Workspaces, WorkspaceRef } from "../workspaces/workspaces";
 
@@ -76,7 +77,7 @@ async function reconcile(workspaces: Workspaces, ws: WorkspaceRef, knownSha: str
 async function squash(workspaces: Workspaces, ws: WorkspaceRef, base: string): Promise<PreparePushResult> {
   const before = await workspaces.git(ws, "rev-parse", "HEAD");
   const mergeBase = await workspaces.git(ws, "merge-base", before, base);
-  const hasFixup = async () => (await subjectsSince(workspaces, ws, mergeBase)).some((s) => s.startsWith(FIXUP));
+  const hasFixup = async () => (await subjectsSince(workspaces, ws, mergeBase)).some((s) => s.startsWith(FIXUP_PREFIX));
   if (!(await hasFixup())) return { outcome: "ok", head: before, squashed: false };
 
   const failed = async (failures: string): Promise<PreparePushResult> => {
@@ -110,14 +111,12 @@ async function squash(workspaces: Workspaces, ws: WorkspaceRef, base: string): P
   if ((await workspaces.git(ws, "rev-parse", "HEAD^{tree}")) !== treeBefore) {
     return failed(`El autosquash cambió el árbol y la branch volvió a ${before.slice(0, 9)}`);
   }
-  const left = (await subjectsSince(workspaces, ws, mergeBase)).filter((s) => s.startsWith(FIXUP));
+  const left = (await subjectsSince(workspaces, ws, mergeBase)).filter((s) => s.startsWith(FIXUP_PREFIX));
   if (left.length > 0) {
     return failed(`Quedan fixup! sin commit destino y la branch volvió a ${before.slice(0, 9)}: ${left.join("; ")}`);
   }
   return { outcome: "ok", head, squashed: true };
 }
-
-const FIXUP = "fixup! ";
 
 async function subjectsSince(workspaces: Workspaces, ws: WorkspaceRef, from: string): Promise<string[]> {
   return (await workspaces.git(ws, "log", "--format=%s", `${from}..HEAD`)).split("\n");

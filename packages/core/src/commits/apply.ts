@@ -10,7 +10,7 @@ import { excerpt } from "../workspaces/exec";
 import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 
 /** Conventional Commits: el formato por defecto. Un pack que pida otro pasa su `messagePattern`. */
-const CONVENTIONAL_COMMIT = /^(feat|fix|refactor|docs|test|chore|perf|ci|build|style|revert)(\([^)]+\))?!?: \S/;
+export const CONVENTIONAL_COMMIT = /^(feat|fix|refactor|docs|test|chore|perf|ci|build|style|revert)(\([^)]+\))?!?: \S/;
 
 /**
  * Líneas que firman un commit como hecho por una IA: el core las saca, el plan no puede traerlas. Incluye el
@@ -231,7 +231,7 @@ function planProblems(
 }
 
 /** El patch de `selected`, en el orden del diff: el encabezado de cada archivo una vez y sus hunks seguidos. */
-function patchOf(selected: Hunk[], all: Hunk[]): string {
+export function patchOf(selected: Hunk[], all: Hunk[]): string {
   let patch = "";
   let fileHeader: string | undefined;
   for (const hunk of [...selected].sort((a, b) => all.indexOf(a) - all.indexOf(b))) {
