@@ -288,6 +288,21 @@ describe("auto: el core comenta /merge solo", () => {
     expect(mergeComments(pr)).toHaveLength(1);
   });
 
+  test("un PR que ya estaba listo en la primera lectura también se anuncia, como el `$first` del vigilante, y no se repite", async () => {
+    sim.defaultBranchCheck("merge-queue");
+    const pr = sim.openPr({ head: "one" });
+    pr.ci("green");
+    pr.review("ana", "APPROVED");
+
+    await wake(0);
+    expect(readyEvents()).toEqual(["auto"]);
+    // El sistema no lo abrió: el evento sale (es del PR) pero nadie comenta.
+    expect(mergeComments(pr)).toEqual([]);
+
+    await wake();
+    expect(readyEvents()).toEqual(["auto"]);
+  });
+
   test("merge-queue en rojo después del /merge es merge.queue failed y sale pr.mergeFailed una vez", async () => {
     const pr = await openApprovable();
     await wake();

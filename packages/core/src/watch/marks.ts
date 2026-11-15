@@ -50,6 +50,8 @@ export interface PrEventInput {
   payload(fresh: string[]): Record<string, unknown>;
   /** La corrida que lo provoca, si la hay (el restack). */
   runId?: RunId;
+  /** Emite también en la primera lectura del PR, que por defecto solo siembra las marcas: lo que ya estaba listo se anuncia. */
+  emitOnFirstRead?: boolean;
 }
 
 /**

@@ -74,7 +74,7 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
       for (const fact of facts) {
         const input = { ...fact, payload: (fresh: string[]) => ({ repo: ref.repo, number: ref.number, ...fact.payload(fresh) }) };
         // La primera vez que se ve un PR solo se siembra: lo que ya estaba ahí no es un cambio.
-        if (known === undefined) recordMarks(tx, row.id, fact.type, fact.keys, at);
+        if (known === undefined && !fact.emitOnFirstRead) recordMarks(tx, row.id, fact.type, fact.keys, at);
         else emitOnce(tx, row, input, at);
       }
       markHead(tx, row.id, state.headSha, at);
@@ -146,15 +146,16 @@ function factsOf(state: PrState): PrEventInput[] {
  * Los hechos de la estrategia de merge, una vez por head (el `sha` de la marca, como el `offered` y el
  * `queuefail` del vigilante: un "todavía no" no se vuelve a preguntar hasta que haya un sha nuevo).
  * `pr.mergeReady` lleva el nivel que se cumple (`auto` o `offer`) y `pr.mergeFailed` avisa que la cola
- * (merge-queue) falló después del comando de merge, en un PR fuera de draft.
+ * (merge-queue) falló después del comando de merge, en un PR fuera de draft. Los dos salen también en la primera
+ * lectura: el `$first` del vigilante solo calla los comentarios, y un PR que ya estaba listo se ofrece.
  */
 export function mergeFactsOf({ merge, headSha, state }: PrState): PrEventInput[] {
   const facts: PrEventInput[] = [];
   if (merge.offer) {
-    facts.push({ type: "pr.mergeReady", keys: [headSha], payload: () => ({ sha: headSha, level: merge.auto ? "auto" : "offer" }) });
+    facts.push({ type: "pr.mergeReady", keys: [headSha], emitOnFirstRead: true, payload: () => ({ sha: headSha, level: merge.auto ? "auto" : "offer" }) });
   }
   if (merge.queue === "failed" && state === "open") {
-    facts.push({ type: "pr.mergeFailed", keys: [headSha], payload: () => ({ sha: headSha }) });
+    facts.push({ type: "pr.mergeFailed", keys: [headSha], emitOnFirstRead: true, payload: () => ({ sha: headSha }) });
   }
   return facts;
 }
