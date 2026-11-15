@@ -1,5 +1,6 @@
 import type { Client } from "@clanker/api";
 import { events } from "./events";
+import { mcp } from "./mcp";
 import { metricsCompareCommand } from "./metrics-compare";
 import { projectsList } from "./projects";
 import { runsGet, runsStart } from "./runs";
@@ -9,6 +10,8 @@ import { status } from "./status";
 export interface CliContext {
   /** El cliente del core. Lo levanta si no corre, así que un comando lo pide después de validar sus argumentos. */
   client(): Promise<Client>;
+  /** Dónde está el MCP del core (`/mcp`) y el token que pide. Lo levanta si no corre. */
+  mcpEndpoint(): Promise<{ url: string; token: string }>;
   /** Una línea de salida. */
   write(line: string): void;
   readFile(path: string): string;
@@ -29,6 +32,7 @@ const commands: Record<string, Command> = {
   "runs get": runsGet,
   "events tail": events,
   "metrics compare": metricsCompareCommand,
+  mcp,
 };
 
 const help = `Uso:\n${Object.values(commands)

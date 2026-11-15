@@ -187,6 +187,9 @@ export const FlowDef = z.strictObject({
 });
 export type FlowDef = z.infer<typeof FlowDef>;
 
+/** El flujo se guarda sin `version`: la asigna `save` y vive en la versión de la def. */
+export const FlowBody = FlowDef.omit({ version: true });
+
 /** Un error o un aviso de `flows.validate`; `path` es la ruta dentro del flujo, por ejemplo `nodes.sync.on.conflict`. */
 export const FlowIssue = z.object({ path: z.string(), message: z.string() });
 export type FlowIssue = z.infer<typeof FlowIssue>;

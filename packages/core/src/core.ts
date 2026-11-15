@@ -113,6 +113,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     flows,
     artifacts,
     decisions: createDecisions(store),
+    defs,
     bootId,
     coreVersion: opts.coreVersion,
     dataDir,

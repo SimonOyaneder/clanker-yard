@@ -66,6 +66,7 @@ async function exec(argv: string[], client: Record<string, unknown>, signal = ne
   const out: string[] = [];
   const ctx: CliContext = {
     client: () => Promise.resolve(client as Client),
+    mcpEndpoint: () => Promise.reject(new Error("este test no usa el MCP")),
     write: (line) => out.push(line),
     readFile: () => "",
     signal,
@@ -256,6 +257,7 @@ describe("clanker events tail", () => {
     const out: string[] = [];
     const done = runCli(["events", "tail", "-n", "1", "-f"], {
       client: () => Promise.resolve(client as Client),
+      mcpEndpoint: () => Promise.reject(new Error("este test no usa el MCP")),
       write: (line) => {
         out.push(line);
         if (out.length === 3) interrupt.abort();

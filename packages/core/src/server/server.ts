@@ -1,10 +1,11 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { ClientOrigin } from "@clanker/api";
 import { ORPCError, onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
 import { newId } from "../store/conventions";
+import { createMcpHandler } from "../mcp/server";
 import { createRouter, type CoreContext, type CoreRouter, type RouterDeps } from "./router";
 
 export interface StartServerOptions extends Pick<
@@ -20,6 +21,7 @@ export interface StartServerOptions extends Pick<
   | "flows"
   | "artifacts"
   | "decisions"
+  | "defs"
   | "coreVersion"
   | "dataDir"
   | "onShutdown"
@@ -31,7 +33,7 @@ export interface StartServerOptions extends Pick<
 }
 
 export interface CoreServer {
-  /** Endpoint `/rpc`, el `url` de `createClient`. */
+  /** Endpoint `/rpc`, el `url` de `createClient`. El MCP (Streamable HTTP) está en `/mcp` del mismo puerto, con el mismo token. */
   url: string;
   port: number;
   /** 32 bytes aleatorios por arranque, en base64url. Va en `Authorization: Bearer`. */
@@ -43,15 +45,17 @@ export interface CoreServer {
 }
 
 /**
- * Sirve la API por HTTP en 127.0.0.1 con puerto aleatorio. Antes de oRPC, cada request debe traer el
- * token y un `x-clanker-origin` válido, y su Host y su Origin deben ser los esperados (contra DNS
- * rebinding: una página ajena que apunte su dominio a 127.0.0.1 manda otro Host u Origin).
+ * Sirve la API por HTTP en 127.0.0.1 con puerto aleatorio: `/rpc` (oRPC) y `/mcp` (MCP). Antes de
+ * cualquiera, cada request debe traer el token y su Host y su Origin deben ser los esperados (contra DNS
+ * rebinding: una página ajena que apunte su dominio a 127.0.0.1 manda otro Host u Origin). `/rpc` además
+ * pide un `x-clanker-origin` válido; `/mcp` es siempre origin `mcp`.
  */
 export async function startServer(opts: StartServerOptions): Promise<CoreServer> {
   const token = randomBytes(32).toString("base64url");
   const bootId = opts.bootId ?? newId("boot");
   const allowedOrigins = new Set(opts.allowedOrigins);
   const router = createRouter({ ...opts, bootId, startedAt: Date.now() });
+  const mcp = createMcpHandler(router, opts.coreVersion);
   const handler = new RPCHandler(router, {
     interceptors: [
       onError((error) => {
@@ -62,12 +66,15 @@ export async function startServer(opts: StartServerOptions): Promise<CoreServer>
 
   const server = createServer(async (req, res) => {
     const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const auth = authorize(req, { host, token, allowedOrigins });
-    if ("status" in auth) {
-      res.writeHead(auth.status, { "content-type": "text/plain; charset=utf-8" }).end(auth.message);
-      return;
+    const rejection = authorize(req, { host, token, allowedOrigins });
+    if (rejection) return reject(res, rejection);
+    if (new URL(req.url ?? "/", `http://${host}`).pathname === "/mcp") return mcp(req, res);
+
+    const origin = ClientOrigin.safeParse(req.headers["x-clanker-origin"]);
+    if (!origin.success) {
+      return reject(res, { status: 400, message: "Falta x-clanker-origin: debe ser ui, cli o mcp." });
     }
-    const { matched } = await handler.handle(req, res, { prefix: "/rpc", context: auth });
+    const { matched } = await handler.handle(req, res, { prefix: "/rpc", context: { origin: origin.data } satisfies CoreContext });
     if (!matched) res.writeHead(404).end();
   });
 
@@ -91,11 +98,20 @@ export async function startServer(opts: StartServerOptions): Promise<CoreServer>
   };
 }
 
-/** El contexto de la llamada, o el rechazo con su status HTTP. */
+function reject(res: ServerResponse, { status, message }: Rejection): void {
+  res.writeHead(status, { "content-type": "text/plain; charset=utf-8" }).end(message);
+}
+
+interface Rejection {
+  status: number;
+  message: string;
+}
+
+/** El rechazo con su status HTTP, o `undefined` si el Host, el Origin y el token son los esperados. */
 function authorize(
   req: IncomingMessage,
   expected: { host: string; token: string; allowedOrigins: ReadonlySet<string> },
-): CoreContext | { status: number; message: string } {
+): Rejection | undefined {
   if (req.headers.host !== expected.host) {
     return { status: 403, message: `Host no permitido: se esperaba ${expected.host}.` };
   }
@@ -109,11 +125,6 @@ function authorize(
       message: "Falta el token: envía Authorization: Bearer <token> (está en core.json).",
     };
   }
-  const clientOrigin = ClientOrigin.safeParse(req.headers["x-clanker-origin"]);
-  if (!clientOrigin.success) {
-    return { status: 400, message: "Falta x-clanker-origin: debe ser ui, cli o mcp." };
-  }
-  return { origin: clientOrigin.data };
 }
 
 function hasBearer(header: string | undefined, token: string): boolean {

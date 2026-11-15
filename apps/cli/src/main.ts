@@ -6,10 +6,15 @@ const interrupt = new AbortController();
 // Un segundo Ctrl+C mata el proceso aunque el comando no escuche la señal.
 process.on("SIGINT", () => (interrupt.signal.aborted ? process.exit(130) : interrupt.abort()));
 
-let client: ReturnType<typeof connectCore> | undefined;
+let core: ReturnType<typeof connectCore> | undefined;
+const connection = () => (core ??= connectCore());
 
 runCli(process.argv.slice(2), {
-  client: () => (client ??= connectCore()),
+  client: async () => (await connection()).client,
+  mcpEndpoint: async () => {
+    const { info } = await connection();
+    return { url: `http://127.0.0.1:${info.port}/mcp`, token: info.token };
+  },
   write: (line) => console.log(line),
   readFile: (path) => readFileSync(path, "utf8"),
   signal: interrupt.signal,

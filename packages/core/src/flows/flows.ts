@@ -1,4 +1,4 @@
-import { FlowDef, type FlowIssue, type Validation } from "@clanker/api";
+import { FlowBody, FlowDef, type FlowIssue, type Validation } from "@clanker/api";
 import type { ZodType } from "zod";
 import type { Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
@@ -8,9 +8,6 @@ import type { ActionDef, Catalog, ConsolidatorDef, RoleInfo, WaitDef } from "./c
 import { itemsMerge, worst } from "./consolidators";
 import { createEngine, type Engine, type EngineDeps } from "./engine";
 import { validateFlow } from "./validate";
-
-/** El flujo se guarda sin `version`: la asigna `save` y vive en la versión de la def. */
-const FlowBody = FlowDef.omit({ version: true });
 
 /** `flows.save` con errores de validación: nada se guardó. */
 export class FlowValidationError extends Error {

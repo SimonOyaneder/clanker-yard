@@ -10,6 +10,6 @@
     "build": "node scripts/build.ts",
     "clanker": "tsx src/main.ts"
   },
-  "dependencies": { "@clanker/api": "*" },
+  "dependencies": { "@clanker/api": "*", "@modelcontextprotocol/client": "^2.4.0", "@modelcontextprotocol/server": "^2.4.0" },
   "devDependencies": { "esbuild": "^0.28.2", "tsx": "^4.23.15" }
 }

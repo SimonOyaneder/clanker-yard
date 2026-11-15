@@ -13,7 +13,7 @@ import { RunNotFoundError, RunStartError } from "../flows/engine";
 import { createStepDetails, StepNotFoundError } from "../flows/step-detail";
 import { createMetrics } from "../metrics/metrics";
 import type { Packs } from "../packs/packs";
-import { DefValidationError } from "../defs/defs";
+import { DefValidationError, type Defs } from "../defs/defs";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { IssueNotCachedError, type RunStarter } from "../projects/start-run";
 import { RecipeSyntaxError } from "../recipe/recipe";
@@ -44,6 +44,7 @@ export interface RouterDeps {
   flows: Engine;
   artifacts: Artifacts;
   decisions: Decisions;
+  defs: Defs;
   coreVersion: string;
   bootId: string;
   /** ms epoch */
@@ -232,6 +233,17 @@ export function createRouter(deps: RouterDeps) {
         const decision = deps.decisions.get(input.id);
         if (!decision) throw new ORPCError("NOT_FOUND", { message: `No existe la decisión ${input.id}.` });
         return decision;
+      }),
+    },
+    defs: {
+      list: os.defs.list.handler(({ input }) => deps.defs.list(input.kind, { includeArchived: input.includeArchived })),
+      get: os.defs.get.handler(({ input }) => {
+        const def = deps.defs.get(input.kind, input.id, input.version);
+        if (!def) {
+          const version = input.version === undefined ? "" : ` en la versión ${input.version}`;
+          throw new ORPCError("NOT_FOUND", { message: `No existe ${input.kind} ${input.id}${version}.` });
+        }
+        return def;
       }),
     },
     events: {

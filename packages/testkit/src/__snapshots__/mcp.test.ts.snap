@@ -1,0 +1,95 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`tools > lista solo list y get, de solo lectura 1`] = `
+[
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista las entidades de un kind. Los esquemas están en los resources clanker://schema/<kind>. Filtros por kind (los que no aparecen no tienen):
+- run: projectId?: string, status?: queued|running|waiting|parked|paused|done|failed|canceled[]
+- decision: projectId?: string, runId?: string, status?: pending|accepted|rejected|answered|expired|superseded[], kind?: gate|needs_human|question|review_note|note|alert[]
+- flow: includeArchived?: boolean
+- role: includeArchived?: boolean
+- profile: includeArchived?: boolean
+- recipe: includeArchived?: boolean
+- pack: includeArchived?: boolean",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "filter": {
+          "additionalProperties": {},
+          "description": "Campos del filtro del kind, como \`{ "status": ["running"] }\`.",
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "kind": {
+          "description": "Qué entidad.",
+          "enum": [
+            "project",
+            "run",
+            "decision",
+            "flow",
+            "role",
+            "profile",
+            "recipe",
+            "pack",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "kind",
+      ],
+      "type": "object",
+    },
+    "name": "list",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Trae una entidad por kind y id. Los esquemas están en los resources clanker://schema/<kind>.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "description": "El id de la entidad (\`list\` los muestra).",
+          "minLength": 1,
+          "type": "string",
+        },
+        "kind": {
+          "description": "Qué entidad.",
+          "enum": [
+            "project",
+            "run",
+            "decision",
+            "flow",
+            "role",
+            "profile",
+            "recipe",
+            "pack",
+          ],
+          "type": "string",
+        },
+        "version": {
+          "description": "Solo para flow, role, profile, recipe y pack: una versión anterior; sin ella, la vigente.",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "kind",
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "get",
+  },
+]
+`;

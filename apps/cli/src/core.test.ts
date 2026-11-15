@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { connectToCore, isPidAlive, readCoreJson } from "@clanker/api/node";
+import { Client as McpClient } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { type CliContext, runCli } from "./cli";
 import { buildCli } from "../scripts/build";
@@ -70,6 +72,29 @@ describe("el binario clanker", () => {
     expect(readCoreJson(home)!.bootId).toBe(info.bootId);
   }, 30_000);
 
+  test("mcp es un puente stdio al core: lista las tools, las ejecuta y levanta el core si no corre", async () => {
+    const home = tempHome();
+    const env = Object.fromEntries(
+      Object.entries({ ...process.env, CLANKER_HOME: home, CLANKER_CORE_ENTRY: coreEntry }).filter((e): e is [string, string] => e[1] !== undefined),
+    );
+    expect(readCoreJson(home)).toBeUndefined();
+    const client = new McpClient({ name: "test", version: "0.0.0" });
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: [cliBundle, "mcp"], env }));
+
+    const { tools } = await client.listTools();
+    const result = await client.callTool({ name: "list", arguments: { kind: "flow" } });
+    const { resources } = await client.listResources();
+    await client.close();
+
+    expect(tools.map((t) => [t.name, t.annotations?.readOnlyHint])).toEqual([
+      ["list", true],
+      ["get", true],
+    ]);
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject([{ kind: "flow", slug: "juguete" }]);
+    expect(resources.map((r) => r.uri)).toContain("clanker://schema/run");
+    expect(isPidAlive(readCoreJson(home)!.pid)).toBe(true);
+  }, 30_000);
+
   test("sin core y sin el bundle del core explica cómo construirlo y sale con 1", async () => {
     const env = { ...process.env, CLANKER_HOME: tempHome(), CLANKER_CORE_ENTRY: join(buildDir, "no-existe.js") };
 
@@ -92,6 +117,7 @@ describe("los comandos contra un core con runtime fake", () => {
     const out: string[] = [];
     const ctx: CliContext = {
       client: () => Promise.resolve(core.client),
+      mcpEndpoint: () => Promise.resolve({ url: `http://127.0.0.1:${core.info.port}/mcp`, token: core.info.token }),
       write: (line) => out.push(line),
       readFile: () => "",
       signal: new AbortController().signal,

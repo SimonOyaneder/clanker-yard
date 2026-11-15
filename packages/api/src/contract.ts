@@ -5,7 +5,6 @@ import {
   ArtifactHash,
   ArtifactKind,
   DecisionId,
-  type DefKind,
   Event,
   EventFilter,
   IssueId,
@@ -15,45 +14,14 @@ import {
   StepRunId,
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
+import { DefFilter, DefRecord, DefRef } from "./defs";
 import { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectSummary, RoleMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
 import { PrRef, PrState } from "./prs";
+import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
 import { Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
-
-/**
- * Convención `.meta({ mcp })` (`docs/design.html#d-data`, "Tools MCP desde el mismo contrato").
- * Un procedimiento que se expone como tool MCP lo declara aquí, en el contrato, con una de dos formas:
- *
- * - CRUD por kind de def: `.meta({ mcp: { tool: "list", kind: "flow" } })`. Las tools `list`, `get`,
- *   `create`, `update` y `delete` reciben `{ kind, id?, data?, dryRun? }` y despachan al procedimiento
- *   marcado para ese kind.
- * - Acción: `.meta({ mcp: { action: "retry_step", annotations: { idempotentHint: true } } })`. Una tool
- *   por acción, con el input zod del procedimiento tal cual.
- *
- * Regla de anotaciones: `list` y `get` van con `readOnlyHint`, `update` con `idempotentHint`, `delete` e
- * `interrupt_run` con `destructiveHint`, y todas con `openWorldHint: false` salvo las que publican en
- * GitHub o Linear. El generador (todavía no existe) debe fallar si un procedimiento con `meta.mcp` no
- * declara anotaciones.
- */
-export type McpMeta =
-  | {
-      tool: "list" | "get" | "create" | "update" | "delete";
-      kind: DefKind;
-    }
-  | { action: string; annotations?: McpAnnotations };
-
-export interface McpAnnotations {
-  readOnlyHint?: boolean;
-  idempotentHint?: boolean;
-  destructiveHint?: boolean;
-  openWorldHint?: boolean;
-}
-
-export interface ContractMeta {
-  mcp?: McpMeta;
-}
 
 /**
  * Versión mayor de la API. Sube cuando el contrato cambia de forma incompatible; el core la
@@ -62,6 +30,9 @@ export interface ContractMeta {
 export const API_MAJOR = 1;
 
 const base = oc.$meta<ContractMeta>({});
+
+/** Los kinds de `defs` que `list` y `get` sirven: los que ya tienen esquema (`context` no). */
+const DEF_MCP_KINDS = ["flow", "role", "profile", "recipe", "pack"] as const;
 
 const system = {
   /** Handshake de versión: la app lo compara con su `apiMajor` para decidir si relanza el core. */
@@ -91,6 +62,7 @@ const system = {
 const events = {
   /** Eventos con `seq > after`, en orden de `seq`. */
   list: base
+    .meta({ mcp: { resource: "run_timeline" } })
     .input(
       z.object({
         after: z.int().nonnegative().default(0),
@@ -183,9 +155,12 @@ const issues = {
 };
 
 const projects = {
-  list: base.output(z.array(ClankerProject)),
+  list: base.meta({ mcp: { tool: "list", kind: "project" } }).output(z.array(ClankerProject)),
   /** Falla con `NOT_FOUND` si no existe. */
-  get: base.input(z.object({ id: ProjectId })).output(ClankerProject),
+  get: base
+    .meta({ mcp: { tool: "get", kind: "project" } })
+    .input(z.object({ id: ProjectId }))
+    .output(ClankerProject),
   /**
    * Falla con `BAD_REQUEST` si el slug o el par (tracker, trackerRef) ya existen, si el flujo o el
    * perfil por defecto no existen, o si un repo no está registrado (`repos.add`), se repite o comparte
@@ -233,15 +208,24 @@ const repos = {
 
 const runs = {
   /** De la más reciente a la más antigua. Sin pasos: están en `get`. */
-  list: base.input(RunFilter.default({})).output(z.array(Run)),
+  list: base
+    .meta({ mcp: { tool: "list", kind: "run" } })
+    .input(RunFilter.default({}))
+    .output(z.array(Run)),
   /** Con sus pasos, sus outcomes y el costo. `NOT_FOUND` si no existe. */
-  get: base.input(z.object({ id: RunId })).output(RunDetail),
+  get: base
+    .meta({ mcp: { tool: "get", kind: "run" } })
+    .input(z.object({ id: RunId }))
+    .output(RunDetail),
   /**
    * Lo del panel de un paso que `get` no trae: sus sesiones de agente con el reporte validado, sus
    * artefactos (el brief que recibió y lo que dejó; contenido con `artifacts.get`) y, en una acción,
    * los comandos que corrió con su salida y su código de salida. `NOT_FOUND` si no existe el paso.
    */
-  step: base.input(z.object({ id: StepRunId })).output(StepDetail),
+  step: base
+    .meta({ mcp: { resource: "step_report" } })
+    .input(z.object({ id: StepRunId }))
+    .output(StepDetail),
   /**
    * El transcript completo de una sesión de agente, normalizado y paginado por `cursor` (un offset
    * en el archivo, no un número de página: sirve para seguir una sesión que todavía escribe). Una sesión
@@ -272,10 +256,30 @@ const metrics = {
 
 const decisions = {
   /** La bandeja: de la más reciente a la más antigua. Sin filtro trae todas, resueltas incluidas. */
-  list: base.input(DecisionFilter.default({})).output(z.array(Decision)),
+  list: base
+    .meta({ mcp: { tool: "list", kind: "decision" } })
+    .input(DecisionFilter.default({}))
+    .output(z.array(Decision)),
   /** `NOT_FOUND` si no existe. */
-  get: base.input(z.object({ id: DecisionId })).output(Decision),
+  get: base
+    .meta({ mcp: { tool: "get", kind: "decision" } })
+    .input(z.object({ id: DecisionId }))
+    .output(Decision),
 };
 
-export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, metrics };
+/** Flujos, roles, perfiles, recetas y packs: lo versionado en `defs`, leído por kind. */
+const defs = {
+  /** Las vigentes del kind con su versión vigente, por slug; las archivadas solo con `includeArchived`. */
+  list: base
+    .meta({ mcp: { tool: "list", kind: DEF_MCP_KINDS } })
+    .input(DefFilter)
+    .output(z.array(DefRecord)),
+  /** `NOT_FOUND` si el id no existe en ese kind o no tiene esa versión. */
+  get: base
+    .meta({ mcp: { tool: "get", kind: DEF_MCP_KINDS } })
+    .input(DefRef)
+    .output(DefRecord),
+};
+
+export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, metrics, defs };
 export type Contract = typeof contract;

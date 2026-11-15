@@ -28,7 +28,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "flows" | "artifacts" | "decisions"> {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "flows" | "artifacts" | "decisions" | "defs"> {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -50,5 +50,6 @@ export function apiDeps(
     flows,
     artifacts,
     decisions: createDecisions(store),
+    defs,
   };
 }
