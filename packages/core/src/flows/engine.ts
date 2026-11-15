@@ -8,7 +8,7 @@ import {
   type StepRunId,
   type SubjectRef,
 } from "@clanker/api";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, max, or, sql, sum } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Defs } from "../defs/defs";
@@ -31,6 +31,16 @@ import { LANE_BY_TRIGGER } from "./validate";
 
 /** El lease de un paso: el core dueño lo renueva cada tercio mientras el paso vive. */
 const STEP_LEASE_TTL_MS = 120_000;
+/** Entre dos despertares del dispatcher, más que esto es que la máquina durmió: los timers no corrieron. */
+const CLOCK_JUMP_MS = 30_000;
+/** A la tercera vez que un corte interrumpe el mismo paso, el paso da error en vez de reabrirse. */
+const MAX_CUTS = 3;
+/** El `error` con que `recover` reabre un paso: lo que sigue en el paso hasta que se cierre o falle de nuevo. */
+const RESUMED_AFTER_CUT = "La app se cerró con este paso en curso; se retoma.";
+/** El `error` de una sesión de agente que un corte dejó sin cerrar: así `performAgent` la reconoce para retomarla. */
+const SESSION_CUT = "La app se cerró con la sesión en curso.";
+const CUT_NOTICE =
+  "La app se reinició mientras trabajabas en esta tarea. Revisa el worktree: puede tener cambios a medias de antes del corte. Termina tu tarea.";
 export const TICK_MS = 5000;
 export const DEFAULT_MAX_AGENTS = 4;
 /** Cada cuánto se sondea un wait mientras no exista Watch que avise con `signal`. */
@@ -113,6 +123,8 @@ export interface EngineDeps {
   probeEverySec?: number;
   /** Identifica a este core como dueño de los leases. */
   bootId?: string;
+  /** Al despertar de un sleep, además de los leases de los pasos: extender los de lo que este core mantiene fuera del motor. */
+  onClockJump?: () => void;
   now?: () => number;
 }
 
@@ -133,11 +145,14 @@ export interface Engine {
   /** Las corridas más recientes primero, sin sus pasos. */
   listRuns(filter?: { projectId?: ProjectId; status?: readonly RunRow["status"][] }): Omit<RunView, "steps">[];
   /**
-   * Al bootear, con las acciones y los waits ya registrados y antes de aceptar trabajo: despacha los
-   * pasos pending que dejó el core anterior (en backoff, o creados durante el drain) y sondea sus
-   * waits. Todavía no retoma lo que quedó leased o running.
+   * Al bootear, antes de aceptar trabajo y con los módulos que registran acciones y waits ya cargados:
+   * reabre los pasos que un corte dejó `leased` o `running` (los lease de otro boot, sea cual sea su
+   * vencimiento: este core tiene el lock y el anterior ya murió), da error al que lleva
+   * `MAX_CUTS` cortes y despierta al dispatcher. Los waits quedan esperando y el primer tick los
+   * sondea (el calendario de sondeos vive en memoria), así que lo que pasó con la app cerrada no se
+   * pierde. Un gate no necesita nada: su corrida sigue parked. Devuelve cuántos pasos tocó.
    */
-  recover(): void;
+  recover(): number;
   /** Deja de despachar y espera a los pasos en curso. */
   close(): Promise<void>;
 }
@@ -207,6 +222,7 @@ export function createEngine(deps: EngineDeps): Engine {
   const nextProbeAt = new Map<StepRunId, number>();
   const probing = new Set<StepRunId>();
   let activeAgents = 0;
+  let lastWakeAt = now();
   let ticker: NodeJS.Timeout | undefined;
   let closed = false;
 
@@ -378,6 +394,10 @@ export function createEngine(deps: EngineDeps): Engine {
     if (closed) return;
     ticker ??= setInterval(wake, deps.tickMs ?? TICK_MS).unref();
     try {
+      const t = now();
+      // Antes de reconciliar nada: dormir no es perder el lease.
+      if (t - lastWakeAt > CLOCK_JUMP_MS) extendOwnLeases(t);
+      lastWakeAt = t;
       // Antes de despachar: un wait que vence o se resuelve deja su paso siguiente listo en esta misma vuelta.
       sweepWaits();
       dispatch();
@@ -385,6 +405,17 @@ export function createEngine(deps: EngineDeps): Engine {
       // Un wake que lanza tumbaría a quien lo llamó (un `start`, el cierre de otro paso, un timer).
       console.error("El dispatcher de flujos falló:", error);
     }
+  }
+
+  function extendOwnLeases(t: number): void {
+    store.tx((tx) =>
+      tx.db
+        .update(stepRuns)
+        .set({ leaseUntil: t + STEP_LEASE_TTL_MS })
+        .where(and(eq(stepRuns.owner, bootId), inArray(stepRuns.status, ["leased", "running"])))
+        .run(),
+    );
+    deps.onClockJump?.();
   }
 
   /** Toma los pasos pending listos: primero los del carril de mantenimiento, luego las corridas más antiguas. */
@@ -420,14 +451,14 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  /** El paso (pending o en un wait) no se pudo cargar: falla sin correr y su corrida queda parked. */
+  /** El paso (pending, en un wait o a medias por un corte) no se pudo cargar: falla sin correr y su corrida queda parked. */
   function parkUnloadable(run: RunRow, step: StepRow, error: string): void {
     try {
       store.tx((tx) => {
         const failed = tx.db
           .update(stepRuns)
           .set({ status: "failed", outcome: "error", error, notBefore: null })
-          .where(and(eq(stepRuns.id, step.id), inArray(stepRuns.status, ["pending", "waiting"])))
+          .where(and(eq(stepRuns.id, step.id), inArray(stepRuns.status, ["pending", "waiting", "leased", "running"])))
           .returning({ id: stepRuns.id })
           .get();
         if (!failed) return;
@@ -463,16 +494,19 @@ export function createEngine(deps: EngineDeps): Engine {
 
   async function execute(job: Job): Promise<void> {
     const controller = new AbortController();
-    // Un timer no lanza: si el latido falla, se interrumpe el paso en vez de dejarlo corriendo sin lease.
+    // Un timer no lanza: si el latido falla o el lease ya es de otro attempt, se interrumpe el paso en
+    // vez de dejarlo corriendo sin lease (un agente de un intento anterior no puede seguir escribiendo).
     const renew = setInterval(() => {
       try {
-        store.tx((tx) =>
+        const renewed = store.tx((tx) =>
           tx.db
             .update(stepRuns)
             .set({ leaseUntil: now() + STEP_LEASE_TTL_MS })
-            .where(and(eq(stepRuns.id, job.step.id), eq(stepRuns.attempt, job.step.attempt)))
-            .run(),
+            .where(and(eq(stepRuns.id, job.step.id), eq(stepRuns.attempt, job.step.attempt), inArray(stepRuns.status, ["leased", "running"])))
+            .returning({ id: stepRuns.id })
+            .get(),
         );
+        if (!renewed) controller.abort(new StaleStepError(job.step.id));
       } catch (error) {
         controller.abort(error);
       }
@@ -505,6 +539,60 @@ export function createEngine(deps: EngineDeps): Engine {
       transition({ ...job, node: { ...job.node, on: {} } }, "error", undefined, error);
     } catch (cause) {
       if (!(cause instanceof StaleStepError)) console.error(`Tampoco se pudo estacionar la corrida ${job.run.id}:`, cause);
+    }
+  }
+
+  // --- recuperación ----------------------------------------------------------------------------
+
+  function recover(): number {
+    const orphans = store.db
+      .select({ step: stepRuns, run: runs })
+      .from(stepRuns)
+      .innerJoin(runs, eq(stepRuns.runId, runs.id))
+      .where(and(inArray(stepRuns.status, ["leased", "running"]), or(isNull(stepRuns.owner), ne(stepRuns.owner, bootId))))
+      .orderBy(asc(stepRuns.id))
+      .all();
+    for (const { step, run } of orphans) {
+      const cuts = step.recoveries + 1;
+      if (cuts >= MAX_CUTS) {
+        store.tx((tx) => closeCutSessions(tx, run, step));
+        const job = loadJob(run, step);
+        if (job) {
+          transition(job, "error", undefined, `La app se cortó ${cuts} veces con este paso en curso: se da por fallado para no entrar en un loop de crash.`);
+        }
+        continue;
+      }
+      store.tx((tx) => {
+        const reopened = tx.db
+          .update(stepRuns)
+          .set({ status: "pending", owner: null, leaseUntil: null, notBefore: null, recoveries: cuts, error: RESUMED_AFTER_CUT })
+          .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), inArray(stepRuns.status, ["leased", "running"])))
+          .returning({ id: stepRuns.id })
+          .get();
+        if (!reopened) throw new StaleStepError(step.id);
+        closeCutSessions(tx, run, step);
+        tx.emit({
+          type: "step.retrying",
+          origin: "core",
+          ...scopeOf(run, step.id),
+          payload: { ...stepPayload(step), recoveries: cuts, error: RESUMED_AFTER_CUT },
+        });
+      });
+    }
+    wake();
+    return orphans.length;
+  }
+
+  /** Las sesiones del paso que seguían `running` no tienen a quién esperar: quedan cerradas con error. */
+  function closeCutSessions(tx: Tx, run: RunRow, step: StepRow): void {
+    const cut = tx.db
+      .update(agentSessions)
+      .set({ status: "error", error: SESSION_CUT, endedAt: now() })
+      .where(and(eq(agentSessions.stepRunId, step.id), eq(agentSessions.status, "running")))
+      .returning({ id: agentSessions.id })
+      .all();
+    for (const { id } of cut) {
+      tx.emit({ type: "agent.ended", origin: "core", ...scopeOf(run, step.id), payload: { sessionId: id, status: "error" } });
     }
   }
 
@@ -603,19 +691,28 @@ export function createEngine(deps: EngineDeps): Engine {
       artifacts: {},
       payload,
     };
-    const result = await agents.run({
-      role: node.role,
-      roleDef,
+    const placement = {
       profile: profile.slug,
       profileDef,
-      mode: node.mode,
-      brief,
-      workspace: workspace.path,
       stepRunId: step.id,
       projectId: run.projectId ?? undefined,
       signal,
-      resumeFrom: node.resumeFrom === undefined ? undefined : priorSession(run.id, node.resumeFrom),
-    });
+      notice: step.error === RESUMED_AFTER_CUT ? CUT_NOTICE : undefined,
+    };
+    // Una sesión que el corte dejó `running` se retoma; sin ella (el corte llegó antes de que el runtime
+    // le diera id) empieza una nueva con el mismo brief.
+    const cutSession = placement.notice === undefined ? undefined : unfinishedSession(step.id);
+    const result = cutSession
+      ? await agents.resume({ ...placement, sessionId: cutSession, mode: node.mode, brief })
+      : await agents.run({
+          ...placement,
+          role: node.role,
+          roleDef,
+          mode: node.mode,
+          brief,
+          workspace: workspace.path,
+          resumeFrom: node.resumeFrom === undefined ? undefined : priorSession(run.id, node.resumeFrom),
+        });
     if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
     return fromAgentResult(result);
   }
@@ -634,6 +731,17 @@ export function createEngine(deps: EngineDeps): Engine {
       case "report_invalid":
         return permanent(result.message);
     }
+  }
+
+  /** La sesión de este paso que un corte dejó sin cerrar. */
+  function unfinishedSession(stepId: StepRunId): string | undefined {
+    return store.db
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(and(eq(agentSessions.stepRunId, stepId), eq(agentSessions.error, SESSION_CUT)))
+      .orderBy(desc(agentSessions.id))
+      .limit(1)
+      .get()?.id;
   }
 
   /** La última sesión de un paso terminado de ese nodo, para que `resumeFrom` parta de ella. */
@@ -751,12 +859,14 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       case "failed": {
         const policy = retryOf(job.node);
-        if (job.step.attempt > policy.max) return transition(job, "error", undefined, settled.error);
-        const wait = policy.backoffSec[Math.min(job.step.attempt, policy.backoffSec.length) - 1] ?? 0;
-        return requeue(job, settled.error, now() + wait * 1000, job.step.attempt);
+        // Ni un corte ni una espera del entorno gastan intento.
+        const spent = job.step.attempt - job.step.recoveries - job.step.deferrals;
+        if (spent > policy.max) return transition(job, "error", undefined, settled.error);
+        const wait = policy.backoffSec[Math.min(spent, policy.backoffSec.length) - 1] ?? 0;
+        return requeue(job, settled.error, now() + wait * 1000, false);
       }
       case "deferred":
-        return requeue(job, settled.error, settled.notBefore, job.step.attempt - 1);
+        return requeue(job, settled.error, settled.notBefore, true);
     }
   }
 
@@ -768,11 +878,18 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** El paso vuelve a pending con su backoff; `attempt` es lo que queda gastado. */
-  function requeue(job: Job, error: string, notBefore: number, attempt: number): void {
+  function requeue(job: Job, error: string, notBefore: number, deferred: boolean): void {
     store.tx((tx) => {
       const requeued = tx.db
         .update(stepRuns)
-        .set({ status: "pending", notBefore, attempt, error, owner: null, leaseUntil: null })
+        .set({
+          status: "pending",
+          notBefore,
+          ...(deferred && { deferrals: sql`${stepRuns.deferrals} + 1` }),
+          error,
+          owner: null,
+          leaseUntil: null,
+        })
         .where(and(eq(stepRuns.id, job.step.id), eq(stepRuns.attempt, job.step.attempt), inArray(stepRuns.status, ["leased", "running"])))
         .returning({ id: stepRuns.id })
         .get();
@@ -1285,7 +1402,7 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(inFlight);
   }
 
-  return { start, signal, getRun, listRuns, recover: wake, close };
+  return { start, signal, getRun, listRuns, recover, close };
 }
 
 class StepTimeout extends Error {

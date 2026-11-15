@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -19,6 +19,8 @@ export interface ExecRequest {
   /** La salida completa se agrega aquí, bajo un encabezado con el comando y un pie con la salida. */
   logPath: string;
   signal: AbortSignal;
+  /** Se llama con el proceso recién lanzado, para registrarlo en `procs`. */
+  onSpawn?: (child: ChildProcess) => void;
 }
 
 export interface ExecResult {
@@ -31,14 +33,14 @@ export interface ExecResult {
  * Corre `command` con `sh -c` en `cwd`, con stdout y stderr entrelazados en el log (nada de la salida
  * se guarda en memoria). Un `signal` abortado mata el grupo de procesos del comando y lanza su razón.
  */
-export async function execLogged({ cwd, command, env, logPath, signal }: ExecRequest): Promise<ExecResult> {
+export async function execLogged({ cwd, command, env, logPath, signal, onSpawn }: ExecRequest): Promise<ExecResult> {
   signal.throwIfAborted();
   mkdirSync(dirname(logPath), { recursive: true });
   const fd = openSync(logPath, "a+");
   try {
     writeSync(fd, `$ ${command}\n`);
     const outputStart = fstatSync(fd).size;
-    const { code, killedBy } = await run(command, cwd, { ...inheritedEnv(), ...env }, fd, signal);
+    const { code, killedBy } = await run(command, cwd, { ...inheritedEnv(), ...env }, fd, signal, onSpawn);
     const outputEnd = fstatSync(fd).size;
     const extract = excerpt(...readTail(fd, outputStart, outputEnd));
     writeSync(fd, `${killedBy ? `[terminó por ${killedBy}]` : `[exit ${code}]`}\n\n`);
@@ -64,10 +66,12 @@ function run(
   env: Record<string, string>,
   fd: number,
   signal: AbortSignal,
+  onSpawn: ((child: ChildProcess) => void) | undefined,
 ): Promise<{ code: number | null; killedBy: NodeJS.Signals | null }> {
   return new Promise((resolve, reject) => {
     // `detached` da su propio grupo de procesos: matar solo el `sh` dejaría vivos a sus hijos.
     const child = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", fd, fd], detached: true });
+    onSpawn?.(child);
     const abort = () => {
       try {
         process.kill(-child.pid!, "SIGKILL");

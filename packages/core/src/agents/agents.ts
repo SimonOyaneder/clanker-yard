@@ -32,6 +32,8 @@ interface Placement {
   projectId?: ProjectId;
   /** Al abortarse, la sesión se interrumpe y el resultado llega como el de un runtime que terminó mal. */
   signal?: AbortSignal;
+  /** Un aviso del core que va antes de las instrucciones del modo (p. ej. que la app se reinició). */
+  notice?: string;
 }
 
 export interface RunRequest extends Placement {
@@ -165,7 +167,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
       role: req.role,
       cwd: req.workspace,
       systemPrompt: role.prompt,
-      prompt: promptFor(mode, req.brief),
+      prompt: promptFor(mode, req.brief, req.notice),
       model: profileRole.model,
       effort: profileRole.effort,
       cacheTtl: profileRole.cacheTtl,
@@ -215,7 +217,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
 
     const agentRun = await runtime.resume(
       { runtime: runtime.id, sessionId: session.sessionRef, cwd: session.cwd },
-      promptFor(mode, req.brief),
+      promptFor(mode, req.brief, req.notice),
       { outputSchema: outputSchemaFor(mode), ...budget },
     );
     interruptOnAbort(req.signal, agentRun);
@@ -444,8 +446,9 @@ function scope(c: { placement: Placement; runId: Brief["run"]["id"] }) {
 }
 
 /** Las instrucciones del modo y el brief van en el mensaje: el prompt de sistema queda fijo. */
-function promptFor(mode: RoleMode, brief: Brief): string {
-  return `${mode.instructions}\n\n${JSON.stringify(brief, null, 2)}`;
+function promptFor(mode: RoleMode, brief: Brief, notice?: string): string {
+  const message = `${mode.instructions}\n\n${JSON.stringify(brief, null, 2)}`;
+  return notice === undefined ? message : `${notice}\n\n${message}`;
 }
 
 function outputSchemaFor(mode: RoleMode): JsonSchema {

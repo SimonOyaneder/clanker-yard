@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { RunId } from "@clanker/api";
-import { and, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
 import { git, tryGit } from "../git/git";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { execLogged, type ExecResult } from "./exec";
 import { newId } from "../store/conventions";
-import { workspaces } from "../store/schema";
+import type { Procs } from "../procs/procs";
+import { runs, workspaces } from "../store/schema";
 import type { Store } from "../store/store";
 
 const REMOTE = "origin";
@@ -45,6 +46,8 @@ export interface WorkspacesOptions {
   identity: { name: string; email: string };
   /** Quien pushea y fetchea; sin él `push` y `fetch` lanzan. */
   remote?: GitRemote;
+  /** Donde se registran los comandos de `exec`, para matar los que deje un crash. */
+  procs?: Procs;
   leaseTtlMs?: number;
   now?: () => number;
 }
@@ -94,6 +97,18 @@ export interface Workspaces {
    * Un worktree que ya existe se reusa tal cual: `base` solo cuenta al crearlo.
    */
   acquire(request: AcquireRequest): Promise<WorkspaceLease>;
+  /**
+   * Al bootear, antes de que Flows reabra los pasos: los worktrees de corridas vivas siguen suyos
+   * (lease renovado, mismo token, latido de nuevo), los de corridas ya terminadas se sueltan y los que
+   * se quedaron a medio crear pierden su lease para que el paso `workspace.acquire` los tome de nuevo.
+   * Devuelve cuántos leases tocó.
+   */
+  recover(): number;
+  /**
+   * Renueva ya todos los leases que este core mantiene. Se llama al despertar de un sleep (el reloj
+   * saltó), antes de que otra corrida pida una branch cuyo lease venció solo por dormir.
+   */
+  extendLeases(): void;
   /** Suelta el lease y deja el worktree `idle`. No hace nada si el token ya no es el vigente. */
   release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void;
   /** El worktree que `runId` tiene tomado: dónde corren sus agentes y su base. */
@@ -129,9 +144,9 @@ export class StaleLeaseError extends Error {}
 export class BranchNotAllowedError extends Error {}
 
 export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
-  const { store, dataDir, repos, identity, remote, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
+  const { store, dataDir, repos, identity, remote, procs, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
   const logDir = opts.logDir ?? join(dataDir, "logs");
-  const heartbeats = new Map<string, NodeJS.Timeout>();
+  const heartbeats = new Map<string, { timer: NodeJS.Timeout; workspaceId: string; runId: RunId; token: number }>();
   const repoLocks = new Map<string, Promise<unknown>>();
 
   /** Un solo fetch o worktree add/remove a la vez por repo: tocan refs compartidas. */
@@ -159,7 +174,8 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         and(
           eq(workspaces.id, id),
           ne(workspaces.state, "archived"),
-          or(isNull(workspaces.holderRunId), lt(workspaces.leaseUntil, t)),
+          // Una corrida que ya lo tiene lo vuelve a tomar (su `workspace.acquire` se re-ejecuta tras un corte).
+          or(isNull(workspaces.holderRunId), lt(workspaces.leaseUntil, t), eq(workspaces.holderRunId, runId)),
         ),
       )
       .returning()
@@ -201,13 +217,13 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       stopHeartbeat(workspaceId, token);
     }, leaseTtlMs / 3);
     timer.unref();
-    heartbeats.set(beatKey(workspaceId, token), timer);
+    heartbeats.set(beatKey(workspaceId, token), { timer, workspaceId, runId, token });
     return lost.signal;
   }
 
   function stopHeartbeat(workspaceId: string, token: number): void {
     const key = beatKey(workspaceId, token);
-    clearInterval(heartbeats.get(key));
+    clearInterval(heartbeats.get(key)?.timer);
     heartbeats.delete(key);
   }
 
@@ -260,7 +276,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
               `hasta ${new Date(existing.leaseUntil ?? 0).toISOString()}.`,
           );
         }
-        if (existing.holderRunId) {
+        if (existing.holderRunId && existing.holderRunId !== runId) {
           emit({
             type: "lease.expired",
             origin: "core",
@@ -503,41 +519,86 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return "ok";
   }
 
+  function release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void {
+    stopHeartbeat(lease.workspaceId, lease.fencingToken);
+    store.tx(({ db, emit }) => {
+      const released = db
+        .update(workspaces)
+        .set({ state: "idle", holderRunId: null, leaseUntil: null })
+        .where(
+          and(
+            eq(workspaces.id, lease.workspaceId),
+            eq(workspaces.fencingToken, lease.fencingToken),
+          ),
+        )
+        .returning({ id: workspaces.id })
+        .get();
+      if (released) {
+        emit({
+          type: "lease.released",
+          origin: "core",
+          runId: lease.runId,
+          payload: {
+            resource: "workspace",
+            id: lease.workspaceId,
+            token: lease.fencingToken,
+          },
+        });
+      }
+    });
+  }
+
+  function recover(): number {
+    const live = new Set(
+      store.db
+        .select({ id: runs.id })
+        .from(runs)
+        .where(inArray(runs.status, ["queued", "running", "waiting", "parked", "paused"]))
+        .all()
+        .map((r) => r.id),
+    );
+    const held = store.db
+      .select()
+      .from(workspaces)
+      .where(and(isNotNull(workspaces.holderRunId), ne(workspaces.state, "archived")))
+      .all();
+    for (const row of held) {
+      const runId = row.holderRunId!;
+      if (!live.has(runId)) {
+        // La corrida terminó sin soltar el worktree.
+        release({ workspaceId: row.id, runId, fencingToken: row.fencingToken });
+      } else if (row.state === "creating") {
+        store.tx(({ db, emit }) => {
+          db.update(workspaces).set({ holderRunId: null, leaseUntil: null }).where(eq(workspaces.id, row.id)).run();
+          emit({
+            type: "lease.expired",
+            origin: "core",
+            runId,
+            payload: { resource: "workspace", id: row.id, runId, token: row.fencingToken },
+          });
+        });
+      } else {
+        renew(row.id, runId, row.fencingToken);
+        startHeartbeat(row.id, runId, row.fencingToken);
+      }
+    }
+    return held.length;
+  }
+
+  function extendLeases(): void {
+    for (const { workspaceId, runId, token } of heartbeats.values()) renew(workspaceId, runId, token);
+  }
+
   return {
     acquire,
     push,
+    recover,
+    extendLeases,
     async fetch(repo) {
       const { remote, url, account } = remoteOf(repo);
       return withRepoLock(repo, () => remote.fetch({ cwd: repos(repo).path, url, account }));
     },
-    release(lease) {
-      stopHeartbeat(lease.workspaceId, lease.fencingToken);
-      store.tx(({ db, emit }) => {
-        const released = db
-          .update(workspaces)
-          .set({ state: "idle", holderRunId: null, leaseUntil: null })
-          .where(
-            and(
-              eq(workspaces.id, lease.workspaceId),
-              eq(workspaces.fencingToken, lease.fencingToken),
-            ),
-          )
-          .returning({ id: workspaces.id })
-          .get();
-        if (released) {
-          emit({
-            type: "lease.released",
-            origin: "core",
-            runId: lease.runId,
-            payload: {
-              resource: "workspace",
-              id: lease.workspaceId,
-              token: lease.fencingToken,
-            },
-          });
-        }
-      });
-    },
+    release,
     held: (runId) =>
       store.db
         .select({ path: workspaces.path, base: workspaces.baseRef })
@@ -562,6 +623,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         env,
         logPath: join(logDir, "runs", runId, `${stepId}.log`),
         signal,
+        onSpawn: procs && ((child) => procs.track(child, { kind: "recipe", stepRunId: stepId })),
       });
     },
   };

@@ -44,6 +44,8 @@ export interface AgentCall {
   spec?: RunSpec;
   /** El `subject.id` del brief, para distinguir de qué corrida es. */
   subject: string;
+  /** El mensaje completo que recibió el agente. */
+  prompt: string;
 }
 export type AgentScript = (call: AgentCall, interrupted: Promise<void>) => Promise<Partial<RunResult>>;
 
@@ -53,11 +55,32 @@ export const okReport = (payload: unknown = { n: 1 }, outcome = "ok") => ({
 
 export const subjectOf = (prompt: string) => /"subject": \{[^}]*"id": "([^"]+)"/.exec(prompt)?.[1] ?? "?";
 
-export function harness(options: { maxAgents?: number; probeEverySec?: number; script?: AgentScript; roles?: Record<string, Role> } = {}) {
-  const store = openStore({ path: ":memory:" });
-  const dir = mkdtempSync(join(tmpdir(), "clanker-flows-"));
+/** Dónde vive lo que sobrevive a un corte: el archivo de la base y la carpeta de artefactos. */
+export interface HarnessHome {
+  dbPath: string;
+  dir: string;
+}
+
+export function harness(
+  options: {
+    maxAgents?: number;
+    probeEverySec?: number;
+    script?: AgentScript;
+    roles?: Record<string, Role>;
+    bootId?: string;
+    /** La base en un archivo (`home` del resultado), para simular un corte: otro `harness` con `reopen` sigue donde quedó este. */
+    persist?: boolean;
+    reopen?: HarnessHome;
+    onClockJump?: () => void;
+  } = {},
+) {
+  const dir = options.reopen?.dir ?? mkdtempSync(join(tmpdir(), "clanker-flows-"));
+  const dbPath = options.reopen?.dbPath ?? (options.persist ? join(dir, "clanker.db") : ":memory:");
+  const store = openStore({ path: dbPath });
   const defs = createDefs(store);
 
+  // Los ids de sesión del runtime no se repiten entre arranques de la misma base.
+  const bootPrefix = options.bootId ? `${options.bootId}-` : "";
   const calls: AgentCall[] = [];
   const script: AgentScript = options.script ?? (() => Promise.resolve(okReport()));
   const run = (call: AgentCall, cwd: string) => {
@@ -79,9 +102,9 @@ export function harness(options: { maxAgents?: number; probeEverySec?: number; s
     id: "fake",
     capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
     start: (spec) =>
-      Promise.resolve(run({ kind: "start", sessionId: `ses-${calls.length + 1}`, spec, subject: subjectOf(spec.prompt) }, spec.cwd)),
+      Promise.resolve(run({ kind: "start", sessionId: `${bootPrefix}ses-${calls.length + 1}`, spec, subject: subjectOf(spec.prompt), prompt: spec.prompt }, spec.cwd)),
     resume: (ref, message) =>
-      Promise.resolve(run({ kind: "resume", sessionId: `ses-${calls.length + 1}`, subject: subjectOf(message) }, ref.cwd)),
+      Promise.resolve(run({ kind: "resume", sessionId: `${bootPrefix}ses-${calls.length + 1}`, subject: subjectOf(message), prompt: message }, ref.cwd)),
   };
 
   const agents = createAgents({ store, defs, runtime });
@@ -100,9 +123,17 @@ export function harness(options: { maxAgents?: number; probeEverySec?: number; s
     workspaceOf: () => ({ path: "/work/tree", base: "main" }),
     maxAgents: options.maxAgents,
     probeEverySec: options.probeEverySec,
+    bootId: options.bootId,
+    onClockJump: options.onClockJump,
   });
+  let crashed = false;
+  /** Un corte: deja de despachar y no espera a lo que tenía en vuelo (un proceso muerto no termina nada). */
+  const crash = () => {
+    crashed = true;
+    return flows.close();
+  };
   const cleanup = async () => {
-    await flows.close();
+    if (!crashed) await flows.close();
     store.close();
     rmSync(dir, { recursive: true, force: true });
   };
@@ -156,5 +187,5 @@ export function harness(options: { maxAgents?: number; probeEverySec?: number; s
 
   const nodes = (runId: RunId) => flows.getRun(runId).steps.map((s) => s.nodeId);
 
-  return { store, defs, flows, artifacts, calls, action, save, start, finished, eventTypes, nodes, cleanup };
+  return { store, defs, flows, artifacts, calls, home: { dbPath, dir } satisfies HarnessHome, crash, action, save, start, finished, eventTypes, nodes, cleanup };
 }

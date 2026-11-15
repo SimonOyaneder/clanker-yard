@@ -9,6 +9,7 @@ import {
   createArtifacts,
   createDefs,
   createFlows,
+  createProcs,
   createWorkspaces,
   LEASE_TTL_MS,
   newId,
@@ -361,5 +362,113 @@ describe("held y workspace.release", () => {
     expect(released.outcome).toBe("ok");
     expect(workspaces.held(runA)).toBeUndefined();
     expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
+  });
+});
+
+describe("recover y extendLeases", () => {
+  /** Una corrida en la base, sin pasar por el motor: `recover` solo mira su estado. */
+  function seedRun(runId: RunId, status: "running" | "parked" | "done") {
+    const sqlite = store.db.$client;
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    sqlite
+      .prepare(
+        `INSERT INTO runs (id, subject_type, subject_id, flow_def_id, flow_version, roles, lane, status, writes, params, rounds, started_at)
+         VALUES (?, 'issue', ?, 'def_x', 1, '{}', 'dev', ?, 1, '{}', '{}', 0)`,
+      )
+      .run(runId, runId, status);
+    sqlite.exec("PRAGMA foreign_keys = ON");
+  }
+
+  const row = (workspaceId: string) =>
+    store.db.$client.prepare("SELECT state, holder_run_id AS holder, lease_until AS leaseUntil, fencing_token AS token FROM workspaces WHERE id = ?").get(workspaceId) as {
+      state: string;
+      holder: string | null;
+      leaseUntil: number | null;
+      token: number;
+    };
+
+  test("el worktree de una corrida viva sigue suyo: mismo token, lease renovado y nadie más lo toma", async () => {
+    const id = repo("r1");
+    seedRun(runA, "parked");
+    const lease = await acquire(id, "cla-1", runA);
+    // Un corte largo: el lease venció y otra corrida podría quedárselo.
+    clock += 10 * LEASE_TTL_MS;
+
+    const rebooted = workspacesOn(store);
+    expect(rebooted.recover()).toBe(1);
+
+    expect(row(lease.workspaceId)).toMatchObject({ state: "leased", holder: runA, token: lease.fencingToken, leaseUntil: clock + LEASE_TTL_MS });
+    expect(rebooted.held(runA)).toMatchObject({ path: lease.path });
+    expect(() => rebooted.validate(lease)).not.toThrow();
+    await expect(rebooted.acquire({ repo: id, branch: "cla-1", base: "main", runId: runB })).rejects.toBeInstanceOf(WorkspaceBusyError);
+  });
+
+  test("el worktree de una corrida que ya terminó se suelta", async () => {
+    const id = repo("r1");
+    seedRun(runA, "done");
+    const lease = await acquire(id, "cla-1", runA);
+
+    expect(workspacesOn(store).recover()).toBe(1);
+
+    expect(row(lease.workspaceId)).toMatchObject({ state: "idle", holder: null, leaseUntil: null });
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
+    await expect(acquire(id, "cla-1", runB)).resolves.toMatchObject({ fencingToken: lease.fencingToken + 1 });
+  });
+
+  test("uno que se quedó a medio crear pierde el lease para que su paso lo tome de nuevo", async () => {
+    const id = repo("r1");
+    seedRun(runA, "running");
+    const lease = await acquire(id, "cla-1", runA);
+    store.db.$client.prepare("UPDATE workspaces SET state = 'creating' WHERE id = ?").run(lease.workspaceId);
+
+    workspacesOn(store).recover();
+
+    expect(row(lease.workspaceId)).toMatchObject({ state: "creating", holder: null, leaseUntil: null });
+    expect(store.events.since(0).at(-1)).toMatchObject({ type: "lease.expired", payload: { runId: runA, token: lease.fencingToken } });
+  });
+
+  test("la corrida que ya tiene el worktree lo vuelve a tomar con un token nuevo, sin avisar un vencimiento", async () => {
+    const id = repo("r1");
+    const first = await acquire(id, "cla-1", runA);
+
+    const again = await acquire(id, "cla-1", runA);
+
+    expect(again.fencingToken).toBe(first.fencingToken + 1);
+    expect(again.path).toBe(first.path);
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.acquired"]);
+    await expect(acquire(id, "cla-1", runB)).rejects.toBeInstanceOf(WorkspaceBusyError);
+  });
+
+  test("extendLeases renueva ya los leases de este core: dormir no los pierde", async () => {
+    const id = repo("r1");
+    const lease = await acquire(id, "cla-1", runA);
+
+    // La máquina duerme 10 min: los latidos no corrieron y el lease venció.
+    clock += 10 * 60_000;
+    workspaces.extendLeases();
+
+    expect(row(lease.workspaceId).leaseUntil).toBe(clock + LEASE_TTL_MS);
+    await expect(acquire(id, "cla-1", runB)).rejects.toBeInstanceOf(WorkspaceBusyError);
+  });
+
+  test("exec registra el comando en procs mientras corre", async () => {
+    const procs = createProcs({ store, bootId: "boot_now" });
+    const id = repo("r1");
+    const lease = await acquire(id, "cla-1", runA);
+    const withProcs = createWorkspaces({
+      store,
+      dataDir,
+      repos: (repoId) => ({ path: repoById.get(repoId)!.dir, defaultBranch: "main", protectedBranches: [] }),
+      identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+      procs,
+      now: () => clock,
+    });
+    const procRows = () => store.db.$client.prepare("SELECT boot_id AS bootId, kind, step_run_id AS stepRunId FROM procs").all();
+
+    const running = withProcs.exec(lease, "sleep 0.3", { runId: runA, stepId: "stp_1" });
+    expect(procRows()).toEqual([{ bootId: "boot_now", kind: "recipe", stepRunId: "stp_1" }]);
+    await running;
+
+    expect(procRows()).toEqual([]);
   });
 });

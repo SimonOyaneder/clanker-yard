@@ -488,6 +488,10 @@ export const stepRuns = sqliteTable(
     round: integer().notNull(),
     /** Ejecuciones empezadas; sube en cada lease. */
     attempt: integer().notNull().default(0),
+    /** Cortes de la app con el paso en curso. */
+    recoveries: integer().notNull().default(0),
+    /** Veces que el entorno (login, cuota) frenó el paso. `attempt` solo sube, porque es el token de fencing; los intentos gastados son `attempt` − `recoveries` − `deferrals`. */
+    deferrals: integer().notNull().default(0),
     status: text({ enum: STEP_STATUSES }).notNull(),
     /** Lo que declara el nodo, más `error`, `timeout` y `skipped`. */
     outcome: text(),
@@ -528,4 +532,25 @@ export const actionEffects = sqliteTable(
     primaryKey({ columns: [t.idemKey, t.stage] }),
     check("action_effects_result_json", sql`json_valid(${t.result})`),
   ],
+);
+
+export const PROC_KINDS = ["agent", "recipe", "git"] as const;
+
+/**
+ * Los procesos que lanza el core, cada uno en su propio grupo, con el `boot_id` que los lanzó. Tras un
+ * crash, el próximo arranque mata los de otro `boot_id`. `started_at` es la hora de inicio que el SO
+ * le da al proceso (no la del registro): si el pid fue reusado, no coincide.
+ */
+export const procs = sqliteTable(
+  "procs",
+  {
+    pid: integer().notNull(),
+    pgid: integer().notNull(),
+    bootId: text("boot_id").notNull(),
+    kind: text({ enum: PROC_KINDS }).notNull(),
+    /** Sin FK ni tipo: un comando de receta puede correr fuera de un paso. */
+    stepRunId: text("step_run_id"),
+    startedAt: integer("started_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.bootId, t.pid] })],
 );

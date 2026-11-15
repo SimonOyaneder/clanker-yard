@@ -691,11 +691,42 @@ describe("agentes", () => {
 
     const runId = h.start("planner");
     await vi.advanceTimersByTimeAsync(0);
-    expect(h.flows.getRun(runId).steps[0]).toMatchObject({ status: "pending", attempt: 0 });
+    // `attempt` es el token de fencing: no retrocede, el intento se descuenta aparte.
+    expect(h.flows.getRun(runId).steps[0]).toMatchObject({ status: "pending", attempt: 1 });
 
     await vi.advanceTimersByTimeAsync(3_600_000);
     expect(h.flows.getRun(runId)).toMatchObject({ status: "done" });
-    expect(h.flows.getRun(runId).steps[0]).toMatchObject({ attempt: 1 });
+    expect(h.flows.getRun(runId).steps[0]).toMatchObject({ attempt: 2 });
+  });
+});
+
+describe("intentos gastados y fencing", () => {
+  test("una espera por el entorno no cuenta como intento del retry y attempt nunca retrocede", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const h = harness({
+      script: () => {
+        calls++;
+        if (calls === 1) return Promise.resolve({ status: "quota_exhausted", message: "sin cuota", resetsAt: Date.now() + 1000 });
+        if (calls === 2) return Promise.resolve({ status: "error", message: "falló" });
+        return Promise.resolve(okReport());
+      },
+    });
+    h.save({
+      schema: 1,
+      id: "planner",
+      name: "planner",
+      trigger: { type: "manual" },
+      start: "plan",
+      nodes: { plan: { type: "agent", role: "dev", mode: "plan", brief: {}, retry: { max: 1, backoffSec: [1] }, on: { ok: "@done", changes: "@failed" } } },
+    });
+
+    const runId = h.start("planner");
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // Con la espera contada como intento, la falla del segundo lease habría agotado el retry.
+    expect(h.flows.getRun(runId)).toMatchObject({ status: "done" });
+    expect(h.flows.getRun(runId).steps[0]).toMatchObject({ attempt: 3 });
   });
 });
 

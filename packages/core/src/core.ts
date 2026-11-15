@@ -9,6 +9,7 @@ import { createConnections } from "./connections/connections";
 import { createDefs, type Defs } from "./defs/defs";
 import { createFlows } from "./flows/flows";
 import { createPacks } from "./packs/packs";
+import { createProcs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
 import type { Secrets } from "./secrets/secrets";
 import { startServer, type CoreServer, type StartServerOptions } from "./server/server";
@@ -52,7 +53,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const defs = createDefs(store);
   const agents = createAgents({ store, defs, runtime });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
-  const workspaces = createWorkspaces({ store, dataDir, repos: createRepos(store).config, identity: GIT_IDENTITY });
+  const procs = createProcs({ store, bootId });
+  const workspaces = createWorkspaces({ store, dataDir, repos: createRepos(store).config, identity: GIT_IDENTITY, procs });
   const flows = createFlows({
     store,
     defs,
@@ -61,11 +63,20 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     roles: roleInfoOf(defs),
     workspaceOf: workspaces.held,
     bootId,
+    onClockJump: workspaces.extendLeases,
   });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
   installBuiltins({ defs, flows });
-  flows.recover();
+
+  // Antes de aceptar trabajo, en este orden: sin procesos de un core anterior que sigan escribiendo,
+  // con los worktrees de las corridas vivas todavía suyos, y recién entonces los pasos se reabren.
+  const orphans = procs.killOrphans();
+  const leases = workspaces.recover();
+  const steps = flows.recover();
+  if (orphans + leases + steps > 0) {
+    store.tx((tx) => tx.emit({ type: "core.recovered", origin: "core", payload: { steps, leases, orphans } }));
+  }
 
   const server = await startServer({
     store,

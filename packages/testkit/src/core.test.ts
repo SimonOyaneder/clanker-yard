@@ -1,10 +1,11 @@
 import { renameSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
-import { createFileSecrets, createRepos, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createFileSecrets, createProcs, createRepos, openStore, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { seedDb, type TestHome } from "./home";
@@ -170,5 +171,60 @@ describe("arranque", () => {
   test("CORE_RUNTIME que no está registrado hace fallar el arranque diciendo cuáles hay", async () => {
     await expect(boot({ CORE_RUNTIME: "claude-sdk" })).rejects.toThrow(/CORE_RUNTIME="claude-sdk".*\(fake\)/);
     await expect(boot({})).rejects.toThrow(/CORE_RUNTIME="claude-sdk"/);
+  });
+});
+
+describe("recuperación al arrancar", () => {
+  test("un corte con el agente en curso: el core nuevo reabre el paso, conserva el worktree y termina la corrida", async () => {
+    const client = await boot();
+    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const project = await createToyProject(client, { repo: repoId });
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
+    const nextFinished = await follow(client, project.id, ["run.finished"]);
+    const { id } = await client.runs.start({ projectId: project.id, issueId: issue.id });
+    await nextFinished();
+    await core?.close();
+    core = undefined;
+
+    // Lo que dejaría un crash con el agente de `saludar` en curso: el paso sigue `running` de otro boot,
+    // `release` no llegó a existir y el worktree sigue tomado por la corrida con su lease vencido.
+    store.tx(({ db }) => {
+      const sqlite = db.$client;
+      sqlite.prepare("UPDATE runs SET status = 'running', outcome = NULL, ended_at = NULL WHERE id = ?").run(id);
+      sqlite.prepare("DELETE FROM step_runs WHERE run_id = ? AND node_id = 'release'").run(id);
+      sqlite
+        .prepare("UPDATE step_runs SET status = 'running', owner = 'boot_dead', outcome = NULL, output_hash = NULL WHERE run_id = ? AND node_id = 'saludar'")
+        .run(id);
+      sqlite.prepare("UPDATE workspaces SET state = 'leased', holder_run_id = ?, lease_until = 0").run(id);
+    });
+
+    await boot();
+
+    await vi.waitFor(() => expect(store.events.since(0, { runId: id, types: ["run.finished"] })).toHaveLength(2));
+    const restarted = await createClient({ url: core!.server.url, token: core!.server.token, origin: "cli" }).runs.get({ id });
+    expect(restarted).toMatchObject({ status: "done", outcome: "done" });
+    expect(restarted.steps.map((s) => [s.nodeId, s.status, s.outcome, s.attempt])).toEqual([
+      ["acquire", "done", "ok", 1],
+      ["saludar", "done", "ok", 2],
+      ["release", "done", "ok", 1],
+    ]);
+    expect(store.events.since(0, { types: ["core.recovered"] })).toMatchObject([{ origin: "core", payload: { steps: 1, leases: 1, orphans: 0 } }]);
+  });
+
+  test("mata los procesos que dejó un core anterior antes de aceptar trabajo", async () => {
+    const orphan = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+    const dead = new Promise((resolve) => orphan.once("exit", (_code, signal) => resolve(signal)));
+    createProcs({ store, bootId: "boot_dead" }).track(orphan, { kind: "agent" });
+
+    await boot();
+
+    expect(await dead).toBe("SIGKILL");
+    expect(store.events.since(0, { types: ["core.recovered"] })).toMatchObject([{ payload: { steps: 0, leases: 0, orphans: 1 } }]);
+  });
+
+  test("un arranque sin nada que recuperar no deja evento", async () => {
+    await boot();
+
+    expect(store.events.since(0, { types: ["core.recovered"] })).toEqual([]);
   });
 });

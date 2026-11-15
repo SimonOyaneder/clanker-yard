@@ -133,6 +133,9 @@ export type {
   WorkspacesOptions,
 } from "./workspaces/workspaces";
 
+export { createProcs } from "./procs/procs";
+export type { Procs, ProcsOptions } from "./procs/procs";
+
 export { createIssues } from "./tracker/issues";
 export type { Issues, ProjectBinding } from "./tracker/issues";
 export { createLocalTracker } from "./tracker/local";
