@@ -2,8 +2,7 @@ import { API_MAJOR, type ClientOrigin, contract, type PrRef, type PrState, type 
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubPatError, githubPatForm } from "../github/pat";
 import { PrNotFoundError } from "../github/pr-query";
-import { createPrCache } from "../github/pr-cache";
-import { signalPr } from "../github/pr-waits";
+import { createPrCache, type PrCacheDeps } from "../github/pr-cache";
 import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
@@ -54,6 +53,8 @@ export interface RouterDeps {
   /** `system.lanes` y `system.setLanes`. */
   lanes: LaneSettings;
   flows: Engine;
+  /** Lo que `prs.refresh` avisa cuando un PR cambió (los waits y los eventos de Watch): el core lo comparte con su propio caché. */
+  onPrChange?: PrCacheDeps["onChange"];
   artifacts: Artifacts;
   decisions: Decisions;
   defs: Defs;
@@ -78,7 +79,7 @@ export function createRouter(deps: RouterDeps) {
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
   const prs = createPrs({ connections: deps.connections, packs: deps.packs });
-  const prCache = createPrCache({ store, repos, prs, onChange: (ref, state) => signalPr(flows.signal, ref, state) });
+  const prCache = createPrCache({ store, repos, prs, onChange: deps.onPrChange });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
     if (!project) throw new ORPCError("NOT_FOUND", { message: `No existe el proyecto ${id}.` });

@@ -262,9 +262,9 @@ describe("stack.restack", () => {
     expect(workspace?.base_ref).toBe("cla-1");
     expect(github.pulls().find((p) => p.number === child)?.base.ref).toBe("cla-1");
     expect(sql(`SELECT * FROM pr_parents`)).toHaveLength(1);
-    const events = store.events.since(0, { types: ["pr.changed"] });
+    const events = store.events.since(0, { types: ["pr.conflict"] });
     expect(events.map((e) => e.payload)).toEqual([
-      { kind: "restack_conflict", repo: REPO, number: child, base: "main", from: expect.any(String), onto: squash, files: ["a.txt"] },
+      { repo: REPO, number: child, sha: before, base: "main", from: expect.any(String), onto: squash, files: ["a.txt"] },
     ]);
   });
 

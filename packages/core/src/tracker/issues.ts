@@ -38,6 +38,11 @@ export interface Issues {
     binding: ProjectBinding,
     origin?: Origin,
   ): Promise<number>;
+  /**
+   * Si el tracker tiene algo que `sync` todavía no trajo al caché del proyecto: pregunta por los cambios
+   * desde su cursor sin moverlo. `true` también si nunca se sincronizó.
+   */
+  hasChanges(tracker: Tracker, binding: ProjectBinding): Promise<boolean>;
   /** Crea una issue en el tracker local y la deja en el caché. El proyecto local se llama como `projectId`. */
   createLocal(
     input: NewLocalIssue & { projectId: ProjectId },
@@ -50,6 +55,9 @@ export function createIssues(
   local: LocalTracker = createLocalTracker(store),
 ): Issues {
   const { db } = store;
+
+  const cursorKeyOf = (tracker: Tracker, project: ProjectRef) => `issues:${tracker.id}:${project.id}`;
+  const savedCursor = (key: string) => db.select().from(syncCursors).where(eq(syncCursors.key, key)).get()?.cursor;
 
   const self: Issues = {
     list({ projectId, ...filter } = {}) {
@@ -83,13 +91,14 @@ export function createIssues(
       return row && toCachedIssue(row);
     },
 
+    async hasChanges(tracker, { project }) {
+      const saved = savedCursor(cursorKeyOf(tracker, project));
+      return saved == null || (await tracker.changesSince(saved)).changed.length > 0;
+    },
+
     async sync(tracker, { projectId, project }, origin = "core") {
-      const cursorKey = `issues:${tracker.id}:${project.id}`;
-      const saved = db
-        .select()
-        .from(syncCursors)
-        .where(eq(syncCursors.key, cursorKey))
-        .get()?.cursor;
+      const cursorKey = cursorKeyOf(tracker, project);
+      const saved = savedCursor(cursorKey);
 
       let fetched: Issue[] = [];
       let cursor: string;

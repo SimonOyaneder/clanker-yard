@@ -8,6 +8,7 @@ import { PermanentActionError, type ActionDef } from "../flows/catalog";
 import { git, GitError, isAncestor, tryGit } from "../git/git";
 import { prParents, pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
+import { emitOnce } from "../watch/marks";
 import { AttachError, RebaseError, type RepoConfig, type Workspaces } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
 import type { Prs } from "./prs";
@@ -64,7 +65,7 @@ const MERGEABLE_WAIT_MS = 10_000;
  *   nombra la base vieja, una nota no bloqueante ("descripción obsoleta"). Los nietos parten de la
  *   punta que el hijo tenía antes y de la nueva.
  * - Un hijo que no se puede restackear queda como estaba y no frena a los demás: `conflict` (la branch
- *   intacta, y un evento `pr.changed` con `kind: "restack_conflict"` para el flujo de rebase) o
+ *   intacta, y un evento `pr.conflict` para el flujo de rebase) o
  *   `skipped` con su razón (council, merge de otra branch, lease rechazado, branch adelantada, sin
  *   commits propios). Sus propios hijos no se tocan: su base no se movió.
  * - Al final relee `mergeable` de todos los PRs abiertos del repo: GitHub lo calcula aparte, y es lo
@@ -149,14 +150,19 @@ export function stackRestackAction(deps: StackRestackDeps): ActionDef<typeof Res
             case "uptodate":
               return { report: { ...base, status: "uptodate" } };
             case "conflict":
-              store.tx(({ emit }) =>
-                emit({
-                  type: "pr.changed",
-                  origin: "core",
-                  runId: ctx.runId,
-                  subject: { type: "pr", id: child.id },
-                  payload: { kind: "restack_conflict", repo: remote.repo, number: child.number, base: start.base, from: start.from, onto, files: result.conflicts },
-                }),
+              // La misma clave que usa Watch (el sha de la punta): si ya vio el conflicto, el flujo de rebase ya salió.
+              store.tx((tx) =>
+                emitOnce(
+                  tx,
+                  child,
+                  {
+                    type: "pr.conflict",
+                    keys: [state.headSha],
+                    runId: ctx.runId,
+                    payload: () => ({ repo: remote.repo, number: child.number, sha: state.headSha, base: start.base, from: start.from, onto, files: result.conflicts }),
+                  },
+                  Date.now(),
+                ),
               );
               return { report: { ...base, status: "conflict", files: result.conflicts, failures: result.failures } };
             case "foreign-merge":

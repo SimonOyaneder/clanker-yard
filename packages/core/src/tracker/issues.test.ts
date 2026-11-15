@@ -147,6 +147,23 @@ describe("sync", () => {
   });
 });
 
+describe("hasChanges", () => {
+  test("es true hasta el primer sync y desde entonces solo cuando el tracker cambió, sin mover el cursor", async () => {
+    expect(await issues.hasChanges(local, binding())).toBe(true);
+
+    await local.createIssue("demo", { title: "a" });
+    await issues.sync(local, binding());
+    expect(await issues.hasChanges(local, binding())).toBe(false);
+
+    await local.createIssue("demo", { title: "b" });
+    expect(await issues.hasChanges(local, binding())).toBe(true);
+    expect(await issues.hasChanges(local, binding())).toBe(true);
+
+    await issues.sync(local, binding());
+    expect(await issues.hasChanges(local, binding())).toBe(false);
+  });
+});
+
 describe("list", () => {
   test("ordena por prioridad, urgente primero y sin prioridad al final, y filtra como el tracker", async () => {
     await local.createIssue("demo", { title: "sin prioridad", labels: ["x"] });

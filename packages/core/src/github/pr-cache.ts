@@ -49,8 +49,8 @@ export interface PrCacheDeps {
   store: Store;
   repos: Pick<Repos, "get" | "byRemote" | "config">;
   prs: Pick<Prs, "get">;
-  /** Con el estado nuevo de un PR cuando lo leído difiere de lo guardado (a Flows: `signalPr`). */
-  onChange?: (ref: PrRef, state: PrState) => void;
+  /** Con el estado nuevo de un PR, y su fila ya al día, cuando lo leído difiere de lo guardado (a los waits: `signalPr`; a los eventos de Watch). */
+  onChange?: (ref: PrRef, state: PrState, row: PrRow) => void;
   now?: () => number;
 }
 
@@ -65,8 +65,8 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
       .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, number)))
       .get();
 
-  /** Guarda el `PrState` leído de GraphQL. Devuelve el anterior (`null` si nunca se había leído) o `undefined` si el PR no está. */
-  function saveDetail(repoId: string, number: number, state: PrState): { previous: PrState | null } | undefined {
+  /** Guarda el `PrState` leído de GraphQL. Devuelve el anterior (`null` si nunca se había leído) y la fila ya al día, o `undefined` si el PR no está. */
+  function saveDetail(repoId: string, number: number, state: PrState): { previous: PrState | null; row: PrRow } | undefined {
     return store.tx(({ db }) => {
       const current = find(repoId, number);
       if (!current) return undefined;
@@ -83,7 +83,7 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
         })
         .where(eq(pullRequests.id, current.id))
         .run();
-      return { previous: current.detail };
+      return { previous: current.detail, row: find(repoId, number)! };
     });
   }
 
@@ -92,7 +92,7 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
       const state = await prs.get(ref);
       const repo = repos.byRemote(ref.repo);
       const saved = repo && saveDetail(repo.id, ref.number, state);
-      if (saved && JSON.stringify(saved.previous) !== JSON.stringify(state)) onChange?.(ref, state);
+      if (saved && JSON.stringify(saved.previous) !== JSON.stringify(state)) onChange?.(ref, state, saved.row);
       return state;
     },
 

@@ -22,6 +22,7 @@ export interface StartServerOptions extends Pick<
   | "scheduler"
   | "lanes"
   | "flows"
+  | "onPrChange"
   | "artifacts"
   | "decisions"
   | "defs"

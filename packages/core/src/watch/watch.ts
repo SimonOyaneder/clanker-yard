@@ -8,12 +8,16 @@ import { prOfWaitKey } from "../github/pr-waits";
 import { syncCursors } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Repos } from "../workspaces/repos";
+import type { PrEvents } from "./events";
 import { throttleOf, type Throttle } from "./quota";
+import type { ErrorReporter } from "./report";
+import type { TrackerChanges } from "./tracker-changes";
 
 // Watch: detecta qué PRs cambiaron sin gastar cuota (`docs/design.html#d-ops`, "CodeHost: polling con ETags").
 // REST condicional (un 304 no cuenta) dice que algo cambió; solo entonces se lee el detalle por GraphQL
 // (`prs.refresh`), que deja el estado en `pull_requests` y avisa a los waits. Es código puro: sin slot, sin
-// agente, siempre encendido, y todo sale en serie por el cliente de GitHub de la cuenta.
+// agente, siempre encendido, y todo sale en serie por el cliente de GitHub de la cuenta. De lo que
+// cambia sale lo demás: `prs.refresh` avisa al caché, y de ahí a los eventos (`events.ts`) y los triggers.
 
 /** Cada cuánto despierta; lo que toca hacer en cada despertar lo deciden los intervalos de abajo. */
 export const WATCH_TICK_MS = 2000;
@@ -49,6 +53,11 @@ export interface WatchDeps {
   remote: Pick<GitRemote, "lsRemote">;
   /** `Engine.waitKeys`: los PRs con un wait esperando son los que Watch no suelta. */
   waitKeys: () => string[];
+  /** Los eventos de los PRs: Watch les da el tiempo (el debounce de las puntas nuevas). */
+  events: Pick<PrEvents, "flush">;
+  errors: ErrorReporter;
+  /** Los cambios de los trackers (Linear) que despiertan al Scheduler. Sin él Watch solo mira PRs. */
+  trackers?: TrackerChanges;
   now?: () => number;
 }
 
@@ -63,7 +72,7 @@ interface Target {
 
 const keyOf = ({ repo, number }: { repo: string; number: number }) => `${repo}#${number}`;
 
-export function createWatch({ store, connections, repos, cache, remote, waitKeys, now = Date.now }: WatchDeps): Watch {
+export function createWatch({ store, connections, repos, cache, remote, waitKeys, events, errors, trackers, now = Date.now }: WatchDeps): Watch {
   // El calendario vive en memoria: tras un reinicio todo toca ya, y los ETags guardados hacen que sea casi gratis.
   const lastVisit = new Map<string, number>();
   const lastLsRemote = new Map<string, number>();
@@ -72,7 +81,6 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
   const headMoved = new Set<string>();
   /** Cuántas relecturas por `mergeable: unknown` van; sin entrada, el PR no está en esa situación. */
   const unknownRereads = new Map<string, number>();
-  const lastError = new Map<string, string>();
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
 
@@ -234,7 +242,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
           if (tip !== undefined && tip !== t.row?.headSha) headMoved.add(keyOf(t.ref));
         }
       } catch (error) {
-        report(`ls-remote ${repo}`, error);
+        errors.report(`ls-remote ${repo}`, error);
       }
     }
   }
@@ -254,25 +262,14 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
     });
   }
 
-  function report(scope: string, error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (lastError.get(scope) === message) return;
-    lastError.set(scope, message);
-    try {
-      store.tx((tx) => tx.emit({ type: "error", origin: "core", payload: { scope: `watch.${scope}`, message } }));
-    } catch (cause) {
-      console.error(`Watch no pudo anotar el error de ${scope}:`, cause);
-    }
-  }
-
   /** Un trabajo que falla no tumba el despertar: el 401 deja la conexión revocada y lo demás se anota una vez. */
   async function attempt(account: string, scope: string, work: () => Promise<void>) {
     try {
       await work();
-      lastError.delete(scope);
+      errors.clear(scope);
     } catch (error) {
       if (error instanceof RequestError && error.status === 401) connections.markRevoked("github", account, "core");
-      else report(scope, error);
+      else errors.report(scope, error);
     }
   }
 
@@ -312,12 +309,15 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
         for (const t of await discover(account, at)) await attempt(account, keyOf(t.ref), () => visit(t, at));
       });
     }
+
+    await events.flush(at);
+    await trackers?.poll(at);
   }
 
   /** Un despertar a la vez: si el anterior sigue en vuelo, este no hace nada. */
   function tick(): Promise<void> {
     running ??= wake()
-      .catch((error: unknown) => report("tick", error))
+      .catch((error: unknown) => errors.report("tick", error))
       .finally(() => {
         running = undefined;
       });

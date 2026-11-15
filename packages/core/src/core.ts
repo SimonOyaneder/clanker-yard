@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { Role, type RunId } from "@clanker/api";
+import { Role, type PrRef, type PrState, type RunId } from "@clanker/api";
 import { createAgents } from "./agents/agents";
 import { createBriefs } from "./agents/brief";
 import { createStepBriefs } from "./agents/step-brief";
@@ -18,7 +18,7 @@ import { createAskpass } from "./git/askpass";
 import { createLegacyImporter } from "./import/legacy";
 import { createGitRemote } from "./git/remote";
 import { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
-import { createPrCache } from "./github/pr-cache";
+import { createPrCache, type PrRow } from "./github/pr-cache";
 import { prWaits, signalPr } from "./github/pr-waits";
 import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/publish";
@@ -42,6 +42,10 @@ import { newId } from "./store/conventions";
 import type { Store } from "./store/store";
 import { createIssues } from "./tracker/issues";
 import { createLocalTracker } from "./tracker/local";
+import { createPrEvents } from "./watch/events";
+import { createErrorReporter } from "./watch/report";
+import { createTrackerChanges } from "./watch/tracker-changes";
+import { startTriggers } from "./watch/triggers";
 import { createWatch } from "./watch/watch";
 import { createRepos } from "./workspaces/repos";
 import {
@@ -176,15 +180,14 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
   });
   const prs = createPrs({ connections: opts.connections, packs });
-  const prCache = createPrCache({ store, repos, prs, onChange: (ref, state) => signalPr(flows.signal, ref, state) });
-  const watch = createWatch({
-    store,
-    connections: opts.connections,
-    repos,
-    cache: prCache,
-    remote: gitRemote,
-    waitKeys: flows.waitKeys,
-  });
+  const watchErrors = createErrorReporter(store);
+  const prEvents = createPrEvents({ store, repos, workspaces, errors: watchErrors });
+  /** Un PR cambió (Watch o `prs.refresh`): los waits que lo esperan y los eventos con su dedupe. */
+  const onPrChange = (ref: PrRef, state: PrState, row: PrRow) => {
+    signalPr(flows.signal, ref, state);
+    prEvents.observe(ref, state, row);
+  };
+  const prCache = createPrCache({ store, repos, prs, onChange: onPrChange });
   const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtime) ? runtime : undefined });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceAttachAction(workspaces));
@@ -232,7 +235,6 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     { types: ["run.returned"] },
   );
-  if (opts.watch) watch.start();
   const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers });
   const scheduler = createScheduler({
     store,
@@ -246,6 +248,22 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     runtime: runtime.id,
     breakers,
   });
+  const stopTriggers = startTriggers({ store, defs, projects, repos, flows, errors: watchErrors });
+  const watch = createWatch({
+    store,
+    connections: opts.connections,
+    repos,
+    cache: prCache,
+    remote: gitRemote,
+    waitKeys: flows.waitKeys,
+    events: prEvents,
+    errors: watchErrors,
+    // Con el Scheduler apagado (los tests que lanzan a mano) un cambio del tracker no lanza nada.
+    ...(opts.scheduler !== false && {
+      trackers: createTrackerChanges({ projects, trackers, issues, onChanges: () => void scheduler.tick(), errors: watchErrors }),
+    }),
+  });
+  if (opts.watch) watch.start();
   const server = await startServer({
     store,
     connections: opts.connections,
@@ -259,6 +277,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     scheduler,
     lanes,
     flows,
+    onPrChange,
     artifacts,
     decisions: createDecisions(store),
     defs,
@@ -275,6 +294,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     server,
     async close({ drain } = { drain: false }) {
       await watch.stop();
+      // Como el Scheduler: un cierre no abre corridas nuevas.
+      stopTriggers();
       const graceMs = drain ? DRAIN_MS : 0;
       // Antes de apagar el motor: un cierre no abre corridas nuevas.
       await scheduler.close();

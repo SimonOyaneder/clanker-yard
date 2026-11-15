@@ -812,6 +812,27 @@ export const pullRequests = sqliteTable(
 );
 
 /**
+ * Lo que Watch ya vio de cada PR (`docs/design.html#d-ops`, "Watch: eventos y qué disparan"). Insertar una
+ * marca es emitir el evento: el índice único `(pr_id, kind, key)` hace que cada clave salga una sola vez.
+ * `kind` es el tipo del evento (`pr.ci`, `pr.comment`...) y `key` su clave de dedupe (un sha, un id de
+ * thread). `head` no es un evento: es la punta que Watch ya evaluó, y sirve para detectar la primera vez
+ * que ve un PR y de qué sha viene una punta nueva.
+ */
+export const watchMarks = sqliteTable(
+  "watch_marks",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    prId: text("pr_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    kind: text().notNull(),
+    key: text().notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("watch_marks_pr_kind_key").on(t.prId, t.kind, t.key)],
+);
+
+/**
  * De qué PRs cuelga un PR del sistema: su base es la branch de cada padre (`docs/design.html#d-ops`,
  * restack). `pr.publish` la escribe al abrir un PR sobre la branch de otro PR abierto; `stack.restack`
  * borra la fila cuando el padre se mergeó y el hijo ya quedó sobre la base nueva.

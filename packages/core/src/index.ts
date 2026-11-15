@@ -102,6 +102,11 @@ export { createPrCache } from "./github/pr-cache";
 export type { PrCache } from "./github/pr-cache";
 export { createWatch, WATCH_TICK_MS } from "./watch/watch";
 export type { Watch, WatchDeps } from "./watch/watch";
+export { createPrEvents, DEBOUNCE_MS } from "./watch/events";
+export type { PrEvents } from "./watch/events";
+export { createErrorReporter } from "./watch/report";
+export { createTrackerChanges, TRACKER_EVERY_MS } from "./watch/tracker-changes";
+export { startTriggers } from "./watch/triggers";
 export type { Prs } from "./github/prs";
 export type {
   GitHubApiOptions,

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createRepos, type Repos } from "../workspaces/repos";
-import { createPrCache, type PrCache, type RestPull } from "./pr-cache";
+import { createPrCache, type PrCache, type PrCacheDeps, type RestPull } from "./pr-cache";
 import { prNode } from "./pr-fixtures";
 import { buildPrState } from "./pr-state";
 
@@ -15,7 +15,7 @@ let repos: Repos;
 let repoId: string;
 let cache: PrCache;
 let state: PrState;
-const onChange = vi.fn<(ref: PrRef, state: PrState) => void>();
+const onChange = vi.fn<NonNullable<PrCacheDeps["onChange"]>>();
 
 const stateOf = (overrides: Parameters<typeof prNode>[0] = {}) => buildPrState(prNode({ number: 7, ...overrides }), { pack: { id: null, ...PackSettings.parse({}) }, viewer: ACCOUNT });
 const ref = (number: number, repo = "acme/api"): PrRef => ({ account: ACCOUNT, repo, number });
@@ -81,7 +81,7 @@ describe("refresh", () => {
     state = stateOf({ isDraft: true, headRefOid: "d".repeat(40) });
     await cache.refresh(ref(7));
     expect(onChange).toHaveBeenCalledTimes(2);
-    expect(onChange).toHaveBeenLastCalledWith(ref(7), state);
+    expect(onChange).toHaveBeenLastCalledWith(ref(7), state, expect.objectContaining({ number: 7, headSha: state.headSha }));
     expect(cache.row(repoId, 7)).toMatchObject({ isDraft: true, headSha: "d".repeat(40), headChangedAt: NOW });
   });
 
