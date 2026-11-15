@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { microsToUsd, newId, usdToMicros } from "./conventions";
 import { SchemaTooNewError } from "./migrate";
 import { events, meta } from "./schema";
@@ -96,25 +96,23 @@ describe("tx", () => {
     expect(store.events.since(0)).toHaveLength(1);
   });
 
-  test("un listener que lanza no deshace el commit ni corta a los demás", async () => {
+  test("un listener que lanza no deshace el commit, no corta a los demás y queda en el log", () => {
     const store = memoryStore();
     const received: number[] = [];
+    const broken = new Error("listener roto");
     store.events.subscribe(() => {
-      throw new Error("listener roto");
+      throw broken;
     });
     store.events.subscribe((event) => received.push(event.seq));
-    const uncaught: unknown[] = [];
-    const onUncaught = (error: unknown) => uncaught.push(error);
-    process.on("uncaughtException", onUncaught);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       store.tx((tx) => tx.emit(runStarted));
-      await new Promise((resolve) => setImmediate(resolve));
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining("evento 1 (run.started)"), broken);
     } finally {
-      process.off("uncaughtException", onUncaught);
+      logged.mockRestore();
     }
 
     expect(received).toEqual([1]);
-    expect(uncaught).toEqual([new Error("listener roto")]);
     expect(store.events.since(0)).toHaveLength(1);
   });
 });

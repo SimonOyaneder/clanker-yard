@@ -78,11 +78,9 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
         try {
           listener(event);
         } catch (error) {
-          // El commit ya ocurrió: lanzar desde tx() haría creer que falló. Un listener que
-          // lanza es un bug suyo; se reporta como excepción no capturada sin cortar a los demás.
-          queueMicrotask(() => {
-            throw error;
-          });
+          // El commit ya ocurrió: lanzar desde tx() haría creer que falló, y relanzarlo como
+          // excepción no capturada tumbaría el core con todas sus corridas por el bug de un suscriptor.
+          console.error(`Un suscriptor de eventos falló con el evento ${event.seq} (${event.type}):`, error);
         }
       }
     }
