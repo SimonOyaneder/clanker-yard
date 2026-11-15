@@ -20,9 +20,27 @@ describe("estimateCostMicros", () => {
   test("cobra entrada, salida, lectura y las dos escrituras de caché con los precios sembrados", () => {
     const { db } = store();
     const tokens = { tokensIn: 1000, tokensOut: 500, tokensCacheRead: 10_000, tokensCacheWrite: 3000, tokensCacheWrite1h: 1000 };
-    // opus: $4 entrada, $20 salida, $0,20 lectura, escritura 5 min 1,25x y 1 h 2x la entrada.
-    expect(estimateCostMicros(db, "claude-opus-4-8", Date.now(), tokens)).toBe(4000 + 10_000 + 2000 + 2 * 5000 + 8000);
-    expect(estimateCostMicros(db, "haiku", Date.now(), { ...none, tokensIn: 1_000_000 })).toBe(100_000);
+    // opus 5.5: $4 entrada, $20 salida, $0,20 lectura, escritura 5 min 1,25x y 1 h 2x la entrada.
+    expect(estimateCostMicros(db, "claude-opus-5-5", Date.now(), tokens)).toBe(4000 + 10_000 + 2000 + 2 * 5000 + 8000);
+    expect(estimateCostMicros(db, "haiku", Date.now(), { ...none, tokensIn: 1_000 })).toBe(100);
+  });
+
+  test("cada versión tiene su precio: la lectura de caché de sonnet 5.5 es la mitad que la de sonnet 5", () => {
+    const { db } = store();
+    const read = { ...none, tokensCacheRead: 1_000_000 };
+    expect(estimateCostMicros(db, "claude-sonnet-5-5", Date.now(), read)).toBe(100_000);
+    expect(estimateCostMicros(db, "claude-sonnet-5", Date.now(), read)).toBe(200_000);
+    expect(estimateCostMicros(db, "claude-sonnet-4-5-20250929", Date.now(), read)).toBe(300_000);
+    expect(estimateCostMicros(db, "claude-opus-4-8", Date.now(), { ...none, tokensOut: 1_000_000 })).toBe(25_000_000);
+  });
+
+  test("haiku 5.5 cobra todo el turno con el precio de prompt largo cuando el prompt pasa de 100 000 tokens", () => {
+    const { db } = store();
+    const turn = (tokensIn: number) => ({ ...none, tokensIn, tokensOut: 1000 });
+    expect(estimateCostMicros(db, "claude-haiku-5-5", Date.now(), turn(100_000))).toBe(10_000 + 500);
+    expect(estimateCostMicros(db, "claude-haiku-5-5", Date.now(), turn(100_001))).toBe(50_000 + 2500 + 1);
+    // La caché cuenta como prompt.
+    expect(estimateCostMicros(db, "claude-haiku-5-5", Date.now(), { ...none, tokensCacheRead: 200_000 })).toBe(10_000);
   });
 
   test("rige el precio más reciente anterior al turno y el nombre más específico", () => {
@@ -39,8 +57,8 @@ describe("estimateCostMicros", () => {
     );
     const oneMillion = { ...none, tokensIn: 1_000_000 };
 
-    expect(estimateCostMicros(s.db, "claude-opus-4-5", 999, oneMillion)).toBe(4_000_000);
-    expect(estimateCostMicros(s.db, "claude-opus-4-5", 1000, oneMillion)).toBe(9_000_000);
+    expect(estimateCostMicros(s.db, "claude-opus-6", 999, oneMillion)).toBe(4_000_000);
+    expect(estimateCostMicros(s.db, "claude-opus-6", 1000, oneMillion)).toBe(9_000_000);
     expect(estimateCostMicros(s.db, "claude-opus-4-8", 1000, oneMillion)).toBe(1_000_000);
   });
 

@@ -49,7 +49,7 @@ const usage = (inputTokens: number, outputTokens: number, cacheRead = 0, cacheWr
 });
 
 const assistant = (id: string, content: unknown[], extra: Record<string, unknown> = {}) =>
-  message({ type: "assistant", message: { id, content, usage: usage(1, 1) }, ...extra });
+  message({ type: "assistant", message: { id, model: "haiku", content, usage: usage(1, 1) }, ...extra });
 
 const modelUsage = (input: number, output: number, cacheRead: number, cacheWrite: number) => ({
   haiku: {
@@ -140,7 +140,7 @@ describe("start", () => {
     const result = await run.result;
 
     expect(run.ref).toEqual({ runtime: "claude-sdk", sessionId: "sess-1", cwd });
-    expect(events.filter((e) => e.type !== "usage")).toEqual([
+    expect(events.filter((e) => e.type !== "usage" && e.type !== "usage_remainder")).toEqual([
       { type: "first_token" },
       { type: "text", text: "Reviso el repo" },
       { type: "tool_start", tool: "Read", detail: "a.ts" },
@@ -163,6 +163,29 @@ describe("start", () => {
       },
     });
     expect(await transcriptLines()).toEqual(script);
+  });
+
+  test("lo que el total del result cuenta de más que los turnos sale como resto por modelo", async () => {
+    // Cada turno trae 1 de entrada y 1 de salida (el uso en streaming no es final): el total dice 100 y 50.
+    const { query } = fakeQuery([
+      init(),
+      assistant("m1", [{ type: "text", text: "a" }]),
+      assistant("m2", [{ type: "text", text: "b" }]),
+      success({
+        modelUsage: {
+          ...modelUsage(100, 50, 1000, 200),
+          other: { inputTokens: 7, outputTokens: 3, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0 },
+        },
+      }),
+    ]);
+
+    const run = await runtimeWith(query).start(spec());
+    const remainders = (await collect(run.events)).filter((e) => e.type === "usage_remainder");
+
+    expect(remainders).toEqual([
+      { type: "usage_remainder", model: "haiku", tokens: { tokensIn: 98, tokensOut: 48, tokensCacheRead: 1000, tokensCacheWrite: 200 }, cacheWrite1hTokens: 0 },
+      { type: "usage_remainder", model: "other", tokens: { tokensIn: 7, tokensOut: 3, tokensCacheRead: 0, tokensCacheWrite: 0 }, cacheWrite1hTokens: 0 },
+    ]);
   });
 
   test("un mensaje partido en bloques (mismo id) cuenta un solo turno", async () => {
@@ -353,7 +376,7 @@ describe("start", () => {
       })(),
     );
     const run = await runtimeWith(query).start(spec());
-    expect(await collect(run.events)).toEqual([{ type: "compaction" }]);
+    expect((await collect(run.events)).filter((e) => e.type === "compaction")).toEqual([{ type: "compaction" }]);
   });
 
   test("el hook PreCompact deja la compactación en el transcript", async () => {

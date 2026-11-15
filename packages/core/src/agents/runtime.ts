@@ -124,6 +124,18 @@ export type AgentEvent =
       /** La parte de `usage.tokensCacheWrite` que fue a la caché de 1 h; el resto es de 5 min. */
       cacheWrite1hTokens?: number;
     }
+  /**
+   * Lo que el total del runtime cuenta de un modelo y los eventos `usage` no: el uso de un turno en
+   * streaming no es final (la salida llega recién en el total) y el total también cubre subagentes y
+   * llamadas internas. Va al final del run; el core lo suma al último turno de ese modelo.
+   */
+  | {
+      type: "usage_remainder";
+      model: string;
+      tokens: Pick<Usage, "tokensIn" | "tokensOut" | "tokensCacheRead" | "tokensCacheWrite">;
+      /** La parte de `tokens.tokensCacheWrite` que fue a la caché de 1 h. */
+      cacheWrite1hTokens: number;
+    }
   | { type: "error"; kind: "login_expired" | "quota_exhausted" | "other"; message: string };
 
 export interface RunResult {

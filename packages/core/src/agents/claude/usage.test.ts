@@ -25,7 +25,7 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-const MODEL = "claude-sonnet-4-5-20260101";
+const MODEL = "claude-sonnet-5-5";
 
 const role: Role = {
   prompt: "Eres un analista.",
@@ -60,10 +60,10 @@ const message = (m: Record<string, unknown>) => ({ session_id: "sess-1", ...m })
 const init = message({ type: "system", subtype: "init", apiKeySource: "none" });
 
 /**
- * Un turno de 15 500 micros con el modelo de `MODEL`: 1 000 de entrada, 500 de salida, 10 000 de
+ * Un turno de 14 500 micros con el modelo de `MODEL`: 1 000 de entrada, 500 de salida, 10 000 de
  * lectura de caché y 2 000 de escritura, la mitad en la caché de 1 h (los precios, en la migración).
  */
-const TURN_MICROS = 15_500;
+const TURN_MICROS = 14_500;
 const TURN_TOKENS = { in: 1000, out: 500, cacheRead: 10_000, cacheWrite: 2000 };
 const turnUsage = {
   input_tokens: TURN_TOKENS.in,
@@ -81,7 +81,7 @@ const assistant = (id: string, extra: Record<string, unknown> = {}) =>
   });
 
 /** El `result` con el acumulado de la sesión tras `turns` turnos, como lo manda el SDK. */
-const result = (turns: number, totalMicros = turns * TURN_MICROS) =>
+const result = (turns: number, totalMicros = turns * TURN_MICROS, model = MODEL, otherModels: Record<string, unknown> = {}) =>
   message({
     type: "result",
     subtype: "success",
@@ -90,13 +90,14 @@ const result = (turns: number, totalMicros = turns * TURN_MICROS) =>
     structured_output: { outcome: "clean", summary: "", payload: {} },
     total_cost_usd: totalMicros / 1_000_000,
     modelUsage: {
-      [MODEL]: {
+      [model]: {
         inputTokens: turns * TURN_TOKENS.in,
         outputTokens: turns * TURN_TOKENS.out,
         cacheReadInputTokens: turns * TURN_TOKENS.cacheRead,
         cacheCreationInputTokens: turns * TURN_TOKENS.cacheWrite,
         costUSD: totalMicros / 1_000_000,
       },
+      ...otherModels,
     },
   });
 
@@ -209,24 +210,62 @@ describe("diferencia con el total del runtime", () => {
   const mismatches = (store: Store) => eventsOf(store, "error").filter((e) => e.payload.scope === "agent.usage");
 
   test("más de 2% deja un evento error, y el total del runtime es el que queda en la sesión", async () => {
-    // Las estimaciones suman 31 000 y el runtime dice 31 700: 2,2%.
-    const { store, agents } = setup(queryOf([init, assistant("m1"), assistant("m2"), result(2, 31_700)]));
+    // Las estimaciones suman 29 000 y el runtime dice 29 700: 2,4%.
+    const { store, agents } = setup(queryOf([init, assistant("m1"), assistant("m2"), result(2, 29_700)]));
 
     await audit(agents);
 
     expect(mismatches(store)).toHaveLength(1);
-    expect(mismatches(store)[0]?.payload.message).toMatch(/31000 micros.*31700 micros/);
-    expect(sessionOf(store)?.costMicros).toBe(31_700);
+    expect(mismatches(store)[0]?.payload.message).toMatch(/29000 micros.*29700 micros/);
+    expect(sessionOf(store)?.costMicros).toBe(29_700);
   });
 
   test("hasta 2% no deja evento", async () => {
-    // 31 000 contra 31 500: 1,6%.
-    const { store, agents } = setup(queryOf([init, assistant("m1"), assistant("m2"), result(2, 31_500)]));
+    // 29 000 contra 29 500: 1,7%.
+    const { store, agents } = setup(queryOf([init, assistant("m1"), assistant("m2"), result(2, 29_500)]));
 
     await audit(agents);
 
     expect(mismatches(store)).toEqual([]);
-    expect(sessionOf(store)?.costMicros).toBe(31_500);
+    expect(sessionOf(store)?.costMicros).toBe(29_500);
+  });
+});
+
+describe("uso por turno que no es final", () => {
+  // El SDK avisa que el `usage` de un `assistant` en streaming no es final: la salida llega en el total.
+  const streaming = (id: string) =>
+    message({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { id, model: MODEL, content: [{ type: "text", text: "hola" }], usage: { ...turnUsage, output_tokens: 1 } },
+    });
+
+  test("la salida que falta en los turnos se suma al último turno del modelo y los turnos suman el total", async () => {
+    const { store, agents } = setup(queryOf([init, streaming("m1"), streaming("m2"), result(2)]));
+
+    await audit(agents);
+
+    expect(turnsOf(store)).toMatchObject([
+      { seq: 1, tokensOut: 1, costMicros: TURN_MICROS - 499 * 10 },
+      { seq: 2, tokensOut: 1 + 2 * 499, costMicros: TURN_MICROS + 499 * 10 },
+    ]);
+    expect(sessionOf(store)).toMatchObject({ turns: 2, tokensOut: 2 * TURN_TOKENS.out, costMicros: 2 * TURN_MICROS });
+    expect(eventsOf(store, "error")).toEqual([]);
+  });
+
+  test("un modelo que solo gastó en llamadas internas queda en un turno propio", async () => {
+    const haiku = { inputTokens: 50_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.005 };
+    const withHaiku = result(1, TURN_MICROS + 5000, MODEL, { "claude-haiku-5-5": haiku });
+    const { store, agents } = setup(queryOf([init, assistant("m1"), withHaiku]));
+
+    await audit(agents);
+
+    expect(turnsOf(store)).toMatchObject([
+      { seq: 1, model: MODEL, costMicros: TURN_MICROS },
+      { seq: 2, model: "claude-haiku-5-5", tokensIn: 50_000, costMicros: 5000 },
+    ]);
+    expect(sessionOf(store)).toMatchObject({ turns: 2, costMicros: TURN_MICROS + 5000 });
+    expect(eventsOf(store, "error")).toEqual([]);
   });
 });
 
@@ -235,7 +274,7 @@ describe("precios", () => {
     const unknown = assistant("m1", {
       message: { id: "m1", model: "claude-mystery-1", content: [], usage: turnUsage },
     });
-    const { store, agents } = setup(queryOf([init, unknown, result(1)]));
+    const { store, agents } = setup(queryOf([init, unknown, result(1, undefined, "claude-mystery-1")]));
 
     await audit(agents);
 

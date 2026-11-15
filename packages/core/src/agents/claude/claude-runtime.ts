@@ -218,6 +218,8 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     let turn: { id: string; model: string; usage: SDKUsage } | undefined;
     let firstToken = false;
     const counted = new Set<string>();
+    const emitted = new Map<string, TokenCounts>();
+    let emittedWrite1h = 0;
     let final: SDKResultMessage | undefined;
 
     // El uso de un mensaje en streaming no es final: se emite cuando llega otro id, con lo último visto.
@@ -231,13 +233,34 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       counted.add(id);
       const usage = turnUsage(sdkUsage, credentials);
       addUsage(tally, usage);
-      events.push({
-        type: "usage",
-        turn: tally.turns,
-        usage,
-        model,
-        cacheWrite1hTokens: sdkUsage.cache_creation?.ephemeral_1h_input_tokens ?? 0,
-      });
+      emitted.set(model, sumTokens([emitted.get(model) ?? NO_TOKENS, usage]));
+      const cacheWrite1hTokens = sdkUsage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+      emittedWrite1h += cacheWrite1hTokens;
+      events.push({ type: "usage", turn: tally.turns, usage, model, cacheWrite1hTokens });
+    };
+
+    // El uso de cada `assistant` no es final (su salida llega recién en el total) y el total también
+    // cubre subagentes y llamadas internas: lo que el `result` cuenta de más por modelo se manda como resto.
+    const flushRemainders = (result: SDKResultMessage) => {
+      const now = totalsOf(result);
+      const before = priorTo(now, previous).byModel;
+      const oneHourShare = tally.tokensCacheWrite === 0 ? 0 : emittedWrite1h / tally.tokensCacheWrite;
+      for (const [model, total] of now.byModel) {
+        const rest = subtractTokens(subtractTokens(total, before.get(model)), emitted.get(model));
+        const remainder: TokenCounts = {
+          tokensIn: Math.max(0, rest.tokensIn),
+          tokensOut: Math.max(0, rest.tokensOut),
+          tokensCacheRead: Math.max(0, rest.tokensCacheRead),
+          tokensCacheWrite: Math.max(0, rest.tokensCacheWrite),
+        };
+        if (Object.values(remainder).every((n) => n === 0)) continue;
+        events.push({
+          type: "usage_remainder",
+          model,
+          tokens: remainder,
+          cacheWrite1hTokens: Math.round(remainder.tokensCacheWrite * oneHourShare),
+        });
+      }
     };
 
     const onMessage = (message: SDKMessage) => {
@@ -294,6 +317,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         crash = error;
       }
       flushTurn();
+      if (final !== undefined) flushRemainders(final);
       await transcript.flush();
 
       // Tras un `result` con error el SDK lanza "Claude Code returned an error result": el estado sale del `result`.
@@ -430,33 +454,60 @@ function addUsage(into: Usage, usage: Usage): void {
   into.costMicros += usage.costMicros;
 }
 
-/** Acumulado de una sesión según un `result`: el SDK lo arrastra al retomar. */
+type TokenCounts = Pick<Usage, "tokensIn" | "tokensOut" | "tokensCacheRead" | "tokensCacheWrite">;
+
+const NO_TOKENS: TokenCounts = { tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0 };
+
+/** Acumulado de una sesión según un `result`, por modelo: el SDK lo arrastra al retomar. */
 interface Totals {
   costUsd: number;
-  tokensIn: number;
-  tokensOut: number;
-  tokensCacheRead: number;
-  tokensCacheWrite: number;
+  byModel: ReadonlyMap<string, TokenCounts>;
 }
 
-const ZERO_TOTALS: Totals = { costUsd: 0, tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0 };
+const ZERO_TOTALS: Totals = { costUsd: 0, byModel: new Map() };
 
 function totalsOf(result: SDKResultMessage): Totals {
-  const totals = { ...ZERO_TOTALS, costUsd: result.total_cost_usd };
-  for (const m of Object.values<ModelUsage>(result.modelUsage)) {
-    totals.tokensIn += m.inputTokens;
-    totals.tokensOut += m.outputTokens;
-    totals.tokensCacheRead += m.cacheReadInputTokens;
-    totals.tokensCacheWrite += m.cacheCreationInputTokens;
+  const byModel = new Map<string, TokenCounts>();
+  for (const [model, m] of Object.entries<ModelUsage>(result.modelUsage)) {
+    byModel.set(model, {
+      tokensIn: m.inputTokens,
+      tokensOut: m.outputTokens,
+      tokensCacheRead: m.cacheReadInputTokens,
+      tokensCacheWrite: m.cacheCreationInputTokens,
+    });
   }
-  return totals;
+  return { costUsd: result.total_cost_usd, byModel };
+}
+
+function subtractTokens(a: TokenCounts, b: TokenCounts = NO_TOKENS): TokenCounts {
+  return {
+    tokensIn: a.tokensIn - b.tokensIn,
+    tokensOut: a.tokensOut - b.tokensOut,
+    tokensCacheRead: a.tokensCacheRead - b.tokensCacheRead,
+    tokensCacheWrite: a.tokensCacheWrite - b.tokensCacheWrite,
+  };
+}
+
+function sumTokens(counts: Iterable<TokenCounts>): TokenCounts {
+  const sum = { ...NO_TOKENS };
+  for (const c of counts) {
+    sum.tokensIn += c.tokensIn;
+    sum.tokensOut += c.tokensOut;
+    sum.tokensCacheRead += c.tokensCacheRead;
+    sum.tokensCacheWrite += c.tokensCacheWrite;
+  }
+  return sum;
 }
 
 /**
- * Lo gastado por este run: el total del `result` menos lo que ya traía la sesión. Un `result` de
- * arranque fallido puede venir en cero y un `/clear` reinicia el total: si el total quedó bajo el
- * previo, el previo ya no cuenta.
+ * Lo que ya traía la sesión antes de este run. Un `result` de arranque fallido puede venir en cero y
+ * un `/clear` reinicia el total: si el total quedó bajo el previo, el previo ya no cuenta.
  */
+function priorTo(now: Totals, previous: Totals): Totals {
+  return now.costUsd >= previous.costUsd ? previous : ZERO_TOTALS;
+}
+
+/** Lo gastado por este run: el total del `result` menos lo que ya traía la sesión. */
 function spentThisRun(
   result: SDKResultMessage,
   previous: Totals,
@@ -464,13 +515,10 @@ function spentThisRun(
   credentials: ClaudeCredentials,
 ): Usage {
   const now = totalsOf(result);
-  const before = now.costUsd >= previous.costUsd ? previous : ZERO_TOTALS;
+  const before = priorTo(now, previous);
   return {
     turns: tally.turns,
-    tokensIn: now.tokensIn - before.tokensIn,
-    tokensOut: now.tokensOut - before.tokensOut,
-    tokensCacheRead: now.tokensCacheRead - before.tokensCacheRead,
-    tokensCacheWrite: now.tokensCacheWrite - before.tokensCacheWrite,
+    ...subtractTokens(sumTokens(now.byModel.values()), sumTokens(before.byModel.values())),
     costMicros: usdToMicros(now.costUsd - before.costUsd),
     costSource: costSourceOf(credentials),
   };

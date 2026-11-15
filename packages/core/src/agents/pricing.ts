@@ -16,8 +16,10 @@ const TOKENS_PER_PRICE_UNIT = 1_000_000;
 
 /**
  * El USD de un turno en micros, con la tabla `model_prices` (la misma cuenta de `clanker-loop cost`:
- * entrada, escritura de caché de 5 min y de 1 h, lectura de caché y salida). `undefined` si ningún
- * precio vigente en `ts` corresponde al modelo: quien llama decide qué hacer, nunca se inventa uno.
+ * entrada, escritura de caché de 5 min y de 1 h, lectura de caché y salida). Un modelo con precio
+ * por prompt largo cobra el turno entero con ese precio si su prompt (entrada más caché) lo pasa.
+ * `undefined` si ningún precio vigente en `ts` corresponde al modelo: quien llama decide qué hacer,
+ * nunca se inventa uno.
  */
 export function estimateCostMicros(
   db: StoreDb,
@@ -28,14 +30,18 @@ export function estimateCostMicros(
   const isFree = Object.values(tokens).every((n) => n === 0);
   if (isFree) return 0;
 
-  // Gana el nombre más específico y, entre iguales, el precio más reciente.
+  // Gana el nombre más específico, entre iguales el precio más reciente y, entre iguales, el de prompt más largo que aplique.
+  const promptTokens = tokens.tokensIn + tokens.tokensCacheRead + tokens.tokensCacheWrite;
   const price = db
     .select()
     .from(modelPrices)
     .where(lte(modelPrices.validFrom, ts))
     .all()
-    .filter((p) => model.includes(p.model))
-    .sort((a, b) => b.model.length - a.model.length || b.validFrom - a.validFrom)[0];
+    .filter((p) => model.includes(p.model) && (p.abovePromptTokens === 0 || promptTokens > p.abovePromptTokens))
+    .sort(
+      (a, b) =>
+        b.model.length - a.model.length || b.validFrom - a.validFrom || b.abovePromptTokens - a.abovePromptTokens,
+    )[0];
   if (price === undefined) return undefined;
 
   const write5m = tokens.tokensCacheWrite - tokens.tokensCacheWrite1h;

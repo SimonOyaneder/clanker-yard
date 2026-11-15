@@ -19,7 +19,7 @@ import { newId } from "../store/conventions";
 import { agentSessions, agentTurns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import { createContextResolver, type ContextResolver } from "./context";
-import { estimateCostMicros } from "./pricing";
+import { estimateCostMicros, type TurnTokens } from "./pricing";
 import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
 
 /** Una diferencia mayor a este porcentaje entre la suma de los turnos y el total del runtime queda como evento `error`. */
@@ -562,6 +562,10 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
         store.tx((tx) => recordTurn(tx, c, sessionId, event, turns));
         continue;
       }
+      if (event.type === "usage_remainder") {
+        store.tx((tx) => recordRemainder(tx, c, sessionId, event, turns));
+        continue;
+      }
       if (event.type === "error") {
         // `login_expired` y `quota_exhausted` también llegan en el resultado, que es lo que decide el paso.
         if (event.kind === "other") {
@@ -613,22 +617,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     // Un resume que reusa la sesión sigue la cuenta: la fila ya cuenta los turnos de antes.
     const seq = session.turns + 1;
 
-    let costMicros = usage.costMicros;
-    if (!runtime.capabilities.costPerTurn) {
-      const estimated = estimateCostMicros(tx.db, model, ts, tokens);
-      if (estimated === undefined) {
-        tx.emit({
-          type: "error",
-          origin: "core",
-          ...scope(c),
-          payload: {
-            scope: "agent.usage",
-            message: `No hay precio en model_prices para el modelo "${model}": el turno ${seq} de la sesión ${sessionId} quedó con costo 0.`,
-          },
-        });
-      }
-      costMicros = estimated ?? 0;
-    }
+    const costMicros = runtime.capabilities.costPerTurn ? usage.costMicros : estimateOrWarn(tx, c, sessionId, model, seq, ts, tokens);
 
     tx.db.insert(agentTurns).values({ sessionId, seq, ts, model, ...tokens, costMicros }).run();
     addStepUsage(tx, c, sessionId, tokens.tokensIn + tokens.tokensOut + tokens.tokensCacheRead + tokens.tokensCacheWrite, costMicros);
@@ -667,6 +656,92 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     turns.tokensCacheRead += tokens.tokensCacheRead;
     turns.tokensCacheWrite += tokens.tokensCacheWrite;
     turns.costMicros += costMicros;
+  }
+
+  /** El USD de un turno con `model_prices`; sin precio para el modelo avisa y lo deja en 0. */
+  function estimateOrWarn(
+    tx: Tx,
+    c: Conversation,
+    sessionId: string,
+    model: string,
+    seq: number,
+    ts: number,
+    tokens: TurnTokens,
+  ): number {
+    const estimated = estimateCostMicros(tx.db, model, ts, tokens);
+    if (estimated !== undefined) return estimated;
+    tx.emit({
+      type: "error",
+      origin: "core",
+      ...scope(c),
+      payload: {
+        scope: "agent.usage",
+        message: `No hay precio en model_prices para el modelo "${model}": el turno ${seq} de la sesión ${sessionId} quedó con costo 0.`,
+      },
+    });
+    return 0;
+  }
+
+  /**
+   * Suma lo que el total del runtime cuenta de más (la salida que el uso de un turno en streaming aún
+   * no trae, subagentes, llamadas internas) al último turno de ese modelo, o a un turno nuevo si la
+   * sesión no tiene ninguno: así los turnos suman lo que cobró el runtime. No cuenta como turno en `turns`.
+   */
+  function recordRemainder(
+    tx: Tx,
+    c: Conversation,
+    sessionId: string,
+    event: Extract<AgentEvent, { type: "usage_remainder" }>,
+    turns: Usage,
+  ): void {
+    const session = tx.db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).get();
+    if (!session) throw new Error(`Desapareció la sesión ${sessionId}.`);
+    const { model, tokens: rest } = event;
+    const last = tx.db
+      .select()
+      .from(agentTurns)
+      .where(and(eq(agentTurns.sessionId, sessionId), eq(agentTurns.model, model)))
+      .orderBy(desc(agentTurns.seq))
+      .limit(1)
+      .get();
+    const seq = last?.seq ?? session.turns + 1;
+    const ts = last?.ts ?? now();
+    const tokens = {
+      tokensIn: (last?.tokensIn ?? 0) + rest.tokensIn,
+      tokensOut: (last?.tokensOut ?? 0) + rest.tokensOut,
+      tokensCacheRead: (last?.tokensCacheRead ?? 0) + rest.tokensCacheRead,
+      tokensCacheWrite: (last?.tokensCacheWrite ?? 0) + rest.tokensCacheWrite,
+      tokensCacheWrite1h: (last?.tokensCacheWrite1h ?? 0) + event.cacheWrite1hTokens,
+    };
+    const costMicros = estimateOrWarn(tx, c, sessionId, model, seq, ts, tokens);
+    const costDelta = costMicros - (last?.costMicros ?? 0);
+
+    tx.db
+      .insert(agentTurns)
+      .values({ sessionId, seq, ts, model, ...tokens, costMicros })
+      .onConflictDoUpdate({
+        target: [agentTurns.sessionId, agentTurns.seq],
+        set: { ...tokens, costMicros },
+      })
+      .run();
+    addStepUsage(tx, c, sessionId, rest.tokensIn + rest.tokensOut + rest.tokensCacheRead + rest.tokensCacheWrite, costDelta);
+    tx.db
+      .update(agentSessions)
+      .set({
+        turns: Math.max(session.turns, seq),
+        tokensIn: session.tokensIn + rest.tokensIn,
+        tokensOut: session.tokensOut + rest.tokensOut,
+        tokensCacheRead: session.tokensCacheRead + rest.tokensCacheRead,
+        tokensCacheWrite: session.tokensCacheWrite + rest.tokensCacheWrite,
+        costMicros: session.costMicros + costDelta,
+      })
+      .where(eq(agentSessions.id, sessionId))
+      .run();
+    turns.tokensIn += rest.tokensIn;
+    turns.tokensOut += rest.tokensOut;
+    turns.tokensCacheRead += rest.tokensCacheRead;
+    turns.tokensCacheWrite += rest.tokensCacheWrite;
+    turns.costMicros += costDelta;
   }
 
   /** Suma lo consumido al paso que corría; un resume con el mismo id de sesión lo cuenta en el paso que lo pidió. */

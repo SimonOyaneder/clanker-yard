@@ -219,8 +219,10 @@ export const stepUsage = sqliteTable(
 
 /**
  * USD por millón de tokens, en micros (USD × 10⁶), para estimar el costo de un turno cuando el
- * runtime no lo reporta. `model` es un nombre de familia (`opus`): sirve a todo id de modelo que
- * lo contenga, y un precio más largo (`opus-4-8`) gana. Rige el de mayor `valid_from` anterior al turno.
+ * runtime no lo reporta. `model` es un trozo del id de modelo: sirve a todo id que lo contenga
+ * (`opus`, `sonnet-4-5`) y uno más largo gana. Rige el de mayor `valid_from` anterior al turno.
+ * Un precio con `above_prompt_tokens` > 0 es el de los turnos cuyo prompt (entrada más caché) pasa de
+ * ese tamaño, y reemplaza al base del mismo modelo y `valid_from`.
  */
 export const modelPrices = sqliteTable(
   "model_prices",
@@ -232,8 +234,9 @@ export const modelPrices = sqliteTable(
     cacheWrite5m: integer("cache_write_5m").notNull(),
     cacheWrite1h: integer("cache_write_1h").notNull(),
     validFrom: integer("valid_from").notNull(),
+    abovePromptTokens: integer("above_prompt_tokens").notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.model, t.validFrom] })],
+  (t) => [primaryKey({ columns: [t.model, t.validFrom, t.abovePromptTokens] })],
 );
 
 /**
