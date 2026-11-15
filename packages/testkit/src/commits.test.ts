@@ -205,7 +205,7 @@ describe("un plan válido", () => {
 
     const result = await run([
       {
-        message: "fix(b): cambia b\n\nPorque sí.\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_1\n🤖 Generated with Claude Code",
+        message: "fix(b): cambia b\n\nPorque sí.\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_1\n🤖 Generated with Claude Code\nhttps://claude.ai/code/session_2",
         hunks: [id!],
       },
     ]);

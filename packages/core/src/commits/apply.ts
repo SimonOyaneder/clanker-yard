@@ -12,9 +12,12 @@ import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspac
 /** Conventional Commits: el formato por defecto. Un pack que pida otro pasa su `messagePattern`. */
 const CONVENTIONAL_COMMIT = /^(feat|fix|refactor|docs|test|chore|perf|ci|build|style|revert)(\([^)]+\))?!?: \S/;
 
-/** Líneas que firman un commit como hecho por una IA: el core las saca, el plan no puede traerlas. */
+/**
+ * Líneas que firman un commit como hecho por una IA: el core las saca, el plan no puede traerlas. Incluye el
+ * link suelto a la sesión de Claude Code (`https://claude.ai/code/session_...`) que su atribución deja en un PR.
+ */
 const AI_ATTRIBUTION =
-  /^(co-authored-by:.*\b(claude|anthropic|openai|copilot|gemini)\b|claude-session:|.*\bgenerated (with|by)\b.*\b(claude|anthropic|ai)\b).*$/i;
+  /^(co-authored-by:.*\b(claude|anthropic|openai|copilot|gemini)\b|claude-session:|.*\bgenerated (with|by)\b.*\b(claude|anthropic|ai)\b|.*\bclaude\.ai\/code\b).*$/i;
 
 export const ApplyArgs = z.object({
   /** El output de `workspace.acquire` (`$ws`). */
