@@ -263,7 +263,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       head = await git(row.path, ["rev-parse", "HEAD"]);
     } catch (error) {
       stopHeartbeat(row.id, row.fencingToken);
-      abandon(row, claim.isNew);
+      abandon(row, runId, claim.isNew);
       throw error;
     }
     store.tx(({ db }) => {
@@ -332,12 +332,29 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return baseSha;
   }
 
-  /** El worktree no se pudo preparar: una fila nueva se borra; una existente suelta su lease. */
-  function abandon(row: typeof workspaces.$inferSelect, isNew: boolean): void {
-    store.tx(({ db }) => {
+  /**
+   * El worktree no se pudo preparar: una fila nueva se borra; una existente suelta su lease. Emite
+   * `lease.released`, porque el `lease.acquired` del claim ya quedó en la línea de tiempo.
+   */
+  function abandon(row: typeof workspaces.$inferSelect, runId: RunId, isNew: boolean): void {
+    store.tx(({ db, emit }) => {
       const mine = and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, row.fencingToken));
-      if (isNew) db.delete(workspaces).where(mine).run();
-      else db.update(workspaces).set({ holderRunId: null, leaseUntil: null }).where(mine).run();
+      const dropped = isNew
+        ? db.delete(workspaces).where(mine).returning({ id: workspaces.id }).get()
+        : db
+            .update(workspaces)
+            .set({ holderRunId: null, leaseUntil: null })
+            .where(mine)
+            .returning({ id: workspaces.id })
+            .get();
+      if (dropped) {
+        emit({
+          type: "lease.released",
+          origin: "core",
+          runId,
+          payload: { resource: "workspace", id: row.id, token: row.fencingToken },
+        });
+      }
     });
   }
 

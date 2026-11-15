@@ -150,6 +150,10 @@ describe("acquire", () => {
     repoById.get(id)!.git("push", "origin", "--delete", "mine");
 
     await expect(acquire(id, "mine")).rejects.toThrow(/no la creó Clanker Yard/);
+    // El lease que alcanzó a tomarse queda soltado también en la línea de tiempo.
+    const [acquired, released] = store.events.since(0);
+    expect([acquired?.type, released?.type]).toEqual(["lease.acquired", "lease.released"]);
+    expect(released?.payload).toMatchObject({ id: acquired?.payload.id, token: acquired?.payload.token });
     // Sin fila huérfana, la branch libre se puede tomar después.
     await expect(acquire(id, "other")).resolves.toBeDefined();
   });
