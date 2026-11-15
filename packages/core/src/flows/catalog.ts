@@ -26,6 +26,12 @@ export interface ActionCtx {
   once<T>(stage: string, fn: () => Promise<T>): Promise<T>;
 }
 
+/**
+ * Lo que una acción lanza cuando reintentar no lo arregla (una receta mal escrita, un comando que pide
+ * un slot que nadie entrega): el paso da `error` de inmediato, sin gastar los reintentos de `retry`.
+ */
+export class PermanentActionError extends Error {}
+
 export interface ActionResult {
   /** Uno de `ActionDef.outcomes`. Un outcome de negocio (tests rojos) es un resultado, no una excepción. */
   outcome: string;
@@ -46,7 +52,7 @@ export interface ActionDef<A extends ZodType = ZodType> {
   /** Por defecto 3 reintentos con 10 s, 60 s y 5 min. El nodo puede pisarlo. */
   retry?: RetryPolicy;
   /**
-   * Solo las excepciones se reintentan. `args` ya llegó validado por `args`.
+   * Solo las excepciones se reintentan, salvo `PermanentActionError`. `args` ya llegó validado por `args`.
    */
   run(args: Infer<A>, ctx: ActionCtx): Promise<ActionResult>;
 }

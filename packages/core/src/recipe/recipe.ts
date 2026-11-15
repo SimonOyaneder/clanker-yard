@@ -6,7 +6,7 @@ import * as z from "zod";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Defs } from "../defs/defs";
 import { DefValidationError } from "../defs/defs";
-import type { ActionCtx, ActionDef } from "../flows/catalog";
+import { PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
 import { agentSessions, stepRuns } from "../store/schema";
 import type { Store } from "../store/store";
 import { excerpt } from "../workspaces/exec";
@@ -144,11 +144,17 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
       files,
       envKeys: Object.keys(recipe.env),
     };
-    const env = Object.fromEntries(
-      Object.entries(recipe.env).map(([key, value]) => [key, renderTemplate(value, vars, { shell: false })]),
-    );
-    const wrap = recipe.wrap === undefined ? [] : [renderTemplate(recipe.wrap, vars, { shell: true })];
-    const command = [...wrap, renderTemplate(recipe.commands[name]!, vars, { shell: true })].join(" ");
+    // Un `{{slot}}` sin slot no se arregla reintentando.
+    const render = (template: string, shell: boolean) => {
+      try {
+        return renderTemplate(template, vars, { shell });
+      } catch (error) {
+        throw asPermanent(error);
+      }
+    };
+    const env = Object.fromEntries(Object.entries(recipe.env).map(([key, value]) => [key, render(value, false)]));
+    const wrap = recipe.wrap === undefined ? [] : [render(recipe.wrap, true)];
+    const command = [...wrap, render(recipe.commands[name]!, true)].join(" ");
 
     let exitCode: number;
     let extract: string;
@@ -175,7 +181,13 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
     outcomes: ["ok", "fail"],
     effects: "local",
     async run({ ws, scope, slot }, ctx) {
-      const recipe = read(ws.path) ?? NO_RECIPE;
+      let recipe;
+      try {
+        recipe = read(ws.path) ?? NO_RECIPE;
+      } catch (error) {
+        // Una receta mal escrita no se arregla reintentando.
+        throw asPermanent(error);
+      }
       const changed = await changedFiles(ws, ws.baseSha);
       const files = scope === "changed" ? changed : [];
 
@@ -205,4 +217,8 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
   };
 
   return { read, checkAction, runCommand };
+}
+
+function asPermanent(error: unknown): PermanentActionError {
+  return new PermanentActionError(error instanceof Error ? error.message : String(error), { cause: error });
 }

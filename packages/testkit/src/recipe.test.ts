@@ -13,6 +13,7 @@ import {
   EXCERPT_MAX_LINES,
   newId,
   openStore,
+  PermanentActionError,
   StaleLeaseError,
   type ActionCtx,
   type Artifacts,
@@ -287,6 +288,51 @@ describe("recipe.check", () => {
   test("{{slot}} sin slot falla con un mensaje que dice qué hacer", async () => {
     await worktree({}, { version: 1, commands: { t: "echo {{slot}}" }, checks: ["t"] });
     await expect(check()).rejects.toThrow(/\{\{slot\}\}.*no tiene slot/);
+  });
+
+  test("una receta inválida o un {{slot}} sin slot no se reintentan: el paso da error al primer intento", async () => {
+    await worktree({}, { version: 1, commands: { t: "echo {{slot}}" }, checks: ["t"] });
+    await expect(check()).rejects.toBeInstanceOf(PermanentActionError);
+    write(".clanker/recipe.json", "{ no es json");
+    await expect(check()).rejects.toBeInstanceOf(PermanentActionError);
+
+    write(".clanker/recipe.json", JSON.stringify({ version: 1, commands: { t: "echo {{slot}}" }, checks: ["t"] }));
+    const defs = createDefs(store);
+    const fixtures = mkdtempSync(join(tmpdir(), "clanker-recipe-none-"));
+    const flows = createFlows({
+      store,
+      defs,
+      agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures, speed: Infinity }) }),
+      artifacts,
+      roles: () => undefined,
+    });
+    flows.registerAction(recipes.checkAction);
+    flows.save(
+      FlowDef.parse({
+        schema: 1,
+        id: "checks",
+        name: "Checks",
+        trigger: { type: "manual" },
+        params: { ws: "Workspace" },
+        start: "checks",
+        nodes: { checks: { type: "action", action: "recipe.check", args: { ws: "$run.params.ws", scope: "all" }, on: { ok: "@done", fail: "@failed" } } },
+      }),
+    );
+    const { workspaceId, path, branch, baseSha, fencingToken } = lease!;
+    const runId = flows.start("checks", { type: "issue", id: "CLA-38" }, { ws: { workspaceId, path, branch, baseSha, fencingToken } });
+    await new Promise<void>((resolve) => {
+      const filter = { runId, types: ["run.parked" as const] };
+      if (store.events.since(0, filter).length > 0) return resolve();
+      const off = store.events.subscribe(() => {
+        off();
+        resolve();
+      }, filter);
+    });
+    await flows.close();
+    rmSync(fixtures, { recursive: true, force: true });
+
+    expect(flows.getRun(runId).steps).toMatchObject([{ status: "failed", outcome: "error", attempt: 1, error: expect.stringMatching(/no tiene slot/) }]);
+    expect(store.events.since(0, { runId, types: ["step.retrying"] })).toEqual([]);
   });
 
   test("scope changed: {{files}} son los archivos de la issue y sin ninguno el check se salta", async () => {

@@ -15,7 +15,7 @@ import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
 import { actionEffects, agentSessions, runs, stepRuns, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
-import type { ActionCtx, ActionDef, ConsolidatorDef, ExternalEvent, RetryPolicy, WaitDef, WaitResult } from "./catalog";
+import { PermanentActionError, type ActionCtx, type ActionDef, type ConsolidatorDef, type ExternalEvent, type RetryPolicy, type WaitDef, type WaitResult } from "./catalog";
 import { edgeFor, edgesOf, maxRoundsOf, takeEdge } from "./edges";
 import {
   agentRolesOf,
@@ -572,7 +572,8 @@ export function createEngine(deps: EngineDeps): Engine {
     try {
       result = await raceAbort(action.run(args.data, ctx), signal);
     } catch (error) {
-      return signal.reason instanceof StepTimeout ? timedOut(signal.reason) : { kind: "failed", error: describe(error) };
+      if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
+      return error instanceof PermanentActionError ? permanent(error.message) : { kind: "failed", error: describe(error) };
     }
     if (!action.outcomes.includes(result.outcome)) {
       return permanent(`La acción "${node.action}" devolvió el outcome "${result.outcome}", que no declara (${action.outcomes.join(", ")}).`);
