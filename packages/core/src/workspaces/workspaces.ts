@@ -122,7 +122,7 @@ export interface Workspaces {
   /** Suelta el lease y deja el worktree `idle`. No hace nada si el token ya no es el vigente. */
   release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void;
   /** El worktree que `runId` tiene tomado: dónde corren sus agentes, su base y lo que hace falta para operar sobre él. */
-  held(runId: RunId): (WorkspaceRef & { base: string }) | undefined;
+  held(runId: RunId): (WorkspaceRef & { base: string; repoId: string }) | undefined;
   /**
    * Suelta los worktrees que `runId` aún tiene tomados: lo que queda al terminar una corrida cuyo flujo
    * no los soltó (`@done`, `@failed` o cancelada). Sin worktrees tomados no hace nada (la hija de un
@@ -844,6 +844,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
           branch: workspaces.branch,
           fencingToken: workspaces.fencingToken,
           base: workspaces.baseRef,
+          repoId: workspaces.repoId,
         })
         .from(workspaces)
         .where(and(eq(workspaces.holderRunId, runId), eq(workspaces.state, "leased")))

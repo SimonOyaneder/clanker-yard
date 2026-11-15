@@ -59,6 +59,11 @@ describe("Pack", () => {
     expect(issues(reference)).toEqual([]);
   });
 
+  test("una referencia de conventions.context con un tipo desconocido se rechaza", () => {
+    const bad = { ...reference, conventions: { context: { "*": ["web:https://x"] } } };
+    expect(issues(bad)).toEqual([expect.stringContaining("conventions.context.*.0")]);
+  });
+
   test("un pack mínimo toma los defaults neutros", () => {
     const pack = Pack.parse({ id: "min", version: 1, activate: { githubOrgs: ["x"] } });
     expect(pack).toMatchObject({ actors: {}, signals: [], conventions: {}, flows: [], roles: [] });

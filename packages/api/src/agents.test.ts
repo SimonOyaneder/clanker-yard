@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { Brief, ContextSource, Profile, Report, Role } from "./index";
+import { Brief, ContextPackage, ContextRef, ContextSource, Profile, Report, Role } from "./index";
 
 const mode = {
   instructions: "Revisa el cambio.",
@@ -62,6 +62,20 @@ describe("ToolPolicy y ContextSource", () => {
 
   test("una fuente de contexto desconocida se rechaza", () => {
     expect(ContextSource.safeParse({ kind: "web", url: "x" }).success).toBe(false);
+  });
+});
+
+describe("ContextPackage", () => {
+  test("guarda referencias de los cuatro tipos", () => {
+    const refs = ["skill:commit", "rule:git-safety", "repo:AGENTS.md", "file:~/lore/core_patterns.md"];
+    expect(ContextPackage.parse({ description: "cómo hago commits", refs }).refs).toEqual(refs);
+  });
+
+  test("un paquete sin referencias, o con una de tipo desconocido o vacía, se rechaza", () => {
+    expect(ContextPackage.safeParse({ refs: [] }).success).toBe(false);
+    expect(ContextRef.safeParse("url:https://x").success).toBe(false);
+    expect(ContextRef.safeParse("skill:").success).toBe(false);
+    expect(ContextRef.safeParse("AGENTS.md").success).toBe(false);
   });
 });
 

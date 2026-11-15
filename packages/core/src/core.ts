@@ -77,10 +77,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const runtime = selectRuntime(opts.runtimes, opts.env);
   const defs = createDefs(store);
   const packs = createPacks({ defs });
-  const agents = createAgents({ store, defs, runtime });
+  const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
+  const agents = createAgents({ store, defs, runtime, packs, remoteOf: (repoId) => repos.get(repoId)?.remote });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const procs = createProcs({ store, bootId });
-  const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
   const slots = createSlots({ store });
   const askpass = createAskpass();
   const workspaces = createWorkspaces({

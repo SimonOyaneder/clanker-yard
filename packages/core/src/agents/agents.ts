@@ -12,9 +12,11 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { Defs } from "../defs/defs";
+import type { Packs } from "../packs/packs";
 import { newId } from "../store/conventions";
 import { agentSessions, agentTurns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
+import { createContextResolver, type ContextResolver } from "./context";
 import { estimateCostMicros } from "./pricing";
 import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
 
@@ -90,14 +92,21 @@ export interface AgentsOptions {
   defs: Defs;
   runtime: AgentRuntime;
   now?: () => number;
+  /** Para `conventions.context` del pack de la org del repo; sin él no hay convenciones. */
+  packs?: Packs;
+  /** El `owner/name` de GitHub de un repo; su org elige el pack. */
+  remoteOf?: (repoId: string) => string | null | undefined;
+  /** Dónde se buscan `skill:` y `rule:`; por defecto el `~/.claude` del usuario. */
+  userDir?: string;
 }
 
 /** El mismo esquema que valida el reporte, hecho JSON Schema; el outcome y el payload los pone el modo. */
 const reportEnvelope = z.toJSONSchema(Report) as JsonSchema & { properties: Record<string, unknown> };
 
-export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOptions): Agents {
+export function createAgents({ store, defs, runtime, now = Date.now, packs, remoteOf, userDir }: AgentsOptions): Agents {
   defs.register("role", Role);
   defs.register("profile", Profile);
+  const context: ContextResolver = createContextResolver({ defs, packs, remoteOf, userDir });
 
   const lastActivity = new Map<string, number>();
 
@@ -111,6 +120,8 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     cwd: string;
     mode: RoleMode;
     budget: Pick<ResumeSpec, "maxBudgetUsd" | "maxTurns">;
+    /** Lo resuelto al lanzar: el reintento por un reporte inválido lo reusa en vez de releerlo. */
+    context: Pick<ResumeSpec, "native" | "references">;
     placement: Placement;
     runId: Brief["run"]["id"];
   }
@@ -156,6 +167,24 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     return { maxTurns, maxBudgetUsd: maxUsd };
   }
 
+  /** Lo que falta de las fuentes de contexto avisa en la corrida y no detiene al agente. */
+  async function resolveContext(req: RunRequest | ResumeRequest, roleSlug: string, role: Role, cwd: string) {
+    const resolved = await context.resolve({ role: roleSlug, sources: role.context, cwd, repoId: req.repoId });
+    if (resolved.warnings.length > 0) {
+      store.tx((tx) => {
+        for (const message of resolved.warnings) {
+          tx.emit({
+            type: "error",
+            origin: "core",
+            ...scope({ placement: req, runId: req.brief.run.id }),
+            payload: { scope: "agent.context", message },
+          });
+        }
+      });
+    }
+    return { native: resolved.native, references: resolved.references };
+  }
+
   async function run(req: RunRequest): Promise<AgentResult> {
     const roleDef = req.roleDef
       ? defs.get("role", req.roleDef.id, req.roleDef.version)
@@ -168,6 +197,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     }
     const profileRole = resolveProfileRole(req, req.profileRole ?? req.role);
     const budget = budgetOf(mode, profileRole.budget);
+    const resolved = await resolveContext(req, req.role, role, req.workspace);
 
     const spec: RunSpec = {
       role: req.role,
@@ -177,7 +207,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
       model: profileRole.model,
       effort: profileRole.effort,
       cacheTtl: profileRole.cacheTtl,
-      context: role.context,
+      ...resolved,
       hooks: role.hooks ?? false,
       tools: role.tools ?? "all",
       outputSchema: outputSchemaFor(mode),
@@ -195,6 +225,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
         cwd: spec.cwd,
         mode,
         budget,
+        context: resolved,
         placement: req,
         runId: req.brief.run.id,
       },
@@ -220,11 +251,12 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     const role = Role.parse(roleDef.body);
     const mode = pickMode(role, roleDef.slug, req.mode, req.brief);
     const budget = budgetOf(mode, resolveProfileRole(req, roleDef.slug).budget);
+    const resolved = await resolveContext(req, roleDef.slug, role, session.cwd);
 
     const agentRun = await runtime.resume(
       { runtime: runtime.id, sessionId: session.sessionRef, cwd: session.cwd },
       promptFor(mode, req.brief, req.notice),
-      { outputSchema: outputSchemaFor(mode), ...budget },
+      { outputSchema: outputSchemaFor(mode), ...budget, ...resolved },
     );
     interruptOnAbort(req.signal, agentRun);
     return converse(
@@ -237,6 +269,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
         cwd: session.cwd,
         mode,
         budget,
+        context: resolved,
         placement: req,
         runId: req.brief.run.id,
       },
@@ -257,7 +290,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     const retry = await runtime.resume(
       first.ref,
       `tu reporte no cumple el esquema: ${attempt.problem}`,
-      { outputSchema: outputSchemaFor(conversation.mode), ...conversation.budget },
+      { outputSchema: outputSchemaFor(conversation.mode), ...conversation.budget, ...conversation.context },
     );
     const second = await settle(conversation, retry, attempt.sessionId);
     return second.kind === "invalid"
@@ -377,6 +410,15 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     for await (const event of agentRun.events) {
       if (event.type === "usage") {
         store.tx((tx) => recordTurn(tx, c, sessionId, event, turns));
+        continue;
+      }
+      if (event.type === "error") {
+        // `login_expired` y `quota_exhausted` también llegan en el resultado, que es lo que decide el paso.
+        if (event.kind === "other") {
+          store.tx((tx) =>
+            tx.emit({ type: "error", origin: "core", ...scope(c), payload: { scope: "agent.runtime", message: event.message } }),
+          );
+        }
         continue;
       }
       if (event.type !== "tool_start") continue;

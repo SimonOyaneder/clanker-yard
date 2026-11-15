@@ -76,7 +76,7 @@ export function harness(
     /** Un resume vuelve con el mismo id de sesión, como Claude; por defecto abre uno nuevo. */
     resumeKeepsSession?: boolean;
     /** El worktree que tiene tomado cada corrida; por defecto todas tienen el mismo. */
-    workspaceOf?: (runId: RunId) => { path: string; base: string } | undefined;
+    workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string } | undefined;
   } = {},
 ) {
   const dir = options.reopen?.dir ?? mkdtempSync(join(tmpdir(), "clanker-flows-"));

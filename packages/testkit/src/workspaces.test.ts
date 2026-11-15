@@ -434,6 +434,7 @@ describe("held y workspace.release", () => {
       branch: "cla-1",
       fencingToken: lease.fencingToken,
       base: "main",
+      repoId: id,
     });
     expect(workspaces.held(runB)).toBeUndefined();
     workspaces.release(lease);

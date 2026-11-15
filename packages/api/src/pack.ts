@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { ContextRef } from "./agents";
 import { ProjectId } from "./domain";
 
 // El formato de un pack de convenciones: `docs/design.html#packs` y `#d-ops` ("Packs: esquema y pack
@@ -140,7 +141,7 @@ export const Conventions = z.strictObject({
     })
     .optional(),
   /** Contexto extra por rol (`*` es todos): `skill:commit`, `rule:git-safety`, `repo:AGENTS.md`. */
-  context: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
+  context: z.record(z.string().min(1), z.array(ContextRef)).optional(),
 });
 
 /**

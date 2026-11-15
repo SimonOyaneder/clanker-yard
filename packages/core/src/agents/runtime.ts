@@ -1,4 +1,4 @@
-import type { ContextSource, Effort, JsonSchema, ToolPolicy } from "@clanker/api";
+import type { Effort, JsonSchema, ToolPolicy } from "@clanker/api";
 
 export type RuntimeId = "claude-sdk" | "acp" | "fake";
 
@@ -20,6 +20,19 @@ export interface RuntimeCapabilities {
   steer: boolean;
 }
 
+/** Lo que Claude Code carga por su cuenta, siempre del disco al iniciar la sesión (`settingSources` y `skills`). */
+export interface NativeContext {
+  sources: ("user" | "project")[];
+  skills: string[] | "all";
+}
+
+/** Un archivo de contexto leído en este lanzamiento: el core lo lee del original cada vez y no lo guarda. */
+export interface ContextReference {
+  /** Cómo se nombra al agente: la ruta tal como la pide la fuente, o `rule:<nombre>`. */
+  label: string;
+  content: string;
+}
+
 export interface RunSpec {
   /** Slug del rol; el runtime solo lo usa para nombrar y registrar. */
   role: string;
@@ -30,8 +43,10 @@ export interface RunSpec {
   effort?: Effort;
   /** Del perfil: 1 h solo conviene si la mayoría de las sesiones retomadas llegan frías. */
   cacheTtl?: "5m" | "1h";
-  /** Fuentes de contexto del rol; cada runtime resuelve las que entiende. */
-  context: ContextSource[];
+  /** Solo lo usa el runtime Claude; sin él, `settingSources` es `["user", "project"]` y no hay skills. */
+  native?: NativeContext;
+  /** Los archivos de contexto del rol (`repo`, `file`, paquetes y convenciones del pack): sirven a cualquier runtime. */
+  references: ContextReference[];
   /** Los hooks del usuario: apagados salvo que el rol los active. */
   hooks: boolean;
   /** Default `"all"`: libertad total. */
@@ -43,8 +58,11 @@ export interface RunSpec {
   maxTurns?: number;
 }
 
-/** Lo que cambia al retomar: el esquema del reporte depende del modo del mensaje. */
-export type ResumeSpec = Pick<RunSpec, "outputSchema" | "maxBudgetUsd" | "maxTurns">;
+/**
+ * Lo que cambia al retomar: el esquema del reporte depende del modo del mensaje, y el contexto se
+ * vuelve a leer (retomar también es un lanzamiento).
+ */
+export type ResumeSpec = Pick<RunSpec, "outputSchema" | "maxBudgetUsd" | "maxTurns" | "native" | "references">;
 
 /**
  * Lo gastado por este run, no el acumulado de la sesión: un runtime cuyo resume arrastra el

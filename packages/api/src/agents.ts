@@ -39,6 +39,29 @@ export const ToolPolicy = z.union([
 ]);
 export type ToolPolicy = z.infer<typeof ToolPolicy>;
 
+const CONTEXT_REF = /^(skill|rule|repo|file):\S/;
+
+/**
+ * Una referencia a contexto, nunca una copia: `skill:<nombre>` (una skill o comando de Claude),
+ * `rule:<nombre>` (`rules/<nombre>.md`), `repo:<ruta>` (un archivo del worktree) o `file:<ruta>`
+ * (absoluta o con `~/`). Es la sintaxis de `ContextPackage.refs` y de `conventions.context` de un pack.
+ */
+export const ContextRef = z.string().regex(CONTEXT_REF, {
+  message: 'debe ser "skill:<nombre>", "rule:<nombre>", "repo:<ruta>" o "file:<ruta>"',
+});
+export type ContextRef = z.infer<typeof ContextRef>;
+
+/**
+ * Body de una def de kind `context`: un paquete de contexto ("cómo hago commits" = la skill `commit` más
+ * `git-safety`). Guarda referencias y se resuelve en cada lanzamiento; un rol lo pide con
+ * `{ kind: "pack", id: <slug> }`.
+ */
+export const ContextPackage = z.object({
+  description: z.string().optional(),
+  refs: z.array(ContextRef).min(1),
+});
+export type ContextPackage = z.infer<typeof ContextPackage>;
+
 /** De dónde saca contexto un rol. Los `pack` y los `file` son referencias, nunca copias. */
 export const ContextSource = z.discriminatedUnion("kind", [
   z.object({

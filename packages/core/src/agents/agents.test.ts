@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
@@ -37,7 +38,7 @@ const usage: Usage = {
 
 const role: Role = {
   prompt: "Eres un analista.",
-  context: [{ kind: "repo", files: ["AGENTS.md"] }],
+  context: [],
   modes: {
     audit: {
       instructions: "Audita el cambio.",
@@ -486,6 +487,92 @@ describe("agent.activity", () => {
     expect(activity.map((e) => e.payload)).toEqual([
       expect.objectContaining({ tool: "Read", detail: "d-Read" }),
       expect.objectContaining({ tool: "Bash", detail: "d-Bash" }),
+    ]);
+  });
+});
+
+describe("contexto del rol", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Un worktree real con el AGENTS.md dado; el rol pide ese archivo, otro que no existe y un paquete que tampoco. */
+  function withContext(steps: Step[], agentsMd = "reglas v1") {
+    const worktree = mkdtempSync(join(tmpdir(), "agents-context-"));
+    dirs.push(worktree);
+    writeFileSync(join(worktree, "AGENTS.md"), agentsMd);
+    const env = setup(steps);
+    env.defs.save({
+      kind: "role",
+      slug: "analyst",
+      scope: "user",
+      body: {
+        ...role,
+        context: [
+          { kind: "repo", files: ["AGENTS.md", "lore/core_patterns.md"] },
+          { kind: "pack", id: "lore" },
+        ],
+      },
+      source: "ui",
+    });
+    return { ...env, worktree, request: () => ({ ...request(), workspace: worktree }) };
+  }
+
+  const warnings = (store: Store) =>
+    store.events.since(0, { types: ["error"] }).filter((e) => e.payload.scope === "agent.context");
+
+  test("un archivo o paquete que falta avisa en la corrida y el agente corre igual con lo demás", async () => {
+    const { store, agents, calls, request } = withContext([{ result: { structured: validReport } }]);
+    const req = request();
+
+    const result = await agents.run(req);
+
+    expect(result.status).toBe("success");
+    expect(calls.starts[0]?.references).toEqual([{ label: "AGENTS.md", content: "reglas v1" }]);
+    expect(warnings(store).map((e) => [e.runId, e.payload.message])).toEqual([
+      [req.brief.run.id, expect.stringContaining('el paquete de contexto "lore"')],
+      [req.brief.run.id, expect.stringContaining("lore/core_patterns.md")],
+    ]);
+  });
+
+  test("retomar la sesión vuelve a leer el archivo: lo editado vale desde ese lanzamiento", async () => {
+    const { agents, calls, request, worktree } = withContext([
+      { result: { structured: validReport } },
+      { result: { structured: { outcome: "done", summary: "ok", payload: { done: true } } } },
+    ]);
+    const first = await agents.run(request());
+
+    writeFileSync(join(worktree, "AGENTS.md"), "reglas v2");
+    await agents.resume({ sessionId: first.sessionId, profile: "default", mode: "followup", brief: brief("followup") });
+
+    expect(calls.resumes[0]?.spec.references).toEqual([{ label: "AGENTS.md", content: "reglas v2" }]);
+  });
+
+  test("el reintento por un reporte inválido reusa lo resuelto y no avisa otra vez", async () => {
+    const bad = { outcome: "findings", summary: "x", payload: {} };
+    const { store, agents, calls, request } = withContext([{ result: { structured: bad } }, { result: { structured: validReport } }]);
+
+    await agents.run(request());
+
+    expect(calls.resumes[0]?.spec.references).toEqual(calls.starts[0]?.references);
+    expect(warnings(store)).toHaveLength(2);
+  });
+
+  test("un evento error del runtime queda en la corrida con su ámbito", async () => {
+    const { store, agents } = setup([
+      {
+        events: async function* () {
+          yield { type: "error", kind: "other", message: "no se pudo observar las skills" } as const;
+        },
+        result: { structured: validReport },
+      },
+    ]);
+
+    await agents.run(request());
+
+    expect(store.events.since(0, { types: ["error"] }).map((e) => e.payload)).toEqual([
+      { scope: "agent.runtime", message: "no se pudo observar las skills" },
     ]);
   });
 });

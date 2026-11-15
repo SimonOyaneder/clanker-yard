@@ -55,8 +55,6 @@ export function agentEnv({
 }
 
 export interface RunCtx {
-  /** Lo que resolvieron las fuentes `repo` y `file` del rol; va después del límite cacheable. */
-  repoContext: string;
   env: Record<string, string>;
   executable: string | undefined;
   abort: AbortController;
@@ -67,15 +65,16 @@ export interface RunCtx {
 
 /** RunSpec → Options del SDK (`docs/design.html#d-agents`, "Adapter Claude"). */
 export function toOptions(spec: RunSpec, ctx: RunCtx): Options {
-  const native = spec.context.find((c) => c.kind === "native");
+  // Los archivos de contexto van después del límite cacheable: cambian con el repo y con lo que el usuario edita.
+  const references = spec.references.map((r) => `# ${r.label}\n\n${r.content}`).join("\n\n");
   return {
     cwd: spec.cwd,
     model: spec.model,
     ...(spec.effort === undefined ? {} : { effort: spec.effort }),
     systemPrompt:
-      ctx.repoContext === ""
+      references === ""
         ? [spec.systemPrompt]
-        : [spec.systemPrompt, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, ctx.repoContext],
+        : [spec.systemPrompt, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, references],
     // Libertad total.
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
@@ -86,8 +85,8 @@ export function toOptions(spec: RunSpec, ctx: RunCtx): Options {
           ...(spec.tools.allow === undefined ? {} : { tools: spec.tools.allow }),
           ...(spec.tools.deny === undefined ? {} : { disallowedTools: spec.tools.deny }),
         }),
-    settingSources: native?.sources ?? ["user", "project"],
-    skills: native?.skills ?? [],
+    settingSources: spec.native?.sources ?? ["user", "project"],
+    skills: spec.native?.skills ?? [],
     // Gana sobre los hooks de user y de project, pero no sobre los de este objeto `hooks`.
     settings: { disableAllHooks: !spec.hooks },
     hooks: { PreCompact: [{ hooks: [ctx.logCompaction] }] },

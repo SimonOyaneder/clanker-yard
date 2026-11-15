@@ -26,7 +26,8 @@ const spec = (overrides: Partial<RunSpec> = {}): RunSpec => ({
   systemPrompt: "Eres el dev.",
   prompt: "Haz lo tuyo.",
   model: "haiku",
-  context: [{ kind: "native", sources: [], skills: [] }],
+  native: { sources: [], skills: [] },
+  references: [],
   hooks: false,
   tools: "all",
   outputSchema: { type: "object" },
@@ -204,40 +205,107 @@ describe("start", () => {
     expect(await readdir(ghDir)).toEqual([]);
   });
 
-  test("las fuentes repo y file entran al prompt de sistema, tras el límite cacheable", async () => {
-    await writeFile(join(cwd, "AGENTS.md"), "reglas del repo");
-    await mkdir(join(cwd, "lore"));
-    await writeFile(join(cwd, "lore", "patterns.md"), "patrones");
+  test("los archivos de contexto entran al prompt de sistema, tras el límite cacheable", async () => {
     const { query, calls } = fakeQuery([init(), success()]);
 
     const run = await runtimeWith(query).start(
       spec({
-        context: [
-          { kind: "native", sources: ["project"], skills: [] },
-          { kind: "repo", files: ["AGENTS.md"] },
-          { kind: "file", path: "lore/patterns.md" },
+        references: [
+          { label: "AGENTS.md", content: "reglas del repo" },
+          { label: "rule:git-safety", content: "confirmar siempre" },
         ],
       }),
     );
     await run.result;
 
-    const prompt = calls[0]?.options.systemPrompt;
-    expect(prompt).toEqual([
+    expect(calls[0]?.options.systemPrompt).toEqual([
       "Eres el dev.",
       "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__",
-      "# AGENTS.md\n\nreglas del repo\n\n# lore/patterns.md\n\npatrones",
+      "# AGENTS.md\n\nreglas del repo\n\n# rule:git-safety\n\nconfirmar siempre",
     ]);
   });
 
-  test("un archivo de contexto que falta, o un pack, rechazan con un mensaje accionable", async () => {
+  describe("skills editadas con la sesión en curso", () => {
+    /** Un `query` que espera a que el core recargue las skills (o falla al intentarlo) antes de terminar. */
+    function reloading(reload: () => Promise<unknown>) {
+      let reloaded!: () => void;
+      const done = new Promise<void>((resolve) => (reloaded = resolve));
+      const query: QueryFn = () =>
+        Object.assign(
+          (async function* () {
+            yield init();
+            await done;
+            yield success();
+          })(),
+          {
+            reloadSkills: async () => {
+              try {
+                return await reload();
+              } finally {
+                reloaded();
+              }
+            },
+          },
+        );
+      return query;
+    }
+
+    const runtimeIn = (userDir: string, query: QueryFn) =>
+      createClaudeRuntime({ credentials: async () => credentials, home, query, baseEnv: { CLAUDE_CONFIG_DIR: userDir } });
+
+    test("el core llama a reloadSkills cuando cambia una skill de las sources del rol", async () => {
+      const userDir = join(cwd, "claude");
+      await mkdir(join(userDir, "skills", "commit"), { recursive: true });
+      let reloads = 0;
+      const query = reloading(async () => void reloads++);
+
+      const run = await runtimeIn(userDir, query).start(spec({ native: { sources: ["user"], skills: ["commit"] } }));
+      await writeFile(join(userDir, "skills", "commit", "SKILL.md"), "# nueva versión");
+      const result = await run.result;
+
+      expect(result.status).toBe("success");
+      expect(reloads).toBe(1);
+    });
+
+    test("si no se puede recargar, el run sigue y el fallo sale como evento error", async () => {
+      const userDir = join(cwd, "claude");
+      await mkdir(join(userDir, "skills"), { recursive: true });
+      const query = reloading(() => Promise.reject(new Error("el proceso ya cerró")));
+
+      const run = await runtimeIn(userDir, query).start(spec({ native: { sources: ["user"], skills: "all" } }));
+      await writeFile(join(userDir, "skills", "nueva.md"), "x");
+      const events = await collect(run.events);
+
+      expect((await run.result).status).toBe("success");
+      expect(events).toContainEqual({
+        type: "error",
+        kind: "other",
+        message: expect.stringContaining('No se pudieron recargar las skills del rol "dev": el proceso ya cerró'),
+      });
+    });
+  });
+
+  test("la sesión guardada no lleva copia del contexto: retomar lo vuelve a recibir", async () => {
     const { query } = fakeQuery([init(), success()]);
-    const runtime = runtimeWith(query);
-    await expect(runtime.start(spec({ context: [{ kind: "repo", files: ["AGENTS.md"] }] }))).rejects.toThrow(
-      /pide el contexto "AGENTS.md"/,
+    const run = await runtimeWith(query).start(
+      spec({ native: { sources: ["user"], skills: ["commit"] }, references: [{ label: "AGENTS.md", content: "v1" }] }),
     );
-    await expect(runtime.start(spec({ context: [{ kind: "pack", id: "rails" }] }))).rejects.toThrow(
-      /todavía no resuelve packs/,
-    );
+    await run.result;
+
+    const stored = await readFile(join(home, "agent-sessions", "sess-1.json"), "utf8");
+    expect(stored).not.toContain("v1");
+    expect(stored).not.toContain("commit");
+
+    const second = fakeQuery([init(), success()]);
+    const resumed = await runtimeWith(second.query).resume(run.ref, "sigue", {
+      outputSchema: { type: "object" },
+      native: { sources: ["user"], skills: ["commit"] },
+      references: [{ label: "AGENTS.md", content: "v2" }],
+    });
+    await resumed.result;
+
+    expect(second.calls[0]?.options).toMatchObject({ skills: ["commit"] });
+    expect(second.calls[0]?.options.systemPrompt).toEqual(["Eres el dev.", "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__", "# AGENTS.md\n\nv2"]);
   });
 
   test("el hook PreCompact deja la compactación en el transcript", async () => {
@@ -436,6 +504,7 @@ describe("resume", () => {
     const resumed = await runtimeWith(second.query).resume(started.ref, "Corrige esto.", {
       outputSchema: { type: "object", title: "otro" },
       maxTurns: 9,
+      references: [],
     });
     const result = await resumed.result;
 
@@ -472,7 +541,7 @@ describe("resume", () => {
     const resumed = await runtimeWith(second.query).resume(
       { runtime: "claude-sdk", sessionId: "sess-1", cwd },
       "sigue",
-      { outputSchema: { type: "object" } },
+      { outputSchema: { type: "object" }, references: [] },
     );
     expect((await resumed.result).usage).toMatchObject({ tokensIn: 10, costMicros: 50_000 });
   });
@@ -480,7 +549,7 @@ describe("resume", () => {
   test("una sesión que este runtime no inició no se retoma", async () => {
     const { query } = fakeQuery([init(), success()]);
     await expect(
-      runtimeWith(query).resume({ runtime: "claude-sdk", sessionId: "ajena", cwd }, "hola", { outputSchema: {} }),
+      runtimeWith(query).resume({ runtime: "claude-sdk", sessionId: "ajena", cwd }, "hola", { outputSchema: {}, references: [] }),
     ).rejects.toThrow(/solo retoma las sesiones que él inició/);
   });
 });

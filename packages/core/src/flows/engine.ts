@@ -154,7 +154,7 @@ export interface EngineDeps {
   consolidators: ReadonlyMap<string, ConsolidatorDef>;
   waits: ReadonlyMap<string, WaitDef>;
   /** El worktree de la corrida (el que tiene tomado), donde corren sus agentes. */
-  workspaceOf?: (runId: RunId) => { path: string; base: string } | undefined;
+  workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string } | undefined;
   /**
    * Arma el brief de un paso agent: deja en el worktree lo que el agente lee (`.clanker-run/`) y lo cita en
    * el brief. Sin esto el brief lleva solo el payload del nodo.
@@ -963,6 +963,7 @@ export function createEngine(deps: EngineDeps): Engine {
       profileDef,
       stepRunId: step.id,
       projectId: run.projectId ?? undefined,
+      repoId: workspace.repoId,
       signal,
       notice: escalated ? HANDOFF_NOTICE : cut ? CUT_NOTICE : undefined,
     };
@@ -1031,7 +1032,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** El worktree que tiene tomada la corrida o, si es un subflujo, el de quien la llamó. */
-  function workspaceFor(run: RunRow): { path: string; base: string } | undefined {
+  function workspaceFor(run: RunRow): { path: string; base: string; repoId?: string } | undefined {
     for (const id of lineage(run)) {
       const held = workspaceOf?.(id);
       if (held) return held;

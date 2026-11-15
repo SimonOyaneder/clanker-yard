@@ -11,7 +11,8 @@ const spec: RunSpec = {
   prompt: "Haz lo tuyo.",
   model: "sonnet",
   effort: "high",
-  context: [{ kind: "native", sources: ["user", "project"], skills: ["commit"] }],
+  native: { sources: ["user", "project"], skills: ["commit"] },
+  references: [{ label: "AGENTS.md", content: "reglas" }],
   hooks: false,
   tools: "all",
   outputSchema: { type: "object", properties: { ok: { type: "boolean" } } },
@@ -21,7 +22,6 @@ const logCompaction: HookCallback = async () => ({});
 
 function ctx(overrides: Partial<RunCtx> = {}): RunCtx {
   return {
-    repoContext: "# AGENTS.md\n\nreglas",
     env: { HOME: "/home/x" },
     executable: "/usr/local/bin/claude",
     abort: new AbortController(),
@@ -58,14 +58,14 @@ describe("toOptions", () => {
   });
 
   test("sin fuente native: sources user y project, y ninguna skill", () => {
-    const options = toOptions({ ...spec, context: [{ kind: "repo", files: ["AGENTS.md"] }] }, ctx());
+    const options = toOptions({ ...spec, native: undefined }, ctx());
     expect(options.settingSources).toEqual(["user", "project"]);
     expect(options.skills).toEqual([]);
   });
 
   test("sources y skills salen del rol", () => {
     const options = toOptions(
-      { ...spec, context: [{ kind: "native", sources: ["project"], skills: "all" }] },
+      { ...spec, native: { sources: ["project"], skills: "all" } },
       ctx(),
     );
     expect(options.settingSources).toEqual(["project"]);
@@ -74,8 +74,8 @@ describe("toOptions", () => {
 
   test("topes, retomar y sin contexto de repo", () => {
     const options = toOptions(
-      { ...spec, maxTurns: 40, maxBudgetUsd: 1.5 },
-      ctx({ repoContext: "", resume: "sess-1" }),
+      { ...spec, references: [], maxTurns: 40, maxBudgetUsd: 1.5 },
+      ctx({ resume: "sess-1" }),
     );
     expect(options).toMatchObject({ maxTurns: 40, maxBudgetUsd: 1.5, resume: "sess-1" });
     expect(options.systemPrompt).toEqual(["Eres el dev."]);

@@ -785,8 +785,7 @@ describe("dispatcher", () => {
     const first = h.start("dev-flow", { type: "issue", id: "dev-1" });
     const second = h.start("dev-flow", { type: "issue", id: "dev-2" });
     const maintenance = h.start("maint-flow", { type: "pr", id: "pr-3" });
-    await Promise.resolve();
-    expect(h.calls.map((c) => c.subject)).toEqual(["dev-1"]);
+    await vi.waitFor(() => expect(h.calls.map((c) => c.subject)).toEqual(["dev-1"]));
 
     release();
     await Promise.all([h.finished(first), h.finished(second), h.finished(maintenance)]);

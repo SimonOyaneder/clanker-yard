@@ -1,5 +1,5 @@
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   query as sdkQuery,
   type HookCallback,
@@ -20,13 +20,18 @@ import type {
   Usage,
 } from "../runtime";
 import type { ClaudeCredentials } from "./credentials";
+import { userConfigDir } from "../context";
 import { createEventQueue } from "./event-queue";
 import { agentEnv, toOptions } from "./options";
 import { credentialMismatch, noteSignals, outcomeOf, type Signals } from "./outcome";
+import { skillDirs, watchDirs } from "./skills-watch";
 import { transcriptFile } from "./transcript";
 
-/** Lo único que el adapter usa de `query`: los tests inyectan uno falso. */
-export type QueryFn = (params: { prompt: string; options: Options }) => AsyncIterable<SDKMessage>;
+/** Lo único que el adapter usa de `query`: los tests inyectan uno falso. Sin `reloadSkills` no se recargan skills a media sesión. */
+export type QueryFn = (params: {
+  prompt: string;
+  options: Options;
+}) => AsyncIterable<SDKMessage> & { reloadSkills?: () => Promise<unknown> };
 
 export interface ClaudeRuntimeOptions {
   /**
@@ -45,10 +50,12 @@ export interface ClaudeRuntimeOptions {
 
 const DEFAULT_GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
 
-/** Lo que `resume` necesita y `ResumeSpec` no trae; se guarda al iniciar para sobrevivir a un reinicio del core. */
+/**
+ * Lo que `resume` necesita y `ResumeSpec` no trae; se guarda al iniciar para sobrevivir a un reinicio del
+ * core. Sin el contexto: cada lanzamiento lo vuelve a leer del original.
+ */
 interface StoredSession {
   spec: RunSpec;
-  repoContext: string;
 }
 
 /**
@@ -90,12 +97,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
   const transcriptOf = (sessionId: string) => transcriptFile(home, sessionId);
   const storedOf = (sessionId: string) => join(paths.sessions, `${sessionId}.json`);
 
-  async function launch(
-    spec: RunSpec,
-    repoContext: string,
-    prompt: string,
-    resumeId: string | undefined,
-  ): Promise<AgentRun> {
+  async function launch(spec: RunSpec, prompt: string, resumeId: string | undefined): Promise<AgentRun> {
     const credentials = await options.credentials();
     const previous = resumeId === undefined ? ZERO_TOTALS : await totalsAtEndOf(transcriptOf(resumeId));
     const abort = new AbortController();
@@ -130,7 +132,6 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     const stream = runQuery({
       prompt,
       options: toOptions(spec, {
-        repoContext,
         env: agentEnv({
           baseEnv,
           ghConfigDir: paths.ghConfigDir,
@@ -144,6 +145,22 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         logCompaction,
       }),
     });
+
+    // Una skill editada mientras el agente corre vale desde su siguiente uso: se recarga del disco.
+    const stopWatching =
+      stream.reloadSkills === undefined
+        ? () => {}
+        : watchDirs(
+            skillDirs(spec.native, spec.cwd, userConfigDir(baseEnv)),
+            () => {
+              stream.reloadSkills?.().catch((error: unknown) => skillsFailed("recargar", error));
+            },
+            (error) => skillsFailed("observar", error),
+          );
+    function skillsFailed(action: string, error: unknown) {
+      const reason = error instanceof Error ? error.message : String(error);
+      events.push({ type: "error", kind: "other", message: `No se pudieron ${action} las skills del rol "${spec.role}": ${reason}` });
+    }
 
     const tally = emptyUsage(credentials);
     const signals: Signals = { loginFailed: false };
@@ -243,7 +260,10 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         ...(outcome.message === undefined ? {} : { message: outcome.message }),
         ...(outcome.resetsAt === undefined ? {} : { resetsAt: outcome.resetsAt }),
       };
-    })().finally(events.close);
+    })().finally(() => {
+      stopWatching();
+      events.close();
+    });
     finished.catch(sessionFailed);
 
     const startedId = await session;
@@ -261,9 +281,8 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
 
     async start(spec) {
       await prepare();
-      const repoContext = await resolveRepoContext(spec);
-      const run = await launch(spec, repoContext, spec.prompt, undefined);
-      const stored: StoredSession = { spec, repoContext };
+      const run = await launch(spec, spec.prompt, undefined);
+      const stored: StoredSession = { spec: { ...spec, native: undefined, references: [] } };
       await writeFile(storedOf(run.ref.sessionId), JSON.stringify(stored));
       return run;
     },
@@ -272,7 +291,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       await prepare();
       const stored = await readStored(storedOf(ref.sessionId), ref.sessionId);
       const spec: RunSpec = { ...stored.spec, ...resumeSpec, cwd: ref.cwd, prompt: message };
-      return launch(spec, stored.repoContext, message, ref.sessionId);
+      return launch(spec, message, ref.sessionId);
     },
   };
 }
@@ -286,32 +305,6 @@ async function readStored(file: string, sessionId: string): Promise<StoredSessio
       `No hay registro de la sesión ${sessionId} en ${file}: el runtime claude-sdk solo retoma las sesiones que él inició.`,
     );
   }
-}
-
-/** Las fuentes `native` las carga Claude con `settingSources`; las `repo` y `file` van al prompt de sistema. */
-async function resolveRepoContext(spec: RunSpec): Promise<string> {
-  const sections: string[] = [];
-  for (const source of spec.context) {
-    if (source.kind === "pack") {
-      throw new Error(
-        `El rol "${spec.role}" usa el pack "${source.id}", y el runtime claude-sdk todavía no resuelve packs.`,
-      );
-    }
-    const files = source.kind === "repo" ? source.files : source.kind === "file" ? [source.path] : [];
-    for (const file of files) {
-      const path = resolve(spec.cwd, file);
-      let content: string;
-      try {
-        content = await readFile(path, "utf8");
-      } catch (error) {
-        throw new Error(
-          `El rol "${spec.role}" pide el contexto "${file}" y no se pudo leer (${path}): ${(error as Error).message}`,
-        );
-      }
-      sections.push(`# ${file}\n\n${content}`);
-    }
-  }
-  return sections.join("\n\n");
 }
 
 function gitConfigFor({ name, email }: { name: string; email: string }): string {

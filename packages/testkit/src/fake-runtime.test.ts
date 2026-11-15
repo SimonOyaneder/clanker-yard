@@ -74,7 +74,7 @@ function spec(role: string, b: Brief, cwd = "/work/tree"): RunSpec {
     systemPrompt: "Eres un agente.",
     prompt: message(b),
     model: "sonnet",
-    context: [],
+    references: [],
     hooks: false,
     tools: "all",
     outputSchema,
@@ -375,7 +375,7 @@ describe("effects y resultados de la receta", () => {
     const first = await runtime.start(spec("dev", brief("fix", 1)));
     await first.result;
 
-    const second = await runtime.resume(first.ref, message(brief("fix", 2)), { outputSchema });
+    const second = await runtime.resume(first.ref, message(brief("fix", 2)), { outputSchema, references: [] });
 
     expect(second.ref).toEqual(first.ref);
     expect(((await second.result).structured as { summary: string }).summary).toBe("r2");
@@ -386,7 +386,7 @@ describe("effects y resultados de la receta", () => {
   test("resume de una sesión que el fake no inició es un error", async () => {
     const runtime = createFakeRuntime({ fixtures: demo });
     await expect(
-      runtime.resume({ runtime: "fake", sessionId: "fake-9", cwd: "/x" }, message(brief("fix")), { outputSchema }),
+      runtime.resume({ runtime: "fake", sessionId: "fake-9", cwd: "/x" }, message(brief("fix")), { outputSchema, references: [] }),
     ).rejects.toThrow(/no conoce la sesión fake-9/);
   });
 });
