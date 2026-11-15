@@ -1,0 +1,17 @@
+# El dev planea sin dudas de la issue: plan-check se salta.
+match: { mode: plan, round: "*" }
+events:
+  - { at: 0, text: "Leo la issue y busco un molde en el código vecino" }
+  - { at: 5, usage: { model: sonnet, in: 900, out: 220, cacheWrite: 0, cacheRead: 0, costUsd: 0.03 } }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Plan listo"
+    payload:
+      approach: "Agregar un archivo nuevo"
+      files: [src/new.ts]
+      tests: []
+      mold: src/index.ts
+      assumptions: []
+      issueDoubts: []

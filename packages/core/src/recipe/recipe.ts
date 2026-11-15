@@ -30,7 +30,7 @@ export interface RecipesOptions {
   artifacts: Artifacts;
   /** Los pools de slots: `recipe.check` toma uno del carril de su corrida cuando la receta define `slots`. */
   slots: Slots;
-  /** Con el runtime `fake`: `recipe.check` no corre los comandos, usa los resultados del guion. */
+  /** Con el runtime `fake`: `recipe.check` no corre los comandos ni el setup, usa los resultados del guion; los `requires` sí se prueban, porque son el entorno real del repo. */
   fake?: ScriptedRecipe;
 }
 
@@ -218,7 +218,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
    * del código del agente, así que abre el breaker `repo:<id>` (`EnvironmentError`) en vez de dar un check rojo.
    */
   async function assertRequires(ws: WorkspaceRef, recipe: Recipe, slot: number | undefined, ctx: ActionCtx): Promise<void> {
-    if (fake || recipe.requires.length === 0) return;
+    if (recipe.requires.length === 0) return;
     const { render, env } = rendering(ws, recipe, { slot, files: [] });
     const down = await failedRequires(
       recipe,

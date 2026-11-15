@@ -1,0 +1,27 @@
+# Council: el thread pide cambiar src/b.ts (el archivo del PR de WEB-2) y se aplica; el cambio sale como `fixup!`.
+match: { mode: council, round: "*" }
+events:
+  - { at: 0, text: "Aplico el thread" }
+  - { at: 2, tool: Edit, input: { file_path: src/b.ts } }
+  - { at: 5, usage: { model: sonnet, in: 900, out: 220, cacheWrite: 0, cacheRead: 0, costUsd: 0.024 } }
+effects:
+  - write:
+      path: src/b.ts
+      content: |
+        export function b(value: number) {
+          return value + 2;
+        }
+run:
+  test:
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Thread aplicado"
+    payload:
+      files: [src/b.ts]
+      rejected: []
+      deletedTests: []
+      cuts:
+        - { behavior: "b suma 2", paths: [src/b.ts] }

@@ -695,6 +695,17 @@ describe("recipe.check con requires", () => {
     expect(existsSync(join(lease!.path, "checked"))).toBe(false);
   });
 
+  test("con el runtime fake los requires también se prueban: son el entorno real del repo, no un check guionado", async () => {
+    await worktree({}, withRequires([{ name: "Postgres", check: "exit 2" }]));
+    const fakeRecipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts, slots, fake: createFakeRuntime({ fixtures: [], speed: Infinity }) });
+    const { workspaceId, path, branch, baseSha, fencingToken } = lease!;
+
+    const error = await fakeRecipes.checkAction.run({ ws: { workspaceId, path, branch, baseSha, fencingToken }, scope: "changed" }, ctx()).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(EnvironmentError);
+    expect((error as Error).message).toBe("Al repo le falta su entorno, no responde: Postgres.");
+  });
+
   test("con todos los requires arriba corre los checks", async () => {
     await worktree({}, withRequires([{ name: "Postgres", check: "true" }]));
 

@@ -1,0 +1,17 @@
+# El plan de WEB-4 gasta más que el tope del proyecto: ahí se estaciona su corrida (los demás usan dev.r0.plan.yaml).
+match: { mode: plan, round: "*", issue: WEB-4 }
+events:
+  - { at: 0, text: "Leo la issue y busco un molde en el código vecino" }
+  - { at: 5, usage: { model: sonnet, in: 900, out: 220, cacheWrite: 0, cacheRead: 0, costUsd: 9 } }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Plan listo"
+    payload:
+      approach: "Agregar src/d.ts"
+      files: [src/d.ts]
+      tests: []
+      mold: src/index.ts
+      assumptions: []
+      issueDoubts: []

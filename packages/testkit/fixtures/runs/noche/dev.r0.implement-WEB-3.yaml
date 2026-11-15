@@ -1,0 +1,28 @@
+# WEB-3 escribe su propio archivo: dos issues nunca tocan el mismo, salvo `shared`, que la base también cambia.
+match: { mode: implement, round: "*", issue: WEB-3 }
+events:
+  - { at: 0, text: "Implemento src/shared.ts" }
+  - { at: 2, tool: Write, input: { file_path: src/shared.ts } }
+  - { at: 5, usage: { model: sonnet, in: 1800, out: 640, cacheWrite: 0, cacheRead: 0, costUsd: 0.08 } }
+effects:
+  - write:
+      path: src/shared.ts
+      content: |
+        export const shared = { owner: "c", value: 1 };
+# Tres veces: si la base se mueve mientras la corrida está en curso, `sync` la rebasea y los checks corren de nuevo.
+run:
+  test:
+    - { ok: true }
+    - { ok: true }
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Implementado"
+    payload:
+      files: [src/shared.ts]
+      rejected: []
+      deletedTests: []
+      cuts:
+        - { behavior: "Agregar src/shared.ts", paths: [src/shared.ts] }

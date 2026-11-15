@@ -193,7 +193,7 @@ El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packa
 
 - Una receta inválida y un `{{slot}}` sin slot son `PermanentActionError`: no se reintentan. Un `requires` que falla es un `EnvironmentError` (abre el breaker del repo), no un check rojo.
 - `workspaces.exec` corre `sh -c` en el worktree con un entorno mínimo (`PATH`, `HOME`, `USER`, `LANG`, `TMPDIR`, `SHELL`; nunca `GH_TOKEN` ni `LINEAR_*`); la salida completa va a `<logDir>/runs/<runId>/<stepId>.log`. Un exit distinto de 0 es un resultado, no una excepción.
-- Con el runtime fake (`fake: runtime` en `createRecipes`), `recipe.check` no corre nada y consume `run.<check>` del guion. Se prueba en `packages/testkit/src/recipe.test.ts` (repos git reales).
+- Con el runtime fake (`fake: runtime` en `createRecipes`), `recipe.check` no corre nada y consume `run.<check>` del guion, salvo los `requires`: son el entorno real del repo y se prueban igual. Se prueba en `packages/testkit/src/recipe.test.ts` (repos git reales).
 
 ## Slots por carril
 
@@ -209,6 +209,7 @@ El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packa
 
 - En el motor, un paso cuyo ámbito está abierto sigue `pending` sin gastar intento (un agente depende de `runtime:<id>` y del `repo:<id>` de su worktree; una acción con `needsRepoEnv`, del repo; una con `effects: "remote"`, de `github`). Waits, gates y subflujos no dependen de ninguno.
 - Un error de entorno nuevo se lanza como `EnvironmentError(scope, mensaje)`, no como un fallo del paso. Linear no abre breakers: sus fallos son por proyecto en el Scheduler.
+- `startCore({ breakerBackoffMs })` acorta el backoff de las pruebas (solo para tests: sale de un `setTimeout` real).
 - Tests: `breakers/breakers.test.ts`, `breakers/probes.test.ts`, `flows/breakers.test.ts` y `packages/testkit/src/breakers.test.ts`.
 
 ## Proyectos, corridas y arranque
@@ -361,6 +362,7 @@ El MCP (`docs/design.html#mcp`) sale del contrato: `generateMcp` (`packages/core
 - `startGitHubSim` (`github-sim.ts`): el GitHub simulado sobre el bare de un `tempGitRepo`, como servidor HTTP en 127.0.0.1 (no msw: el core real puede correr en otro proceso). Una ruta o query que no conoce responde un error que lo dice, nunca un 200 inventado. Lo que agregues, verifícalo contra la documentación o el esquema real (`docs.github.com/public/fpt/schema.docs.graphql`).
 - `createFakeClaude` (un `claude` y un `query` falsos para `testClaude`) y `createFakeRuntime({ fixtures })` (el runtime `fake`: reproduce guiones YAML `<rol>.r<n>.yaml`; sin guion, o con un reporte que no cumple el esquema, rechaza en vez de inventar). Ejemplo de guiones en `packages/testkit/fixtures/runs/demo`.
 - `startTechleadScenario` (`techlead-scenario.ts`): el core real con el runtime fake, el simulador con bot y Linear falso, de punta a punta.
+- `startNightScenario` (`night-scenario.ts`, `night.test.ts`, guiones en `fixtures/runs/noche`): el criterio de la fase 2, cinco issues con Scheduler y Watch encendidos, un corte del core (`restart()`) y un reloj falso unas 25 veces más rápido. `night.until` avanza el reloj; falsea solo `Date` y `setInterval` porque con `setTimeout` falseado `fetch` espera ~6 s reales cada dos requests. `holdingRuntime` retiene agentes por `<issue>:<modo>` para llenar dev o cortar con un agente en curso. `run.test` va en cada implement y reviewer del guion: tras un `sync` rebasado el siguiente `recipe.check` lo contesta la última sesión que terminó.
 - Los tests que levantan el core con `startCore` y lanzan corridas a mano pasan `scheduler: false`: con el Scheduler encendido una issue `todo` se lanza sola.
 - Fixtures `.sqlite` (`packages/testkit/fixtures/db/`) no se versionan: `npm run fixtures -w @clanker/testkit` las regenera; hazlo si cambias el schema o un escenario (`scenarios.ts`).
 

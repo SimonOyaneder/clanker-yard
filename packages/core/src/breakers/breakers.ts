@@ -63,9 +63,11 @@ export interface BreakersOptions {
   /** El nombre legible de un ámbito para la alerta (por defecto el propio ámbito). */
   label?(scope: string): string;
   now?: () => number;
+  /** Los ms entre una prueba y la siguiente, la última repetida; por defecto 1, 5, 15 y 30 min. Un test lo acorta. */
+  backoffMs?: readonly number[];
 }
 
-export function createBreakers({ store, runtime, probe, label = (scope) => scope, now = Date.now }: BreakersOptions): Breakers {
+export function createBreakers({ store, runtime, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS }: BreakersOptions): Breakers {
   const entries = new Map<string, OpenBreaker>();
   const timers = new Map<string, NodeJS.Timeout>();
   const probing = new Set<string>();
@@ -113,7 +115,7 @@ export function createBreakers({ store, runtime, probe, label = (scope) => scope
       if (failure === undefined) return shut(entry);
       entry.probes++;
       entry.reason = failure;
-      entry.nextProbeAt = now() + BACKOFF_MS[Math.min(entry.probes, BACKOFF_MS.length - 1)]!;
+      entry.nextProbeAt = now() + backoffMs[Math.min(entry.probes, backoffMs.length - 1)]!;
       store.tx((tx) => persist(tx));
       schedule(entry);
     } catch (error) {
@@ -140,7 +142,7 @@ export function createBreakers({ store, runtime, probe, label = (scope) => scope
   function trip({ scope, cause, reason, resetsAt }: { scope: string; cause: BreakerCause; reason: string; resetsAt?: number }): void {
     if (entries.has(scope) || closed) return;
     const at = now();
-    const nextProbeAt = resetsAt !== undefined && resetsAt > at ? resetsAt : at + BACKOFF_MS[0]!;
+    const nextProbeAt = resetsAt !== undefined && resetsAt > at ? resetsAt : at + backoffMs[0]!;
     store.tx((tx) => {
       const decision = openDecision(tx, {
         kind: "alert",

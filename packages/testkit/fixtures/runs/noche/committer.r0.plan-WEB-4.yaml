@@ -1,0 +1,18 @@
+# Un solo commit: el archivo nuevo de WEB-4 es el hunk h1 del diff contra la base.
+match: { mode: plan, round: "*", issue: WEB-4 }
+events:
+  - { at: 0, text: "Un commit con el archivo nuevo" }
+  - { at: 5, usage: { model: sonnet, in: 1100, out: 300, cacheWrite: 0, cacheRead: 0, costUsd: 0.027 } }
+run:
+  test:
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Un commit"
+    payload:
+      commits:
+        - { message: "feat(d): add the d helper", hunks: [h1], tests: [], whyAtomic: "Es un solo archivo nuevo" }
+      pr: { title: "feat(d): add the d helper", body: "Agrega src/d.ts." }
+      notes: []

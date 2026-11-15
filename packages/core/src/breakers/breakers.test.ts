@@ -93,6 +93,27 @@ describe("backoff y cierre", () => {
     expect(probes).toHaveLength(after);
   });
 
+  test("backoffMs acorta las pruebas: la última se repite", async () => {
+    failing.add(repoScope("a"));
+    const created = createBreakers({
+      store,
+      runtime: "fake",
+      backoffMs: [100, 300],
+      probe: (scope) => {
+        probes.push({ scope, at: Date.now() });
+        return Promise.resolve(failing.has(scope) ? "sigue caído" : undefined);
+      },
+    });
+    created.start();
+    open.push(created);
+    const start = Date.now();
+    created.trip({ scope: repoScope("a"), cause: "environment", reason: "No responde: Postgres." });
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(probes.map((p) => p.at - start)).toEqual([100, 400, 700, 1000]);
+  });
+
   test("con la hora del reset de la cuota, la primera prueba es ahí y no antes", async () => {
     const b = breakers();
     const resetsAt = Date.now() + 90 * MIN;

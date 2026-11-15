@@ -1,0 +1,30 @@
+# WEB-4 escribe su propio archivo: dos issues nunca tocan el mismo, salvo `shared`, que la base también cambia.
+match: { mode: implement, round: "*", issue: WEB-4 }
+events:
+  - { at: 0, text: "Implemento src/d.ts" }
+  - { at: 2, tool: Write, input: { file_path: src/d.ts } }
+  - { at: 5, usage: { model: sonnet, in: 1800, out: 640, cacheWrite: 0, cacheRead: 0, costUsd: 0.08 } }
+effects:
+  - write:
+      path: src/d.ts
+      content: |
+        export function d(value: number) {
+          return value + 1;
+        }
+# Tres veces: si la base se mueve mientras la corrida está en curso, `sync` la rebasea y los checks corren de nuevo.
+run:
+  test:
+    - { ok: true }
+    - { ok: true }
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Implementado"
+    payload:
+      files: [src/d.ts]
+      rejected: []
+      deletedTests: []
+      cuts:
+        - { behavior: "Agregar src/d.ts", paths: [src/d.ts] }

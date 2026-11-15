@@ -1,0 +1,10 @@
+match: { role: "*", mode: re-review }
+events:
+  - { at: 0, text: "Reviso diff-round.patch" }
+  - { at: 5, usage: { model: haiku, in: 600, out: 60, cacheWrite: 0, cacheRead: 0, costUsd: 0.003 } }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Sin hallazgos"
+    payload: { findings: [], previous: [] }

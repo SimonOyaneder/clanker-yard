@@ -1,0 +1,24 @@
+# El dev junta los dos lados del conflicto en src/shared.ts: el dueño del PR y el valor nuevo de la base.
+# Los archivos en conflicto llevan marcas con el sha del commit, que un patch no puede citar: se escribe el archivo entero.
+match: { mode: conflict, round: "*" }
+events:
+  - { at: 0, text: "Junto el dueño del PR con el valor nuevo de la base" }
+  - { at: 5, usage: { model: sonnet, in: 900, out: 220, cacheWrite: 0, cacheRead: 0, costUsd: 0.024 } }
+effects:
+  - write:
+      path: src/shared.ts
+      content: |
+        export const shared = { owner: "c", value: 2 };
+run:
+  test:
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: resolved
+    summary: "Conflicto resuelto juntando los dos lados"
+    payload:
+      files: [src/shared.ts]
+      rejected: []
+      deletedTests: []
+      cuts: []

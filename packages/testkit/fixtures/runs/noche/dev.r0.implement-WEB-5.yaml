@@ -1,0 +1,30 @@
+# WEB-5 escribe su propio archivo: dos issues nunca tocan el mismo, salvo `shared`, que la base también cambia.
+match: { mode: implement, round: "*", issue: WEB-5 }
+events:
+  - { at: 0, text: "Implemento src/e.ts" }
+  - { at: 2, tool: Write, input: { file_path: src/e.ts } }
+  - { at: 5, usage: { model: sonnet, in: 1800, out: 640, cacheWrite: 0, cacheRead: 0, costUsd: 0.08 } }
+effects:
+  - write:
+      path: src/e.ts
+      content: |
+        export function e(value: number) {
+          return value + 1;
+        }
+# Tres veces: si la base se mueve mientras la corrida está en curso, `sync` la rebasea y los checks corren de nuevo.
+run:
+  test:
+    - { ok: true }
+    - { ok: true }
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Implementado"
+    payload:
+      files: [src/e.ts]
+      rejected: []
+      deletedTests: []
+      cuts:
+        - { behavior: "Agregar src/e.ts", paths: [src/e.ts] }

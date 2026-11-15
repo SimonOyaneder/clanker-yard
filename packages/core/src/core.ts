@@ -108,6 +108,8 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
    * está apagado para que un test que levanta el core contra el GitHub simulado no reciba requests que no pidió.
    */
   watch?: boolean;
+  /** Los ms entre las pruebas de un circuit breaker (por defecto 1, 5, 15 y 30 min): un test los acorta para no esperar un minuto. */
+  breakerBackoffMs?: readonly number[];
 }
 
 export interface Core {
@@ -158,6 +160,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     store,
     runtime: runtime.id,
     probe: environmentProbe({ connections: opts.connections, repos, runtime: runtime.id }),
+    ...(opts.breakerBackoffMs && { backoffMs: opts.breakerBackoffMs }),
     label: (scope) => (scope.startsWith("repo:") ? `repo ${repos.get(scope.slice("repo:".length))?.name ?? scope}` : scope),
   });
   // Antes de despachar nada: un breaker que dejó un corte sigue pausando lo suyo.

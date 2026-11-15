@@ -1,0 +1,14 @@
+match: { mode: review, round: "*" }
+events:
+  - { at: 0, text: "Reviso diff.patch" }
+  - { at: 5, usage: { model: haiku, in: 1400, out: 120, cacheWrite: 0, cacheRead: 0, costUsd: 0.004 } }
+# Los checks que siguen a un `sync` rebasado los contesta la última sesión que terminó, que es la de un reviewer.
+run:
+  test:
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Sin hallazgos"
+    payload: { findings: [], previous: [] }

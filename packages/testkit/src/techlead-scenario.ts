@@ -1,7 +1,7 @@
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createClient, type Client, type ClankerProject, type Event, type IssueId, type Run } from "@clanker/api";
+import { createClient, type Client, type ClankerProject, type Event, type IssueId, type NewProject, type Run } from "@clanker/api";
 import {
   createConnections,
   createFileSecrets,
@@ -11,6 +11,7 @@ import {
   openStore,
   startCore,
   startFakeLinear,
+  type AgentRuntime,
   type Core,
   type FakeLinear,
   type FakeProject,
@@ -70,28 +71,44 @@ const LINEAR_STATES = [
 ];
 
 export interface TechleadScenarioOptions {
-  /** Pisa el guion del bot (por defecto un hallazgo y después LGTM). */
-  bot?: BotTurn[];
+  /**
+   * Pisa el guion del bot (por defecto un hallazgo y después LGTM): una lista con lo que contesta a cada `/review`
+   * en orden, o una función que decide por PR (con varias corridas a la vez el orden de los `/review` no es de nadie).
+   */
+  bot?: BotTurn[] | ((pr: SimPr) => BotTurn);
   /** De dónde salen las issues: el tracker `local` (por defecto) o el adapter de Linear contra el Linear falso. */
   tracker?: "local" | "linear";
   /** Carpetas de guiones del runtime fake, además de `FIXTURES` (un test que corre otro flujo sobre el PR). */
   fixtures?: string[];
   /** Enciende Watch (por defecto sí). Un test que emite los eventos de PR a mano lo apaga para que nada los repita. */
   watch?: boolean;
+  /** Enciende el Scheduler (por defecto no: `run()` lanza a mano). Con él, las issues de la cola se lanzan solas. */
+  scheduler?: boolean;
+  /** Campos del proyecto que se crea (`parallel`, `maxCostUsd`, `stackOn`...). */
+  project?: Partial<NewProject>;
+  /** Los ms entre las pruebas de un breaker (`StartCoreOptions.breakerBackoffMs`). */
+  breakerBackoffMs?: readonly number[];
+  /** Pisa la receta del repo (`.clanker/recipe.json`). */
+  recipe?: Record<string, unknown>;
+  /** El runtime de agentes, en lugar del fake con los guiones de `fixtures`. Un reinicio vuelve a pasar el mismo: sus sesiones sobreviven al core, como las de Claude. */
+  runtime?: AgentRuntime;
 }
 
 /** La corrida con sus pasos, como la devuelve `runs.get`. */
 export type RunDetail = Awaited<ReturnType<Client["runs"]["get"]>>;
 
 export interface TechleadScenario {
+  /** `client`, `core` y `store` son los del core de turno: `restart()` los reemplaza. */
   client: Client;
   core: Core;
   store: Store;
   home: TestHome;
   repo: TempGitRepo;
   github: GitHubSim;
-  /** El Linear falso, con `tracker: "linear"`. */
+  /** El Linear falso, con `tracker: "linear"`, con su equipo y su proyecto. */
   linear: FakeLinear | undefined;
+  team: FakeTeam | undefined;
+  linearProject: FakeProject | undefined;
   project: ClankerProject;
   /** Crea una issue en el tracker del proyecto y lanza `techlead-clasico` sobre ella, con `params` del flujo si se piden. */
   run(params?: Record<string, unknown>): Promise<{ issueId: IssueId; run: Run }>;
@@ -105,6 +122,11 @@ export interface TechleadScenario {
   gitAuthorizations: string[];
   /** Los hashes de commit de la branch del PR en el remoto, del más nuevo al más viejo, con su asunto. */
   remoteLog(branch: string): { sha: string; subject: string }[];
+  /**
+   * Un corte: apaga el core (sin drain: interrumpe a los agentes y deja cada paso en curso como lo dejaría un apagado),
+   * cierra la base y arranca otro core sobre el mismo `CLANKER_HOME`, que recupera lo que quedó a medias.
+   */
+  restart(): Promise<void>;
   /** Cierra el core y la base (con su WAL volcado) y copia `clanker.db` a `path`. */
   saveDb(path: string): Promise<void>;
   cleanup(): Promise<void>;
@@ -112,7 +134,7 @@ export interface TechleadScenario {
 
 export async function startTechleadScenario(options: TechleadScenarioOptions = {}): Promise<TechleadScenario> {
   const home = seedDb("empty");
-  const store = openStore({ path: home.dbPath });
+  let store = openStore({ path: home.dbPath });
   const repo = tempGitRepo({
     remote: true,
     commits: [
@@ -121,7 +143,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
         files: {
           "package.json": '{ "name": "web", "private": true }\n',
           "src/index.ts": "export {};\n",
-          ".clanker/recipe.json": `${JSON.stringify(RECIPE, null, 2)}\n`,
+          ".clanker/recipe.json": `${JSON.stringify(options.recipe ?? RECIPE, null, 2)}\n`,
         },
       },
     ],
@@ -130,10 +152,10 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
   const gitServer = await startGitHttpServer(repo.remoteDir!, { user: ACCOUNT, password: TOKEN });
   const github = await startGitHubSim({ origin: repo, repo: REPO, account: ACCOUNT, token: TOKEN, bot: BOT });
 
-  const turns: BotTurn[] = [...(options.bot ?? [{ findings: ["Falta incluir el monto en el mensaje del error"] }, "lgtm"])];
+  const turns: BotTurn[] = typeof options.bot === "function" ? [] : [...(options.bot ?? [{ findings: ["Falta incluir el monto en el mensaje del error"] }, "lgtm"])];
   github.onComment((pr, body) => {
     if (body.split("\n")[0] !== "/review") return;
-    const turn = turns.shift();
+    const turn = typeof options.bot === "function" ? options.bot(pr) : turns.shift();
     if (turn === undefined) throw new Error("El bot simulado no tiene más respuestas guionadas para otro `/review`.");
     if (turn === "lgtm") pr.botLgtm();
     else pr.botFindings(turn.findings.map((finding) => ({ body: finding, path: "src/transfer.ts", line: 2 })));
@@ -147,30 +169,40 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
 
   const useLinear = options.tracker === "linear";
   const linear = useLinear ? await startFakeLinear({ clientId: LINEAR_CLIENT_ID }) : undefined;
-  const connections = createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") }), {
-    github: { baseUrl: github.baseUrl },
-    ...(linear && { linear: { clientId: LINEAR_CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints } }),
-  });
+  const runtime = options.runtime ?? createFakeRuntime({ fixtures: [FIXTURES, ...(options.fixtures ?? [])], speed: Infinity });
+
+  const newConnections = () =>
+    createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") }), {
+      github: { baseUrl: github.baseUrl },
+      ...(linear && { linear: { clientId: LINEAR_CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints } }),
+    });
+  let connections = newConnections();
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
   if (linear) {
     const { url, done } = await connections.linearAuth("ui");
     await fetch((await fetch(url, { redirect: "manual" })).headers.get("location")!);
     await done;
   }
-  const core = await startCore({
-    store,
-    dataDir: home.path,
-    connections,
-    runtimes: [createFakeRuntime({ fixtures: [FIXTURES, ...(options.fixtures ?? [])], speed: Infinity })],
-    env: { CORE_RUNTIME: "fake" },
-    scheduler: false,
-    gitUrl: () => gitServer.url,
-    linearEndpoint: linear?.endpoints.graphql,
-    coreVersion: "0.0.0",
-    onShutdown: () => {},
-    watch: options.watch ?? true,
-  });
-  const client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
+
+  /** El core sobre `store` y `connections`: lo mismo la primera vez que tras un corte. */
+  async function bootCore(): Promise<{ core: Core; client: Client }> {
+    const core = await startCore({
+      store,
+      dataDir: home.path,
+      connections,
+      runtimes: [runtime],
+      env: { CORE_RUNTIME: "fake" },
+      scheduler: options.scheduler ?? false,
+      gitUrl: () => gitServer.url,
+      linearEndpoint: linear?.endpoints.graphql,
+      coreVersion: "0.0.0",
+      onShutdown: () => {},
+      watch: options.watch ?? true,
+      ...(options.breakerBackoffMs && { breakerBackoffMs: options.breakerBackoffMs }),
+    });
+    return { core, client: createClient({ url: core.server.url, token: core.server.token, origin: "cli" }) };
+  }
+  let { core, client } = await bootCore();
 
   const repoId = createRepos(store).add({ name: "web", path: repo.dir, remote: REPO });
   let team: FakeTeam | undefined;
@@ -187,19 +219,25 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
     defaultFlowId: "techlead-clasico",
     defaultProfileId: "eco",
     repos: [{ repoId }],
+    ...options.project,
   });
 
-  const abort = new AbortController();
-  const ended = client.events.stream({ filter: { projectId: project.id, types: ["run.finished", "run.parked"] } }, { signal: abort.signal });
+  let abort: AbortController;
   const seen = new Map<string, Event>();
   const waiters = new Map<string, (event: Event) => void>();
-  void (async () => {
-    for await (const event of await ended) {
-      if (event.runId === undefined) continue;
-      seen.set(event.runId, event);
-      waiters.get(event.runId)?.(event);
-    }
-  })().catch(() => {});
+  /** Sigue `run.finished` y `run.parked` del proyecto en el core de turno (el stream rellena desde el seq 0). */
+  function follow() {
+    abort = new AbortController();
+    const ended = client.events.stream({ filter: { projectId: project.id, types: ["run.finished", "run.parked"] } }, { signal: abort.signal });
+    void (async () => {
+      for await (const event of await ended) {
+        if (event.runId === undefined) continue;
+        seen.set(event.runId, event);
+        waiters.get(event.runId)?.(event);
+      }
+    })().catch(() => {});
+  }
+  follow();
 
   let closed = false;
   async function closeCore() {
@@ -210,7 +248,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
     store.close();
   }
 
-  return {
+  const scenario: TechleadScenario = {
     client,
     core,
     store,
@@ -218,6 +256,8 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
     repo,
     github,
     linear,
+    team,
+    linearProject,
     project,
     gitAuthorizations: gitServer.authorizations,
     async run(params) {
@@ -226,7 +266,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
       let issueId: IssueId;
       if (linear && team && linearProject) {
         const created = linear.workspace.addIssue({ team, title, description: body, project: linearProject });
-        // Nada sincroniza todavía la cola de un proyecto de Linear (llega con el scheduler): el caché se llena a mano.
+        // Con el Scheduler apagado nadie sincroniza el caché de un proyecto de Linear: se llena a mano.
         await createIssues(store).sync(createLinearTracker({ connections, endpoint: linear.endpoints.graphql }), {
           projectId: project.id,
           project: { tracker: "linear", id: linearProject.id },
@@ -253,6 +293,16 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
         .split("\n")
         .filter(Boolean)
         .map((line) => ({ sha: line.slice(0, 40), subject: line.slice(41) })),
+    async restart() {
+      abort.abort();
+      await core.close();
+      store.close();
+      store = openStore({ path: home.dbPath });
+      connections = newConnections();
+      ({ core, client } = await bootCore());
+      Object.assign(scenario, { core, client, store });
+      follow();
+    },
     async saveDb(path) {
       await closeCore();
       mkdirSync(dirname(path), { recursive: true });
@@ -267,6 +317,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
       home.cleanup();
     },
   };
+  return scenario;
 }
 
 /**
