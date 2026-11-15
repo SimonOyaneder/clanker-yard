@@ -74,7 +74,7 @@ export type {
   GitHubClient,
   GitHubTokenSource,
 } from "./github/client";
-export { createAskpass, TICKET_MAX_READS, TICKET_TTL_MS } from "./git/askpass";
+export { createAskpass, TICKET_TTL_MS } from "./git/askpass";
 export type { Askpass, AskpassOptions, AskpassSession, GitCredentials } from "./git/askpass";
 export { createGitRemote } from "./git/remote";
 export type {

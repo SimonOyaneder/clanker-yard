@@ -14,7 +14,6 @@ import {
   LEASE_TTL_MS,
   newId,
   openStore,
-  TICKET_MAX_READS,
   TICKET_TTL_MS,
   type Askpass,
   type Connections,
@@ -164,6 +163,13 @@ function savedRemoteSha(): string | null {
   return row.sha;
 }
 
+/** Un hook del repo, como lo dejaría un agente; `core.hooksPath` local para que no lo tape uno global. */
+function writeHook(name: string, script: string): void {
+  const hooks = join(repo.dir, ".git", "hooks");
+  repo.git("config", "core.hooksPath", hooks);
+  writeFileSync(join(hooks, name), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+}
+
 /** Otro proceso pusheó a la branch directo al bare, sin pasar por el core. */
 function otherProcessPushes(message: string, branch = BRANCH): string {
   repo.git("commit", "--allow-empty", "--message", message);
@@ -293,6 +299,69 @@ describe("el token no sale del core", () => {
   });
 });
 
+describe("el token solo va al remoto del ticket", () => {
+  test("un url.insteadOf en el config del repo no lleva el token a otro host", async () => {
+    await setup();
+    const other = await startGitHttpServer(repo.remoteDir!, { user: ACCOUNT, password: TOKEN });
+    try {
+      repo.git("config", `url.${other.url}.insteadOf`, server!.url);
+      const lease = await acquire();
+      await commit(lease, "feat: one");
+
+      await expect(workspaces.push(lease)).rejects.toThrow(/el ticket es para/);
+
+      expect(other.authorizations.join("\n")).not.toContain(Buffer.from(`${ACCOUNT}:${TOKEN}`).toString("base64"));
+    } finally {
+      await other.close();
+    }
+  });
+
+  test("un pre-push no obtiene la contraseña aunque git solo haya pedido esa", async () => {
+    await setup();
+    // Con `credential.username` git no pide el usuario: queda una lectura del ticket sin usar.
+    repo.git("config", "credential.username", ACCOUNT);
+    const seen = join(dataDir, "hook-askpass.txt");
+    writeHook("pre-push", `"$GIT_ASKPASS" "Password for '${server!.url}': " > "${seen}" 2>&1\nexit 0`);
+    const lease = await acquire();
+    await commit(lease, "feat: one");
+
+    expect(await workspaces.push(lease)).toBe("ok");
+
+    expect(readFileSync(seen, "utf8")).toMatch(/ya se usó/);
+  });
+
+  test("el fetch no corre hooks del repo", async () => {
+    await setup();
+    await acquire();
+    otherProcessPushes("chore: someone else", "other");
+    // El push de arriba ya movió la referencia local: sin esto el fetch no actualiza nada.
+    repo.git("update-ref", "-d", "refs/remotes/origin/other");
+    const seen = join(dataDir, "hook-ran.txt");
+    writeHook("reference-transaction", `touch "${seen}"`);
+
+    expect(await workspaces.fetch("r1")).toBe("ok");
+
+    expect(repo.git("rev-parse", "refs/remotes/origin/other")).toBeTruthy();
+    expect(existsSync(seen)).toBe(false);
+  });
+
+  test("los hooks no heredan el entorno del core", async () => {
+    await setup();
+    const seen = join(dataDir, "hook-env.txt");
+    writeHook("pre-push", `env > "${seen}"`);
+    const lease = await acquire();
+    await commit(lease, "feat: one");
+    process.env.GH_TOKEN = "ghp_from_the_shell";
+    try {
+      expect(await workspaces.push(lease)).toBe("ok");
+    } finally {
+      delete process.env.GH_TOKEN;
+    }
+
+    expect(readFileSync(seen, "utf8")).not.toContain("ghp_from_the_shell");
+  });
+});
+
 describe("fetch", () => {
   test("trae las branches del remoto a refs/remotes/origin con el mismo mecanismo", async () => {
     await setup();
@@ -329,36 +398,48 @@ describe("askpass", () => {
 
   const credentials = { username: ACCOUNT, password: TOKEN };
 
-  test("un ticket usado tres veces falla la tercera, y el token no va en el entorno", async () => {
-    const { env } = await askpass.issue(credentials);
+  const GITHUB = "https://github.com/simon/repo.git";
+
+  test("entrega el usuario y la contraseña una vez cada uno, y el token no va en el entorno", async () => {
+    const { env } = await askpass.issue(credentials, GITHUB);
 
     expect(Object.values(env).join("\n")).not.toContain(TOKEN);
     expect(await ask(env, "Username for 'https://github.com': ")).toEqual({ ok: true, stdout: ACCOUNT });
     expect(await ask(env, "Password for 'https://simon@github.com': ")).toEqual({ ok: true, stdout: TOKEN });
-    expect(TICKET_MAX_READS).toBe(2);
-    const third = await ask(env, "Password for 'https://simon@github.com': ");
-    expect(third).toMatchObject({ ok: false });
-    expect(third.stderr).toMatch(/ticket venció, ya se usó o no existe/);
-    expect(third.stderr).not.toContain(TOKEN);
+    const again = await ask(env, "Password for 'https://simon@github.com': ");
+    expect(again).toMatchObject({ ok: false });
+    expect(again.stderr).toMatch(/ticket venció, ya se usó o no existe/);
+    expect(again.stderr).not.toContain(TOKEN);
+  });
+
+  test("no contesta a un prompt de otro origen", async () => {
+    const { env } = await askpass.issue(credentials, GITHUB);
+
+    const other = await ask(env, "Password for 'https://simon@evil.example': ");
+    expect(other).toMatchObject({ ok: false });
+    expect(other.stderr).toMatch(/para https:\/\/evil.example y el ticket es para https:\/\/github.com/);
+    expect(await ask(env, "Password for 'http://github.com': ")).toMatchObject({ ok: false });
+    // El rechazo no gasta la lectura.
+    expect(await ask(env, "Password for 'https://simon@github.com': ")).toEqual({ ok: true, stdout: TOKEN });
   });
 
   test("un ticket vence a los 60 s", async () => {
-    const { env } = await askpass.issue(credentials);
+    const { env } = await askpass.issue(credentials, GITHUB);
     clock += TICKET_TTL_MS;
 
     expect(await ask(env, "Username for 'https://github.com': ")).toMatchObject({ ok: false });
   });
 
   test("un ticket revocado no entrega nada", async () => {
-    const { env, revoke } = await askpass.issue(credentials);
+    const { env, revoke } = await askpass.issue(credentials, GITHUB);
     revoke();
 
     expect(await ask(env, "Username for 'https://github.com': ")).toMatchObject({ ok: false });
   });
 
   test("un ticket inventado no entrega nada", async () => {
-    const { env } = await askpass.issue(credentials);
+    const { env } = await askpass.issue(credentials, GITHUB);
 
-    expect(await ask({ ...env, CLANKER_ASKPASS_TICKET: "inventado" }, "Username for 'x': ")).toMatchObject({ ok: false });
+    expect(await ask({ ...env, CLANKER_ASKPASS_TICKET: "inventado" }, "Username for 'https://github.com': ")).toMatchObject({ ok: false });
   });
 });

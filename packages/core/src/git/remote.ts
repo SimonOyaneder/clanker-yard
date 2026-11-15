@@ -5,6 +5,18 @@ import type { Askpass } from "./askpass";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Lo único que git hereda del entorno del core, que puede traer `GH_TOKEN` y otros tokens de la shell
+ * que lanzó la app. Los hooks del repo los escribe el agente y ven este entorno.
+ */
+const INHERITED_ENV = ["PATH", "HOME", "USER", "LANG", "TMPDIR", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"];
+
+/**
+ * El fetch no corre hooks del repo (`reference-transaction`, `pre-auto-gc`): contra un repo público
+ * git no pide credenciales y un hook podría cambiar el ticket intacto por la contraseña.
+ */
+const NO_HOOKS = ["-c", "core.hooksPath=/dev/null"];
+
 /** `unauthorized`: GitHub respondió 401 y la conexión quedó revocada. `lease-rejected`: el remoto ya no está donde el core creía. */
 export type PushOutcome = "ok" | "lease-rejected" | "unauthorized";
 export type FetchOutcome = "ok" | "unauthorized";
@@ -46,13 +58,13 @@ export interface GitRemoteOptions {
 
 export function createGitRemote({ askpass, connections }: GitRemoteOptions): GitRemote {
   /** `credential.helper=` vacío: el Keychain no puede contestar con otra cuenta. */
-  async function run({ cwd, account }: RemoteTarget, args: string[]) {
+  async function run({ cwd, url, account }: RemoteTarget, args: string[]) {
     const token = await connections.token("github", account);
-    const session = await askpass.issue({ username: account, password: token });
+    const session = await askpass.issue({ username: account, password: token }, url);
     try {
       const { stdout } = await execFileAsync("git", ["-c", "credential.helper=", ...args], {
         cwd,
-        env: { ...process.env, ...session.env },
+        env: { ...inheritedEnv(), ...session.env },
         encoding: "utf8",
       });
       return { ok: true as const, stdout: stdout.trimEnd() };
@@ -92,13 +104,22 @@ export function createGitRemote({ askpass, connections }: GitRemoteOptions): Git
     },
 
     async fetch(target) {
-      const args = ["fetch", "--no-tags", target.url, "+refs/heads/*:refs/remotes/origin/*"];
+      const args = [...NO_HOOKS, "fetch", "--no-tags", target.url, "+refs/heads/*:refs/remotes/origin/*"];
       const fetched = await run(target, args);
       if (fetched.ok) return "ok";
       if (fetched.reason === "unauthorized") return "unauthorized";
       throw failure(target, args, fetched.stderr);
     },
   };
+}
+
+function inheritedEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of INHERITED_ENV) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 const STALE_LEASE = /\(stale info\)/;
