@@ -1,0 +1,9 @@
+{
+  "status": 403,
+  "headers": { "x-ratelimit-limit": "5000", "x-ratelimit-remaining": "4990", "x-ratelimit-reset": "1795000000", "x-ratelimit-resource": "core", "x-accepted-github-permissions": "issues=read" },
+  "body": {
+    "message": "Resource not accessible by personal access token",
+    "documentation_url": "https://docs.github.com/rest/issues/issues#list-repository-issues",
+    "status": "403"
+  }
+}

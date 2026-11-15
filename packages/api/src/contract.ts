@@ -1,6 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
-import { Connection } from "./connections";
+import { Connection, GitHubPatForm } from "./connections";
 import { Event, EventFilter } from "./domain";
 
 /**
@@ -97,6 +97,14 @@ const events = {
 const connections = {
   /** Cuentas conectadas, sin sus tokens. */
   list: base.output(z.array(Connection)),
+  /**
+   * Valida el fine-grained PAT contra GitHub (usuario, repos y un check por permiso) y lo conecta con
+   * la cuenta a la que pertenece. Rechaza el token con un mensaje accionable si GitHub lo rechaza, si
+   * no ve repos o si le falta un permiso. Sin `meta.mcp`: un token no pasa por el MCP.
+   */
+  setPat: base.input(z.object({ token: z.string().min(1) })).output(Connection),
+  /** El link y la lista de permisos para crear el PAT. */
+  githubPatForm: base.output(GitHubPatForm),
 };
 
 export const contract = { system, events, connections };

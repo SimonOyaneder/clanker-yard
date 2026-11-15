@@ -34,7 +34,16 @@ const router = os.router({
     })),
     shutdown: os.system.shutdown.handler(() => {}),
   },
-  connections: { list: os.connections.list.handler(() => []) },
+  connections: {
+    list: os.connections.list.handler(() => []),
+    setPat: os.connections.setPat.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    githubPatForm: os.connections.githubPatForm.handler(() => ({
+      url: "https://github.com/settings/personal-access-tokens/new",
+      permissions: [],
+    })),
+  },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
     stream: os.events.stream.handler(async function* ({ input }) {

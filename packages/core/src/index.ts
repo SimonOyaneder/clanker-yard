@@ -34,8 +34,14 @@ export type {
 export { createFlows, FlowValidationError } from "./flows/flows";
 export type { FlowVersion, Flows, FlowsDeps, SaveFlowOptions } from "./flows/flows";
 export type { ActionDef, ConsolidatorDef, RoleInfo, WaitDef } from "./flows/catalog";
-export { createConnections } from "./connections/connections";
-export type { ConnectInput, Connections } from "./connections/connections";
+export { createConnections, EXPIRY_WARNING_DAYS } from "./connections/connections";
+export type { ConnectInput, Connections, ConnectionsOptions } from "./connections/connections";
+export { GitHubPatError } from "./github/pat";
+export type {
+  GitHubApiOptions,
+  GitHubClient,
+  GitHubTokenSource,
+} from "./github/client";
 export { createFileSecrets } from "./secrets/encrypted-file";
 export { createKeychainSecrets } from "./secrets/keychain";
 export type { KeychainSecretsOptions } from "./secrets/keychain";

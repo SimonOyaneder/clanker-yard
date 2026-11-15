@@ -5,7 +5,7 @@ import { type Contract, type Event, contract } from "./index";
 describe("contrato", () => {
   test("exporta los routers system y events con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual(["connections", "events", "system"]);
-    expect(Object.keys(contract.connections)).toEqual(["list"]);
+    expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm"]);
     expect(Object.keys(contract.system).sort()).toEqual(["health", "info", "shutdown"]);
     expect(Object.keys(contract.events).sort()).toEqual(["list", "stream"]);
     for (const procedure of [...Object.values(contract.system), ...Object.values(contract.events)]) {

@@ -1,0 +1,22 @@
+{
+  "status": 200,
+  "headers": {},
+  "body": [
+    {
+      "id": 1296269,
+      "name": "hello-world",
+      "full_name": "octocat/hello-world",
+      "private": false,
+      "owner": { "login": "octocat", "id": 583231, "type": "User" },
+      "default_branch": "main"
+    },
+    {
+      "id": 2296270,
+      "name": "secret-project",
+      "full_name": "octocat/secret-project",
+      "private": true,
+      "owner": { "login": "octocat", "id": 583231, "type": "User" },
+      "default_branch": "trunk"
+    }
+  ]
+}

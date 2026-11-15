@@ -1,5 +1,6 @@
 import { API_MAJOR, type ClientOrigin, contract } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
+import { GitHubPatError, githubPatForm } from "../github/pat";
 import type { Connections } from "../connections/connections";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
@@ -63,6 +64,17 @@ export function createRouter(deps: RouterDeps) {
     },
     connections: {
       list: os.connections.list.handler(() => deps.connections.list()),
+      setPat: os.connections.setPat.handler(async ({ input, context }) => {
+        try {
+          return await deps.connections.setPat(input.token, context.origin);
+        } catch (error) {
+          if (error instanceof GitHubPatError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        }
+      }),
+      githubPatForm: os.connections.githubPatForm.handler(() => githubPatForm()),
     },
     events: {
       list: os.events.list.handler(({ input }) =>

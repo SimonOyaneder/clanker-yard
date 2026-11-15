@@ -1,0 +1,9 @@
+{
+  "status": 403,
+  "headers": { "x-ratelimit-limit": "5000", "x-ratelimit-remaining": "0", "x-ratelimit-used": "5000", "x-ratelimit-reset": "1795003600", "x-ratelimit-resource": "core" },
+  "body": {
+    "message": "API rate limit exceeded for user ID 583231.",
+    "documentation_url": "https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting",
+    "status": "403"
+  }
+}

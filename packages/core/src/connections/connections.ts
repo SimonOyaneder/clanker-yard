@@ -1,5 +1,7 @@
 import type { Connection, ConnectionProvider, Origin } from "@clanker/api";
 import { and, asc, eq } from "drizzle-orm";
+import { createGitHubClient, type GitHubApiOptions, type GitHubClient } from "../github/client";
+import { validatePat } from "../github/pat";
 import type { Secrets } from "../secrets/secrets";
 import { connections } from "../store/schema";
 import type { Store } from "../store/store";
@@ -13,13 +15,38 @@ export interface ConnectInput {
   expiresAt?: number;
 }
 
+/** Con cuántos días de margen una conexión avisa que su token está por vencer. */
+export const EXPIRY_WARNING_DAYS = 7;
+const EXPIRY_WARNING_MS = EXPIRY_WARNING_DAYS * 24 * 60 * 60 * 1000;
+
+export interface ConnectionsOptions {
+  /** Dónde está GitHub; en tests, un servidor local. */
+  github?: GitHubApiOptions;
+  /** Reloj en ms epoch, para el vencimiento. */
+  now?: () => number;
+}
+
 export interface Connections {
   /**
    * Guarda el token en `Secrets` y la cuenta en la base. Si la cuenta ya estaba conectada, reemplaza
    * token, scopes y vencimiento y la deja `active`. Emite `connection.changed`.
    */
   connect(input: ConnectInput, origin: Origin): Promise<Connection>;
-  /** Las cuentas conectadas, sin tokens. */
+  /**
+   * Valida un fine-grained PAT de GitHub y lo conecta con la cuenta a la que pertenece (`GitHubPatError`
+   * si no sirve, sin guardar nada). Los permisos verificados quedan como `scopes`. Emite
+   * `connection.changed`.
+   */
+  setPat(token: string, origin: Origin): Promise<Connection>;
+  /**
+   * El cliente de GitHub de una cuenta, el único que habla con la API: pone su token en cada request y
+   * registra la cuota en `sync_cursors`. Lanza si la cuenta no está conectada.
+   */
+  githubClient(account: string): GitHubClient;
+  /**
+   * Las cuentas conectadas, sin tokens. Un token vencido sale `expired`; `expiresSoon` marca los que
+   * vencen en `EXPIRY_WARNING_DAYS`.
+   */
   list(): Connection[];
   /** El token de una cuenta, solo para el core. Lanza si la cuenta no está conectada. */
   token(provider: ConnectionProvider, account: string): Promise<string>;
@@ -27,7 +54,13 @@ export interface Connections {
   disconnect(provider: ConnectionProvider, account: string, origin: Origin): Promise<void>;
 }
 
-export function createConnections(store: Store, secrets: Secrets): Connections {
+export function createConnections(
+  store: Store,
+  secrets: Secrets,
+  { github = {}, now = Date.now }: ConnectionsOptions = {},
+): Connections {
+  const githubClients = new Map<string, GitHubClient>();
+
   function find(provider: ConnectionProvider, account: string) {
     return store.db
       .select()
@@ -36,7 +69,7 @@ export function createConnections(store: Store, secrets: Secrets): Connections {
       .get();
   }
 
-  return {
+  const self: Connections = {
     async connect({ provider, account, scopes, token, expiresAt }, origin) {
       if (account === "" || token === "") {
         throw new Error(`Conectar ${provider} necesita una cuenta y un token no vacíos.`);
@@ -45,17 +78,10 @@ export function createConnections(store: Store, secrets: Secrets): Connections {
       // El token primero: si la escritura en la base falla queda un secreto sin cuenta, que el
       // próximo `connect` de la misma cuenta pisa. Al revés quedaría una cuenta sin token.
       await secrets.set(secretRef, token);
-      const connection: Connection = {
-        provider,
-        account,
-        scopes,
-        status: "active",
-        ...(expiresAt === undefined ? {} : { expiresAt }),
-      };
       store.tx((tx) => {
         const values = {
           scopes,
-          status: connection.status,
+          status: "active" as const,
           secretRef,
           expiresAt: expiresAt ?? null,
         };
@@ -67,19 +93,44 @@ export function createConnections(store: Store, secrets: Secrets): Connections {
         tx.emit({
           type: "connection.changed",
           origin,
-          payload: { provider, account, status: connection.status },
+          payload: { provider, account, status: "active" },
         });
       });
-      return connection;
+      return toConnection(find(provider, account)!, now());
+    },
+
+    async setPat(token, origin) {
+      const { login, permissions, expiresAt } = await validatePat(token, github);
+      return self.connect(
+        { provider: "github", account: login, scopes: permissions, token, expiresAt },
+        origin,
+      );
+    },
+
+    githubClient(account) {
+      if (!find("github", account)) {
+        throw new Error(`No hay una cuenta github conectada como "${account}": conéctala primero.`);
+      }
+      let client = githubClients.get(account);
+      if (!client) {
+        client = createGitHubClient({
+          ...github,
+          tokens: { kind: "pat", token: () => self.token("github", account) },
+          quota: { store, account },
+        });
+        githubClients.set(account, client);
+      }
+      return client;
     },
 
     list() {
+      const at = now();
       return store.db
         .select()
         .from(connections)
         .orderBy(asc(connections.provider), asc(connections.account))
         .all()
-        .map(toConnection);
+        .map((row) => toConnection(row, at));
     },
 
     async token(provider, account) {
@@ -102,6 +153,7 @@ export function createConnections(store: Store, secrets: Secrets): Connections {
       // El token primero: si falla, la cuenta sigue a la vista y se puede reintentar. Al revés
       // quedaría un token vivo en el almacén sin que nadie lo vea.
       await secrets.delete(row.secretRef);
+      if (provider === "github") githubClients.delete(account);
       store.tx((tx) => {
         tx.db
           .delete(connections)
@@ -115,15 +167,20 @@ export function createConnections(store: Store, secrets: Secrets): Connections {
       });
     },
   };
+  return self;
 }
 
 /** Sin `secretRef` a propósito: es un detalle del core, la API no lo necesita. */
-function toConnection(row: typeof connections.$inferSelect): Connection {
+function toConnection(row: typeof connections.$inferSelect, now: number): Connection {
+  const expired = row.expiresAt !== null && row.expiresAt <= now;
+  const expiresSoon =
+    row.status === "active" && row.expiresAt !== null && !expired && row.expiresAt - now <= EXPIRY_WARNING_MS;
   return {
     provider: row.provider,
     account: row.account,
     scopes: row.scopes,
-    status: row.status,
+    status: expired && row.status === "active" ? "expired" : row.status,
     ...(row.expiresAt === null ? {} : { expiresAt: row.expiresAt }),
+    ...(expiresSoon ? { expiresSoon } : {}),
   };
 }

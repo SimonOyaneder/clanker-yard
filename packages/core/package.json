@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@clanker/api": "*",
+    "@octokit/core": "^7.0.8",
+    "@octokit/request-error": "^7.1.2",
     "@orpc/server": "^1.16.2",
     "drizzle-orm": "1.0.0-rc.5",
     "ulid": "3.0.2",

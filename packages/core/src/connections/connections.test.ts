@@ -7,6 +7,8 @@ import type { Secrets } from "../secrets/secrets";
 import { openStore, type Store } from "../store/store";
 import { createConnections, type ConnectInput, type Connections } from "./connections";
 
+/** Fijo: los vencimientos de los tests no deben depender del reloj real. */
+const NOW = 1_700_000_000_000;
 const TOKEN = "ghp_UNIQUE-secret-token-0123456789";
 const github: Omit<ConnectInput, "token" | "expiresAt"> = {
   provider: "github",
@@ -23,7 +25,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "clanker-connections-"));
   store = openStore({ path: join(dir, "clanker.db") });
   secrets = createFileSecrets({ dir: join(dir, "secrets") });
-  connections = createConnections(store, secrets);
+  connections = createConnections(store, secrets, { now: () => NOW });
 });
 
 afterEach(() => {

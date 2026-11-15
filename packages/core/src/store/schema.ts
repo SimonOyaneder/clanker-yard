@@ -201,3 +201,15 @@ export const workspaces = sqliteTable(
       .where(sql`${t.state} != 'archived'`),
   ],
 );
+
+/** Estado de polling y cuota por recurso: ETags (`etag`, `cursor`) y la última cuota que GitHub informó. */
+export const syncCursors = sqliteTable("sync_cursors", {
+  /** URL o recurso; la cuota de GitHub usa `rate:github:<cuenta>:<recurso>`. */
+  key: text().primaryKey(),
+  etag: text(),
+  cursor: text(),
+  checkedAt: integer("checked_at").notNull(),
+  rateRemaining: integer("rate_remaining"),
+  /** ms epoch en que se renueva la cuota. */
+  resetAt: integer("reset_at"),
+});
