@@ -53,7 +53,7 @@ export const okReport = (payload: unknown = { n: 1 }, outcome = "ok") => ({
 
 export const subjectOf = (prompt: string) => /"subject": \{[^}]*"id": "([^"]+)"/.exec(prompt)?.[1] ?? "?";
 
-export function harness(options: { maxAgents?: number; script?: AgentScript; roles?: Record<string, Role> } = {}) {
+export function harness(options: { maxAgents?: number; probeEverySec?: number; script?: AgentScript; roles?: Record<string, Role> } = {}) {
   const store = openStore({ path: ":memory:" });
   const dir = mkdtempSync(join(tmpdir(), "clanker-flows-"));
   const defs = createDefs(store);
@@ -99,6 +99,7 @@ export function harness(options: { maxAgents?: number; script?: AgentScript; rol
     },
     workspaceOf: () => ({ path: "/work/tree", base: "main" }),
     maxAgents: options.maxAgents,
+    probeEverySec: options.probeEverySec,
   });
   const cleanup = async () => {
     await flows.close();

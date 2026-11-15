@@ -61,8 +61,10 @@ function setup(): { defs: Defs; flows: Flows } {
   action("pr.publish", ["ok", "replan"], "remote");
   action("pr.pushFixups", ["ok", "route"], "remote");
   action("pr.reply", okOnly, "remote");
-  flows.registerWait({ name: "pr.botReview", outcomes: ["lgtm", "findings"], args: anyArgs });
-  flows.registerWait({ name: "pr.ci", outcomes: ["ok", "fail"], args: anyArgs });
+  const wait = (name: string, outcomes: string[]) =>
+    flows.registerWait({ name, outcomes, args: anyArgs, key: () => name, match: () => undefined, probe: () => Promise.resolve(undefined) });
+  wait("pr.botReview", ["lgtm", "findings"]);
+  wait("pr.ci", ["ok", "fail"]);
   return { defs, flows };
 }
 

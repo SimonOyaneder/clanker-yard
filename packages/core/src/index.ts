@@ -57,11 +57,13 @@ export type {
   ActionResult,
   BranchResult,
   ConsolidatorDef,
+  ExternalEvent,
   RetryPolicy,
   RoleInfo,
   WaitDef,
+  WaitResult,
 } from "./flows/catalog";
-export { DEFAULT_MAX_AGENTS, OUTPUT_INLINE_MAX_BYTES, RunNotFoundError, RunStartError, TICK_MS } from "./flows/engine";
+export { DEFAULT_MAX_AGENTS, DEFAULT_PROBE_EVERY_SEC, OUTPUT_INLINE_MAX_BYTES, RunNotFoundError, RunStartError, TICK_MS } from "./flows/engine";
 export type { RunView, StartOptions, StepView } from "./flows/engine";
 export {
   createConnections,

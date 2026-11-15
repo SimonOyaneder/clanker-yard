@@ -2,8 +2,7 @@ import type { FlowDef, RunId } from "@clanker/api";
 import type { infer as Infer, ZodType } from "zod";
 
 // Lo que otros módulos (Workspaces, CodeHost, Tracker, packs, Agents) registran en Flows: la
-// validación lee los nombres y outcomes, el motor ejecuta. `WaitDef` agrega `key`, `match` y
-// `probe` cuando exista el nodo wait.
+// validación lee los nombres y outcomes, el motor ejecuta.
 
 /** Cuántas veces se re-ejecuta tras una excepción y cuánto se espera: `backoffSec[n-1]` antes del reintento n, el último se repite. */
 export interface RetryPolicy {
@@ -52,10 +51,34 @@ export interface ActionDef<A extends ZodType = ZodType> {
   run(args: Infer<A>, ctx: ActionCtx): Promise<ActionResult>;
 }
 
-export interface WaitDef {
+/** Un hecho de afuera (el bot revisó, el CI terminó) que `flows.signal` entrega a los waits. */
+export interface ExternalEvent {
+  type: string;
+  [field: string]: unknown;
+}
+
+/** Cómo termina un wait: uno de `WaitDef.outcomes`, con lo que los demás nodos leen como `$nodo`. */
+export interface WaitResult {
+  outcome: string;
+  output?: unknown;
+}
+
+/**
+ * Un wait espera un evento externo con el `timeoutSec` del nodo. Mientras no exista Watch, el motor
+ * llama `probe` al entrar y cada `probeEverySec`; `signal` y `probe` son dos caminos al mismo
+ * resultado, así que deben coincidir. El timeout no lo da el wait: lo cierra el motor con el
+ * outcome `timeout`.
+ */
+export interface WaitDef<A extends ZodType = ZodType> {
   name: string;
-  args: ZodType;
+  args: A;
   outcomes: string[];
+  /** Qué espera (por ejemplo `pr:api#4251:ci`). Queda en el paso y no puede lanzar. */
+  key(args: Infer<A>): string;
+  /** `undefined`: el evento no es de este wait. Síncrona y pura; si lanza, el wait termina en `error`. */
+  match(event: ExternalEvent, args: Infer<A>): WaitResult | undefined;
+  /** Mira el estado actual; `undefined` si lo esperado todavía no pasó. Una excepción en un sondeo se anota en el paso y se reintenta en el siguiente. */
+  probe(args: Infer<A>): Promise<WaitResult | undefined>;
 }
 
 /** Lo que una rama del parallel dejó al cerrar: su outcome y su output. */

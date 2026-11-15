@@ -8,14 +8,14 @@ import {
   type StepRunId,
   type SubjectRef,
 } from "@clanker/api";
-import { and, asc, desc, eq, inArray, isNull, lt, lte, max, or, sql, sum } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, max, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
 import { actionEffects, agentSessions, runs, stepRuns, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
-import type { ActionCtx, ActionDef, ConsolidatorDef, RetryPolicy } from "./catalog";
+import type { ActionCtx, ActionDef, ConsolidatorDef, ExternalEvent, RetryPolicy, WaitDef, WaitResult } from "./catalog";
 import { edgeFor, edgesOf, maxRoundsOf, takeEdge } from "./edges";
 import {
   agentRolesOf,
@@ -33,6 +33,8 @@ import { LANE_BY_TRIGGER } from "./validate";
 const STEP_LEASE_TTL_MS = 120_000;
 export const TICK_MS = 5000;
 export const DEFAULT_MAX_AGENTS = 4;
+/** Cada cuánto se sondea un wait mientras no exista Watch que avise con `signal`. */
+export const DEFAULT_PROBE_EVERY_SEC = 60;
 /** Un valor resuelto de más de esto no entra al brief: va a artifacts y el brief recibe `{ artifact, size }`. */
 export const OUTPUT_INLINE_MAX_BYTES = 16 * 1024;
 /** Cuánto se espera antes de reintentar un paso frenado por el entorno (login vencido, cuota agotada). */
@@ -67,6 +69,10 @@ export interface StepView {
   error: string | null;
   /** Backoff pendiente: no se despacha antes. */
   notBefore: number | null;
+  /** Un wait: qué espera (`WaitDef.key`). */
+  waitKey: string | null;
+  /** Un wait con `timeoutSec`: desde cuándo vence con outcome `timeout`. */
+  deadline: number | null;
   costMicros: number;
 }
 
@@ -97,11 +103,14 @@ export interface EngineDeps {
   artifacts: Artifacts;
   actions: ReadonlyMap<string, ActionDef>;
   consolidators: ReadonlyMap<string, ConsolidatorDef>;
+  waits: ReadonlyMap<string, WaitDef>;
   /** El worktree de la corrida (el que tiene tomado), donde corren sus agentes. */
   workspaceOf?: (runId: RunId) => { path: string; base: string } | undefined;
   /** Tope global de agentes a la vez. */
   maxAgents?: number;
   tickMs?: number;
+  /** Cada cuánto se sondea un wait con `probe`; por defecto `DEFAULT_PROBE_EVERY_SEC`. */
+  probeEverySec?: number;
   /** Identifica a este core como dueño de los leases. */
   bootId?: string;
   now?: () => number;
@@ -114,6 +123,11 @@ export interface Engine {
    * y del perfil. Falla, sin crear nada, si faltan params o los maxRounds apuntan a un valor inválido.
    */
   start(flow: string, subject: SubjectRef, params?: Record<string, unknown>, opts?: StartOptions): RunId;
+  /**
+   * Entrega un hecho externo a los waits que esperan: cada uno cuyo `match` lo reconoce termina con
+   * el outcome que devuelve. Los waits que no calzan siguen esperando.
+   */
+  signal(event: ExternalEvent): void;
   /** Lanza `RunNotFoundError` si no existe. */
   getRun(runId: RunId): RunView;
   /** Las corridas más recientes primero, sin sus pasos. */
@@ -177,11 +191,15 @@ interface BranchState {
 }
 
 export function createEngine(deps: EngineDeps): Engine {
-  const { store, defs, agents, artifacts, actions, consolidators, workspaceOf, now = Date.now } = deps;
+  const { store, defs, agents, artifacts, actions, consolidators, waits, workspaceOf, now = Date.now } = deps;
   const maxAgents = deps.maxAgents ?? DEFAULT_MAX_AGENTS;
+  const probeEveryMs = (deps.probeEverySec ?? DEFAULT_PROBE_EVERY_SEC) * 1000;
   const bootId = deps.bootId ?? newId("boot");
   const flowCache = new Map<string, FlowDef>();
   const inFlight = new Set<Promise<void>>();
+  /** Cuándo toca el próximo sondeo de cada wait de este proceso. Sin entrada (tras un reinicio), toca ya. */
+  const nextProbeAt = new Map<StepRunId, number>();
+  const probing = new Set<StepRunId>();
   let activeAgents = 0;
   let ticker: NodeJS.Timeout | undefined;
   let closed = false;
@@ -229,11 +247,11 @@ export function createEngine(deps: EngineDeps): Engine {
       const unsupported = Object.entries(flow.nodes).flatMap(([nodeId, n]) => {
         const types: [string, string][] = [[nodeId, n.type]];
         if (n.type === "parallel" && !Array.isArray(n.branches)) types.push([`${nodeId}.branch`, n.branches.branch.type]);
-        return types.filter(([, type]) => type !== "agent" && type !== "action" && type !== "parallel");
+        return types.filter(([, type]) => !["agent", "action", "wait", "parallel"].includes(type));
       });
       if (unsupported.length > 0) {
         const list = unsupported.map(([nodeId, type]) => `${nodeId} (${type})`).join(", ");
-        throw new RunStartError(`El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${list}. Solo agent, action y parallel.`);
+        throw new RunStartError(`El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${list}. Solo agent, action, wait y parallel.`);
       }
       const params = effectiveParams(flow, given);
       try {
@@ -332,11 +350,20 @@ export function createEngine(deps: EngineDeps): Engine {
 
   // --- dispatcher ------------------------------------------------------------------------------
 
-  /** Despierta al dispatcher: lo llaman cada transición y el tick de 5 s (backoff vencido). */
+  function jobOf(run: RunRow, step: StepRow): Job {
+    const flow = flowOf(run);
+    const target = stepNode(flow, step.nodeId);
+    const parallel = target.kind === "plain" ? undefined : { parent: target.parent, role: target.kind };
+    return { run, step, flow, node: target.node, parallel };
+  }
+
+  /** Despierta al dispatcher: lo llaman cada transición y el tick de 5 s (backoff vencido, timeouts y sondeos de waits). */
   function wake(): void {
     if (closed) return;
     ticker ??= setInterval(wake, deps.tickMs ?? TICK_MS).unref();
     try {
+      // Antes de despachar: un wait que vence o se resuelve deja su paso siguiente listo en esta misma vuelta.
+      sweepWaits();
       dispatch();
     } catch (error) {
       // Un wake que lanza tumbaría a quien lo llamó (un `start`, el cierre de otro paso, un timer).
@@ -361,16 +388,13 @@ export function createEngine(deps: EngineDeps): Engine {
       .all();
 
     for (const { step, run } of ready) {
-      const flow = flowOf(run);
-      const target = stepNode(flow, step.nodeId);
-      const { node } = target;
-      const isAgent = node.type === "agent";
+      const planned = jobOf(run, step);
+      const isAgent = planned.node.type === "agent";
       if (isAgent && activeAgents >= maxAgents) continue;
       const leased = lease(step);
       if (!leased) continue;
       if (isAgent) activeAgents++;
-      const parallel = target.kind === "plain" ? undefined : { parent: target.parent, role: target.kind };
-      const job = execute({ run, step: leased, flow, node, parallel }).finally(() => {
+      const job = execute({ ...planned, step: leased }).finally(() => {
         if (isAgent) activeAgents--;
         inFlight.delete(job);
         wake();
@@ -455,10 +479,12 @@ export function createEngine(deps: EngineDeps): Engine {
     const input =
       job.parallel?.role === "join"
         ? branchOutputs(run.id, job.parallel.parent, job.flow)
-        : resolveRefs(node.type === "agent" ? node.brief : node.type === "action" ? node.args : null, resolve);
+        : resolveRefs(node.type === "agent" ? node.brief : node.type === "action" || node.type === "wait" ? node.args : null, resolve);
     const inputHash = artifacts.put(JSON.stringify(input), "brief", { mime: "application/json" });
     artifacts.ref(inputHash, { type: "step_run", id: step.id, role: "input" });
     markRunning(job, inputHash);
+    // En un wait `timeoutSec` es el plazo de la espera (`deadline`), no un límite a esta ejecución.
+    if (node.type === "wait") return enterWait(job, node.event, input);
 
     const timeoutSec = node.timeoutSec ?? (node.type === "action" ? actions.get(node.action)?.timeoutSec : undefined);
     const timer =
@@ -694,6 +720,7 @@ export function createEngine(deps: EngineDeps): Engine {
   function retryOf(node: Node): RetryPolicy {
     if (node.retry) return node.retry;
     if (node.type === "action") return actions.get(node.action)?.retry ?? DEFAULT_ACTION_RETRY;
+    if (node.type === "wait") return DEFAULT_ACTION_RETRY;
     return DEFAULT_AGENT_RETRY;
   }
 
@@ -852,6 +879,153 @@ export function createEngine(deps: EngineDeps): Engine {
       .where(and(eq(stepRuns.runId, runId), eq(stepRuns.nodeId, nodeId)))
       .get();
     return (last?.visit ?? 0) + 1;
+  }
+
+  // --- wait ------------------------------------------------------------------------------------
+
+  /**
+   * Entra a un wait: si `probe` ya ve lo esperado termina de inmediato; si no, el paso queda
+   * `waiting` con su clave y su plazo, y lo cierra `signal`, un sondeo o el vencimiento. Un evento
+   * que llegue entre el `probe` y el guardado se pierde hasta el próximo sondeo.
+   */
+  async function enterWait(job: Job, event: string, input: unknown): Promise<Settled> {
+    const { step, node } = job;
+    const wait = waits.get(event);
+    if (!wait) return permanent(`El wait "${event}" no está registrado.`);
+    const args = wait.args.safeParse(input);
+    if (!args.success) return permanent(`Los args de "${event}" no son válidos: ${formatIssues(args.error)}`);
+
+    const found = await wait.probe(args.data);
+    if (found) return fromWaitResult(wait, found);
+
+    const waitKey = wait.key(args.data);
+    const deadline = node.timeoutSec === undefined ? null : now() + node.timeoutSec * 1000;
+    store.tx((tx) => {
+      const waiting = tx.db
+        .update(stepRuns)
+        .set({ status: "waiting", owner: null, leaseUntil: null, waitKey, deadline })
+        .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), eq(stepRuns.status, "running")))
+        .returning({ id: stepRuns.id })
+        .get();
+      if (!waiting) throw new StaleStepError(step.id);
+      tx.emit({
+        type: "step.waiting",
+        origin: "core",
+        ...scopeOf(job.run, step.id),
+        payload: { ...stepPayload(step), waitKey, deadline },
+      });
+    });
+    nextProbeAt.set(step.id, now() + probeEveryMs);
+    return { kind: "waiting" };
+  }
+
+  function fromWaitResult(wait: WaitDef, result: WaitResult): Settled {
+    if (!wait.outcomes.includes(result.outcome)) {
+      return permanent(`El wait "${wait.name}" devolvió el outcome "${result.outcome}", que no declara (${wait.outcomes.join(", ")}).`);
+    }
+    return { kind: "outcome", outcome: result.outcome, output: result.output };
+  }
+
+  function signal(event: ExternalEvent): void {
+    for (const waiting of waitingSteps()) {
+      const input = waitInput(waiting);
+      if (!input.ok) finishWait(waiting, permanent(input.error));
+      else {
+        let found: WaitResult | undefined;
+        try {
+          found = input.wait.match(event, input.args);
+        } catch (error) {
+          finishWait(waiting, permanent(`El match de "${input.wait.name}" falló: ${describe(error)}`));
+          continue;
+        }
+        if (found) finishWait(waiting, fromWaitResult(input.wait, found));
+      }
+    }
+    wake();
+  }
+
+  /** Los waits que esperan en corridas activas. */
+  function waitingSteps(): Job[] {
+    return store.db
+      .select({ step: stepRuns, run: runs })
+      .from(stepRuns)
+      .innerJoin(runs, eq(stepRuns.runId, runs.id))
+      .where(and(eq(stepRuns.status, "waiting"), isNotNull(stepRuns.waitKey), eq(runs.status, "running")))
+      .orderBy(asc(stepRuns.id))
+      .all()
+      .map(({ step, run }) => jobOf(run, step));
+  }
+
+  /** El wait y los args que el paso guardó al entrar. */
+  function waitInput(job: Job): { ok: true; wait: WaitDef; args: unknown } | { ok: false; error: string } {
+    if (job.node.type !== "wait") return { ok: false, error: `El paso ${job.step.id} espera y su nodo no es un wait.` };
+    const wait = waits.get(job.node.event);
+    if (!wait) return { ok: false, error: `El wait "${job.node.event}" no está registrado.` };
+    const args = wait.args.safeParse(readArtifact(job.step.inputHash));
+    if (!args.success) return { ok: false, error: `Los args de "${job.node.event}" no son válidos: ${formatIssues(args.error)}` };
+    return { ok: true, wait, args: args.data };
+  }
+
+  /** Cierra un wait desde fuera de su ejecución. Si otro camino lo cerró antes, no hace nada. */
+  function finishWait(job: Job, settled: Settled): void {
+    try {
+      settle(job, settled);
+      nextProbeAt.delete(job.step.id);
+    } catch (error) {
+      if (error instanceof StaleStepError) return;
+      console.error(`No se pudo cerrar el wait ${job.step.id} (${job.step.nodeId}):`, error);
+      parkAfterFailure(job, describe(error));
+    }
+  }
+
+  /** El tick: vence los waits cuyo plazo pasó y sondea los que ya les toca. */
+  function sweepWaits(): void {
+    for (const job of waitingSteps()) {
+      const { step, node } = job;
+      if (step.deadline !== null && step.deadline <= now()) {
+        const timeout = new StepTimeout(node.timeoutSec ?? 0, "El wait");
+        finishWait(job, timedOut(timeout));
+      } else if (!probing.has(step.id) && (nextProbeAt.get(step.id) ?? 0) <= now()) {
+        probeWait(job);
+      }
+    }
+  }
+
+  function probeWait(job: Job): void {
+    const input = waitInput(job);
+    if (!input.ok) return finishWait(job, permanent(input.error));
+    const { id } = job.step;
+    probing.add(id);
+    nextProbeAt.set(id, now() + probeEveryMs);
+    const probe = (async () => {
+      try {
+        const found = await input.wait.probe(input.args);
+        if (found) finishWait(job, fromWaitResult(input.wait, found));
+        else noteProbeError(job, null);
+      } catch (error) {
+        noteProbeError(job, describe(error));
+      } finally {
+        probing.delete(id);
+      }
+      wake();
+    })().finally(() => inFlight.delete(probe));
+    inFlight.add(probe);
+  }
+
+  /** Un sondeo que lanza no cierra el wait: se anota en el paso y se vuelve a intentar en el próximo. */
+  function noteProbeError(job: Job, error: string | null): void {
+    try {
+      store.tx((tx) =>
+        tx.db
+          .update(stepRuns)
+          .set({ error })
+          // Sin error que anotar solo se limpia uno anterior: un sondeo sin novedades no escribe.
+          .where(and(eq(stepRuns.id, job.step.id), eq(stepRuns.status, "waiting"), error === null ? isNotNull(stepRuns.error) : undefined))
+          .run(),
+      );
+    } catch (cause) {
+      console.error(`No se pudo anotar el error del sondeo de ${job.step.id}:`, cause);
+    }
   }
 
   // --- parallel --------------------------------------------------------------------------------
@@ -1035,8 +1209,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const steps = store.db.select().from(stepRuns).where(eq(stepRuns.runId, runId)).orderBy(asc(stepRuns.id)).all();
     return {
       ...viewOf(run),
-      steps: steps.map(({ id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, costMicros }) => ({
-        id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, costMicros,
+      steps: steps.map(({ id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, waitKey, deadline, costMicros }) => ({
+        id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, waitKey, deadline, costMicros,
       })),
     };
   }
@@ -1062,12 +1236,15 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(inFlight);
   }
 
-  return { start, getRun, listRuns, close };
+  return { start, signal, getRun, listRuns, close };
 }
 
 class StepTimeout extends Error {
-  constructor(readonly timeoutSec: number) {
-    super(`El paso superó su timeoutSec de ${timeoutSec} s.`);
+  constructor(
+    readonly timeoutSec: number,
+    subject = "El paso",
+  ) {
+    super(`${subject} superó su timeoutSec de ${timeoutSec} s.`);
   }
 }
 

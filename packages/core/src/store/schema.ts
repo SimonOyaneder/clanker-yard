@@ -495,6 +495,10 @@ export const stepRuns = sqliteTable(
     owner: text(),
     /** Espera de backoff: no se despacha antes. */
     notBefore: integer("not_before"),
+    /** Solo un wait en `waiting`: la clave de lo que espera (`WaitDef.key`). */
+    waitKey: text("wait_key"),
+    /** Solo un wait en `waiting` con `timeoutSec`: desde este instante vence con outcome `timeout`. */
+    deadline: integer(),
     /** El input ya resuelto (artefacto `brief`). */
     inputHash: text("input_hash").$type<ArtifactHash>(),
     outputHash: text("output_hash").$type<ArtifactHash>(),

@@ -44,7 +44,7 @@ export interface SaveFlowOptions {
 export interface Flows extends Engine {
   /** Cada módulo registra lo que aporta; registrar dos veces el mismo nombre es un bug. */
   registerAction<A extends ZodType>(def: ActionDef<A>): void;
-  registerWait(def: WaitDef): void;
+  registerWait<A extends ZodType>(def: WaitDef<A>): void;
   /** `worst` e `items.merge` ya vienen registrados. */
   registerConsolidator<A extends ZodType>(def: ConsolidatorDef<A>): void;
   /**
@@ -59,7 +59,7 @@ export interface Flows extends Engine {
   save(def: FlowDef, opts?: SaveFlowOptions): FlowVersion;
 }
 
-export interface FlowsDeps extends Omit<EngineDeps, "actions" | "consolidators"> {
+export interface FlowsDeps extends Omit<EngineDeps, "actions" | "consolidators" | "waits"> {
   store: Store;
   defs: Defs;
   agents: Agents;
@@ -75,8 +75,8 @@ export function createFlows({ roles, ...deps }: FlowsDeps): Flows {
     [worst.name, worst],
     [itemsMerge.name, itemsMerge],
   ]);
-  const engine = createEngine({ ...deps, actions, consolidators });
   const waits = new Map<string, WaitDef>();
+  const engine = createEngine({ ...deps, actions, consolidators, waits });
   defs.register("flow", FlowBody);
 
   function register<T extends { name: string }>(kind: string, into: Map<string, T>, def: T) {
