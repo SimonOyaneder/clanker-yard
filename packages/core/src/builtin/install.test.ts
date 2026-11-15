@@ -1,3 +1,4 @@
+import { Role } from "@clanker/api";
 import { afterEach, expect, test } from "vitest";
 import { z } from "zod";
 import { createAgents } from "../agents/agents";
@@ -19,6 +20,19 @@ const unusedRuntime: AgentRuntime = {
   resume: () => Promise.reject(new Error("no se usa")),
 };
 
+/** Las acciones y los waits que citan las plantillas, con los outcomes de su diseño. */
+const ACTIONS = {
+  "workspace.acquire": ["ok"],
+  "workspace.release": ["ok"],
+  "workspace.syncBase": ["same", "rebased", "conflict"],
+  "recipe.check": ["ok", "fail"],
+  "pr.publish": ["ok", "replan"],
+  "pr.pushFixups": ["ok", "route"],
+  "pr.reply": ["ok"],
+  "review.requestBot": ["ok", "none"],
+};
+const WAITS = { "pr.botReview": ["lgtm", "findings"], "pr.ci": ["ok", "fail"] };
+
 function setup() {
   store = openStore({ path: ":memory:" });
   const defs = createDefs(store);
@@ -27,22 +41,52 @@ function setup() {
     defs,
     agents: createAgents({ store, defs, runtime: unusedRuntime }),
     artifacts: createArtifacts({ store, dir: "sin-uso" }),
-    roles: (id) => (defs.resolve("role", id) ? { modes: { saludar: { outcomes: ["ok"] } } } : undefined),
+    roles: (id) => {
+      const def = defs.resolve("role", id);
+      if (!def) return undefined;
+      const { modes } = Role.parse(def.body);
+      return { modes: Object.fromEntries(Object.entries(modes).map(([name, { outcomes }]) => [name, { outcomes }])) };
+    },
   });
-  for (const name of ["workspace.acquire", "workspace.release"]) {
-    flows.registerAction({ name, outcomes: ["ok"], effects: "local", args: z.record(z.string(), z.unknown()), run: () => Promise.reject(new Error("no se usa")) });
+  const args = z.record(z.string(), z.unknown());
+  for (const [name, outcomes] of Object.entries(ACTIONS)) {
+    flows.registerAction({ name, outcomes, effects: "local", args, run: () => Promise.reject(new Error("no se usa")) });
+  }
+  for (const [name, outcomes] of Object.entries(WAITS)) {
+    flows.registerWait({ name, outcomes, args, key: () => name, match: () => undefined, probe: () => Promise.reject(new Error("no se usa")) });
   }
   return { defs, flows };
 }
 
-const builtin = (defs: Defs, kind: "role" | "flow") => defs.list(kind, { includeArchived: true }).find((d) => d.scope === "builtin" && d.slug === "juguete")!;
+const builtin = (defs: Defs, kind: "role" | "flow", slug: string) =>
+  defs.list(kind, { includeArchived: true }).find((d) => d.scope === "builtin" && d.slug === slug)!;
 
-test.each(["role", "flow"] as const)("con su %s archivado, el arranque deja la plantilla fuera en vez de lanzar", (kind) => {
+test("instala juguete y el equipo clanker-loop (sus roles, perfiles y los flujos techlead-clasico y pr-feedback) y repetirlo no suma versiones", () => {
+  const { defs, flows } = setup();
+
+  installBuiltins({ defs, flows });
+  const versions = store!.events.since(0, { types: ["def.versioned"] }).length;
+  installBuiltins({ defs, flows });
+
+  expect(defs.resolve("flow", "techlead-clasico")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("flow", "pr-feedback")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("flow", "juguete")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("role", "committer")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("profile", "eco")).toMatchObject({ scope: "builtin" });
+  expect(store!.events.since(0, { types: ["def.versioned"] })).toHaveLength(versions);
+});
+
+test.each([
+  ["role", "juguete"],
+  ["flow", "juguete"],
+  ["role", "committer"],
+  ["flow", "pr-feedback"],
+] as const)("con su %s %s archivado, el arranque deja esa plantilla fuera en vez de lanzar", (kind, slug) => {
   const { defs, flows } = setup();
   installBuiltins({ defs, flows });
-  defs.archive(kind, builtin(defs, kind).id, "ui");
+  defs.archive(kind, builtin(defs, kind, slug).id, "ui");
 
   expect(() => installBuiltins({ defs, flows })).not.toThrow();
-  expect(builtin(defs, kind).archivedAt).not.toBeNull();
-  expect(defs.resolve(kind, "juguete")).toBeUndefined();
+  expect(builtin(defs, kind, slug).archivedAt).not.toBeNull();
+  expect(defs.resolve(kind, slug)).toBeUndefined();
 });

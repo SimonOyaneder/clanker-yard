@@ -185,8 +185,14 @@ export function prResolveThreadAction(deps: PrFeedbackDeps): ActionDef<typeof Re
 
 const ReplyArgs = z.object({
   pr: PrRef,
-  /** El reporte del triage: cada ítem es un thread por el id de su primer comentario. */
-  triage: z.object({ items: z.array(z.object({ id: ThreadId, reply: z.string().optional() })) }),
+  /**
+   * El reporte del triage: cada ítem es un thread por el id de su primer comentario. Sin reporte (el flujo
+   * llegó aquí sin triage del bot, p. ej. tras un CI rojo) no hay a quién responder.
+   */
+  triage: z
+    .object({ items: z.array(z.object({ id: ThreadId, reply: z.string().optional() })) })
+    .nullish()
+    .transform((triage) => triage ?? { items: [] }),
   /** El sha del fixup que arregló cada ítem (`pr.pushFixups`): sin `reply`, es lo que se le dice al thread. */
   shas: z.record(z.string(), z.string()).default({}),
   /** Después de responder, vuelve a pedirle review al bot del pack. */

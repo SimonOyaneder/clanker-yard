@@ -94,6 +94,36 @@ async function summaryOf(runtime: ReturnType<typeof createFakeRuntime>, s: RunSp
   return ((await run.result).structured as { summary: string }).summary;
 }
 
+describe("valores que salen del brief", () => {
+  const withPayload = (payload: unknown): Brief => ({ ...brief("bot", 0), payload });
+
+  test("un string $brief.<ruta> del reporte toma lo que el brief trae ahí, como el id de un ítem", async () => {
+    const runtime = createFakeRuntime({
+      fixtures: fixtures({
+        "triage.r0.yaml": `
+result:
+  status: success
+  structured: { outcome: done, summary: "$brief.payload.items.1.id", payload: { first: "$brief.payload.items.0", base: "$brief.base" } }
+`,
+      }),
+      sleep: instant,
+    });
+
+    const run = await runtime.start(spec("triage", withPayload({ items: [{ id: "123" }, { id: "456" }] })));
+
+    expect((await run.result).structured).toEqual({ outcome: "done", summary: "456", payload: { first: { id: "123" }, base: "origin/main" } });
+  });
+
+  test("una ruta que el brief no tiene es un error del fixture que dice cuál", async () => {
+    const runtime = createFakeRuntime({
+      fixtures: fixtures({ "triage.r0.yaml": `result:\n  status: success\n  structured: { outcome: done, summary: "$brief.payload.nada", payload: {} }\n` }),
+      sleep: instant,
+    });
+
+    await expect(runtime.start(spec("triage", withPayload({})))).rejects.toThrow(/cita \$brief\.payload\.nada y el brief no lo tiene/);
+  });
+});
+
 describe("elección del guion", () => {
   const dir = fixtures({
     "review-bugs.r1.yaml": report("cualquier modo"),
@@ -111,6 +141,22 @@ describe("elección del guion", () => {
 
   test("la ronda sale del nombre del archivo", async () => {
     expect(await summaryOf(runtime, spec("review-bugs", brief("review", 2)))).toBe("ronda 2");
+  });
+
+  test("los guiones con times sirven en orden esa cantidad de veces y después cae al que no lo tiene", async () => {
+    const series = createFakeRuntime({
+      fixtures: fixtures({
+        "dev.r1.a.yaml": `match: { mode: fix }\ntimes: 1${report("primera")}`,
+        "dev.r1.b.yaml": `match: { mode: fix }\ntimes: 2${report("segunda y tercera")}`,
+        "dev.r1.z.yaml": `match: { mode: fix }${report("el resto")}`,
+      }),
+      sleep: instant,
+    });
+
+    const answers = [];
+    for (let i = 0; i < 5; i++) answers.push(await summaryOf(series, spec("dev", brief("fix", 1))));
+
+    expect(answers).toEqual(["primera", "segunda y tercera", "segunda y tercera", "el resto", "el resto"]);
   });
 
   test("dos guiones igual de específicos son un error", async () => {

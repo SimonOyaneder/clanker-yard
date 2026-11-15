@@ -240,3 +240,41 @@ describe("load", () => {
     expect(defs.list("pack").map((d) => d.slug)).toEqual(["acme"]);
   });
 });
+
+describe("loadAll", () => {
+  /** Una carpeta de packs instalados: una subcarpeta por pack. */
+  function installed(packs: Record<string, Files>): string {
+    const root = mkdtempSync(join(tmpdir(), "clanker-packs-"));
+    dirs.push(root);
+    for (const [name, files] of Object.entries(packs)) {
+      for (const [file, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, name, file)), { recursive: true });
+        writeFileSync(join(root, name, file), JSON.stringify(content));
+      }
+    }
+    return root;
+  }
+
+  test("carga cada subcarpeta y deja la de un pack roto en errors sin impedir las demás", async () => {
+    const { packs } = setup();
+    const root = installed({
+      acme: { "pack.json": { id: "acme", version: 1, activate: { githubOrgs: ["acme-co"] } } },
+      roto: { "pack.json": { id: "roto", version: 1, activate: "no" } },
+      zeta: { "pack.json": { id: "zeta", version: 1, activate: { githubOrgs: ["zeta-co"] } } },
+    });
+
+    const { errors } = await packs.loadAll(root);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(PackLoadError);
+    expect(errors[0]!.dir).toBe(join(root, "roto"));
+    expect(packs.packFor({ githubOrg: "acme-co" }).id).toBe("acme");
+    expect(packs.packFor({ githubOrg: "zeta-co" }).id).toBe("zeta");
+  });
+
+  test("una carpeta de packs que no existe es no tener packs", async () => {
+    const { packs } = setup();
+
+    expect(await packs.loadAll(join(tmpdir(), "clanker-sin-packs-aqui"))).toEqual({ errors: [] });
+  });
+});

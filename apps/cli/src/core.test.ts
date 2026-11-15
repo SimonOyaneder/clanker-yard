@@ -90,7 +90,7 @@ describe("el binario clanker", () => {
       ["list", true],
       ["get", true],
     ]);
-    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject([{ kind: "flow", slug: "juguete" }]);
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "flow", slug: "juguete" })]));
     expect(resources.map((r) => r.uri)).toContain("clanker://schema/run");
     expect(isPidAlive(readCoreJson(home)!.pid)).toBe(true);
   }, 30_000);

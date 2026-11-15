@@ -1,0 +1,20 @@
+# Dos commits: la implementación (h2, src/transfer.ts) y su prueba (h1, src/transfer.test.ts).
+# Los ids salen de hunks.json del diff completo contra la base, en orden de ruta.
+match: { mode: plan, round: "*" }
+events:
+  - { at: 0, text: "Parto el diff en dos commits" }
+  - { at: 5, usage: { model: sonnet, in: 1100, out: 300, cacheWrite: 0, cacheRead: 0, costUsd: 0.027 } }
+run:
+  test:
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Dos commits"
+    payload:
+      commits:
+        - { message: "feat(transfers): validate and round the transfer amount", hunks: [h2], tests: [], whyAtomic: "La implementación es un solo cambio" }
+        - { message: "test(transfers): log a created transfer", hunks: [h1], tests: [src/transfer.test.ts], whyAtomic: "La prueba se puede revertir sola" }
+      pr: { title: "feat(transfers): validate and round the transfer amount", body: "Agrega createTransfer: valida que el monto sea positivo y lo redondea." }
+      notes: []

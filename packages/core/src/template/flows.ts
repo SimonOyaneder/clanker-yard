@@ -197,7 +197,9 @@ export const PR_FEEDBACK: FlowDef = {
     fixups: {
       type: "action",
       action: "pr.pushFixups",
-      args: { ws: "$run.params.ws" },
+      // `items` son los hallazgos del bot (sin ellos, p. ej. tras un CI rojo, es null y la acción lo toma como
+      // ninguno); `route` es el reporte del committer, que solo existe cuando la acción ya devolvió `route`.
+      args: { ws: "$run.params.ws", items: "$bot-wait.items", route: "$route" },
       on: { ok: "reply-fixed", route: { to: "route", maxRounds: 1, exhausted: "@failed" } },
     },
     route: {

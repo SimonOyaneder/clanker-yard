@@ -123,6 +123,19 @@ export interface RunView {
 /** La corrida sin lo que solo trae `getRun`. */
 export type RunSummary = Omit<RunView, "steps" | "flowDef" | "workspace" | "usage">;
 
+/** Lo que el motor sabe de un paso agent al armarle el brief. */
+export interface StepBriefRequest {
+  run: Brief["run"];
+  nodeId: string;
+  /** Cuántas veces entró la corrida a este nodo, desde 1. */
+  visit: number;
+  mode: string;
+  /** El brief del nodo con sus refs resueltas. */
+  payload: unknown;
+  /** La corrida y sus padres: el worktree y los reportes previos pueden ser de cualquiera. */
+  lineage: RunId[];
+}
+
 export interface EngineDeps {
   store: Store;
   defs: Defs;
@@ -133,6 +146,11 @@ export interface EngineDeps {
   waits: ReadonlyMap<string, WaitDef>;
   /** El worktree de la corrida (el que tiene tomado), donde corren sus agentes. */
   workspaceOf?: (runId: RunId) => { path: string; base: string } | undefined;
+  /**
+   * Arma el brief de un paso agent: deja en el worktree lo que el agente lee (`.clanker-run/`) y lo cita en
+   * el brief. Sin esto el brief lleva solo el payload del nodo.
+   */
+  briefFor?: (request: StepBriefRequest) => Promise<Brief>;
   /** Tope global de agentes a la vez. */
   maxAgents?: number;
   tickMs?: number;
@@ -250,7 +268,7 @@ interface BranchState {
 }
 
 export function createEngine(deps: EngineDeps): Engine {
-  const { store, defs, agents, artifacts, actions, consolidators, waits, workspaceOf, now = Date.now } = deps;
+  const { store, defs, agents, artifacts, actions, consolidators, waits, workspaceOf, briefFor, now = Date.now } = deps;
   const maxAgents = deps.maxAgents ?? DEFAULT_MAX_AGENTS;
   const probeEveryMs = (deps.probeEverySec ?? DEFAULT_PROBE_EVERY_SEC) * 1000;
   const bootId = deps.bootId ?? newId("boot");
@@ -809,14 +827,10 @@ export function createEngine(deps: EngineDeps): Engine {
     const profile = profileDef && defs.get("profile", profileDef.id, profileDef.version);
     if (!roleDef || !profile) return permanent(`La corrida no fijó el rol "${node.role}" o su perfil.`);
 
-    const brief: Brief = {
-      run: { id: run.id, subject: { type: run.subjectType, id: run.subjectId }, round: step.round, attempt: step.attempt },
-      worktree: workspace.path,
-      base: workspace.base,
-      mode: node.mode,
-      artifacts: {},
-      payload,
-    };
+    const briefRun: Brief["run"] = { id: run.id, subject: { type: run.subjectType, id: run.subjectId }, round: step.round, attempt: step.attempt };
+    const brief: Brief = briefFor
+      ? await briefFor({ run: briefRun, nodeId: step.nodeId, visit: step.visit, mode: node.mode, payload, lineage: lineage(run) })
+      : { run: briefRun, worktree: workspace.path, base: workspace.base, mode: node.mode, artifacts: {}, payload };
     const placement = {
       profile: profile.slug,
       profileDef,

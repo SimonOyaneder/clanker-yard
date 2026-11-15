@@ -1,6 +1,6 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compileJsonSchema, Role, type RunId } from "@clanker/api";
 import {
@@ -17,6 +17,7 @@ import {
   createSlots,
   createWorkspaces,
   openStore,
+  prPushFixupsAction,
   prReplyAction,
   prWaits,
   reviewRequestBotAction,
@@ -86,19 +87,7 @@ async function setup(options: SetupOptions = {}) {
   await packs.load(join(dir, "pack"));
   const pr = sim.openPr({ head: "cla-1", draft: true });
 
-  // El hallazgo del bot que `feedback/triage.r0.bot.yaml` triagea: su id es el del thread, como lo espera `pr.reply`.
-  const thread = pr.botFindings(["Falta validar el monto"])[0]!;
-  const threadId = String(thread.commentId);
-  const fixtureDirs = (options.fixtures ?? []).map((path) => {
-    if (basename(path) !== "feedback") return path;
-    const copy = join(dir, "feedback");
-    cpSync(path, copy, { recursive: true });
-    const triage = join(copy, "triage.r0.bot.yaml");
-    writeFileSync(triage, readFileSync(triage, "utf8").replaceAll("id: b1", `id: "${threadId}"`));
-    return copy;
-  });
-
-  const runtime = createFakeRuntime({ fixtures: fixtureDirs, speed: Infinity });
+  const runtime = createFakeRuntime({ fixtures: options.fixtures ?? [], speed: Infinity });
   const agents = createAgents({ store, defs, runtime });
   for (const [slug, body] of Object.entries(clankerLoopTemplate.roles)) {
     defs.save({ kind: "role", slug, scope: "builtin", body, source: "import" });
@@ -122,6 +111,17 @@ async function setup(options: SetupOptions = {}) {
     },
     workspaceOf: () => ({ path: dir, base: "main" }),
   });
+  const unusedRepos = () => {
+    throw new Error("no se usa");
+  };
+  const workspaces = createWorkspaces({
+    store,
+    dataDir: join(dir, "workspaces"),
+    repos: unusedRepos,
+    identity: { name: "Test", email: "test@clanker.invalid" },
+  });
+  // Los tests que recorren `pr.pushFixups` (publicar un PR de verdad y empujarle fixups) corren en `techlead-e2e.test.ts`.
+  flows.registerAction(prPushFixupsAction({ store, workspaces, repos: unusedRepos, prs: createPrs({ connections, packs }) }));
   flows.registerAction(prReplyAction({ connections, packs, pause: () => Promise.resolve() }));
   const requestBot = reviewRequestBotAction({ connections, packs });
   flows.registerAction(
@@ -142,25 +142,12 @@ async function setup(options: SetupOptions = {}) {
     skip.push("pr.botReview", "pr.ci");
   }
   if (options.real) {
-    const workspaces = createWorkspaces({
-      store,
-      dataDir: join(dir, "workspaces"),
-      repos: () => {
-        throw new Error("no se usa");
-      },
-      identity: { name: "Test", email: "test@clanker.invalid" },
-    });
     flows.registerAction(workspaceAcquireAction(workspaces));
     flows.registerAction(workspaceSyncBaseAction(workspaces));
     flows.registerAction(createRecipes({ store, defs, workspaces, artifacts, slots: createSlots({ store }) }).checkAction);
     skip.push("workspace.acquire", "workspace.syncBase", "recipe.check");
   }
-  const outputs = {
-    "pr.botReview": { findings: { items: [{ id: threadId, kind: "bot", path: "src/index.ts", line: 1, text: "Falta validar el monto" }] } },
-    "pr.pushFixups": { ok: { byItem: { [threadId]: "abc1234def5678" } } },
-    ...options.outputs,
-  };
-  const stubs = registerFlowStubs(flows, { script: options.script, skip, outputs });
+  const stubs = registerFlowStubs(flows, { script: options.script, skip, outputs: options.outputs });
   cleanups.push(async () => {
     await flows.close();
     await sim.close();
@@ -168,7 +155,7 @@ async function setup(options: SetupOptions = {}) {
     store.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { flows, store, stubs, pr, thread };
+  return { flows, store, stubs, pr };
 }
 
 /** Guarda `pr-feedback` y después `techlead-clasico`, que lo llama. */
@@ -305,56 +292,6 @@ describe("techlead-clasico con el runtime fake", () => {
 });
 
 describe("pr-feedback con el runtime fake", () => {
-  test("un hallazgo válido del bot vuelve al dev, pasa checks y reviews ligeras, empuja el fixup y espera el LGTM", async () => {
-    const { flows, store, pr } = await setup({
-      fixtures: fixtures("base", "reviews-ok", "feedback"),
-      script: { "pr.botReview": ["findings", "lgtm"] },
-    });
-    saveTemplates(flows);
-
-    const { runId, run } = await runTechlead(flows, store);
-
-    expect(run).toMatchObject({ status: "done", outcome: "done" });
-    const [feedback] = flows.listRuns().filter((r) => r.parentRunId === runId);
-    const view = flows.getRun(feedback!.id);
-    expect(view).toMatchObject({ status: "done", outcome: "done", rounds: { external: 1 } });
-    expect(view.steps.filter((s) => !/^lr-/.test(s.nodeId)).map((s) => [s.nodeId, s.outcome])).toEqual([
-      ["bot-req", "ok"],
-      ["bot-wait", "findings"],
-      ["triage", "fix"],
-      ["fix", "ok"],
-      ["checks", "ok"],
-      ["light", "ok"],
-      ["fixups", "ok"],
-      ["reply-fixed", "ok"],
-      ["bot-wait", "lgtm"],
-      ["ci-wait", "ok"],
-    ]);
-    // `pr.reply` es la real: responde el thread con el sha del fixup, lo resuelve (es del bot) y vuelve a pedirle review.
-    const node = pr.node();
-    const [finding] = node.reviewThreads;
-    expect(finding!.comments.nodes.map((c) => c.body.split("\n")[0])).toEqual(["Falta validar el monto", "[clanker] aplicado en abc1234"]);
-    expect(finding!.isResolved).toBe(true);
-    expect(node.comments.map((c) => c.body.split("\n")[0])).toEqual(["/review", "/review"]);
-  });
-
-  test("sin LGTM tras las rondas externas responde al bot y sigue al CI con una nota", async () => {
-    const { flows, store } = await setup({
-      fixtures: fixtures("base", "reviews-ok", "feedback"),
-      script: { "pr.botReview": ["findings", "findings"] },
-    });
-    saveTemplates(flows);
-
-    const { runId } = await runTechlead(flows, store, { externalRounds: 1 });
-
-    const [feedback] = flows.listRuns().filter((r) => r.parentRunId === runId);
-    const view = flows.getRun(feedback!.id);
-    expect(view).toMatchObject({ status: "done", outcome: "done" });
-    expect(topLevel(view).slice(-3)).toEqual(["triage", "reply", "ci-wait"]);
-    expect(view.steps.filter((s) => s.nodeId === "triage").map((s) => s.outcome)).toEqual(["fix", "fix"]);
-    expect(notes(store, feedback!.id)).toEqual(["Sin LGTM tras las rondas externas"]);
-  });
-
   test("un CI rojo ajeno cierra el feedback con una nota", async () => {
     const { flows, store } = await setup({
       fixtures: fixtures("base", "reviews-ok", "feedback"),

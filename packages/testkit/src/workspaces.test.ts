@@ -428,10 +428,29 @@ describe("held y workspace.release", () => {
 
     const lease = await acquire(id, "cla-1");
 
-    expect(workspaces.held(runA)).toEqual({ path: lease.path, base: "main" });
+    expect(workspaces.held(runA)).toEqual({
+      workspaceId: lease.workspaceId,
+      path: lease.path,
+      branch: "cla-1",
+      fencingToken: lease.fencingToken,
+      base: "main",
+    });
     expect(workspaces.held(runB)).toBeUndefined();
     workspaces.release(lease);
     expect(workspaces.held(runA)).toBeUndefined();
+  });
+
+  test("releaseHeldBy suelta lo que tiene la corrida, deja lo de otra y no hace nada si no tiene nada", async () => {
+    const id = repo("r1");
+    await acquire(id, "cla-1", runA);
+    await acquire(id, "cla-2", runB);
+
+    workspaces.releaseHeldBy(runA);
+    workspaces.releaseHeldBy(runA);
+
+    expect(workspaces.held(runA)).toBeUndefined();
+    expect(workspaces.held(runB)).toMatchObject({ branch: "cla-2" });
+    expect(store.events.since(0, { runId: runA, types: ["lease.released"] })).toHaveLength(1);
   });
 
   test("la acción suelta el lease que acquire devolvió, solo con el id y el token", async () => {

@@ -121,8 +121,14 @@ export interface Workspaces {
   extendLeases(): void;
   /** Suelta el lease y deja el worktree `idle`. No hace nada si el token ya no es el vigente. */
   release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void;
-  /** El worktree que `runId` tiene tomado: dónde corren sus agentes y su base. */
-  held(runId: RunId): { path: string; base: string } | undefined;
+  /** El worktree que `runId` tiene tomado: dónde corren sus agentes, su base y lo que hace falta para operar sobre él. */
+  held(runId: RunId): (WorkspaceRef & { base: string }) | undefined;
+  /**
+   * Suelta los worktrees que `runId` aún tiene tomados: lo que queda al terminar una corrida cuyo flujo
+   * no los soltó (`@done`, `@failed` o cancelada). Sin worktrees tomados no hace nada (la hija de un
+   * subflujo usa el del padre, que es quien lo tiene).
+   */
+  releaseHeldBy(runId: RunId): void;
   /** Lanza `StaleLeaseError` si `lease` ya no es el lease vigente del worktree. */
   validate(lease: WorkspaceRef): void;
   /**
@@ -822,9 +828,23 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     baseSha,
     syncBase,
     release,
+    releaseHeldBy(runId) {
+      const rows = store.db
+        .select({ workspaceId: workspaces.id, fencingToken: workspaces.fencingToken })
+        .from(workspaces)
+        .where(and(eq(workspaces.holderRunId, runId), ne(workspaces.state, "archived")))
+        .all();
+      for (const row of rows) release({ ...row, runId });
+    },
     held: (runId) =>
       store.db
-        .select({ path: workspaces.path, base: workspaces.baseRef })
+        .select({
+          workspaceId: workspaces.id,
+          path: workspaces.path,
+          branch: workspaces.branch,
+          fencingToken: workspaces.fencingToken,
+          base: workspaces.baseRef,
+        })
         .from(workspaces)
         .where(and(eq(workspaces.holderRunId, runId), eq(workspaces.state, "leased")))
         .get(),

@@ -1,0 +1,22 @@
+# El dev implementa dejando el patch en el worktree; el primer check sale rojo.
+match: { mode: implement, round: "*" }
+events:
+  - { at: 0, text: "Implemento createTransfer" }
+  - { at: 2, tool: Write, input: { file_path: src/transfer.ts } }
+  - { at: 5, usage: { model: sonnet, in: 1800, out: 640, cacheWrite: 0, cacheRead: 0, costUsd: 0.082 } }
+effects:
+  - apply: patches/implement.patch
+run:
+  test:
+    - { ok: false, extract: extracts/test-red.txt }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Implementado"
+    payload:
+      files: [src/transfer.ts, src/transfer.test.ts]
+      rejected: []
+      deletedTests: []
+      cuts:
+        - { behavior: "Crear una transfer con el monto validado", paths: [src/transfer.ts, src/transfer.test.ts] }

@@ -84,6 +84,8 @@ export { LinearAuthError } from "./linear/oauth";
 export type { LinearEndpoints } from "./linear/oauth";
 export { startFakeLinear } from "./linear/fake-linear";
 export type { FakeLinear, FakeLinearOptions } from "./linear/fake-linear";
+export type { FakeIssue, FakeProject, FakeTeam, FakeWorkspace } from "./linear/fake-workspace";
+export { createLinearTracker } from "./linear/tracker";
 export { GitHubPatError } from "./github/pat";
 export { PrNotFoundError } from "./github/pr-query";
 export { healthyGitHub, recorded, startFakeGitHub } from "./github/fake-github";

@@ -1,0 +1,21 @@
+# Los tres fix llegan con round 1 (cada edge cuenta aparte): sirven en el orden de su nombre, cada uno con su patch.
+match: { mode: fix, round: 1 }
+times: 1
+events:
+  - { at: 0, text: "Valido que el monto sea positivo" }
+  - { at: 5, usage: { model: sonnet, in: 700, out: 180, cacheWrite: 0, cacheRead: 0, costUsd: 0.024 } }
+effects:
+  - apply: patches/fix-2-review.patch
+run:
+  test:
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Valido que el monto sea positivo"
+    payload:
+      files: [src/transfer.ts]
+      rejected: []
+      deletedTests: []
+      cuts: []

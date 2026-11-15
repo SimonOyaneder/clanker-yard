@@ -49,6 +49,8 @@ const ScriptFile = z.strictObject({
     })
     .default({}),
   speed: z.number().positive().default(1),
+  /** Cuántas veces sirve este guion; después se salta y gana el siguiente que calce (o un guion sin `times`). */
+  times: z.int().positive().optional(),
   events: z.array(ScriptEvent).default([]),
   effects: z.array(z.strictObject({ apply: z.string() })).default([]),
   run: z
@@ -72,6 +74,7 @@ export interface Script {
   /** `"*"` acepta cualquier valor. */
   match: { role: string; mode: string; round: number | "*"; issue: string };
   speed: number;
+  times: number | undefined;
   /** Ordenados por `at`. */
   events: ScriptEvent[];
   /** Rutas absolutas de los patches a aplicar al worktree. */
@@ -118,6 +121,7 @@ function loadScript(file: string): Script {
       issue: match.issue ?? "*",
     },
     speed: parsed.data.speed,
+    times: parsed.data.times,
     events: [...parsed.data.events].sort((a, b) => a.at - b.at),
     patches: parsed.data.effects.map((effect) => existing(file, resolve(dir, effect.apply))),
     run: Object.fromEntries(
@@ -165,13 +169,22 @@ function specificity(script: Script): number {
   return FIELDS.filter((field) => script.match[field] !== "*").length;
 }
 
-/** Gana el guion que fija más campos de `match`; un empate es un error, nunca una elección silenciosa. */
-export function pickScript(scripts: readonly Script[], query: ScriptQuery): Script {
-  const matching = scripts.filter((script) =>
-    FIELDS.every((field) => script.match[field] === "*" || script.match[field] === query[field]),
+/**
+ * Gana el guion que fija más campos de `match`. Entre los igual de específicos, primero los que tienen
+ * `times` y aún les quedan usos (en orden de nombre de archivo): así una serie de respuestas distintas a
+ * la misma pregunta (la ronda 1 de un fix que llega tres veces) se escribe como guiones con `times: 1`.
+ * Dos guiones sin `times` igual de específicos son un error, nunca una elección silenciosa.
+ */
+export function pickScript(scripts: readonly Script[], query: ScriptQuery, used: ReadonlyMap<Script, number> = new Map()): Script {
+  const matching = scripts.filter(
+    (script) =>
+      FIELDS.every((field) => script.match[field] === "*" || script.match[field] === query[field]) &&
+      (script.times === undefined || (used.get(script) ?? 0) < script.times),
   );
   const best = Math.max(0, ...matching.map(specificity));
   const winners = matching.filter((script) => specificity(script) === best);
+  const limited = winners.find((script) => script.times !== undefined);
+  if (limited) return limited;
   const [winner, second] = winners;
   if (!winner) {
     const forRole = scripts.filter((s) => s.match.role === query.role || s.match.role === "*");

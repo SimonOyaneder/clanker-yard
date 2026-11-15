@@ -23,12 +23,16 @@ const PushFixupsArgs = z.object({
    */
   items: z
     .array(z.object({ id: z.string(), path: z.string().optional(), line: z.int().positive().optional() }))
-    .default([]),
+    .nullish()
+    .transform((items) => items ?? []),
   /**
    * El reporte del committer en modo route (`CommitRoute`): los commits nuevos de los hunks que devolvió
    * esta acción en `unrouted`, que se numeran igual mientras el worktree no cambie. De él solo lee `commits[{ message, hunks }]`.
    */
-  route: z.object({ commits: z.array(z.object({ message: z.string(), hunks: z.array(z.string()) })) }).optional(),
+  route: z
+    .object({ commits: z.array(z.object({ message: z.string(), hunks: z.array(z.string()) })) })
+    .nullish()
+    .transform((route) => route ?? undefined),
   /** Regex que debe cumplir la primera línea del mensaje de cada commit nuevo. Por defecto, Conventional Commits. */
   messagePattern: ApplyArgs.shape.messagePattern,
 });

@@ -1,0 +1,13 @@
+# El id del hallazgo es el del thread del bot: sale del brief.
+match: { mode: bot, round: "*" }
+events:
+  - { at: 0, text: "Valido el hallazgo contra el código" }
+  - { at: 5, usage: { model: sonnet, in: 800, out: 140, cacheWrite: 0, cacheRead: 0, costUsd: 0.022 } }
+result:
+  status: success
+  structured:
+    outcome: fix
+    summary: "El hallazgo del bot es válido"
+    payload:
+      items:
+        - { id: "$brief.payload.items.0.id", verdict: valid, fix: "Incluir el monto en el mensaje del error" }

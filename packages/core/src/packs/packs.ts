@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { NodeId, Pack, PackSettings, type DefKind, type PackScope, type ResolvedPack } from "@clanker/api";
 import * as z from "zod";
@@ -29,6 +29,11 @@ export interface Packs {
    * y esta ya no, se archiva. Cargar dos veces el mismo contenido no crea versiones.
    */
   load(dir: string): Promise<{ id: string; version: number; changed: boolean }>;
+  /**
+   * `load` de cada subcarpeta de `root` (la carpeta de packs instalados; que no exista es no tener packs).
+   * Un pack roto no impide cargar los demás: sale en `errors` con su carpeta.
+   */
+  loadAll(root: string): Promise<{ errors: PackLoadError[] }>;
   /**
    * El pack que se activa para este repo o proyecto (por org de GitHub, workspace del tracker o proyecto), o
    * los defaults neutros si ninguno cubre el alcance. Si dos packs lo cubren gana el de menor id.
@@ -101,7 +106,7 @@ export function createPacks({ defs }: { defs: Defs }): Packs {
     return out;
   }
 
-  return {
+  const self: Packs = {
     async load(dir) {
       const manifest = await readJson(dir, "pack.json");
       const parsed = Pack.safeParse(manifest);
@@ -146,6 +151,23 @@ export function createPacks({ defs }: { defs: Defs }): Packs {
       return { id: pack.id, version: pack.version, changed: changed || saved.changed };
     },
 
+    async loadAll(root) {
+      const entries = await readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+      });
+      const errors: PackLoadError[] = [];
+      for (const entry of entries.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+        try {
+          await self.load(join(root, entry.name));
+        } catch (error) {
+          if (!(error instanceof PackLoadError)) throw error;
+          errors.push(error);
+        }
+      }
+      return { errors };
+    },
+
     packFor(scope) {
       for (const def of defs.list("pack")) {
         const pack = Pack.parse(def.body);
@@ -154,6 +176,7 @@ export function createPacks({ defs }: { defs: Defs }): Packs {
       return { id: null, ...PackSettings.parse({}) };
     },
   };
+  return self;
 }
 
 function covers(activate: Pack["activate"], scope: PackScope): boolean {

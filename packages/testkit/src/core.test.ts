@@ -1,4 +1,4 @@
-import { renameSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -242,13 +242,19 @@ describe("runs.start con los repos del proyecto", () => {
 });
 
 describe("arranque", () => {
-  test("la plantilla juguete queda instalada como builtin y arrancar de nuevo no suma versiones", async () => {
+  test("las plantillas juguete y techlead-clasico quedan instaladas como builtin y arrancar de nuevo no suma versiones", async () => {
     await boot();
+    const versions = store.events.since(0, { types: ["def.versioned"] }).length;
     await core?.close();
     core = undefined;
     await boot();
 
-    expect(store.events.since(0, { types: ["def.versioned"] })).toHaveLength(3);
+    expect(store.events.since(0, { types: ["def.versioned"] })).toHaveLength(versions);
+    expect(store.db.$client.prepare("SELECT slug FROM defs WHERE kind = 'flow' AND scope = 'builtin' ORDER BY slug").all()).toEqual([
+      { slug: "juguete" },
+      { slug: "pr-feedback" },
+      { slug: "techlead-clasico" },
+    ]);
   });
 
   test("al arrancar despacha los pasos pending que dejó el core anterior", async () => {
@@ -271,6 +277,20 @@ describe("arranque", () => {
     const nextFinished = await follow(client, project.id, ["run.finished"]);
 
     expect(await nextFinished()).toMatchObject({ runId: id, payload: { outcome: "done" } });
+  });
+
+  test("carga los packs de <dataDir>/packs y un pack roto deja un evento error sin impedir el arranque", async () => {
+    mkdirSync(join(home.path, "packs", "bueno"), { recursive: true });
+    writeFileSync(join(home.path, "packs", "bueno", "pack.json"), JSON.stringify({ id: "bueno", version: 1, activate: { githubOrgs: ["acme"] } }));
+    mkdirSync(join(home.path, "packs", "roto"), { recursive: true });
+    writeFileSync(join(home.path, "packs", "roto", "pack.json"), "{ no es json");
+
+    await boot();
+
+    expect(store.db.$client.prepare("SELECT slug FROM defs WHERE kind = 'pack'").all()).toEqual([{ slug: "bueno" }]);
+    expect(store.events.since(0, { types: ["error"] })).toMatchObject([
+      { origin: "core", payload: { scope: "packs.load", message: expect.stringContaining("roto") } },
+    ]);
   });
 
   test("CORE_RUNTIME que no está registrado hace fallar el arranque diciendo cuáles hay", async () => {

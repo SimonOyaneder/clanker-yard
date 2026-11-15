@@ -4,7 +4,7 @@ import type { ArtifactKind, Brief, IssueDetail, IssueRef, Report } from "@clanke
 import type { Artifacts } from "../artifacts/artifacts";
 import { git } from "../git/git";
 import { diffBetween, listHunks, snapshotTree } from "../git/tree";
-import type { WorkspaceLease, Workspaces } from "../workspaces/workspaces";
+import type { WorkspaceLease, WorkspaceRef, Workspaces } from "../workspaces/workspaces";
 
 /** Carpeta de los artefactos dentro del worktree; el brief los cita con rutas relativas a él. */
 export const RUN_DIR = ".clanker-run";
@@ -21,7 +21,8 @@ export interface PreviousReport {
 }
 
 export interface BriefRequest {
-  lease: WorkspaceLease;
+  /** El worktree tomado: un `WorkspaceLease` o lo que `workspaces.held` devuelve (con `baseRef` en vez de `base`). */
+  lease: WorkspaceRef & Pick<WorkspaceLease, "baseRef">;
   run: Brief["run"];
   mode: string;
   /** Tal como la devuelve `Tracker.getIssue`. Sin issue (un PR sin issue) no hay `issue.md`. */

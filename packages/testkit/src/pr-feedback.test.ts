@@ -170,6 +170,15 @@ describe("review.requestBot", () => {
 });
 
 describe("pr.reply", () => {
+  test("sin triage (el flujo llegó tras un CI rojo, sin el del bot) no responde a nadie y vuelve a pedir el bot", async () => {
+    const { sim, ref, reply } = await setup();
+
+    const result = await reply.run(reply.args.parse({ pr: ref, triage: null, rerequestBot: true }), ctx("run_1:reply-fixed:1"));
+
+    expect(result.output).toMatchObject({ replied: [], resolved: [], skipped: [], requestedAt: expect.any(Number) });
+    expect(sim.pr(1).node().comments.map((c) => c.body.split("\n")[0])).toEqual(["/review"]);
+  });
+
   test("responde con el sha del fixup o con la razón, resuelve los threads del bot y vuelve a pedir el bot", async () => {
     const { sim, pr, ref, reply } = await setup();
     const [fixed, rejected] = pr.botFindings(["Falta validar el monto", "Renombra esto"]);

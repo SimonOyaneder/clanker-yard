@@ -137,6 +137,12 @@ export interface GitHubSim {
   pulls(): SimPull[];
   /** Abre un PR de una branch del bare sin pasar por la API (como si otro lo hubiera abierto). */
   openPr(input: { head: string; base?: string; title?: string; body?: string; draft?: boolean; author?: Who }): SimPr;
+  /**
+   * `listener` se llama, antes de contestar, con cada comentario de la conversación de un PR que llega por
+   * la REST API (el de quien llama, no los que arma el guion). Sirve para que el bot responda cuando le
+   * piden review (`pr.botFindings`, `pr.botLgtm`), como el real. Devuelve cómo dejar de escuchar.
+   */
+  onComment(listener: (pr: SimPr, body: string) => void): () => void;
   /** Fija la cuota de un recurso; con `remaining: 0` GitHub corta con el error de cuota primaria. */
   setQuota(resource: QuotaResource, quota: { remaining: number; resetAt?: number }): void;
   /** Desde ahora, todo responde 401 `Bad credentials`. */
@@ -236,6 +242,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   const prs: PrData[] = [];
   /** Los checks que exige la branch protection (los que un helper marcó `required`): valen para todo commit. */
   const requiredChecks = new Set<string>();
+  const commentListeners = new Set<(pr: SimPr, body: string) => void>();
   const quotas: Record<QuotaResource, { remaining: number; reset: number }> = {
     core: { remaining: QUOTA_LIMIT, reset: QUOTA_RESET },
     graphql: { remaining: QUOTA_LIMIT, reset: QUOTA_RESET },
@@ -615,6 +622,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         const comment = newComment(viewer, text);
         found.issueComments.push(comment);
         found.updatedAt = comment.createdAt;
+        for (const listener of commentListeners) listener(handle(found), text);
         return json(201, commentJson(comment, found));
       },
     ],
@@ -835,6 +843,10 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     pulls: () => prs.map(pullJson),
     openPr({ head, base = defaultBranch, title = head, body = null, draft = false, author = viewer }) {
       return handle(createPr({ head, base, title, body, draft, author: actor(author) }));
+    },
+    onComment(listener) {
+      commentListeners.add(listener);
+      return () => commentListeners.delete(listener);
     },
     setQuota(resource, { remaining, resetAt }) {
       quotas[resource] = { remaining, reset: resetAt === undefined ? quotas[resource].reset : Math.floor(resetAt / 1000) };

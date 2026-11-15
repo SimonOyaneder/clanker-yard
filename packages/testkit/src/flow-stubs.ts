@@ -1,10 +1,10 @@
 import type { Flows } from "@clanker/core";
 import { z } from "zod";
 
-// Las acciones y waits que usan las plantillas de flujo (`techlead-clasico`, `pr-feedback`) y todavía no
-// tienen implementación, con los outcomes del diseño (`docs/design.html#d-flows`): sirven para validar un
-// flujo y recorrerlo con el runtime fake sin depender de Workspaces ni de CodeHost. Las que ya existen
-// (`pr.reply`, `review.requestBot`) las registra el test con su acción real.
+// Las acciones y waits de las plantillas de flujo (`techlead-clasico`, `pr-feedback`) con los outcomes del
+// diseño (`docs/design.html#d-flows`): sirven para validar un flujo y recorrerlo con el runtime fake
+// guionando lo que la implementación real no produce a pedido (un check rojo, un conflicto con la base). Las
+// demás las registra el test con su acción real (`pr.reply`, `review.requestBot`, `pr.pushFixups`...).
 
 type StubSpec = {
   outcomes: string[];
@@ -34,12 +34,6 @@ const SPECS: Record<string, StubSpec> = {
     outputs: { ok: { specsChanged: true }, fail: { failures: "1 test rojo" } },
   },
   "pr.publish": { kind: "action", outcomes: ["ok", "replan"], effects: "remote", outputs: { ok: { pr: prRef } } },
-  "pr.pushFixups": {
-    kind: "action",
-    outcomes: ["ok", "route"],
-    effects: "remote",
-    outputs: { ok: { byItem: { b1: "abc1234" } }, route: { unrouted: [] } },
-  },
   "pr.botReview": {
     kind: "wait",
     outcomes: ["lgtm", "findings"],

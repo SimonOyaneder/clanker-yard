@@ -25,3 +25,5 @@ export type {
   ThreadRef,
   Who,
 } from "./github-sim";
+export { startTechleadScenario, writeTechleadFixture } from "./techlead-scenario";
+export type { BotTurn, RunDetail, TechleadScenario, TechleadScenarioOptions } from "./techlead-scenario";

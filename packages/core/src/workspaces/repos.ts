@@ -35,7 +35,12 @@ export interface Repos {
   config(id: string): RepoConfig;
 }
 
-export function createRepos(store: Store): Repos {
+export interface ReposOptions {
+  /** `RepoConfig.remote` de un repo por su `owner/name` de GitHub (`githubRemote`); sin esto ningún repo se puede pushear. */
+  remote?: (repo: string) => RepoConfig["remote"];
+}
+
+export function createRepos(store: Store, { remote: remoteOf }: ReposOptions = {}): Repos {
   const byPath = (path: string) => store.db.select().from(repos).where(eq(repos.path, path)).get();
 
   const self: Repos = {
@@ -65,7 +70,7 @@ export function createRepos(store: Store): Repos {
     config(id) {
       const row = self.get(id);
       if (!row) throw new RepoNotFoundError(id);
-      return { path: row.path, defaultBranch: row.defaultBranch };
+      return { path: row.path, defaultBranch: row.defaultBranch, remote: row.remote ? remoteOf?.(row.remote) : undefined };
     },
   };
   return self;

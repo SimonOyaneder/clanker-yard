@@ -1,0 +1,4 @@
+FAIL src/transfer.test.ts
+  createTransfer(100) devuelve el monto sin redondear
+
+Tests: 1 failed, 1 total

@@ -261,6 +261,23 @@ describe("REST: comentarios y threads", () => {
     expect((await api("POST", `/repos/${REPO}/issues/7/comments`, { body: "x" })).status).toBe(404);
   });
 
+  test("onComment deja que el bot conteste el comentario que le pide review, y no oye los del guion", async () => {
+    sim.openPr({ head: BRANCH });
+    const heard: string[] = [];
+    const off = sim.onComment((pr, body) => {
+      heard.push(body);
+      if (body === "/review") pr.botLgtm();
+    });
+    sim.pr(1).comment("ana", "hola");
+
+    await api("POST", `/repos/${REPO}/issues/1/comments`, { body: "/review" });
+    off();
+    await api("POST", `/repos/${REPO}/issues/1/comments`, { body: "/review" });
+
+    expect(heard).toEqual(["/review"]);
+    expect(sim.pr(1).node().reviews.map((r) => [r.author?.login, r.state])).toEqual([["review-bot[bot]", "APPROVED"]]);
+  });
+
   test("la respuesta REST a un comentario de review entra al thread, con la cuenta como autora", async () => {
     sim.openPr({ head: BRANCH });
     const thread = sim.pr(1).councilThread("renombrar esto");

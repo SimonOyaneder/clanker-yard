@@ -1,0 +1,15 @@
+# La primera pasada del review de bugs pide validar el monto; después da ok.
+match: { mode: review, round: "*" }
+times: 1
+events:
+  - { at: 0, text: "Reviso diff.patch" }
+  - { at: 5, usage: { model: sonnet, in: 1500, out: 260, cacheWrite: 0, cacheRead: 0, costUsd: 0.052 } }
+result:
+  status: success
+  structured:
+    outcome: changes
+    summary: "1 amarillo"
+    payload:
+      findings:
+        - { id: f1, severity: yellow, path: src/transfer.ts, line: 2, claim: "Un monto negativo crea una transfer", fix: "Rechazar montos menores o iguales a 0" }
+      previous: []

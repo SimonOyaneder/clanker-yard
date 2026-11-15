@@ -1,0 +1,10 @@
+match: { mode: review, round: "*" }
+events:
+  - { at: 0, text: "Reviso diff.patch" }
+  - { at: 5, usage: { model: sonnet, in: 1400, out: 120, cacheWrite: 0, cacheRead: 0, costUsd: 0.019 } }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Sin hallazgos"
+    payload: { findings: [], previous: [] }

@@ -177,6 +177,16 @@ function durableCtx(crashAfter?: string) {
 const fixed = () => file(lines(30)).replace("l2\n", "top fixed\nextra\n").replace("l28\n", "bottom fixed\n");
 
 describe("pr.pushFixups", () => {
+  test("items y route en null (el motor deja null el ref de un nodo que todavía no corrió) son ninguno", () => {
+    const ws = { workspaceId: "wsp_1", path: "/w", branch: "b", baseSha: "0".repeat(40), fencingToken: 1 };
+
+    for (const given of [{ items: null, route: null }, {}]) {
+      const args = pushFixups.args.parse({ ws, ...given });
+      expect(args.items).toEqual([]);
+      expect(args.route).toBeUndefined();
+    }
+  });
+
   test("un hunk sobre líneas de un commit va a su fixup y, tras el autosquash, queda dentro de ese commit", async () => {
     const [top, bottom] = [shaOf("feat: top"), shaOf("feat: bottom")];
     write("c.txt", fixed());

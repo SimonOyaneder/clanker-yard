@@ -1,0 +1,10 @@
+diff --git a/src/transfer.ts b/src/transfer.ts
+index 273edc8..63146fb 100644
+--- a/src/transfer.ts
++++ b/src/transfer.ts
+@@ -1,4 +1,4 @@
+ export function createTransfer(amount: number) {
+-  if (amount <= 0) throw new RangeError("amount must be positive");
++  if (amount <= 0) throw new RangeError(`amount must be positive, got ${amount}`);
+   return { amount: Math.round(amount), status: "created" };
+ }

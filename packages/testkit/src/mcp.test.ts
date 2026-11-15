@@ -82,11 +82,14 @@ describe("tools", () => {
   test("list y get de los kinds de defs: los builtin del core", async () => {
     const flows = (await call("list", { kind: "flow" })) as { id: string; slug: string; scope: string; body: { id: string } }[];
 
-    expect(flows).toMatchObject([{ slug: "juguete", scope: "builtin", body: { id: "juguete" } }]);
-    expect(await call("get", { kind: "flow", id: flows[0]!.id })).toEqual(flows[0]);
-    expect(await call("get", { kind: "flow", id: flows[0]!.id, version: 1 })).toMatchObject({ version: 1 });
-    expect(await call("list", { kind: "role" })).toMatchObject([{ slug: "juguete" }]);
-    expect(await call("list", { kind: "profile" })).toMatchObject([{ slug: "juguete" }]);
+    const juguete = flows.find((f) => f.slug === "juguete");
+
+    expect(flows.map((f) => f.slug)).toEqual(expect.arrayContaining(["juguete", "techlead-clasico", "pr-feedback"]));
+    expect(juguete).toMatchObject({ scope: "builtin", body: { id: "juguete" } });
+    expect(await call("get", { kind: "flow", id: juguete!.id })).toEqual(juguete);
+    expect(await call("get", { kind: "flow", id: juguete!.id, version: 1 })).toMatchObject({ version: 1 });
+    expect(await call("list", { kind: "role" })).toEqual(expect.arrayContaining([expect.objectContaining({ slug: "juguete" })]));
+    expect(await call("list", { kind: "profile" })).toEqual(expect.arrayContaining([expect.objectContaining({ slug: "juguete" })]));
     expect(await call("list", { kind: "recipe" })).toEqual([]);
   });
 
@@ -120,7 +123,7 @@ describe("resources", () => {
 
   test("la definición de un flujo se lista y se lee", async () => {
     const { resources } = await mcp.listResources();
-    const flow = resources.find((r) => r.uri.startsWith("clanker://flow/"));
+    const flow = resources.find((r) => r.uri.startsWith("clanker://flow/") && r.name === "juguete");
 
     expect(flow).toMatchObject({ name: "juguete" });
     expect(await read(flow!.uri)).toMatchObject({ slug: "juguete", kind: "flow", body: { id: "juguete", start: "acquire" } });

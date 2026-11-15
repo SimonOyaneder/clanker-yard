@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Recipe, renderTemplate, templateVariables, type TemplateVars } from "@clanker/api";
-import { desc, eq } from "drizzle-orm";
+import { Recipe, renderTemplate, templateVariables, type RunId, type TemplateVars } from "@clanker/api";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Defs } from "../defs/defs";
@@ -124,14 +124,22 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
     return [...new Set([...tracked.split("\n"), ...untracked.split("\n")].filter(Boolean))].sort();
   }
 
-  /** La sesión del agente que terminó antes de este paso: el guion `fake` pone ahí los resultados de la receta. */
+  /**
+   * La sesión de agente que terminó más recientemente en la corrida o en sus padres (un subflujo retoma la
+   * sesión del dev de la corrida que lo llamó): el guion `fake` pone ahí los resultados de la receta.
+   */
   function scriptedSession(ctx: ActionCtx): string {
+    const lineage: RunId[] = [];
+    for (let id: RunId | null = ctx.runId; id !== null; ) {
+      lineage.push(id);
+      id = store.db.select({ parent: runs.parentRunId }).from(runs).where(eq(runs.id, id)).get()?.parent ?? null;
+    }
     const session = store.db
       .select({ ref: agentSessions.sessionRef })
       .from(agentSessions)
       .innerJoin(stepRuns, eq(agentSessions.stepRunId, stepRuns.id))
-      .where(eq(stepRuns.runId, ctx.runId))
-      .orderBy(desc(agentSessions.startedAt), desc(agentSessions.id))
+      .where(inArray(stepRuns.runId, lineage))
+      .orderBy(desc(sql`coalesce(${agentSessions.endedAt}, ${agentSessions.startedAt})`), desc(agentSessions.id))
       .limit(1)
       .get();
     if (!session) {

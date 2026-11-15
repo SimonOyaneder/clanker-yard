@@ -13,7 +13,7 @@ import {
   type Usage,
 } from "@clanker/core";
 import * as z from "zod";
-import { loadScripts, pickScript, type RecipeResult, type Script } from "./fake-script";
+import { loadScripts, pickScript, type RecipeResult, type Script, type ScriptResult } from "./fake-script";
 
 const git = promisify(execFile);
 
@@ -58,6 +58,7 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
   const scripts = loadScripts(dirs);
   const sleep = options.sleep ?? sleepUnlessAborted;
   const sessions = new Map<string, Session>();
+  const used = new Map<Script, number>();
   let started = 0;
 
   async function serve(
@@ -77,8 +78,10 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
       mode: brief.mode,
       round: brief.run.round,
       issue: brief.issue?.key,
-    });
-    checkReport(script, outputSchema);
+    }, used);
+    used.set(script, (used.get(script) ?? 0) + 1);
+    const result = fillFromBrief(script, brief);
+    checkReport(script, result, outputSchema);
 
     for (const [command, results] of Object.entries(script.run)) {
       session.recipe.set(command, [...(session.recipe.get(command) ?? []), ...results]);
@@ -88,19 +91,20 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
     const abort = new AbortController();
     const speed = options.speed ?? script.speed;
     const record = options.transcripts ? transcriptWriter(options.transcripts, sessionId) : undefined;
-    const result = play(script, session.cwd, speed, events.push, abort.signal, record).finally(events.close);
+    const played = play(script, result, session.cwd, speed, events.push, abort.signal, record).finally(events.close);
     // Quien solo itera los eventos todavía no pidió `result`: un crash no debe tumbar el proceso antes.
-    result.catch(() => {});
+    played.catch(() => {});
     return {
       ref: { runtime: "fake", sessionId, cwd: session.cwd },
       events,
       interrupt: async () => abort.abort(),
-      result,
+      result: played,
     };
   }
 
   async function play(
     script: Script,
+    result: ScriptResult,
     cwd: string,
     speed: number,
     emit: (event: AgentEvent) => void,
@@ -150,7 +154,6 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
       }
     }
 
-    const { result } = script;
     if (result.status === "crash") {
       await waitUntil(result.at);
       throw new Error(`El guion ${script.file} simula una caída a los ${result.at} ms.`);
@@ -228,10 +231,33 @@ function briefOf(message: string): Brief | undefined {
   }
 }
 
+/**
+ * El resultado del guion con cada string `$brief.<ruta>` reemplazado por lo que el brief trae en esa ruta
+ * (`$brief.payload.items.0.id`): el guion puede citar ids que solo existen en la corrida, como el de un
+ * thread del PR que el triage recibe. Una ruta que el brief no tiene es un error del fixture.
+ */
+function fillFromBrief(script: Script, brief: Brief): ScriptResult {
+  const { result } = script;
+  if (result.status !== "success" || result.structured === undefined) return result;
+  const fill = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      const path = /^\$brief\.(.+)$/.exec(value)?.[1];
+      if (path === undefined) return value;
+      const found = path.split(".").reduce<unknown>((node, key) => (node as Record<string, unknown> | undefined)?.[key], brief);
+      if (found === undefined) throw new Error(`El guion ${script.file} cita $brief.${path} y el brief no lo tiene.`);
+      return found;
+    }
+    if (Array.isArray(value)) return value.map(fill);
+    if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, fill(item)]));
+    return value;
+  };
+  return { ...result, structured: fill(result.structured) };
+}
+
 /** El reporte guionado tiene que cumplir el mismo esquema que exigiría el modo a un agente real. */
-function checkReport(script: Script, outputSchema: JsonSchema): void {
-  if (script.result.status !== "success") return;
-  const parsed = compileJsonSchema(outputSchema).safeParse(script.result.structured);
+function checkReport(script: Script, result: ScriptResult, outputSchema: JsonSchema): void {
+  if (result.status !== "success") return;
+  const parsed = compileJsonSchema(outputSchema).safeParse(result.structured);
   if (!parsed.success) {
     throw new Error(
       `El guion ${script.file} entrega un reporte que no cumple el esquema del modo:\n${z.prettifyError(parsed.error)}`,
