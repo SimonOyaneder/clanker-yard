@@ -357,6 +357,18 @@ describe("REST: checks", () => {
     expect((await prState(1)).ci).toMatchObject({ state: "pending" });
   });
 
+  test("un check requerido que todavía no corre en el head deja el PR BLOCKED, como la branch protection", async () => {
+    const pr = sim.openPr({ head: BRANCH });
+    pr.ci("green");
+    expect(pr.node().mergeStateStatus).toBe("CLEAN");
+
+    pushCommit(BRANCH, "fixup! feat: change");
+
+    expect(pr.node()).toMatchObject({ mergeStateStatus: "BLOCKED", head: { contexts: [] } });
+    pr.check("ci", "success");
+    expect(pr.node()).toMatchObject({ mergeStateStatus: "CLEAN", head: { contexts: [{ name: "ci", isRequired: true }] } });
+  });
+
   test("un ref que no existe es 422", async () => {
     const reply = await api("GET", `/repos/${REPO}/commits/nope/check-runs`);
 

@@ -234,6 +234,8 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   const bare = origin.remoteDir;
 
   const prs: PrData[] = [];
+  /** Los checks que exige la branch protection (los que un helper marcó `required`): valen para todo commit. */
+  const requiredChecks = new Set<string>();
   const quotas: Record<QuotaResource, { remaining: number; reset: number }> = {
     core: { remaining: QUOTA_LIMIT, reset: QUOTA_RESET },
     graphql: { remaining: QUOTA_LIMIT, reset: QUOTA_RESET },
@@ -298,7 +300,9 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     const mergeable = dirty ? "CONFLICTING" : "MERGEABLE";
     if (pr.draft) return { mergeable, mergeStateStatus: "DRAFT" };
     if (dirty) return { mergeable, mergeStateStatus: "DIRTY" };
-    if (contexts.some((c) => c.isRequired && !passing(c))) return { mergeable, mergeStateStatus: "BLOCKED" };
+    const name = (c: RawContext) => (c.__typename === "CheckRun" ? c.name : c.context);
+    const missing = [...requiredChecks].some((required) => !contexts.some((c) => name(c) === required));
+    if (missing || contexts.some((c) => c.isRequired && !passing(c))) return { mergeable, mergeStateStatus: "BLOCKED" };
     if (contexts.some((c) => !passing(c))) return { mergeable, mergeStateStatus: "UNSTABLE" };
     return { mergeable, mergeStateStatus: "CLEAN" };
   }
@@ -465,7 +469,8 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       if (!thread) throw new Error(`El PR #${pr.number} no tiene el thread ${threadId}.`);
       return thread;
     };
-    const check: SimPr["check"] = (checkName, outcome, { required = false, sha = headSha(pr) } = {}) => {
+    const check: SimPr["check"] = (checkName, outcome, { required = requiredChecks.has(checkName), sha = headSha(pr) } = {}) => {
+      if (required) requiredChecks.add(checkName);
       setContext(pr, sha, {
         __typename: "CheckRun",
         name: checkName,
@@ -498,7 +503,8 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       },
       comment: (by, body) => void pr.issueComments.push(newComment(by, body)),
       check,
-      status(context, state, { required = false, sha = headSha(pr) } = {}) {
+      status(context, state, { required = requiredChecks.has(context), sha = headSha(pr) } = {}) {
+        if (required) requiredChecks.add(context);
         setContext(pr, sha, { __typename: "StatusContext", context, state, isRequired: required });
       },
       ci(outcome, { name: checkName = "ci" } = {}) {
