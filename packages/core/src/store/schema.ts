@@ -787,6 +787,24 @@ export const pullRequests = sqliteTable(
 );
 
 /**
+ * De qué PRs cuelga un PR del sistema: su base es la branch de cada padre (`docs/design.html#d-ops`,
+ * restack). `pr.publish` la escribe al abrir un PR sobre la branch de otro PR abierto; `stack.restack`
+ * borra la fila cuando el padre se mergeó y el hijo ya quedó sobre la base nueva.
+ */
+export const prParents = sqliteTable(
+  "pr_parents",
+  {
+    childId: text("child_id")
+      .notNull()
+      .references(() => pullRequests.id),
+    parentId: text("parent_id")
+      .notNull()
+      .references(() => pullRequests.id),
+  },
+  (t) => [primaryKey({ columns: [t.childId, t.parentId] }), index("pr_parents_parent").on(t.parentId)],
+);
+
+/**
  * Lo que una corrida cerrada dejó, calculado al cerrarla (`recordRunMetrics`); de aquí salen todas
  * las métricas. `result` es el outcome de la corrida o `canceled`. Sin columnas de un rol: las rondas
  * de review, bot y CI salen de `rounds` (contador → vueltas) y `outcomes` (nodo → outcome → pasos).

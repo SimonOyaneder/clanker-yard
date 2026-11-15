@@ -1,6 +1,6 @@
 import type { PrRef } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import * as z from "zod";
 import { ApplyArgs, cleanMessage, commitsApplyAction } from "../commits/apply";
 import { preparePush } from "../commits/prepare-push";
@@ -10,7 +10,7 @@ import { claimPr } from "../flows/subjects";
 import type { Packs } from "../packs/packs";
 import type { Recipes } from "../recipe/recipe";
 import { newId } from "../store/conventions";
-import { pullRequests, runs, workspaces as workspaceRows } from "../store/schema";
+import { prParents, pullRequests, runs, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
 import type { RepoConfig, Workspaces } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
@@ -144,7 +144,7 @@ async function openPull(
 }
 
 /**
- * Guarda el PR y emite `pr.opened` en la misma tx. Si la fila ya estaba (un reintento tras un corte
+ * Guarda el PR (y de qué PR abierto cuelga, `pr_parents`) y emite `pr.opened` en la misma tx. Si la fila ya estaba (un reintento tras un corte
  * después de guardarla) no hace nada: ni la pisa ni repite el evento.
  */
 function recordPull(
@@ -177,6 +177,13 @@ function recordPull(
     if (!saved) return;
     // La corrida de la issue también es la dueña del PR: un council o un rebase sobre él espera a que ella termine o se estacione.
     claimPr(tx, ctx.runId, saved.id);
+    // Su base es la branch de otro PR abierto del repo: cuelga de él hasta que se mergee (`stack.restack`).
+    const parent = db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.headRef, baseRef), eq(pullRequests.state, "open")))
+      .get();
+    if (parent) db.insert(prParents).values({ childId: saved.id, parentId: parent.id }).run();
     emit({
       type: "pr.opened",
       origin: "core",

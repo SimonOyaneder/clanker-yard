@@ -121,8 +121,11 @@ export interface SimPr {
   ci(outcome: "green" | "red" | "pending", opts?: { name?: string }): void;
   requestReview(login: string): void;
   setDraft(draft: boolean): void;
-  /** Mergea el PR: queda cerrado y mergeado, con el head de hoy como commit del merge. */
-  merge(): void;
+  /**
+   * Mergea el PR: queda cerrado y mergeado. El commit del merge es `sha` (un squash que otro dejó en la
+   * base del bare) o, sin él, el head de hoy.
+   */
+  merge(opts?: { sha?: string }): void;
 }
 
 export interface GitHubSim {
@@ -522,10 +525,10 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       setDraft(draft) {
         pr.draft = draft;
       },
-      merge() {
+      merge({ sha } = {}) {
         pr.state = "closed";
         pr.closedAt = pr.merged?.at ?? tick();
-        pr.merged ??= { at: pr.closedAt, sha: headSha(pr) };
+        pr.merged ??= { at: pr.closedAt, sha: sha ?? headSha(pr) };
       },
     };
   }

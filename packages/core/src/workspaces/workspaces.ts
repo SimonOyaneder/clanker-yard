@@ -10,6 +10,7 @@ import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { diffBetween, snapshotTree } from "../git/tree";
 import { defaultLogDir, excerpt, execLogged, stepLogPath, type ExecResult } from "./exec";
 import { continueRebase, rebaseInProgress, rebaseOnto, startRebase, type RebaseStep } from "./rebase";
+import { planRestack } from "./restack";
 import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
 import { runs, workspaces } from "../store/schema";
@@ -191,6 +192,16 @@ export interface Workspaces {
    * conflicto: `--abort` y la branch queda igual). Con `continue` sigue un rebase detenido, ver `continueRebase`.
    */
   rebase(lease: WorkspaceRef, opts: RebaseOptions): Promise<RebaseResult>;
+  /**
+   * Restack de un PR (`docs/design.html#d-ops`, restack): sus commits propios (los de `from..HEAD` por
+   * el primer padre, sin los merges de la base) se vuelven a aplicar uno a uno sobre `onto` con el mismo
+   * patch-id, y el resultado se pushea con lease antes de mover la branch local: un conflicto, un lease
+   * rechazado o un corte antes del push dejan la branch y el remoto como estaban. Con la branch ya sobre
+   * `onto` y sin `from` en su historia no hay nada que hacer (`uptodate`). Precondiciones, o lanza
+   * `RebaseError`: sin council, `HEAD` es el `remote_sha`, árbol limpio, sin un rebase en curso y `onto` y
+   * `from` existen. Guarda `base` como `baseRef` y `onto` como `baseSha`.
+   */
+  restack(lease: WorkspaceRef, opts: RestackOptions): Promise<RestackResult>;
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
   git(lease: WorkspaceRef, ...args: string[]): Promise<string>;
   /**
@@ -235,6 +246,25 @@ export type RebaseResult =
   | { outcome: "clean"; baseSha: string; head: string }
   | { outcome: "conflict"; applying?: string; conflicts: string[]; failures: string }
   | { outcome: "error"; failures: string };
+
+export interface RestackOptions {
+  /** El PR tuvo threads `[clanker-council]`: nunca se fuerza. */
+  council: boolean;
+  /** La punta de la base nueva. */
+  onto: string;
+  /** La última punta de la base vieja: lo que el PR trae de ella no es suyo. */
+  from: string;
+  /** El nombre de la base nueva, que pasa a ser la del worktree. */
+  base: string;
+}
+
+export type RestackResult =
+  | { outcome: "restacked"; previousHead: string; head: string; commits: number }
+  | { outcome: "uptodate" }
+  | { outcome: "conflict"; applying: string; conflicts: string[]; failures: string }
+  | { outcome: "foreign-merge"; merge: string; failures: string }
+  | { outcome: "empty" }
+  | { outcome: Exclude<PushOutcome, "ok"> };
 
 export type SyncBaseResult =
   | { outcome: "same"; baseSha: string }
@@ -639,7 +669,6 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   async function push(lease: WorkspaceRef, { council = false } = {}): Promise<PushOutcome> {
     validate(lease);
     const row = store.db.select().from(workspaces).where(eq(workspaces.id, lease.workspaceId)).get()!;
-    const { remote, url, account } = remoteOf(row.repoId);
     const sha = await git(lease.path, ["rev-parse", "HEAD"]);
     if (council && row.remoteSha && !(await isAncestor(lease.path, row.remoteSha, sha))) {
       throw new Error(
@@ -647,6 +676,17 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
           `(${row.remoteSha.slice(0, 9)}): pushearlo sería un force push, que un PR con council no admite.`,
       );
     }
+    return pushSha(lease, row, sha);
+  }
+
+  /** Pushea `sha` a la branch del workspace con lease contra su `remote_sha` y guarda el nuevo (más `extra`). */
+  async function pushSha(
+    lease: WorkspaceRef,
+    row: typeof workspaces.$inferSelect,
+    sha: string,
+    extra: Partial<typeof workspaces.$inferInsert> = {},
+  ): Promise<PushOutcome> {
+    const { remote, url, account } = remoteOf(row.repoId);
     const outcome = await remote.push({
       cwd: lease.path,
       url,
@@ -659,7 +699,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const saved = store.tx(({ db }) =>
       db
         .update(workspaces)
-        .set({ headSha: sha, remoteSha: sha })
+        .set({ headSha: sha, remoteSha: sha, ...extra })
         .where(and(eq(workspaces.id, lease.workspaceId), eq(workspaces.fencingToken, lease.fencingToken)))
         .returning({ id: workspaces.id })
         .get(),
@@ -678,9 +718,12 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return git(lease.path, args, {
       GIT_AUTHOR_NAME: identity.name,
       GIT_AUTHOR_EMAIL: identity.email,
-      GIT_COMMITTER_NAME: identity.name,
-      GIT_COMMITTER_EMAIL: identity.email,
+      ...committerEnv(),
     });
+  }
+
+  function committerEnv(): Record<string, string> {
+    return { GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email };
   }
 
   function rowOf(lease: WorkspaceRef): typeof workspaces.$inferSelect {
@@ -899,6 +942,52 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return { outcome: "clean", baseSha: onto, head };
   }
 
+  async function restack(lease: WorkspaceRef, { council, onto, from, base }: RestackOptions): Promise<RestackResult> {
+    const row = rowOf(lease);
+    if (council) {
+      throw new RebaseError(`${row.branch} tiene threads [clanker-council]: un restack reescribiría su historia y un PR con council nunca se fuerza.`);
+    }
+    const run = (...args: string[]) => gitIn(lease, ...args);
+    if (await rebaseInProgress(run)) throw new RebaseError(`${row.branch} tiene un rebase en curso: termínalo o abórtalo antes de un restack.`);
+    const head = await run("rev-parse", "HEAD");
+    if (row.remoteSha === null || head !== row.remoteSha) {
+      throw new RebaseError(
+        `HEAD de ${row.branch} (${head.slice(0, 9)}) no es lo último que se pusheó (${row.remoteSha?.slice(0, 9) ?? "nada"}): ` +
+          "rehacerlo pisaría o perdería commits. Retoma la branch con attach.",
+      );
+    }
+    if ((await run("status", "--porcelain")) !== "") {
+      throw new RebaseError(`${row.branch} tiene cambios sin commitear: un restack con el árbol sucio perdería trabajo.`);
+    }
+    for (const [name, sha] of [["onto", onto], ["from", from]] as const) {
+      if ((await tryGit(lease.path, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`])) === undefined) {
+        throw new RebaseError(`El commit ${name} ${sha.slice(0, 9)} no existe en el repo de ${row.branch}: falta un fetch.`);
+      }
+    }
+
+    const moved = { baseRef: normalizeBase(base), baseSha: onto };
+    if ((await isAncestor(lease.path, onto, head)) && !(await isAncestor(lease.path, from, head))) {
+      store.tx(({ db }) => db.update(workspaces).set(moved).where(and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, lease.fencingToken))).run());
+      return { outcome: "uptodate" };
+    }
+
+    const plan = await planRestack((args, env, input) => git(lease.path, args, env, input), { onto, from, committer: committerEnv() });
+    switch (plan.status) {
+      case "empty":
+        return { outcome: "empty" };
+      case "conflict":
+        return { outcome: "conflict", applying: plan.applying, conflicts: plan.conflicts, failures: plan.failures };
+      case "foreign-merge":
+        return { outcome: "foreign-merge", merge: plan.merge, failures: plan.failures };
+      case "ok":
+        break;
+    }
+    const pushed = await pushSha(lease, row, plan.head, moved);
+    if (pushed !== "ok") return { outcome: pushed };
+    await run("reset", "--hard", plan.head);
+    return { outcome: "restacked", previousHead: head, head: plan.head, commits: plan.commits };
+  }
+
   /**
    * El `from` de `rebase --onto`: solo si el PR cambió de base (el de abajo se mergeó), la última punta
    * que pusheamos de la base vieja. Sin cambio de base, `undefined`: un `rebase` común ya deja afuera los
@@ -1038,6 +1127,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     acquire,
     attach,
     rebase,
+    restack,
     push,
     recover,
     extendLeases,

@@ -177,6 +177,8 @@ export type { PrPublishDeps } from "./github/publish";
 export { prPushFixupsAction } from "./github/push-fixups";
 export { prPushLeaseAction, workspaceRebaseAction } from "./github/rebase-pr";
 export type { RebasePrDeps } from "./github/rebase-pr";
+export { stackRestackAction } from "./github/restack";
+export type { ChildReport, StackRestackDeps } from "./github/restack";
 export type { PrPushFixupsDeps } from "./github/push-fixups";
 export { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
 export type { PrFeedbackDeps } from "./github/pr-feedback";

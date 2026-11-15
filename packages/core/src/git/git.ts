@@ -41,17 +41,18 @@ export function pickEnv(keys: readonly string[]): Record<string, string> {
 
 /**
  * Corre `git` en `cwd` y devuelve stdout tal cual: a un patch sin su salto final `git apply` lo rechaza.
- * Hereda solo `INHERITED_ENV`, más `env`.
+ * Hereda solo `INHERITED_ENV`, más `env`. `input` va a su stdin.
  */
-export async function gitRaw(cwd: string, args: string[], env: Record<string, string> = {}): Promise<string> {
+export async function gitRaw(cwd: string, args: string[], env: Record<string, string> = {}, input?: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("git", args, {
+    const running = execFileAsync("git", args, {
       cwd,
       env: { ...pickEnv(INHERITED_ENV), ...env },
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
     });
-    return stdout;
+    if (input !== undefined) running.child.stdin?.end(input);
+    return (await running).stdout;
   } catch (error) {
     const { stdout = "", stderr = "" } = error as { stdout?: string; stderr?: string };
     throw new GitError(`git ${args.join(" ")} falló en ${cwd}: ${stderr.trim() || String(error)}`, stdout, stderr, {
@@ -61,8 +62,8 @@ export async function gitRaw(cwd: string, args: string[], env: Record<string, st
 }
 
 /** Como `gitRaw`, sin el salto de línea final. */
-export async function git(cwd: string, args: string[], env: Record<string, string> = {}): Promise<string> {
-  return (await gitRaw(cwd, args, env)).trimEnd();
+export async function git(cwd: string, args: string[], env: Record<string, string> = {}, input?: string): Promise<string> {
+  return (await gitRaw(cwd, args, env, input)).trimEnd();
 }
 
 /** `undefined` si git sale con error: para preguntas de existencia, donde el error es la respuesta. */
