@@ -1,7 +1,9 @@
 import type { ProjectId, QueueEntry } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Prs } from "../github/prs";
+import { repoOfRun } from "../projects/issue-repos";
 import { ProjectNotFoundError, type Projects } from "../projects/projects";
+import { chosenRepos } from "../projects/repo-question";
 import { issueBoosts, issueSkips, pullRequests, runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
@@ -28,8 +30,9 @@ export interface ProjectQueueDeps {
 
 export interface ProjectQueue {
   /**
-   * La cola del proyecto (`tickDev`) sobre el caché de issues, sus corridas dev, las issues saltadas y los
-   * PRs abiertos del sistema de las issues bloqueantes. Lanza `ProjectNotFoundError` o `QueueUnavailableError`. No
+   * La cola del proyecto (`tickDev`) sobre el caché de issues, sus corridas dev, las issues saltadas, los repos
+   * elegidos para las issues ambiguas y los PRs abiertos del sistema de las issues bloqueantes y de las que
+   * ya corrieron en un repo. Lanza `ProjectNotFoundError` o `QueueUnavailableError`. No
    * escribe nada, así que la cola del caché es tan fresca como el último sync.
    */
   of(projectId: ProjectId): Promise<QueueEntry[]>;
@@ -85,18 +88,24 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
           .flatMap((issue) => issue.relations.blockedBy.flatMap((ref) => byRef.get(`${ref.tracker}:${ref.id}`) ?? [])),
       );
       const devRuns = store.db
-        .select({ issueId: runs.subjectId, status: runs.status, outcome: runs.outcome })
+        .select({ issueId: runs.subjectId, status: runs.status, outcome: runs.outcome, params: runs.params })
         .from(runs)
         .where(and(eq(runs.projectId, project.id), eq(runs.subjectType, "issue"), eq(runs.lane, "dev"), isNull(runs.parentRunId)))
-        .all();
+        .all()
+        .map(({ params, ...run }) => ({ ...run, repoId: repoOfRun(params) }));
       // Sin saber quién es la persona no hay cola (decide qué issues son suyas); sin cuenta conectada el adapter lanza.
       const viewer = tracker.viewer().catch((error: unknown) => {
         throw new QueueUnavailableError(`No se pudo leer tu usuario de ${project.tracker} para calcular la cola de ${project.slug}: ${(error as Error).message}`);
       });
-      const [me, prs] = await Promise.all([viewer, prFacts([...blockerIds], project.stackOn === "ci_green")]);
+      // Las issues con corridas siguen una cadena entre repos: de ellas solo importa qué PRs siguen abiertos.
+      const ran = new Set(devRuns.map((run) => run.issueId));
+      const chainIds = all.map((issue) => issue.id).filter((id) => ran.has(id) && !blockerIds.has(id));
+      const [me, prs, chainPrs] = await Promise.all([viewer, prFacts([...blockerIds], project.stackOn === "ci_green"), prFacts(chainIds, false)]);
       const skipped = new Set<string>(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
       const boosted = new Map(store.db.select().from(issueBoosts).all().map((row) => [row.issueId, row.createdAt]));
-      return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs, skipped, boosted });
+      const repoNames = new Map(project.repos.map(({ repoId }) => [repoId, repos.get(repoId)?.name ?? repoId]));
+      const repoChoices = chosenRepos(store, repos, project);
+      return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs: [...prs, ...chainPrs], skipped, boosted, repoChoices, repoNames });
     },
   };
 }

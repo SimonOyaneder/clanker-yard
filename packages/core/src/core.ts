@@ -276,6 +276,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     store,
     projects,
     issues,
+    repos,
     trackers,
     flows,
     runs,

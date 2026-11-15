@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
-import { createConnections, createFileSecrets, createProcs, createRepos, newId, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createProcs, createRepos, JUGUETE_FLOW, newId, openStore, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -175,19 +175,40 @@ describe("runs.start con los repos del proyecto", () => {
       ],
     });
     const frontend = await client.issues.createLocal({ projectId: project.id, title: "Botón", labels: ["frontend"] });
-    const untagged = await client.issues.createLocal({ projectId: project.id, title: "Sin label" });
     const nextClaimed = await follow(client, project.id, ["issue.claimed"]);
 
     const run = await client.runs.start({ projectId: project.id, issueId: frontend.id });
-    const fallback = await client.runs.start({ projectId: project.id, issueId: untagged.id });
 
     expect(run.params).toEqual({ repo: front.id, base: "master" });
-    expect(fallback.params).toEqual({ repo: back.id, base: "main" });
     expect(await nextClaimed()).toMatchObject({ subject: { type: "issue", id: frontend.id }, payload: { issueId: frontend.id } });
     expect(await client.issues.get({ id: frontend.id })).toMatchObject({
       status: "in_progress",
       assignee: { id: expect.any(String) },
     });
+  });
+
+  test("dependsOn solo llega a un flujo que lo declara", async () => {
+    const client = await boot();
+    const registered = await client.repos.add({ path: repo.dir });
+    const withDeps = { ...JUGUETE_FLOW, id: "juguete-con-deps", params: { ...JUGUETE_FLOW.params, dependsOn: { type: "string[]", default: [] } } };
+    await client.defs.create({ kind: "flow", slug: "juguete-con-deps", scope: "user", body: withDeps });
+    const project = await client.projects.create({
+      slug: "demo",
+      name: "Demo",
+      tracker: "local",
+      defaultFlowId: "juguete",
+      defaultProfileId: "juguete",
+      repos: [{ repoId: registered.id }],
+    });
+    const first = await client.issues.createLocal({ projectId: project.id, title: "Una" });
+    const second = await client.issues.createLocal({ projectId: project.id, title: "Otra" });
+    const params = { dependsOn: ["api#7"] };
+
+    const declared = await client.runs.start({ projectId: project.id, issueId: first.id, flow: "juguete-con-deps", params });
+    const ignored = await client.runs.start({ projectId: project.id, issueId: second.id, params });
+
+    expect(declared.params).toMatchObject({ dependsOn: ["api#7"] });
+    expect(ignored.params).toEqual({ repo: registered.id, base: "main" });
   });
 
   test("los flowParams del proyecto pisan los defaults del flujo y lo que pasa quien lanza pisa a los dos", async () => {

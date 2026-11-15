@@ -7,7 +7,8 @@ import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
 import type { Repos } from "../workspaces/repos";
 import { ProjectNotFoundError, type Projects } from "./projects";
-import { repoOf } from "./repo-of";
+import type { IssuePlan } from "./issue-repos";
+import { issuePlan } from "./repo-question";
 
 /** La issue no está en el caché de issues. */
 export class IssueNotCachedError extends Error {}
@@ -26,11 +27,16 @@ export interface RunStarterDeps {
 export interface RunStarter {
   /**
    * Reclama la issue en su tracker y lanza el flujo del proyecto (o `flow`) sobre ella. El flujo recibe
-   * `repo` (el primero de `project.repos` con algún label de la issue; si ninguno calza, el primero) y
-   * `base` (su branch por defecto) si los declara; `flowParams` del proyecto (solo con su flujo por
-   * defecto) y `params` los pisan, en ese orden. Lanza `ProjectNotFoundError`, `IssueNotCachedError` o
-   * `RunStartError` (con un mensaje que dice qué cambiar). Si el flujo no arranca, la issue queda
-   * reclamada: reclamar es idempotente, así que basta corregir y reintentar.
+   * `repo` y `base` (su branch por defecto) si los declara; `flowParams` del proyecto (solo con su flujo por
+   * defecto) y `params` los pisan, en ese orden (`dependsOn` se ignora si el flujo no lo declara).
+   *
+   * El repo es el que le toca a la issue (`planIssue`): el siguiente de su cadena si sus labels calzan con
+   * varios repos (el flujo debe declarar `repo`), el único del proyecto o el que se eligió. Una issue
+   * ambigua necesita `params.repo` o que se responda la decisión de la bandeja.
+   *
+   * Lanza `ProjectNotFoundError`, `IssueNotCachedError` o `RunStartError` (con un mensaje que dice qué
+   * cambiar). Si el flujo no arranca, la issue queda reclamada: reclamar es idempotente, así que basta
+   * corregir y reintentar.
    */
   start(input: z.output<typeof StartRun>, origin: Origin): Promise<RunView>;
 }
@@ -57,18 +63,30 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
         );
       }
 
-      const repoId = repoOf(project, issue.labels);
+      const plan = issuePlan(store, repos, project, issue);
+      const repoId = typeof input.params?.repo === "string" ? input.params.repo : planned(plan);
+      if (repoId === undefined && plan.kind === "ambiguous") {
+        throw new RunStartError(
+          `${issue.ref.key} no calza ningún repo del proyecto ${project.slug}: pasa \`params.repo\` o responde la decisión de la bandeja que pregunta de qué repo es.`,
+        );
+      }
       const def = defs.resolve("flow", flow, { repoId });
       // Antes de reclamar: un flujo que no existe no debería dejar la issue tomada.
       if (!def) throw new RunStartError(`No existe el flujo "${flow}".`);
       const declared = FlowDef.parse(def.body).params ?? {};
+      if (plan.kind === "repos" && plan.repoIds.length > 1 && !("repo" in declared)) {
+        throw new RunStartError(
+          `${issue.ref.key} toca ${plan.repoIds.length} repos y el flujo "${flow}" no declara \`repo\`: no puede encadenar una corrida por repo.`,
+        );
+      }
       const params: Record<string, unknown> = {
         ...(repoId !== undefined && "repo" in declared ? { repo: repoId } : {}),
         ...(repoId !== undefined && "base" in declared ? { base: repos.config(repoId).defaultBranch } : {}),
         // Los flowParams del proyecto son del flujo por defecto, y solo los que declara: los demás son de los
         // flujos que arrancan los triggers (una política como `rebaseNonDraft`) y aquí no cuentan.
         ...(flow === project.defaultFlowId ? Object.fromEntries(Object.entries(project.flowParams).filter(([name]) => name in declared)) : {}),
-        ...input.params,
+        // `dependsOn` lo pone el Scheduler desde la cola: un flujo que no publica PRs no lo declara ni lo necesita.
+        ...Object.fromEntries(Object.entries(input.params ?? {}).filter(([name]) => name !== "dependsOn" || name in declared)),
       };
       if (typeof declared.repo === "string" && params.repo === undefined) {
         throw new RunStartError(
@@ -105,4 +123,9 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
       return flows.getRun(runId);
     },
   };
+}
+
+/** El repo de la próxima corrida de la issue; si ya corrió en todos (un reintento a mano), el primero. */
+function planned(plan: IssuePlan): string | undefined {
+  return plan.kind === "repos" ? (plan.next ? plan.next.repoId : plan.repoIds[0]) : undefined;
 }

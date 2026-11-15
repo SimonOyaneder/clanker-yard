@@ -6,12 +6,13 @@ import type { Engine } from "../flows/engine";
 import { hasRoom } from "../flows/lanes";
 import type { Projects } from "../projects/projects";
 import { ProjectNotFoundError } from "../projects/projects";
-import { repoOf } from "../projects/repo-of";
+import { askWhichRepo, issuePlan } from "../projects/repo-question";
 import type { RunStarter } from "../projects/start-run";
 import { issueBoosts, issueSkips, issues as issuesTable, runs } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
+import type { Repos } from "../workspaces/repos";
 import type { LaneSettings } from "./lanes";
 import type { ProjectQueue } from "./project-queue";
 
@@ -45,6 +46,7 @@ export interface SchedulerDeps {
   store: Store;
   projects: Projects;
   issues: Issues;
+  repos: Repos;
   /** Los adapters que este core conoce, por id de tracker: el tick trae de ahí lo que cambió antes de leer la cola. */
   trackers: Readonly<Record<string, Tracker>>;
   flows: Pick<Engine, "wake">;
@@ -88,7 +90,7 @@ export interface Scheduler {
 export class IssueNotInProjectError extends Error {}
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
-  const { store, projects, issues, lanes, breakers } = deps;
+  const { store, projects, issues, repos, lanes, breakers } = deps;
   /** Lo que el último tick no pudo lanzar de cada proyecto, con su motivo. */
   const skipped = new Map<ProjectId, Map<IssueId, string>>();
   /** El último error de cada proyecto, para no repetir el mismo evento en cada tick. */
@@ -153,6 +155,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const marks = new Map<IssueId, string>();
     try {
       for (const entry of entries) {
+        if (entry.state === "blocked" && !entry.skipped && issuePlan(store, repos, project, entry.issue).kind === "ambiguous") {
+          askWhichRepo(store, repos, project, entry.issue);
+        }
         if (entry.state !== "ready") continue;
         const { issue } = entry;
         if (closed || !hasRoom(store.db, lanes.capacity(), { lane: "dev", projectId: project.id })) break;
@@ -162,7 +167,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           marks.set(issue.id, held);
           continue;
         }
-        const params: StartRun["params"] = entry.base.kind === "stacked" ? { base: entry.base.parent.branch } : {};
+        const params: StartRun["params"] = {
+          ...(entry.base.kind === "stacked" ? { base: entry.base.parent.branch } : {}),
+          ...(entry.dependsOn.length > 0 ? { dependsOn: entry.dependsOn } : {}),
+        };
         try {
           await deps.runs.start({ projectId: project.id, issueId: issue.id, params }, "core");
           inFlight.add(issue.id);
@@ -186,7 +194,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   ): string | undefined {
     const related = conflictsWithRunning(issue, cache, inFlight);
     if (related !== undefined) return `relacionada con ${related.ref.key}, que está en vuelo: no corren a la vez`;
-    const repoId = repoOf(project, issue.labels);
+    const plan = issuePlan(store, repos, project, issue);
+    const repoId = plan.kind === "repos" ? plan.next?.repoId : undefined;
     const paused = (repoId === undefined ? undefined : pausedBecause(`repo:${repoId}`)) ?? pausedBecause(`runtime:${deps.runtime}`);
     if (paused !== undefined) return paused;
     if (base.kind === "combined") {

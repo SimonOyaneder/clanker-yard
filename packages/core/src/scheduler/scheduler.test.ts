@@ -8,7 +8,7 @@ import { createLocalTracker } from "../tracker/local";
 import type { Tracker } from "../tracker/tracker";
 import { createRepos } from "../workspaces/repos";
 import { createLaneSettings } from "./lanes";
-import { createProjectQueue } from "./project-queue";
+import { createProjectQueue, type ProjectQueue } from "./project-queue";
 import { createScheduler, SCHEDULER_TICK_MS, type Breakers } from "./scheduler";
 
 /** `vi.waitFor` con holgura: la suite entera corre en paralelo y un tick puede tardar más de 1 s. */
@@ -26,13 +26,15 @@ interface Options {
   breakers?: Breakers;
   claim?: Tracker["claim"];
   reopen?: HarnessHome;
+  /** Lo que la cola dice de cada issue `ready`: depende de estos PRs de otros repos. */
+  dependsOn?: string[];
 }
 
 /**
  * El Scheduler sobre el motor de flujos real, un tracker local y acciones que esperan a que el test las suelte.
  * Cada issue corre `dev`: `check` estaciona (gate) las issues de `parkFirst` y `work` espera a `release`.
  */
-function setup({ parallel = 1, lanes: initial, breakers, claim, reopen }: Options = {}) {
+function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn }: Options = {}) {
   const h = createHarness({ persist: true, reopen, laneCapacity: () => lanes.capacity() });
   cleanups.push(h.cleanup);
   const lanes = createLaneSettings(h.store);
@@ -73,14 +75,24 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen }: Option
   const issues = createIssues(h.store, local);
   const projects = createProjects(h.store, h.defs);
   const repos = createRepos(h.store);
-  const queue = createProjectQueue({ store: h.store, projects, issues, repos, trackers, prs: { get: () => Promise.reject(new Error("no se esperaba leer un PR")) } });
+  const realQueue = createProjectQueue({ store: h.store, projects, issues, repos, trackers, prs: { get: () => Promise.reject(new Error("no se esperaba leer un PR")) } });
+  const queue: ProjectQueue = {
+    async of(id) {
+      const entries = await realQueue.of(id);
+      return dependsOn ? entries.map((entry) => (entry.state === "ready" ? { ...entry, dependsOn } : entry)) : entries;
+    },
+  };
+  const realRuns = createRunStarter({ store: h.store, defs: h.defs, projects, repos, issues, flows: h.flows, trackers });
+  /** Lo que el Scheduler le pidió a `runs.start`. */
+  const starts: Parameters<typeof realRuns.start>[0][] = [];
   const scheduler = createScheduler({
     store: h.store,
     projects,
     issues,
+    repos,
     trackers,
     flows: h.flows,
-    runs: createRunStarter({ store: h.store, defs: h.defs, projects, repos, issues, flows: h.flows, trackers }),
+    runs: { start: (input, origin) => (starts.push(input), realRuns.start(input, origin)) },
     queue,
     lanes,
     runtime: "fake",
@@ -100,7 +112,7 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen }: Option
   const resolveGate = (issue: CachedIssue) => h.flows.resolveGate(h.decisions.list({ runId: runOf(issue)!.id, status: ["pending"] })[0]!.id, "go", "ui");
   /** Espera a que la corrida de la issue esté en `work`, esperando que el test la suelte. */
   const working = (issue: CachedIssue) => until(() => expect(open.has(runOf(issue)?.id as RunId)).toBe(true));
-  return { ...h, lanes, parkFirst, issues, projects, projectId, scheduler, create, runOf, status, finish, abandon, events, resolveGate, working, local };
+  return { ...h, starts, lanes, parkFirst, issues, projects, projectId, scheduler, create, runOf, status, finish, abandon, events, resolveGate, working, local };
 }
 
 describe("lanzar issues por carril", () => {
@@ -120,6 +132,17 @@ describe("lanzar issues por carril", () => {
     await h.working(urgent);
     h.finish(urgent);
     await until(() => expect(h.status(low)).toBe("running"));
+  });
+
+  test("le pasa a runs.start los PRs de otros repos de los que depende la issue, y un flujo que no los declara los ignora", async () => {
+    const h = setup({ dependsOn: ["api#7"] });
+    const issue = await h.create("depende de otro repo");
+
+    await h.scheduler.tick();
+
+    expect(h.starts).toEqual([{ projectId: h.projectId, issueId: issue.id, params: { dependsOn: ["api#7"] } }]);
+    expect(h.status(issue)).toBe("running");
+    expect(h.runOf(issue)).toMatchObject({ params: {} });
   });
 
   test("trae del tracker lo que cambió antes de leer la cola", async () => {

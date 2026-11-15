@@ -248,6 +248,16 @@ describe("techlead-clasico con el runtime fake", () => {
     expect(pr.node().comments.map((c) => c.body.split("\n")[0])).toEqual(["/review"]);
   });
 
+  test("dependsOn de los params llega a pr.publish y sin él va vacío", async () => {
+    const { flows, store, stubs } = await setup({ fixtures: fixtures("base", "reviews-ok") });
+    saveTemplates(flows);
+
+    await runTechlead(flows, store);
+    await runTechlead(flows, store, { dependsOn: ["api#12"] });
+
+    expect(stubs.calls["pr.publish"]!.map((call) => (call as { dependsOn: unknown }).dependsOn)).toEqual([[], ["api#12"]]);
+  });
+
   test("con las rondas de review agotadas sigue a sync con una nota y termina el PR", async () => {
     const { flows, store } = await setup({ fixtures: fixtures("base", "reviews-changes") });
     saveTemplates(flows);

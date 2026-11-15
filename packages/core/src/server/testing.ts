@@ -53,6 +53,7 @@ export function apiDeps(
     store,
     projects,
     issues,
+    repos,
     trackers: { local },
     flows,
     runs,

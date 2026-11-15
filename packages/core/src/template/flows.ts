@@ -16,6 +16,8 @@ export const TECHLEAD_CLASICO: FlowDef = {
   params: {
     repo: "RepoRef",
     base: "string",
+    /** `repo#n` de los PRs de otros repos de los que depende (los pone el Scheduler desde la cola): abren el body del PR. */
+    dependsOn: { type: "string[]", default: [] },
     reviewRounds: { type: "number", default: 3 },
     checkRounds: { type: "number", default: 3 },
     externalRounds: { type: "number", default: 3 },
@@ -115,7 +117,7 @@ export const TECHLEAD_CLASICO: FlowDef = {
     publish: {
       type: "action",
       action: "pr.publish",
-      args: { ws: "$ws", plan: "$commit", draft: true },
+      args: { ws: "$ws", plan: "$commit", draft: true, dependsOn: "$run.params.dependsOn" },
       on: { ok: "feedback", replan: { to: "commit", maxRounds: 2, exhausted: "@failed" } },
     },
     feedback: {

@@ -129,6 +129,84 @@ describe("el Scheduler del core", () => {
   });
 });
 
+describe("el repo de la issue", () => {
+  let other: TempGitRepo;
+  beforeEach(() => {
+    other = tempGitRepo({});
+  });
+  afterEach(() => other.cleanup());
+
+  /** Un proyecto con dos repos, `front` y `back`, cada uno con su label; el flujo por defecto es `juguete`. */
+  async function twoRepoProject(client: Client) {
+    const repos = createRepos(store);
+    const front = repos.add({ name: "front", path: repo.dir });
+    const back = repos.add({ name: "back", path: other.dir });
+    const project = await client.projects.create({
+      slug: "demo",
+      name: "Demo",
+      tracker: "local",
+      defaultFlowId: "juguete",
+      defaultProfileId: "juguete",
+      repos: [{ repoId: front, labels: ["frontend"] }, { repoId: back, labels: ["backend"] }],
+    });
+    return { project, front, back };
+  }
+
+  test("una issue que toca dos repos corre dos veces, una por repo y en el orden del proyecto", async () => {
+    const client = await boot();
+    const { project, front, back } = await twoRepoProject(client);
+
+    const both = await client.issues.createLocal({ projectId: project.id, title: "Cruza", labels: ["backend", "frontend"] });
+
+    await until(async () => {
+      const runs = await client.runs.list({ projectId: project.id });
+      expect(runs.map((r) => [r.status, r.outcome])).toEqual([["done", "done"], ["done", "done"]]);
+    });
+    const runs = (await client.runs.list({ projectId: project.id })).sort((a, b) => a.startedAt - b.startedAt);
+    expect(runs.map((r) => [r.subject.id, r.params.repo])).toEqual([[both.id, front], [both.id, back]]);
+    // Con una corrida en cada repo ya no queda nada por lanzar, aunque la issue siga en progreso.
+    expect(await client.projects.queue({ id: project.id })).toEqual([]);
+  });
+
+  test("una issue ambigua deja una decisión con los repos y corre en el que se elige", async () => {
+    const client = await boot();
+    const { project, back } = await twoRepoProject(client);
+
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "No se sabe", labels: ["otro"] });
+
+    const [question] = await vi.waitFor(async () => {
+      const pending = await client.decisions.list({ projectId: project.id, status: ["pending"] });
+      expect(pending).toHaveLength(1);
+      return pending;
+    });
+    expect(question).toMatchObject({ kind: "question", subject: { type: "issue", id: issue.id }, options: ["front", "back"] });
+    expect(await client.projects.queue({ id: project.id })).toMatchObject([{ issue: { id: issue.id }, state: "blocked" }]);
+    expect(await client.runs.list({ projectId: project.id })).toEqual([]);
+
+    // Un tick nuevo (la issue siguiente) no repite la pregunta de la primera mientras siga pendiente.
+    const next = await client.issues.createLocal({ projectId: project.id, title: "Tampoco se sabe" });
+    await until(async () => expect(await client.decisions.list({ projectId: project.id })).toHaveLength(2));
+    expect((await client.decisions.list({ projectId: project.id })).map((d) => d.subject?.id).sort()).toEqual([issue.id, next.id].sort());
+
+    await client.decisions.resolve({ id: question!.id, option: "back" });
+
+    await until(async () => {
+      expect((await client.runs.list({ projectId: project.id })).map((r) => [r.subject.id, r.params.repo, r.status])).toEqual([[issue.id, back, "done"]]);
+    });
+  });
+
+  test("runs.start de una issue ambigua pide el repo; con params.repo corre", async () => {
+    const client = await boot();
+    const { project, back } = await twoRepoProject(client);
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "No se sabe" });
+
+    await expect(client.runs.start({ projectId: project.id, issueId: issue.id })).rejects.toThrow(/no calza ningún repo/);
+    const run = await client.runs.start({ projectId: project.id, issueId: issue.id, params: { repo: back } });
+
+    expect(run.params).toMatchObject({ repo: back });
+  });
+});
+
 /** Una issue local que llega con el core apagado: nadie la lanza hasta el próximo arranque. */
 async function createIssueOffline(projectId: ProjectId): Promise<string> {
   const issues = createIssues(store, createLocalTracker(store));

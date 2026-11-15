@@ -10,7 +10,7 @@ import type {
   StatusCategory,
   TrackerCapabilities,
 } from "@clanker/api";
-import { repoOf } from "../projects/repo-of";
+import { planIssue, type IssuePlan } from "../projects/issue-repos";
 import { matchesIssueFilter } from "../tracker/tracker";
 
 /** Una corrida raíz del carril dev sobre una issue. */
@@ -19,6 +19,8 @@ export interface QueueRun {
   status: RunStatus;
   /** El `@fin` con que terminó el flujo (`done`, `blocked`, `failed`); `null` mientras vive. */
   outcome: string | null;
+  /** El repo en que corrió (`repo` de sus params); `undefined` si su flujo no lo declara. */
+  repoId?: string;
 }
 
 /** Un PR abierto (draft o no) que el sistema abrió para una issue. */
@@ -45,6 +47,10 @@ export interface TickDevInput {
   prs: readonly QueuePrFact[];
   /** Ids de issues que el usuario pidió no lanzar (`projects.skipIssue`): quedan en la cola como `blocked`. */
   skipped?: ReadonlySet<string>;
+  /** Issue id → el repo que el usuario eligió en la decisión de una issue ambigua (`askWhichRepo`). */
+  repoChoices?: ReadonlyMap<string, string>;
+  /** Repo id → nombre, para los motivos; sin él se usa el id. */
+  repoNames?: ReadonlyMap<string, string>;
   /** Issue id → ms epoch en que el usuario la subió (`projects.boostIssue`): van antes que el resto, la más reciente primero. */
   boosted?: ReadonlyMap<string, number>;
 }
@@ -60,6 +66,12 @@ const CLOSED: ReadonlySet<StatusCategory> = new Set(["done", "canceled"]);
  * Elegible: su estado está en `queueFilter.status` (default `todo`), calza `queueFilter.labels`, no tiene
  * ninguno de `excludeLabels` (default `no-clanker`), no tiene dueño o es `me`, no tiene sub-issues abiertas
  * y ninguna corrida del carril dev la tomó (viva o terminada: una issue terminada no vuelve a la cola).
+ *
+ * Una issue de varios repos (`planIssue`) corre una vez por repo, encadenadas: con una corrida en el primero
+ * sigue elegible, aunque ya no esté en `todo` (salvo que se cerró), mientras le falte un repo. La corrida del
+ * siguiente espera a que termine la anterior (`waiting`), no se lanza si terminó mal (`blocked`) y sale
+ * sobre la branch por defecto de su repo con `dependsOn` el PR abierto del anterior. Una issue que no calza
+ * ningún repo de un proyecto con varios sale `blocked` hasta que se elija uno.
  *
  * Una issue que el usuario saltó (`skipped`) sale `blocked` con ese motivo.
  *
@@ -82,23 +94,30 @@ export function tickDev(input: TickDevInput): QueueEntry[] {
     (issue) => refKey(issue.parent!),
   );
 
+  const planOf = (issue: CachedIssue): IssuePlan =>
+    planIssue(project, issue.labels, input.repoChoices?.get(issue.id), runsOf.get(issue.id) ?? []);
   const eligible = issues
-    .filter(
-      (issue) =>
-        issue.projectId === project.id &&
-        matchesIssueFilter(issue, filter) &&
+    .filter((issue) => {
+      if (issue.projectId !== project.id) return false;
+      const plan = planOf(issue);
+      const hasRuns = runsOf.has(issue.id);
+      // Una issue encadenada ya salió de `todo` con su primera corrida: sigue su cadena mientras no se cierre.
+      const chained = hasRuns && plan.kind === "repos" && plan.next !== undefined && !CLOSED.has(issue.status);
+      return (
+        matchesIssueFilter(issue, chained ? { ...filter, status: undefined } : filter) &&
         (issue.assignee === undefined || issue.assignee.id === me.id) &&
         !(childrenOf.get(refKey(issue.ref)) ?? []).some((child) => !CLOSED.has(child.status)) &&
-        !runsOf.has(issue.id),
-    )
+        (plan.kind === "repos" ? plan.next !== undefined : !hasRuns)
+      );
+    })
     .sort((a, b) => (input.boosted?.get(b.id) ?? 0) - (input.boosted?.get(a.id) ?? 0) || byQueueOrder(a, b));
 
-  const world: World = { project, me, byRef, runsOf, prsOf };
+  const world: World = { project, me, byRef, runsOf, prsOf, repoNames: input.repoNames ?? new Map() };
   const entries = eligible.map(
     (issue): QueueEntry =>
       input.skipped?.has(issue.id)
         ? { issue, state: "blocked", skipped: true, reason: "saltada a mano: el usuario pidió que el Scheduler no la lance (projects.skipIssue)" }
-        : classify(issue, capabilities.relations ? issue.relations.blockedBy : [], world),
+        : classify(issue, capabilities.relations ? issue.relations.blockedBy : [], planOf(issue), world),
   );
   return [...entries.filter((e) => e.state === "ready"), ...entries.filter((e) => e.state === "waiting"), ...entries.filter((e) => e.state === "blocked")];
 }
@@ -109,6 +128,7 @@ interface World {
   byRef: ReadonlyMap<string, CachedIssue>;
   runsOf: ReadonlyMap<string, QueueRun[]>;
   prsOf: ReadonlyMap<string, QueuePrFact[]>;
+  repoNames: ReadonlyMap<string, string>;
 }
 
 /** Lo que una issue bloqueante le deja a la bloqueada: nada, PRs sobre los que apilarse o depender, o esperar. */
@@ -117,9 +137,17 @@ type Verdict =
   | { kind: "pr"; stack: QueuePrFact[]; cross: QueuePrFact[] }
   | { kind: "waiting" | "blocked"; reason: string };
 
-function classify(issue: CachedIssue, blockers: readonly IssueRef[], world: World): QueueEntry {
-  const repo = repoOf(world.project, issue.labels);
-  const verdicts = blockers.map((ref) => judge(ref, repo, world));
+function classify(issue: CachedIssue, blockers: readonly IssueRef[], plan: IssuePlan, world: World): QueueEntry {
+  const nameOf = (repoId: string) => world.repoNames.get(repoId) ?? repoId;
+  if (plan.kind === "ambiguous") {
+    const names = plan.candidates.map(nameOf).join(", ");
+    return { issue, state: "blocked", reason: `ningún label calza con un repo del proyecto (${names}): elige uno en la bandeja de decisiones` };
+  }
+  const next = plan.next!;
+  const chain = plan.repoIds.length > 1 ? chainOf(issue, next, world) : undefined;
+  if (chain !== undefined && chain.state !== "ready") return { issue, state: chain.state, reason: chain.reason };
+
+  const verdicts = blockers.map((ref) => judge(ref, next.repoId, world));
 
   const blocked = verdicts.flatMap((v) => (v.kind === "blocked" ? [v.reason] : []));
   if (blocked.length > 0) return { issue, state: "blocked", reason: blocked.join("; ") };
@@ -128,9 +156,10 @@ function classify(issue: CachedIssue, blockers: readonly IssueRef[], world: Worl
 
   const prs = verdicts.filter((v) => v.kind === "pr");
   const stack = uniqueByKey(prs.flatMap((v) => v.stack));
-  const dependsOn = uniqueByKey(prs.flatMap((v) => v.cross)).map((pr) => pr.key);
+  const dependsOn = [...new Set([...uniqueByKey(prs.flatMap((v) => v.cross)).map((pr) => pr.key), ...(chain?.dependsOn ?? [])])];
   const base = baseOf(stack);
   const parts = [
+    ...(next.repoId !== undefined && plan.repoIds.length > 1 ? [`en ${nameOf(next.repoId)}`] : []),
     base.kind === "default"
       ? "lista sobre la branch por defecto"
       : base.kind === "stacked"
@@ -139,6 +168,27 @@ function classify(issue: CachedIssue, blockers: readonly IssueRef[], world: Worl
     ...(dependsOn.length > 0 ? [`depende de ${dependsOn.join(", ")}`] : []),
   ];
   return { issue, state: "ready", reason: parts.join(", "), base, dependsOn };
+}
+
+type Chain = { state: "ready"; dependsOn: string[] } | { state: "waiting" | "blocked"; reason: string };
+
+/**
+ * El eslabón de una issue de varios repos: el siguiente espera a que la corrida del anterior termine bien y
+ * depende de su PR si sigue abierto (nunca se apila entre repos). El primero no espera a nadie.
+ */
+function chainOf(issue: CachedIssue, next: NonNullable<Extract<IssuePlan, { kind: "repos" }>["next"]>, world: World): Chain {
+  if (next.after === undefined) return { state: "ready", dependsOn: [] };
+  const before = world.repoNames.get(next.after) ?? next.after;
+  const after = next.repoId === undefined ? "el siguiente repo" : (world.repoNames.get(next.repoId) ?? next.repoId);
+  const runs = (world.runsOf.get(issue.id) ?? []).filter((run) => run.repoId === next.after);
+  if (runs.some((run) => LIVE.has(run.status))) {
+    return { state: "waiting", reason: `espera la corrida en ${before}: ${issue.ref.key} va primero ahí y después en ${after}` };
+  }
+  if (!runs.some((run) => run.status === "done" && run.outcome === "done")) {
+    return { state: "blocked", reason: `su corrida en ${before} no terminó bien: resuélvela antes de que corra en ${after}` };
+  }
+  const open = (world.prsOf.get(issue.id) ?? []).filter((pr) => pr.repoId === next.after);
+  return { state: "ready", dependsOn: open.map((pr) => pr.key) };
 }
 
 /** La tabla de bloqueantes de `docs/design.html#d-ops`, para un bloqueante. */

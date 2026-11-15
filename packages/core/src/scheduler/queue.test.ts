@@ -382,3 +382,83 @@ describe("pureza", () => {
     expect(queue(issues)).toEqual(first);
   });
 });
+
+describe("repo de la issue", () => {
+  const FRONT = "repo_front";
+  const BACK = "repo_back";
+  const repoOf = (repoId: string) => repoId as ClankerProject["repos"][number]["repoId"];
+  const twoRepos = project({
+    repos: [
+      { repoId: repoOf(FRONT), labels: ["frontend"] },
+      { repoId: repoOf(BACK), labels: ["backend"] },
+    ],
+  });
+  const names = new Map([[FRONT, "front"], [BACK, "back"]]);
+  const chained = (issues: CachedIssue[], extra: Partial<TickDevInput> = {}) => queue(issues, { project: twoRepos, repoNames: names, ...extra });
+  const runIn = (n: number, repoId: string, status: QueueRun["status"], outcome: string | null = null): QueueRun => ({ ...run(n, status, outcome), repoId });
+  const prIn = (n: number, repoId: string, key: string): QueuePrFact => pr(n, { repoId, key, ci: "not_green" });
+
+  test("un label mapea a su repo: la issue es elegible y sale sobre la branch por defecto", () => {
+    expect(only(chained([issue(1, { labels: ["backend"] })]))).toMatchObject({ state: "ready", base: { kind: "default" }, dependsOn: [] });
+  });
+
+  test("una issue sin label de un proyecto con varios repos es ambigua: blocked con los repos a elegir", () => {
+    const entry = only(chained([issue(1, { labels: ["otro"] })]));
+
+    expect(entry).toMatchObject({ state: "blocked", reason: expect.stringContaining("(front, back)") });
+  });
+
+  test("con el repo elegido en la decisión deja de ser ambigua", () => {
+    const entry = only(chained([issue(1)], { repoChoices: new Map([[issueId(1), BACK]]) }));
+
+    expect(entry).toMatchObject({ state: "ready", base: { kind: "default" } });
+  });
+
+  test("un proyecto con un solo repo nunca es ambiguo, tenga o no labels", () => {
+    expect(only(queue([issue(1, { labels: ["otro"] })])).state).toBe("ready");
+  });
+
+  test("dos repos generan dos corridas en orden: la segunda espera a la primera, en vuelo", () => {
+    const issues = [issue(1, { labels: ["frontend", "backend"], status: "in_progress" })];
+
+    const entry = only(chained(issues, { runs: [runIn(1, FRONT, "running")] }));
+
+    expect(entry).toMatchObject({ state: "waiting", reason: expect.stringContaining("espera la corrida en front") });
+  });
+
+  test("terminada la primera, la segunda sale ready sobre la branch por defecto de su repo y depende del PR del primero", () => {
+    const issues = [issue(1, { labels: ["frontend", "backend"], status: "in_progress" })];
+
+    const entry = only(chained(issues, { runs: [runIn(1, FRONT, "done", "done")], prs: [prIn(1, FRONT, "front#7")] }));
+
+    expect(entry).toMatchObject({
+      state: "ready",
+      base: { kind: "default" },
+      dependsOn: ["front#7"],
+      reason: "en back, lista sobre la branch por defecto, depende de front#7",
+    });
+  });
+
+  test("con el PR del primero ya mergeado la segunda corre sin depender de nadie", () => {
+    const issues = [issue(1, { labels: ["frontend", "backend"], status: "in_review" })];
+
+    const entry = only(chained(issues, { runs: [runIn(1, FRONT, "done", "done")] }));
+
+    expect(entry).toMatchObject({ state: "ready", dependsOn: [] });
+  });
+
+  test("si la primera no terminó bien la segunda queda blocked", () => {
+    const issues = [issue(1, { labels: ["frontend", "backend"], status: "in_progress" })];
+
+    const entry = only(chained(issues, { runs: [runIn(1, FRONT, "done", "failed")] }));
+
+    expect(entry).toMatchObject({ state: "blocked", reason: expect.stringContaining("no terminó bien") });
+  });
+
+  test("con una corrida en cada repo la issue sale de la cola; una issue cerrada no sigue su cadena", () => {
+    const labels = ["frontend", "backend"];
+
+    expect(chained([issue(1, { labels, status: "in_progress" })], { runs: [runIn(1, FRONT, "done", "done"), runIn(1, BACK, "done", "done")] })).toEqual([]);
+    expect(chained([issue(1, { labels, status: "canceled" })], { runs: [runIn(1, FRONT, "done", "done")] })).toEqual([]);
+  });
+});
