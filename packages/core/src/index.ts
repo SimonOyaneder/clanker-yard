@@ -3,14 +3,7 @@ export const name = "@clanker/core";
 export { microsToUsd, newId, usdToMicros } from "./store/conventions";
 export { SchemaTooNewError } from "./store/migrate";
 export { openStore } from "./store/store";
-export type {
-  EventFilter,
-  NewEvent,
-  OpenStoreOptions,
-  Store,
-  StoredEvent,
-  Tx,
-} from "./store/store";
+export type { NewEvent, OpenStoreOptions, Store, Tx } from "./store/store";
 
 export { createDefs, DefValidationError } from "./defs/defs";
 export type { Def, DefIssue, DefKind, DefScope, DefVersion, Defs, SaveDef } from "./defs/defs";

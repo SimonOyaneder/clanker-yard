@@ -49,6 +49,8 @@ packages/testkit  runtime fake, fixtures, repos git temporales
 
 El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run db:generate -w @clanker/core` deja una carpeta nueva en `packages/core/migrations/` (se commitea). Para triggers u otro SQL que drizzle-kit no modela: `npx drizzle-kit generate --custom --name <x>` desde `packages/core` y escribe el SQL a mano. No edites una migración ya mergeada.
 
+Lo que ya define `@clanker/api` (ids con prefijo, `EventType`, `Origin`, `SubjectRef`, `Event`, `EventFilter`) se importa de ahí, no se redeclara en el core: en el schema con `.$type<...>()`, que no cambia la migración.
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:

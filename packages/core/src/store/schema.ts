@@ -1,3 +1,12 @@
+import type {
+  Event,
+  EventType,
+  Origin,
+  ProjectId,
+  RunId,
+  StepRunId,
+  SubjectRef,
+} from "@clanker/api";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -20,13 +29,13 @@ export const events = sqliteTable(
   {
     seq: integer().primaryKey({ autoIncrement: true }),
     ts: integer().notNull(),
-    type: text().notNull(),
-    origin: text({ enum: ["core", "ui", "cli", "mcp", "watch", "import"] }).notNull(),
-    projectId: text("project_id"),
-    runId: text("run_id"),
-    stepRunId: text("step_run_id"),
-    subject: text(),
-    payload: text({ mode: "json" }).notNull(),
+    type: text().$type<EventType>().notNull(),
+    origin: text().$type<Origin>().notNull(),
+    projectId: text("project_id").$type<ProjectId>(),
+    runId: text("run_id").$type<RunId>(),
+    stepRunId: text("step_run_id").$type<StepRunId>(),
+    subject: text({ mode: "json" }).$type<SubjectRef>(),
+    payload: text({ mode: "json" }).$type<Event["payload"]>().notNull(),
   },
   (t) => [
     check("events_payload_json", sql`json_valid(${t.payload})`),

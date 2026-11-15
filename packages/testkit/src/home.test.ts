@@ -56,7 +56,7 @@ test("el core arranca con una fixture cargada vía CLANKER_HOME", () => {
   const home = loadFixture(fixture);
   homes.push(home);
 
-  expect(eventTypesAt(home)).toEqual(["run.started", "run.blocked"]);
+  expect(eventTypesAt(home)).toEqual(["run.started", "run.parked"]);
 });
 
 test("loadFixture trabaja sobre una copia: lo que escribe el core no cambia la fixture", () => {

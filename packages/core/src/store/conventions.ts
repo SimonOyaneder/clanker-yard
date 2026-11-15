@@ -3,7 +3,7 @@ import { monotonicFactory } from "ulid";
 const ulid = monotonicFactory();
 
 /** Id de texto con prefijo y ULID (`run_01J…`): ordenable por creación, también dentro del mismo ms. */
-export function newId(prefix: string): string {
+export function newId<const P extends string>(prefix: P): `${P}_${string}` {
   return `${prefix}_${ulid()}`;
 }
 

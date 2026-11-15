@@ -123,7 +123,14 @@ describe("events", () => {
   test("since devuelve en orden los eventos posteriores y respeta el filtro", () => {
     const store = memoryStore();
     store.tx((tx) => {
-      tx.emit({ type: "run.started", origin: "core", projectId: "prj_1", runId: "run_1", payload: { a: 1 } });
+      tx.emit({
+        type: "run.started",
+        origin: "core",
+        projectId: "prj_1",
+        runId: "run_1",
+        subject: { type: "issue", id: "CLA-8" },
+        payload: { a: 1 },
+      });
       tx.emit({ type: "step.started", origin: "core", projectId: "prj_1", runId: "run_1" });
       tx.emit({ type: "run.started", origin: "ui", projectId: "prj_2", runId: "run_2" });
     });
@@ -132,8 +139,17 @@ describe("events", () => {
     expect(store.events.since(1).map((e) => e.seq)).toEqual([2, 3]);
     expect(store.events.since(0, { runId: "run_1" }).map((e) => e.seq)).toEqual([1, 2]);
     expect(store.events.since(0, { projectId: "prj_2" }).map((e) => e.seq)).toEqual([3]);
-    expect(store.events.since(0, { type: "run.started" }).map((e) => e.seq)).toEqual([1, 3]);
-    expect(store.events.since(0)[0]).toMatchObject({ payload: { a: 1 }, origin: "core", stepRunId: null });
+    expect(store.events.since(0, { types: ["run.started"] }).map((e) => e.seq)).toEqual([1, 3]);
+    expect(store.events.since(0)[0]).toEqual({
+      seq: 1,
+      ts: expect.any(Number),
+      type: "run.started",
+      origin: "core",
+      projectId: "prj_1",
+      runId: "run_1",
+      subject: { type: "issue", id: "CLA-8" },
+      payload: { a: 1 },
+    });
   });
 
   test("subscribe solo recibe lo que cumple el filtro, hasta que se cancela", () => {
@@ -142,13 +158,13 @@ describe("events", () => {
     const cancel = store.events.subscribe((e) => received.push(e.type), { runId: "run_1" });
 
     store.tx((tx) => {
-      tx.emit({ type: "a", origin: "core", runId: "run_1" });
-      tx.emit({ type: "b", origin: "core", runId: "run_2" });
+      tx.emit({ type: "run.started", origin: "core", runId: "run_1" });
+      tx.emit({ type: "run.started", origin: "core", runId: "run_2" });
     });
     cancel();
-    store.tx((tx) => tx.emit({ type: "c", origin: "core", runId: "run_1" }));
+    store.tx((tx) => tx.emit({ type: "run.finished", origin: "core", runId: "run_1" }));
 
-    expect(received).toEqual(["a"]);
+    expect(received).toEqual(["run.started"]);
   });
 
   test("ts sale del reloj inyectado", () => {
@@ -167,7 +183,7 @@ describe("events", () => {
     });
     const failure = (fn: () => unknown) => expect(fn).toThrow(appendOnly);
     failure(() => store.tx((tx) => tx.db.delete(events).run()));
-    failure(() => store.tx((tx) => tx.db.update(events).set({ type: "x" }).run()));
+    failure(() => store.tx((tx) => tx.db.update(events).set({ type: "error" }).run()));
     expect(store.events.since(0).map((e) => e.type)).toEqual(["run.started"]);
   });
 

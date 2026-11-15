@@ -9,8 +9,11 @@ function prefixedId<const P extends string>(prefix: P) {
 }
 
 export const ProjectId = prefixedId("prj");
+export type ProjectId = z.infer<typeof ProjectId>;
 export const RunId = prefixedId("run");
+export type RunId = z.infer<typeof RunId>;
 export const StepRunId = prefixedId("stp");
+export type StepRunId = z.infer<typeof StepRunId>;
 
 /** Sobre qué trabaja una corrida o a qué se refiere un evento. */
 export const SubjectRef = z.object({

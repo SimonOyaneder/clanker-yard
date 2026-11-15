@@ -1,17 +1,16 @@
 import { createHash } from "node:crypto";
+import type { Origin } from "@clanker/api";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import type { ZodType } from "zod";
 import { newId } from "../store/conventions";
 import { DEF_SCOPES, defs, defVersions } from "../store/schema";
-import type { Store, StoredEvent } from "../store/store";
+import type { Store } from "../store/store";
 
 export type DefKind = (typeof defs.$inferSelect)["kind"];
 export type DefScope = (typeof DEF_SCOPES)[number];
 
 /** El mismo orden en que se resuelve un slug: el primero que exista gana. */
 const SCOPE_PRECEDENCE = ["user", "repo", "pack", "builtin"] as const satisfies readonly DefScope[];
-
-type Origin = StoredEvent["origin"];
 
 export interface SaveDef {
   kind: DefKind;

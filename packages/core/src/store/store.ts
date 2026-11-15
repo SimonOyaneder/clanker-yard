@@ -1,36 +1,21 @@
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import { and, asc, eq, gt } from "drizzle-orm";
+import type { Event, EventFilter } from "@clanker/api";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { drizzle, type NodeSQLiteDatabase } from "drizzle-orm/node-sqlite";
 import { migrateStore } from "./migrate";
 import { events } from "./schema";
 
 export type StoreDb = NodeSQLiteDatabase & { $client: DatabaseSync };
-export type StoredEvent = typeof events.$inferSelect;
 
-export interface NewEvent {
-  /** `entidad.verbo`, por ejemplo `run.started`. */
-  type: string;
-  origin: StoredEvent["origin"];
-  projectId?: string;
-  runId?: string;
-  stepRunId?: string;
-  subject?: string;
-  /** Mínimo: ids y lo que cambió. El detalle se lee de las tablas. */
-  payload?: unknown;
-}
-
-export interface EventFilter {
-  projectId?: string;
-  runId?: string;
-  type?: string;
-}
+/** Un evento por escribir: `seq` y `ts` los pone el store y `payload` vale `{}` si no viene. */
+export type NewEvent = Omit<Event, "seq" | "ts" | "payload"> & Partial<Pick<Event, "payload">>;
 
 export interface Tx {
   /** La misma conexión y la misma transacción: se confirma o se deshace junto con los eventos. */
   db: StoreDb;
   /** Escribe el evento en la tx; los suscriptores lo reciben recién después del commit. */
-  emit(event: NewEvent): StoredEvent;
+  emit(event: NewEvent): Event;
 }
 
 export interface Store {
@@ -43,9 +28,9 @@ export interface Store {
   tx<T>(fn: (tx: Tx) => T): T;
   events: {
     /** Eventos con `seq` mayor que `seq`, en orden. */
-    since(seq: number, filter?: EventFilter): StoredEvent[];
+    since(seq: number, filter?: EventFilter): Event[];
     /** Llama a `listener` por cada evento confirmado que cumpla el filtro. Devuelve cómo cancelar. */
-    subscribe(listener: (event: StoredEvent) => void, filter?: EventFilter): () => void;
+    subscribe(listener: (event: Event) => void, filter?: EventFilter): () => void;
   };
   close(): void;
 }
@@ -83,10 +68,10 @@ export function openStore(opts: OpenStoreOptions): Store {
 }
 
 function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Store {
-  const listeners = new Set<{ listener: (event: StoredEvent) => void; filter: EventFilter }>();
+  const listeners = new Set<{ listener: (event: Event) => void; filter: EventFilter }>();
   let inTx = false;
 
-  function publish(committed: StoredEvent[]): void {
+  function publish(committed: Event[]): void {
     for (const event of committed) {
       for (const { listener, filter } of listeners) {
         if (!matches(filter, event)) continue;
@@ -111,22 +96,15 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
           "store.tx no se puede anidar: pasa el `tx` recibido a las funciones que escriben.",
         );
       }
-      const written: StoredEvent[] = [];
-      const emit = (event: NewEvent): StoredEvent => {
-        const stored = db
-          .insert(events)
-          .values({
-            ts: now(),
-            type: event.type,
-            origin: event.origin,
-            projectId: event.projectId,
-            runId: event.runId,
-            stepRunId: event.stepRunId,
-            subject: event.subject,
-            payload: event.payload ?? {},
-          })
-          .returning()
-          .get();
+      const written: Event[] = [];
+      const emit = (event: NewEvent): Event => {
+        const stored = toEvent(
+          db
+            .insert(events)
+            .values({ ...event, ts: now(), payload: event.payload ?? {} })
+            .returning()
+            .get(),
+        );
         written.push(stored);
         return stored;
       };
@@ -154,7 +132,7 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
     },
     events: {
       since(seq, filter = {}) {
-        return db
+        const rows = db
           .select()
           .from(events)
           .where(
@@ -162,11 +140,12 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
               gt(events.seq, seq),
               filter.projectId === undefined ? undefined : eq(events.projectId, filter.projectId),
               filter.runId === undefined ? undefined : eq(events.runId, filter.runId),
-              filter.type === undefined ? undefined : eq(events.type, filter.type),
+              filter.types === undefined ? undefined : inArray(events.type, filter.types),
             ),
           )
           .orderBy(asc(events.seq))
           .all();
+        return rows.map(toEvent);
       },
       subscribe(listener, filter = {}) {
         const entry = { listener, filter };
@@ -181,12 +160,23 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
   };
 }
 
-function matches(filter: EventFilter, event: StoredEvent): boolean {
+function matches(filter: EventFilter, event: Event): boolean {
   return (
     (filter.projectId === undefined || filter.projectId === event.projectId) &&
     (filter.runId === undefined || filter.runId === event.runId) &&
-    (filter.type === undefined || filter.type === event.type)
+    (filter.types === undefined || filter.types.includes(event.type))
   );
+}
+
+/** Las columnas vacías vuelven como `null`; el `Event` de la API las omite. */
+function toEvent({ projectId, runId, stepRunId, subject, ...row }: typeof events.$inferSelect): Event {
+  return {
+    ...row,
+    ...(projectId === null ? {} : { projectId }),
+    ...(runId === null ? {} : { runId }),
+    ...(stepRunId === null ? {} : { stepRunId }),
+    ...(subject === null ? {} : { subject }),
+  };
 }
 
 function isThenable(value: unknown): boolean {
