@@ -53,8 +53,19 @@ export type {
 } from "./flows/catalog";
 export { DEFAULT_MAX_AGENTS, OUTPUT_INLINE_MAX_BYTES, TICK_MS } from "./flows/engine";
 export type { RunView, StartOptions, StepView } from "./flows/engine";
-export { createConnections, EXPIRY_WARNING_DAYS } from "./connections/connections";
-export type { ConnectInput, Connections, ConnectionsOptions } from "./connections/connections";
+export {
+  createConnections,
+  EXPIRY_WARNING_DAYS,
+  LINEAR_REDIRECT_PORT,
+} from "./connections/connections";
+export type {
+  ConnectInput,
+  Connections,
+  ConnectionsOptions,
+  LinearLogin,
+  LinearOptions,
+} from "./connections/connections";
+export { LinearAuthError } from "./linear/oauth";
 export { GitHubPatError } from "./github/pat";
 export type {
   GitHubApiOptions,

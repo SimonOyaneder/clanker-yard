@@ -60,15 +60,15 @@ describe("connect", () => {
     expect(await connections.token("github", "simon")).toBe("ghp_nuevo");
   });
 
-  test("list ordena por proveedor y cuenta, y dos cuentas del mismo proveedor conviven", async () => {
-    await connections.connect({ provider: "linear", account: "simon", scopes: [], token: "lin_1" }, "ui");
+  test("list ordena por cuenta, y dos cuentas del mismo proveedor conviven", async () => {
+    await connections.connect({ ...github, account: "zeta", token: "ghp_zeta" }, "ui");
     await connections.connect({ ...github, account: "otra", token: "ghp_otra" }, "ui");
     await connections.connect({ ...github, token: TOKEN }, "ui");
 
     expect(connections.list().map((c) => `${c.provider}/${c.account}`)).toEqual([
       "github/otra",
       "github/simon",
-      "linear/simon",
+      "github/zeta",
     ]);
     expect(await connections.token("github", "otra")).toBe("ghp_otra");
     expect(await connections.token("github", "simon")).toBe(TOKEN);

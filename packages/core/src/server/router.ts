@@ -1,6 +1,7 @@
 import { API_MAJOR, type ClientOrigin, contract } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubPatError, githubPatForm } from "../github/pat";
+import { LinearAuthError } from "../linear/oauth";
 import type { Connections } from "../connections/connections";
 import { join } from "node:path";
 import { createArtifacts } from "../artifacts/artifacts";
@@ -80,6 +81,22 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       githubPatForm: os.connections.githubPatForm.handler(() => githubPatForm()),
+      linearAuth: os.connections.linearAuth.handler(async ({ context }) => {
+        try {
+          // `done` no se espera: el resultado llega como `connection.changed`, y un fallo se le muestra
+          // al usuario en la pestaña del navegador.
+          const { url } = await deps.connections.linearAuth(context.origin);
+          return { url };
+        } catch (error) {
+          if (error instanceof LinearAuthError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        }
+      }),
+      disconnect: os.connections.disconnect.handler(async ({ input, context }) => {
+        await deps.connections.disconnect(input.provider, input.account, context.origin);
+      }),
     },
     artifacts: {
       get: os.artifacts.get.handler(({ input }) => {

@@ -5,7 +5,7 @@ import { type Contract, type Event, contract } from "./index";
 describe("contrato", () => {
   test("exporta los routers system, events, connections, artifacts e issues con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual(["artifacts", "connections", "events", "issues", "system"]);
-    expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm"]);
+    expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm", "linearAuth", "disconnect"]);
     expect(Object.keys(contract.system).sort()).toEqual(["health", "info", "shutdown"]);
     expect(Object.keys(contract.events).sort()).toEqual(["list", "stream"]);
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);

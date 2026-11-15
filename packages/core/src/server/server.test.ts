@@ -14,6 +14,7 @@ import { createArtifacts, INLINE_MAX_BYTES } from "../artifacts/artifacts";
 import { readSchemaVersion } from "../store/migrate";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
+import { startFakeLinear } from "../linear/fake-linear";
 import { startServer, type CoreServer } from "./server";
 
 let store: Store;
@@ -149,6 +150,47 @@ describe("connections", () => {
       { provider: "github", account: "simon", scopes: ["contents", "pull_requests"], status: "active" },
     ]);
     expect(JSON.stringify(listed)).not.toContain(token);
+  });
+
+  test("disconnect borra la cuenta con el origen de la llamada", async () => {
+    await connections.connect({ provider: "github", account: "simon", scopes: [], token: "ghp_x" }, "ui");
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+
+    await client.connections.disconnect({ provider: "github", account: "simon" });
+
+    expect(await client.connections.list()).toEqual([]);
+    expect(store.events.since(0).at(-1)).toMatchObject({ origin: "cli", payload: { status: "disconnected" } });
+  });
+
+  test("linearAuth sin client_id es BAD_REQUEST con el paso a seguir", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+    await expect(client.connections.linearAuth()).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("client_id"),
+    });
+  });
+
+  test("linearAuth devuelve el link y la cuenta aparece al aprobar", async () => {
+    const linear = await startFakeLinear({ clientId: "test-client-id" });
+    try {
+      connections = createConnections(store, createFileSecrets({ dir: secretsDir }), {
+        linear: { clientId: "test-client-id", redirectPort: 0, endpoints: linear.endpoints },
+      });
+      const core = await start();
+      const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+      const { url } = await client.connections.linearAuth();
+      const authorize = await fetch(url, { redirect: "manual" });
+      await fetch(authorize.headers.get("location")!);
+
+      // El loopback responde después de guardar la cuenta, así que al volver el fetch ya está conectada.
+      expect(await client.connections.list()).toMatchObject([{ provider: "linear", account: "clanker-yard" }]);
+    } finally {
+      await linear.close();
+    }
   });
 });
 

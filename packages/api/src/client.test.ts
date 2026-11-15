@@ -43,6 +43,10 @@ const router = os.router({
       url: "https://github.com/settings/personal-access-tokens/new",
       permissions: [],
     })),
+    linearAuth: os.connections.linearAuth.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    disconnect: os.connections.disconnect.handler(() => {}),
   },
   artifacts: {
     get: os.artifacts.get.handler(({ input }) => ({
