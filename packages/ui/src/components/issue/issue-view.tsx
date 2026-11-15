@@ -1,5 +1,5 @@
 import { ExternalLink, FolderOpen, GitPullRequest } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { Member } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -48,7 +48,10 @@ export function IssueView({ slug, issueId, projectUrl }: Props) {
   const { data: d, error } = usePoll(() => appData.issue(slug, issueId), [slug, issueId])
   const [tab, setTab] = useState<string | null>(null)
 
-  const tailRoles = d ? d.team.filter((m) => d.tails[m.role]?.length).map((m) => m.role) : []
+  const tailRoles = useMemo(
+    () => (d ? d.team.filter((m) => d.tails[m.role]?.length).map((m) => m.role) : []),
+    [d],
+  )
   const firstWorking = d?.team.find((m) => m.status === "trabajando")?.role
   useEffect(() => {
     if (!tab && d) setTab(firstWorking ?? tailRoles[0] ?? null)

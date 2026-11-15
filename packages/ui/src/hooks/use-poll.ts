@@ -38,6 +38,7 @@ export function usePoll<T>(fetcher: () => Promise<Result<T>>, deps: unknown[], m
       if (timer) clearTimeout(timer)
     }
     // `fetcher` cambia en cada render: quien llama decide con `deps` cuándo hay que volver a pedir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
 
   const refresh = useCallback(() => tickRef.current(), [])

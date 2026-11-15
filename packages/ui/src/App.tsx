@@ -123,7 +123,7 @@ function Shell() {
   const prsNeedingAction = (prs.data?.prs ?? []).filter((p) => reviewStatus(p) === "changes").length
   const prsReady = (prs.data?.prs ?? []).filter((p) => p.merge.ready).length
 
-  const loops = data?.loops ?? []
+  const loops = useMemo(() => data?.loops ?? [], [data])
   const inBar = useMemo(() => loops.filter((l) => !l.archived || isRunning(l)), [loops])
   const loop = loops.find((l) => l.slug === slug) ?? null
 

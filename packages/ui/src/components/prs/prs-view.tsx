@@ -81,7 +81,7 @@ export function PrsView({ data, error, onRefresh }: Props) {
     writePref("prs.hiddenRepos", next)
   }
 
-  const prs = data?.prs ?? []
+  const prs = useMemo(() => data?.prs ?? [], [data])
   const repos = useMemo(() => [...new Set(prs.map((p) => p.repoFullName))].sort(), [prs])
   const scoped = useMemo(() => prs.filter((p) => !hiddenRepos.includes(p.repoFullName)), [prs, hiddenRepos])
   const forest = useMemo(() => buildStackForest(scoped), [scoped])
