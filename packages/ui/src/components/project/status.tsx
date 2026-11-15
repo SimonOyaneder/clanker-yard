@@ -15,7 +15,7 @@ interface Look {
 }
 
 const RUN: Record<RunStatus, Look> = {
-  queued: { label: "en cola", tone: tone.neutral, hint: "Espera cupo en su carril.", Icon: Circle, iconClass: "text-muted-foreground" },
+  queued: { label: "en cola", tone: tone.neutral, hint: "Espera cupo en su carril o a la corrida que escribe sobre su sujeto.", Icon: Circle, iconClass: "text-muted-foreground" },
   running: { label: "corriendo", tone: tone.violet, hint: "Un paso se está ejecutando.", Icon: CircleDot, iconClass: "text-violet-600 dark:text-violet-400", pulse: true },
   waiting: { label: "esperando", tone: tone.sky, hint: "Espera que terminen sus ramas o un evento externo. No bloquea a las demás.", Icon: Clock, iconClass: "text-sky-600 dark:text-sky-400" },
   parked: { label: "estacionada", tone: tone.amber, hint: "Espera a una persona. No ocupa cupo de su carril.", Icon: Hand, iconClass: "text-amber-600 dark:text-amber-400" },

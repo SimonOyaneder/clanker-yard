@@ -33,6 +33,7 @@ import {
   type ParallelNode,
 } from "./parallel";
 import { readRunDetail } from "./run-detail";
+import { createSubjects, hasQueued, loanOf, type SubjectsDeps } from "./subjects";
 import { isTruthy, navigate, refPath, resolveRefs } from "./refs";
 import { calledFlows, LANE_BY_TRIGGER } from "./validate";
 
@@ -145,7 +146,7 @@ export interface StepBriefRequest {
   lineage: RunId[];
 }
 
-export interface EngineDeps {
+export interface EngineDeps extends SubjectsDeps {
   store: Store;
   defs: Defs;
   agents: Agents;
@@ -153,8 +154,12 @@ export interface EngineDeps {
   actions: ReadonlyMap<string, ActionDef>;
   consolidators: ReadonlyMap<string, ConsolidatorDef>;
   waits: ReadonlyMap<string, WaitDef>;
-  /** El worktree de la corrida (el que tiene tomado), donde corren sus agentes. */
-  workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string } | undefined;
+  /**
+   * El worktree de la corrida (el que tiene tomado), donde corren sus agentes. Con `workspaceId` y
+   * `fencingToken`, un `$nodo` que lo nombra (el output de `workspace.acquire`) lleva siempre el token vigente: un
+   * préstamo del sujeto lo sube y la dueña, al retomar, no puede seguir con el que tomó antes.
+   */
+  workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string; workspaceId?: string; fencingToken?: number } | undefined;
   /**
    * Arma el brief de un paso agent: deja en el worktree lo que el agente lee (`.clanker-run/`) y lo cita en
    * el brief. Sin esto el brief lleva solo el payload del nodo.
@@ -310,6 +315,7 @@ export function createEngine(deps: EngineDeps): Engine {
   /** El abort de cada paso que este proceso ejecuta, para que `cancel` lo interrumpa. */
   const controllers = new Map<StepRunId, AbortController>();
   const probing = new Set<StepRunId>();
+  const subjects = createSubjects(deps);
   let activeAgents = 0;
   let lastWakeAt = now();
   let ticker: NodeJS.Timeout | undefined;
@@ -455,7 +461,11 @@ export function createEngine(deps: EngineDeps): Engine {
     return { flows, subflows };
   }
 
-  /** Crea la corrida con su primer paso en pending y emite `run.started`. */
+  /**
+   * Crea la corrida con su primer paso en pending y emite `run.started`. Si otra corrida es la dueña de
+   * su sujeto, queda `queued` (el dispatcher no la toma) o, si la dueña es de dev y está estacionada y
+   * esta es de mantenimiento, corre con el sujeto prestado.
+   */
   function insertRun(
     tx: Tx,
     n: {
@@ -472,6 +482,13 @@ export function createEngine(deps: EngineDeps): Engine {
       parent?: { runId: RunId; stepRunId: StepRunId; stopBefore: string | undefined };
     },
   ): RunRow {
+    const admission = subjects.admit(tx.db, {
+      subjectType: n.subject.type,
+      subjectId: n.subject.id,
+      lane: n.lane,
+      writes: n.writes,
+      parentRunId: n.parent?.runId ?? null,
+    });
     const run = tx.db
       .insert(runs)
       .values({
@@ -489,7 +506,8 @@ export function createEngine(deps: EngineDeps): Engine {
         parentStepRunId: n.parent?.stepRunId,
         stopBefore: n.parent?.stopBefore,
         lane: n.lane,
-        status: "running",
+        status: admission.status,
+        borrowedFromRunId: "lender" in admission ? admission.lender.id : undefined,
         writes: n.writes,
         params: n.params,
         rounds: {},
@@ -510,6 +528,7 @@ export function createEngine(deps: EngineDeps): Engine {
         ...(n.parent && { parentRunId: n.parent.runId }),
       },
     });
+    if ("lender" in admission) subjects.lend(tx, run, admission.lender);
     return run;
   }
 
@@ -565,6 +584,8 @@ export function createEngine(deps: EngineDeps): Engine {
       sweepWaits();
       sweepGates();
       sweepChildren();
+      // Una dueña que se estacionó o terminó puede dejar libre (o prestable) el sujeto de una corrida que espera.
+      if (hasQueued(store.db)) store.tx((tx) => subjects.promoteQueued(tx));
       dispatch();
     } catch (error) {
       // Un wake que lanza tumbaría a quien lo llamó (un `start`, el cierre de otro paso, un timer).
@@ -1098,9 +1119,19 @@ export function createEngine(deps: EngineDeps): Engine {
         break;
       default:
         // "En la corrida o en sus padres": un subflujo ve los nodos de quien lo llamó.
-        root = outputOf(lastDoneInLineage(run, head));
+        root = withLiveToken(run, outputOf(lastDoneInLineage(run, head)));
     }
     return shrink(step, navigate(root, path));
+  }
+
+  /** El output de `workspace.acquire` guarda el token con que se tomó el worktree: si un préstamo lo subió, el vigente es el que tiene la corrida. */
+  function withLiveToken(run: RunRow, value: unknown): unknown {
+    if (!isRecord(value) || typeof value.workspaceId !== "string" || typeof value.fencingToken !== "number") return value;
+    for (const id of lineage(run)) {
+      const held = workspaceOf?.(id);
+      if (held?.workspaceId === value.workspaceId && held.fencingToken !== undefined) return { ...value, fencingToken: held.fencingToken };
+    }
+    return value;
   }
 
   function selectStep(id: StepRunId): StepRow | undefined {
@@ -1289,6 +1320,7 @@ export function createEngine(deps: EngineDeps): Engine {
         .where(eq(runs.id, run.id))
         .run();
       recordRunMetrics(tx, run.id);
+      subjects.ended(tx, run);
       tx.emit({
         type: "run.finished",
         origin: "core",
@@ -1621,14 +1653,16 @@ export function createEngine(deps: EngineDeps): Engine {
   /**
    * La corrida deja de estar estacionada: `leave` la lleva adonde corresponda (el edge de un gate, un
    * paso nuevo, nada) y, si sigue viva, vuelve a la cola de su carril. Va antes que las corridas nuevas
-   * porque el dispatcher toma primero las más antiguas.
+   * porque el dispatcher toma primero las más antiguas. Si mantenimiento tiene prestado su sujeto, la
+   * decisión queda resuelta pero la corrida sigue `parked` hasta que se lo devuelvan (`subjects.ended`).
    */
   function leaveParking(tx: Tx, run: RunRow, decisionId: DecisionId, leave: (current: RunRow) => void): void {
-    const resumed: RunRow = { ...run, status: "running", parkReason: null };
-    tx.db.update(runs).set({ status: "running", parkReason: null }).where(eq(runs.id, run.id)).run();
+    const lent = loanOf(tx.db, run.id) !== undefined;
+    const resumed: RunRow = lent ? run : { ...run, status: "running", parkReason: null };
+    if (!lent) tx.db.update(runs).set({ status: "running", parkReason: null }).where(eq(runs.id, run.id)).run();
     leave(resumed);
     const after = tx.db.select().from(runs).where(eq(runs.id, run.id)).get();
-    if (after?.status === "running") {
+    if (!lent && after?.status === "running") {
       tx.emit({ type: "run.requeued", origin: "core", ...scopeOf(run), payload: { decisionId, reason: run.parkReason } });
     }
   }
@@ -1969,6 +2003,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const endedAt = now();
       tx.db.update(runs).set({ status: "canceled", parkReason: null, endedAt }).where(eq(runs.id, run.id)).run();
       recordRunMetrics(tx, run.id);
+      subjects.ended(tx, run);
       tx.emit({
         type: "run.finished",
         origin: "core",

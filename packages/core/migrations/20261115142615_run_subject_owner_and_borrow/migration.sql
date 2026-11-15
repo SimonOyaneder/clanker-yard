@@ -1,0 +1,5 @@
+ALTER TABLE `runs` ADD `borrowed_from_run_id` text REFERENCES runs(id);--> statement-breakpoint
+ALTER TABLE `runs` ADD `claimed_pr_id` text;--> statement-breakpoint
+CREATE UNIQUE INDEX `runs_subject_owner` ON `runs` (`subject_type`,`subject_id`) WHERE "runs"."writes" = 1 AND "runs"."parent_run_id" IS NULL AND "runs"."borrowed_from_run_id" IS NULL AND "runs"."status" IN ('running', 'waiting', 'parked', 'paused');--> statement-breakpoint
+CREATE UNIQUE INDEX `runs_claimed_pr_owner` ON `runs` (`claimed_pr_id`) WHERE "runs"."writes" = 1 AND "runs"."parent_run_id" IS NULL AND "runs"."borrowed_from_run_id" IS NULL AND "runs"."status" IN ('running', 'waiting', 'parked', 'paused');--> statement-breakpoint
+CREATE UNIQUE INDEX `runs_borrowed_from` ON `runs` (`borrowed_from_run_id`) WHERE "runs"."status" IN ('running', 'waiting', 'parked', 'paused');

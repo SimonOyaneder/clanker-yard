@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { Role } from "@clanker/api";
+import { Role, type RunId } from "@clanker/api";
 import { createAgents } from "./agents/agents";
 import { createBriefs } from "./agents/brief";
 import { createStepBriefs } from "./agents/step-brief";
@@ -110,6 +110,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     artifacts,
     roles: roleInfoOf(defs),
     workspaceOf: workspaces.held,
+    handOverWorkspaces: workspaces.handOver,
     briefFor: createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, trackers }),
     bootId,
     onClockJump: () => {
@@ -155,6 +156,15 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     { types: ["run.finished"] },
   );
+  // Al devolver un sujeto prestado la branch pudo moverse: la dueña relee su `head_sha` antes de seguir.
+  const stopRereading = store.events.subscribe(
+    ({ payload }) => {
+      workspaces.reread(payload.fromRunId as RunId).catch((error: unknown) => {
+        store.tx((tx) => tx.emit({ type: "error", origin: "core", payload: { scope: "workspaces.reread", message: String(error) } }));
+      });
+    },
+    { types: ["run.returned"] },
+  );
   const server = await startServer({
     store,
     connections: opts.connections,
@@ -182,6 +192,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       await server.close();
       await Promise.race([flows.close(), delay(DRAIN_MS, undefined, { ref: false })]);
       stopReleasing();
+      stopRereading();
       await askpass.close();
     },
   };

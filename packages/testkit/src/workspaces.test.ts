@@ -369,6 +369,19 @@ describe("heartbeat", () => {
     expect(current.lost.aborted).toBe(false);
   });
 
+  test("tras un handOver el latido sigue con quien recibió el worktree y el de quien lo entregó aborta `lost`", async () => {
+    const id = repo("r1");
+    const lease = await acquire(id, "cla-1", runA);
+    store.tx((tx) => workspaces.handOver(tx, runA, runB));
+    const before = leaseUntil(lease.workspaceId);
+
+    clock += LEASE_TTL_MS / 3;
+    vi.advanceTimersByTime(LEASE_TTL_MS / 3);
+
+    expect(leaseUntil(lease.workspaceId)).toBe(before + LEASE_TTL_MS / 3);
+    expect(lease.lost.aborted).toBe(true);
+  });
+
   test("si la base falla al renovar, aborta `lost` con el error en vez de lanzar desde el timer", async () => {
     const id = repo("r1");
     const closing = openStore({ path: ":memory:", now: () => clock });
@@ -464,6 +477,52 @@ describe("held y workspace.release", () => {
     expect(released.outcome).toBe("ok");
     expect(workspaces.held(runA)).toBeUndefined();
     expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
+  });
+});
+
+describe("handOver y reread", () => {
+  const rowOf = (lease: WorkspaceLease) =>
+    store.db.$client
+      .prepare("SELECT holder_run_id AS holder, fencing_token AS token, head_sha AS head, lease_until AS until FROM workspaces WHERE id = ?")
+      .get(lease.workspaceId) as { holder: string; token: number; head: string; until: number };
+
+  test("pasa el worktree a otra corrida con fencing + 1: lo que tenía la anterior ya no valida", async () => {
+    const id = repo("r1");
+    const lease = await acquire(id, "cla-1", runA);
+
+    store.tx((tx) => workspaces.handOver(tx, runA, runB));
+
+    expect(rowOf(lease)).toMatchObject({ holder: runB, token: lease.fencingToken + 1 });
+    expect(workspaces.held(runA)).toBeUndefined();
+    expect(workspaces.held(runB)).toMatchObject({ workspaceId: lease.workspaceId, fencingToken: lease.fencingToken + 1 });
+    expect(() => workspaces.validate(lease)).toThrow(StaleLeaseError);
+    expect(store.events.since(0, { types: ["lease.released", "lease.acquired"] }).map((e) => [e.type, e.runId, e.payload.token])).toEqual([
+      ["lease.acquired", runA, 1],
+      ["lease.released", runA, 1],
+      ["lease.acquired", runB, 2],
+    ]);
+  });
+
+  test("sin worktrees tomados no hace nada, y deja los de otra corrida", async () => {
+    const id = repo("r1");
+    const lease = await acquire(id, "cla-1", runA);
+
+    store.tx((tx) => workspaces.handOver(tx, runB, newId("run")));
+
+    expect(rowOf(lease)).toMatchObject({ holder: runA, token: lease.fencingToken });
+  });
+
+  test("reread deja el head_sha de la fila en el HEAD que tiene el worktree", async () => {
+    const id = repo("r1");
+    const lease = await acquire(id, "cla-1", runA);
+    const before = rowOf(lease).head;
+
+    await workspaces.git(lease, "commit", "--allow-empty", "-m", "rebase de otra corrida");
+    await workspaces.reread(runA);
+
+    const head = repoById.get(id)!.git("rev-parse", "cla-1");
+    expect(rowOf(lease).head).toBe(head);
+    expect(head).not.toBe(before);
   });
 });
 

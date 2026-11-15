@@ -576,6 +576,10 @@ export const runs = sqliteTable(
     parentStepRunId: text("parent_step_run_id").$type<StepRunId>(),
     /** El nodo del flujo antes del cual la corrida termina con `done` sin ejecutarlo (`stopBefore` del nodo `flow`). */
     stopBefore: text("stop_before"),
+    /** La corrida de dev estacionada a la que esta (de mantenimiento) le pidió prestado el sujeto y el worktree; `null` si no es un préstamo. */
+    borrowedFromRunId: text("borrowed_from_run_id").$type<RunId>(),
+    /** El PR (`pull_requests.id`) que una corrida de issue tomó como sujeto al publicarlo, además del suyo. */
+    claimedPrId: text("claimed_pr_id"),
     lane: text({ enum: LANES }).notNull(),
     status: text({ enum: RUN_STATUSES }).notNull(),
     parkReason: text("park_reason", { enum: PARK_REASONS }),
@@ -603,6 +607,25 @@ export const runs = sqliteTable(
       .on(t.flowDefId, t.subjectType, t.subjectId)
       .where(sql`${t.parentRunId} IS NULL AND ${t.status} IN ('queued', 'running', 'waiting', 'parked', 'paused')`),
     foreignKey({ columns: [t.parentRunId], foreignColumns: [t.id] }),
+    foreignKey({ columns: [t.borrowedFromRunId], foreignColumns: [t.id] }),
+    // Una sola dueña que escribe por sujeto entre todos los flujos; las demás quedan `queued`, que no lo ocupa.
+    // Las hijas quedan fuera (heredan el sujeto de su padre, que corre a la vez) y una corrida con un
+    // sujeto prestado no es la dueña: lo es la corrida de dev estacionada a la que se lo pidió.
+    uniqueIndex("runs_subject_owner")
+      .on(t.subjectType, t.subjectId)
+      .where(
+        sql`${t.writes} = 1 AND ${t.parentRunId} IS NULL AND ${t.borrowedFromRunId} IS NULL AND ${t.status} IN ('running', 'waiting', 'parked', 'paused')`,
+      ),
+    // Lo mismo para el PR que la corrida de una issue toma al publicarlo. Que no lo tenga ya otra corrida con ese PR como sujeto lo revisa `ownerOf`: un índice solo ve una columna.
+    uniqueIndex("runs_claimed_pr_owner")
+      .on(t.claimedPrId)
+      .where(
+        sql`${t.writes} = 1 AND ${t.parentRunId} IS NULL AND ${t.borrowedFromRunId} IS NULL AND ${t.status} IN ('running', 'waiting', 'parked', 'paused')`,
+      ),
+    // Un solo préstamo a la vez por corrida dueña.
+    uniqueIndex("runs_borrowed_from")
+      .on(t.borrowedFromRunId)
+      .where(sql`${t.status} IN ('running', 'waiting', 'parked', 'paused')`),
     // Un paso `flow` abre una sola corrida hija, aunque el paso se reabra tras un corte.
     uniqueIndex("runs_parent_step").on(t.parentStepRunId),
     index("runs_parent_run").on(t.parentRunId),

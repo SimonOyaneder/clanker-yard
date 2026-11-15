@@ -8,7 +8,7 @@ import type { AgentRuntime, RunResult, RunSpec, SessionRef, Usage } from "../age
 import { createArtifacts } from "../artifacts/artifacts";
 import { createDecisions } from "../decisions/decisions";
 import { createDefs } from "../defs/defs";
-import { openStore } from "../store/store";
+import { openStore, type Tx } from "../store/store";
 import type { ActionCtx, ActionResult } from "./catalog";
 import { createFlows } from "./flows";
 
@@ -76,7 +76,9 @@ export function harness(
     /** Un resume vuelve con el mismo id de sesión, como Claude; por defecto abre uno nuevo. */
     resumeKeepsSession?: boolean;
     /** El worktree que tiene tomado cada corrida; por defecto todas tienen el mismo. */
-    workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string } | undefined;
+    workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string; workspaceId?: string; fencingToken?: number } | undefined;
+    /** Lo que hace el préstamo del sujeto con los worktrees (en producción, `workspaces.handOver`). */
+    handOverWorkspaces?: (tx: Tx, from: RunId, to: RunId) => void;
   } = {},
 ) {
   const dir = options.reopen?.dir ?? mkdtempSync(join(tmpdir(), "clanker-flows-"));
@@ -130,6 +132,7 @@ export function harness(
     probeEverySec: options.probeEverySec,
     bootId: options.bootId,
     onClockJump: options.onClockJump,
+    handOverWorkspaces: options.handOverWorkspaces,
   });
   let crashed = false;
   /** Un corte: deja de despachar y no espera a lo que tenía en vuelo (un proceso muerto no termina nada). */

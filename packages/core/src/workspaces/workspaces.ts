@@ -13,7 +13,7 @@ import { continueRebase, rebaseInProgress, rebaseOnto, startRebase, type RebaseS
 import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
 import { runs, workspaces } from "../store/schema";
-import type { Store } from "../store/store";
+import type { Store, Tx } from "../store/store";
 
 const REMOTE = "origin";
 const WORKTREE_LOCK_REASON = "clanker-yard";
@@ -137,6 +137,21 @@ export interface Workspaces {
    * subflujo usa el del padre, que es quien lo tiene).
    */
   releaseHeldBy(runId: RunId): void;
+  /**
+   * Pasa a `to` los worktrees que tiene `from`, dentro de la tx de quien cambia de dueño: el préstamo del
+   * sujeto de una corrida de dev estacionada al carril de mantenimiento y su devolución
+   * (`docs/design.html#d-flows`). Cada uno sube su `fencing_token` en 1, así que lo que `from` tenía en
+   * vuelo ya no valida, y emite `lease.released` y `lease.acquired`. El latido sigue con `to`; si la tx se
+   * deshace, esa renovación falla y el latido se apaga solo.
+   */
+  handOver(tx: Tx, from: RunId, to: RunId): void;
+  /**
+   * Relee `head_sha` de los worktrees que tiene `runId` desde git: tras una devolución la branch pudo
+   * moverse (un rebase). `remote_sha` no se relee: es lo que el core pusheó por última vez, la punta que
+   * `--force-with-lease` espera, y adoptar la del remoto dejaría pisar el commit de otra persona. El
+   * préstamo ya lo dejó al día con cada `push` de quien lo tuvo.
+   */
+  reread(runId: RunId): Promise<void>;
   /** Lanza `StaleLeaseError` si `lease` ya no es el lease vigente del worktree. */
   validate(lease: WorkspaceRef): void;
   /**
@@ -983,6 +998,42 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     for (const { workspaceId, runId, token } of heartbeats.values()) renew(workspaceId, runId, token);
   }
 
+  function handOver({ db, emit }: Tx, from: RunId, to: RunId): void {
+    const held = db
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.holderRunId, from), ne(workspaces.state, "archived")))
+      .all();
+    for (const row of held) {
+      const token = row.fencingToken + 1;
+      db.update(workspaces)
+        .set({ holderRunId: to, leaseUntil: now() + leaseTtlMs, fencingToken: token })
+        .where(eq(workspaces.id, row.id))
+        .run();
+      emit({ type: "lease.released", origin: "core", runId: from, payload: { resource: "workspace", id: row.id, token: row.fencingToken } });
+      emit({ type: "lease.acquired", origin: "core", runId: to, payload: { resource: "workspace", id: row.id, runId: to, token } });
+      startHeartbeat(row.id, to, token);
+    }
+  }
+
+  async function reread(runId: RunId): Promise<void> {
+    const held = store.db
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.holderRunId, runId), eq(workspaces.state, "leased")))
+      .all();
+    for (const row of held) {
+      const headSha = await git(row.path, ["rev-parse", "HEAD"]);
+      store.tx(({ db }) =>
+        db
+          .update(workspaces)
+          .set({ headSha })
+          .where(and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, row.fencingToken)))
+          .run(),
+      );
+    }
+  }
+
   return {
     acquire,
     attach,
@@ -994,6 +1045,8 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     baseSha,
     syncBase,
     release,
+    handOver,
+    reread,
     releaseHeldBy(runId) {
       const rows = store.db
         .select({ workspaceId: workspaces.id, fencingToken: workspaces.fencingToken })

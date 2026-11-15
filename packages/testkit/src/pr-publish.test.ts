@@ -408,6 +408,8 @@ describe("en un flujo", () => {
       { runId, subject: { type: "pr", id: row?.id }, payload: { repo: REPO, number: 1, url: `https://github.com/${REPO}/pull/1` } },
     ]);
     expect(github.pulls()).toMatchObject([{ number: 1, draft: true, head: { ref: "cla-53-flow" } }]);
+    // La corrida de la issue también es la dueña del PR: un rebase o un council sobre él espera a que ella termine.
+    expect(store.db.$client.prepare("SELECT claimed_pr_id FROM runs WHERE id = ?").get(runId)).toEqual({ claimed_pr_id: row?.id });
   });
 
   test("replan sigue el edge del flujo hacia el committer", async () => {

@@ -6,6 +6,7 @@ import { ApplyArgs, cleanMessage, commitsApplyAction } from "../commits/apply";
 import { preparePush } from "../commits/prepare-push";
 import type { Connections } from "../connections/connections";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../flows/catalog";
+import { claimPr } from "../flows/subjects";
 import type { Packs } from "../packs/packs";
 import type { Recipes } from "../recipe/recipe";
 import { newId } from "../store/conventions";
@@ -152,7 +153,8 @@ function recordPull(
   { repoId, repo, pull, headRef, baseRef }: { repoId: string; repo: string; pull: Pull; headRef: string; baseRef: string },
 ): void {
   const run = store.db.select().from(runs).where(eq(runs.id, ctx.runId)).get();
-  store.tx(({ db, emit }) => {
+  store.tx((tx) => {
+    const { db, emit } = tx;
     const saved = db
       .insert(pullRequests)
       .values({
@@ -173,6 +175,8 @@ function recordPull(
       .returning({ id: pullRequests.id })
       .get();
     if (!saved) return;
+    // La corrida de la issue también es la dueña del PR: un council o un rebase sobre él espera a que ella termine o se estacione.
+    claimPr(tx, ctx.runId, saved.id);
     emit({
       type: "pr.opened",
       origin: "core",

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
-import { createConnections, createFileSecrets, createProcs, createRepos, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createProcs, createRepos, newId, openStore, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -283,6 +283,21 @@ describe("arranque", () => {
       { slug: "pr-feedback" },
       { slug: "techlead-clasico" },
     ]);
+  });
+
+  test("al devolverse un sujeto prestado, la dueña relee el head_sha de su worktree", async () => {
+    await boot();
+    const owner = newId("run");
+    const borrower = newId("run");
+    store.db.$client
+      .prepare(
+        "INSERT INTO workspaces (id, repo_id, path, branch, base_ref, head_sha, state, holder_run_id, fencing_token) VALUES ('wsp_1', 'demo', ?, 'main', 'main', 'viejo', 'leased', ?, 3)",
+      )
+      .run(repo.dir, owner);
+
+    store.tx((tx) => tx.emit({ type: "run.returned", origin: "core", runId: borrower, payload: { runId: borrower, fromRunId: owner } }));
+
+    await vi.waitFor(() => expect(store.db.$client.prepare("SELECT head_sha FROM workspaces").get()).toEqual({ head_sha: repo.git("rev-parse", "HEAD") }));
   });
 
   test("al arrancar despacha los pasos pending que dejó el core anterior", async () => {
