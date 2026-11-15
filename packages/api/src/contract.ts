@@ -35,6 +35,12 @@ export interface ContractMeta {
   mcp?: McpMeta;
 }
 
+/**
+ * Versión mayor de la API. Sube cuando el contrato cambia de forma incompatible; el core la
+ * informa en `system.health` y la app, si difiere de la suya, relanza el core (`d-data`, "Handshake").
+ */
+export const API_MAJOR = 1;
+
 const base = oc.$meta<ContractMeta>({});
 
 const system = {

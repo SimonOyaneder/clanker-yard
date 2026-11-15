@@ -38,7 +38,7 @@ export function migrateStore(
     .run(SCHEMA_VERSION_KEY, String(target));
 }
 
-function readSchemaVersion(sqlite: DatabaseSync): number {
+export function readSchemaVersion(sqlite: DatabaseSync): number {
   const hasMeta = sqlite
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'")
     .get();

@@ -1,0 +1,92 @@
+import { API_MAJOR, type ClientOrigin, contract } from "@clanker/api";
+import { ORPCError, implement, withEventMeta } from "@orpc/server";
+import { readSchemaVersion } from "../store/migrate";
+import type { Store } from "../store/store";
+import { eventsAfter } from "./event-stream";
+
+/** Lo que cada llamada trae consigo, venga por HTTP o en proceso (`createRouterClient`, MCP). */
+export interface CoreContext {
+  origin: ClientOrigin;
+}
+
+export interface RouterDeps {
+  store: Store;
+  coreVersion: string;
+  bootId: string;
+  /** ms epoch */
+  startedAt: number;
+  dataDir: string;
+  /** Quien lanzó el core decide cómo apagarlo; `system.shutdown` solo lo pide. */
+  onShutdown(opts: { drain: boolean }): void;
+}
+
+const os = implement(contract).$context<CoreContext>();
+
+export function createRouter(deps: RouterDeps) {
+  const { store } = deps;
+  const schemaVersion = readSchemaVersion(store.db.$client);
+  const platform = process.platform;
+  if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
+    throw new Error(
+      `Plataforma no soportada: ${platform}. El core corre en macOS, Linux y Windows.`,
+    );
+  }
+
+  return os.router({
+    system: {
+      health: os.system.health.handler(() => ({
+        coreVersion: deps.coreVersion,
+        apiMajor: API_MAJOR,
+        schemaVersion,
+        bootId: deps.bootId,
+        // Todavía no existe la tabla de corridas.
+        activeRuns: 0,
+      })),
+      info: os.system.info.handler(() => ({
+        pid: process.pid,
+        startedAt: deps.startedAt,
+        dataDir: deps.dataDir,
+        platform,
+      })),
+      shutdown: os.system.shutdown.handler(({ input, context }) => {
+        store.tx((tx) =>
+          tx.emit({
+            type: "core.stopping",
+            origin: context.origin,
+            payload: { reason: "system.shutdown" },
+          }),
+        );
+        deps.onShutdown({ drain: input.drain });
+      }),
+    },
+    events: {
+      list: os.events.list.handler(({ input }) =>
+        store.events.since(input.after, input.filter).slice(0, input.limit),
+      ),
+      stream: os.events.stream.handler(async function* ({ input, lastEventId, signal }) {
+        for await (const event of eventsAfter(
+          store,
+          resumeFrom(lastEventId, input.after),
+          input.filter,
+          signal,
+        )) {
+          yield withEventMeta(event, { id: String(event.seq) });
+        }
+      }),
+    },
+  });
+}
+
+export type CoreRouter = ReturnType<typeof createRouter>;
+
+/** El `Last-Event-ID` del reconectado manda sobre `after`: es lo último que el cliente vio. */
+function resumeFrom(lastEventId: string | undefined, after: number | undefined): number {
+  if (lastEventId === undefined) return after ?? 0;
+  const seq = Number(lastEventId);
+  if (!Number.isSafeInteger(seq) || seq < 0) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Last-Event-ID debe ser el número de un evento (entero >= 0), llegó "${lastEventId}".`,
+    });
+  }
+  return seq;
+}
