@@ -8,6 +8,8 @@ function prefixedId<const P extends string>(prefix: P) {
   return z.templateLiteral([`${prefix}_`, z.string().regex(ULID)]);
 }
 
+export const IssueId = prefixedId("iss");
+export type IssueId = z.infer<typeof IssueId>;
 export const ProjectId = prefixedId("prj");
 export type ProjectId = z.infer<typeof ProjectId>;
 export const RunId = prefixedId("run");

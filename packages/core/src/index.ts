@@ -69,3 +69,10 @@ export type {
   Workspaces,
   WorkspacesOptions,
 } from "./workspaces/workspaces";
+
+export { createIssues } from "./tracker/issues";
+export type { Issues, ProjectBinding } from "./tracker/issues";
+export { createLocalTracker } from "./tracker/local";
+export type { LocalTracker, LocalTrackerOptions, RelationKind } from "./tracker/local";
+export { IssueNotFoundError, matchesIssueFilter } from "./tracker/tracker";
+export type { Tracker } from "./tracker/tracker";

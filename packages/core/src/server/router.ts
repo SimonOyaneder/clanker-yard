@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createArtifacts } from "../artifacts/artifacts";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
+import type { Issues } from "../tracker/issues";
 import { eventsAfter } from "./event-stream";
 
 /** Lo que cada llamada trae consigo, venga por HTTP o en proceso (`createRouterClient`, MCP). */
@@ -16,6 +17,7 @@ export interface CoreContext {
 export interface RouterDeps {
   store: Store;
   connections: Connections;
+  issues: Issues;
   coreVersion: string;
   bootId: string;
   /** ms epoch */
@@ -88,6 +90,17 @@ export function createRouter(deps: RouterDeps) {
         const { content, ...meta } = artifact;
         return { ...meta, content: new Blob([content], { type: artifact.mime }) };
       }),
+    },
+    issues: {
+      list: os.issues.list.handler(({ input }) => deps.issues.list(input)),
+      get: os.issues.get.handler(({ input }) => {
+        const issue = deps.issues.get(input.id);
+        if (!issue) throw new ORPCError("NOT_FOUND", { message: `No hay una issue ${input.id} en el caché.` });
+        return issue;
+      }),
+      createLocal: os.issues.createLocal.handler(({ input, context }) =>
+        deps.issues.createLocal(input, context.origin),
+      ),
     },
     events: {
       list: os.events.list.handler(({ input }) =>

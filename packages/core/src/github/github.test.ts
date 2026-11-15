@@ -8,6 +8,7 @@ import { createFileSecrets } from "../secrets/encrypted-file";
 import { createRouter } from "../server/router";
 import { openStore, type Store } from "../store/store";
 import { syncCursors } from "../store/schema";
+import { createIssues } from "../tracker/issues";
 import { createGitHubClient } from "./client";
 import { healthyGitHub, recorded, startFakeGitHub, type FakeGitHub } from "./fake-github";
 import { GitHubPatError, githubPatForm } from "./pat";
@@ -186,6 +187,7 @@ describe("API", () => {
     const router = createRouter({
       store,
       connections,
+      issues: createIssues(store),
       coreVersion: "0",
       bootId: "boot",
       startedAt: 0,

@@ -63,6 +63,10 @@ Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Sec
 - Nunca guardes aquí el token OAuth de la suscripción de Claude (`docs/claude-subscription.md`).
 - Los tests no tocan el Keychain real: usan `createFileSecrets` en un directorio temporal, o un `.keychain-db` temporal creado con `security create-keychain` y pasado en `keychain` (ver `secrets.test.ts`).
 
+## Trackers
+
+`Tracker` (`packages/core/src/tracker/tracker.ts`) es lo único que el scheduler y los flujos ven de un tracker; las formas normalizadas (`Issue`, `IssueRef`, `StatusCategory`, `IssueFilter`, `TrackerCapabilities`) son de `@clanker/api`. `createLocalTracker(store)` es el adapter `local`: sus issues, comentarios y relaciones viven en `local_issues`, `local_comments` y `local_relations`, y `rev` es el cursor de `changesSince`. `createIssues(store)` es el caché `issues`: `sync(tracker, { projectId, project })` vuelca `listIssues` (la primera vez) o `changesSince` (después, con el cursor en `sync_cursors`, clave `issues:<tracker>:<proyecto>`) y emite `issue.synced`; `issues.list`, `issues.get` y `issues.createLocal` de la API leen y escriben ahí. Un adapter nuevo implementa `Tracker` y declara sus `capabilities`.
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:

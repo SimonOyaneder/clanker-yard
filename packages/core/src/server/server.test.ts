@@ -13,6 +13,7 @@ import { createFileSecrets } from "../secrets/encrypted-file";
 import { createArtifacts, INLINE_MAX_BYTES } from "../artifacts/artifacts";
 import { readSchemaVersion } from "../store/migrate";
 import { openStore, type Store } from "../store/store";
+import { createIssues } from "../tracker/issues";
 import { startServer, type CoreServer } from "./server";
 
 let store: Store;
@@ -42,6 +43,7 @@ async function start(allowedOrigins?: string[]): Promise<CoreServer> {
   server = await startServer({
     store,
     connections,
+    issues: createIssues(store),
     coreVersion: "1.2.3",
     dataDir,
     onShutdown,

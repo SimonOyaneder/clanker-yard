@@ -5,11 +5,18 @@ import type {
   ConnectionStatus,
   Event,
   EventType,
+  IssueId,
+  IssueRef,
+  Milestone,
   Origin,
+  Person,
+  Priority,
   ProjectId,
   RunId,
+  StatusCategory,
   StepRunId,
   SubjectRef,
+  TrackerId,
 } from "@clanker/api";
 import { sql } from "drizzle-orm";
 import {
@@ -19,6 +26,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -242,4 +250,112 @@ export const artifactRefs = sqliteTable(
     role: text().notNull(),
   },
   (t) => [primaryKey({ columns: [t.hash, t.ownerType, t.ownerId, t.role] })],
+);
+
+/**
+ * Caché de las issues de los trackers, con la forma normalizada. Se llena con el sync; el scheduler y
+ * la API leen de aquí. `project_id` es el proyecto de Clanker (sin FK hasta que exista `projects`).
+ */
+export const issues = sqliteTable(
+  "issues",
+  {
+    id: text().$type<IssueId>().primaryKey(),
+    tracker: text().$type<TrackerId>().notNull(),
+    trackerId: text("tracker_id").notNull(),
+    key: text().notNull(),
+    url: text().notNull(),
+    projectId: text("project_id").$type<ProjectId>().notNull(),
+    /** El proyecto dentro del tracker (`Issue.project`). */
+    trackerProject: text("tracker_project").notNull(),
+    title: text().notNull(),
+    body: text().notNull(),
+    status: text().$type<StatusCategory>().notNull(),
+    rawStatus: text("raw_status").notNull(),
+    priority: integer().$type<Priority>().notNull(),
+    assignee: text({ mode: "json" }).$type<Person>(),
+    labels: text({ mode: "json" }).$type<string[]>().notNull(),
+    estimate: real(),
+    parent: text({ mode: "json" }).$type<IssueRef>(),
+    milestone: text({ mode: "json" }).$type<Milestone>(),
+    relations: text({ mode: "json" })
+      .$type<{ blocks: IssueRef[]; blockedBy: IssueRef[]; related: IssueRef[] }>()
+      .notNull(),
+    remoteUpdatedAt: integer("remote_updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("issues_tracker_tracker_id").on(t.tracker, t.trackerId),
+    index("issues_project_status_priority").on(t.projectId, t.status, t.priority),
+    check("issues_labels_json", sql`json_valid(${t.labels})`),
+    check("issues_relations_json", sql`json_valid(${t.relations})`),
+    check("issues_assignee_json", sql`${t.assignee} IS NULL OR json_valid(${t.assignee})`),
+    check("issues_parent_json", sql`${t.parent} IS NULL OR json_valid(${t.parent})`),
+    check("issues_milestone_json", sql`${t.milestone} IS NULL OR json_valid(${t.milestone})`),
+  ],
+);
+
+/** Las issues del tracker `local`: la fuente de verdad, no el caché. Ver `tracker/local.ts`. */
+export const localIssues = sqliteTable(
+  "local_issues",
+  {
+    id: text().primaryKey(),
+    project: text().notNull(),
+    /** Correlativo dentro del proyecto; con el proyecto forma la key (`DEMO-3`). */
+    number: integer().notNull(),
+    title: text().notNull(),
+    body: text().notNull(),
+    status: text().$type<StatusCategory>().notNull(),
+    rawStatus: text("raw_status").notNull(),
+    priority: integer().$type<Priority>().notNull(),
+    assignee: text({ mode: "json" }).$type<Person>(),
+    labels: text({ mode: "json" }).$type<string[]>().notNull(),
+    estimate: real(),
+    parentId: text("parent_id"),
+    milestone: text({ mode: "json" }).$type<Milestone>(),
+    /** Sube con cada cambio de la issue (propio o de sus comentarios y relaciones): es el cursor de `changesSince`. */
+    rev: integer().notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("local_issues_project_number").on(t.project, t.number),
+    uniqueIndex("local_issues_rev").on(t.rev),
+    foreignKey({ columns: [t.parentId], foreignColumns: [t.id] }),
+    check("local_issues_labels_json", sql`json_valid(${t.labels})`),
+    check("local_issues_assignee_json", sql`${t.assignee} IS NULL OR json_valid(${t.assignee})`),
+    check("local_issues_milestone_json", sql`${t.milestone} IS NULL OR json_valid(${t.milestone})`),
+  ],
+);
+
+/**
+ * Una arista por relación: `blocks` va de quien bloquea a quien queda bloqueado (`blockedBy` es la
+ * misma fila leída al revés) y `related` se guarda una vez, con los ids en orden.
+ */
+export const localRelations = sqliteTable(
+  "local_relations",
+  {
+    fromId: text("from_id").notNull(),
+    toId: text("to_id").notNull(),
+    kind: text({ enum: ["blocks", "related"] }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.fromId, t.toId, t.kind] }),
+    foreignKey({ columns: [t.fromId], foreignColumns: [localIssues.id] }),
+    foreignKey({ columns: [t.toId], foreignColumns: [localIssues.id] }),
+    check("local_relations_distinct", sql`${t.fromId} != ${t.toId}`),
+  ],
+);
+
+export const localComments = sqliteTable(
+  "local_comments",
+  {
+    id: text().primaryKey(),
+    issueId: text("issue_id").notNull(),
+    author: text({ mode: "json" }).$type<Person>().notNull(),
+    text: text().notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    index("local_comments_issue").on(t.issueId, t.createdAt),
+    foreignKey({ columns: [t.issueId], foreignColumns: [localIssues.id] }),
+    check("local_comments_author_json", sql`json_valid(${t.author})`),
+  ],
 );

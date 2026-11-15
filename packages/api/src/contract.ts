@@ -1,7 +1,15 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
 import { Connection, GitHubPatForm } from "./connections";
-import { ArtifactHash, ArtifactKind, Event, EventFilter } from "./domain";
+import {
+  ArtifactHash,
+  ArtifactKind,
+  Event,
+  EventFilter,
+  IssueId,
+  ProjectId,
+} from "./domain";
+import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 
 /**
  * Convención `.meta({ mcp })` (`docs/design.html#d-data`, "Tools MCP desde el mismo contrato").
@@ -120,5 +128,21 @@ const artifacts = {
   ),
 };
 
-export const contract = { system, events, connections, artifacts };
+const issues = {
+  /** Del caché, no del tracker. Orden: prioridad (urgente primero, sin prioridad al final) y luego la creación. */
+  list: base
+    .input(IssueFilter.extend({ projectId: ProjectId.optional() }))
+    .output(z.array(CachedIssue)),
+  /** Del caché, con sus relaciones. */
+  get: base.input(z.object({ id: IssueId })).output(CachedIssue),
+  /**
+   * Crea una issue en el tracker local (demos y fixtures) y la deja en el caché. Mientras no exista la
+   * tabla `projects`, el proyecto local de la issue se llama como su `projectId`.
+   */
+  createLocal: base
+    .input(NewLocalIssue.extend({ projectId: ProjectId }))
+    .output(CachedIssue),
+};
+
+export const contract = { system, events, connections, artifacts, issues };
 export type Contract = typeof contract;

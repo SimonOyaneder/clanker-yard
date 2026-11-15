@@ -53,6 +53,15 @@ const router = os.router({
       content: new Blob(["ok"]),
     })),
   },
+  issues: {
+    list: os.issues.list.handler(() => []),
+    get: os.issues.get.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    createLocal: os.issues.createLocal.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+  },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
     stream: os.events.stream.handler(async function* ({ input }) {
