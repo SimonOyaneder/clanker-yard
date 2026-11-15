@@ -1,8 +1,9 @@
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import type { Event, EventFilter } from "@clanker/api";
+import { Event, type EventFilter } from "@clanker/api";
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { drizzle, type NodeSQLiteDatabase } from "drizzle-orm/node-sqlite";
+import * as z from "zod";
 import { migrateStore } from "./migrate";
 import { events } from "./schema";
 
@@ -10,6 +11,12 @@ export type StoreDb = NodeSQLiteDatabase & { $client: DatabaseSync };
 
 /** Un evento por escribir: `seq` y `ts` los pone el store y `payload` vale `{}` si no viene. */
 export type NewEvent = Omit<Event, "seq" | "ts" | "payload"> & Partial<Pick<Event, "payload">>;
+
+/**
+ * `events` es append-only y la API valida lo que responde: un evento que no cumple `Event` (un
+ * `run_1` pasa el tipo, no el esquema) rompería `events.list` y `events.stream` para siempre.
+ */
+const WritableEvent = Event.omit({ seq: true, ts: true });
 
 export interface Tx {
   /** La misma conexión y la misma transacción: se confirma o se deshace junto con los eventos. */
@@ -96,10 +103,16 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
       }
       const written: Event[] = [];
       const emit = (event: NewEvent): Event => {
+        const checked = WritableEvent.safeParse({ ...event, payload: event.payload ?? {} });
+        if (!checked.success) {
+          throw new Error(
+            `El evento ${event.type} no cumple el Event de la API:\n${z.prettifyError(checked.error)}`,
+          );
+        }
         const stored = toEvent(
           db
             .insert(events)
-            .values({ ...event, ts: now(), payload: event.payload ?? {} })
+            .values({ ...checked.data, ts: now() })
             .returning()
             .get(),
         );

@@ -26,7 +26,9 @@ function memoryStore(): Store {
   return store;
 }
 
-const runStarted = { type: "run.started", origin: "core", runId: "run_1" } as const;
+const [run1, run2] = [newId("run"), newId("run")];
+const [prj1, prj2] = [newId("prj"), newId("prj")];
+const runStarted = { type: "run.started", origin: "core", runId: run1 } as const;
 
 describe("tx", () => {
   test("confirma las escrituras y los eventos, y avisa a los suscriptores después del commit", () => {
@@ -124,27 +126,27 @@ describe("events", () => {
       tx.emit({
         type: "run.started",
         origin: "core",
-        projectId: "prj_1",
-        runId: "run_1",
+        projectId: prj1,
+        runId: run1,
         subject: { type: "issue", id: "CLA-8" },
         payload: { a: 1 },
       });
-      tx.emit({ type: "step.started", origin: "core", projectId: "prj_1", runId: "run_1" });
-      tx.emit({ type: "run.started", origin: "ui", projectId: "prj_2", runId: "run_2" });
+      tx.emit({ type: "step.started", origin: "core", projectId: prj1, runId: run1 });
+      tx.emit({ type: "run.started", origin: "ui", projectId: prj2, runId: run2 });
     });
 
     expect(store.events.since(0).map((e) => e.seq)).toEqual([1, 2, 3]);
     expect(store.events.since(1).map((e) => e.seq)).toEqual([2, 3]);
-    expect(store.events.since(0, { runId: "run_1" }).map((e) => e.seq)).toEqual([1, 2]);
-    expect(store.events.since(0, { projectId: "prj_2" }).map((e) => e.seq)).toEqual([3]);
+    expect(store.events.since(0, { runId: run1 }).map((e) => e.seq)).toEqual([1, 2]);
+    expect(store.events.since(0, { projectId: prj2 }).map((e) => e.seq)).toEqual([3]);
     expect(store.events.since(0, { types: ["run.started"] }).map((e) => e.seq)).toEqual([1, 3]);
     expect(store.events.since(0)[0]).toEqual({
       seq: 1,
       ts: expect.any(Number),
       type: "run.started",
       origin: "core",
-      projectId: "prj_1",
-      runId: "run_1",
+      projectId: prj1,
+      runId: run1,
       subject: { type: "issue", id: "CLA-8" },
       payload: { a: 1 },
     });
@@ -153,14 +155,14 @@ describe("events", () => {
   test("subscribe solo recibe lo que cumple el filtro, hasta que se cancela", () => {
     const store = memoryStore();
     const received: string[] = [];
-    const cancel = store.events.subscribe((e) => received.push(e.type), { runId: "run_1" });
+    const cancel = store.events.subscribe((e) => received.push(e.type), { runId: run1 });
 
     store.tx((tx) => {
-      tx.emit({ type: "run.started", origin: "core", runId: "run_1" });
-      tx.emit({ type: "run.started", origin: "core", runId: "run_2" });
+      tx.emit({ type: "run.started", origin: "core", runId: run1 });
+      tx.emit({ type: "run.started", origin: "core", runId: run2 });
     });
     cancel();
-    store.tx((tx) => tx.emit({ type: "run.finished", origin: "core", runId: "run_1" }));
+    store.tx((tx) => tx.emit({ type: "run.finished", origin: "core", runId: run1 }));
 
     expect(received).toEqual(["run.started"]);
   });
@@ -169,6 +171,17 @@ describe("events", () => {
     const store = openStore({ path: ":memory:", now: () => 1_700_000_000_000 });
     open.push(store);
     expect(store.tx((tx) => tx.emit(runStarted)).ts).toBe(1_700_000_000_000);
+  });
+
+  test("rechaza un evento que la API no podría servir y deshace la tx", () => {
+    const store = memoryStore();
+    expect(() =>
+      store.tx((tx) => {
+        tx.emit(runStarted);
+        tx.emit({ type: "run.started", origin: "core", runId: "run_1" });
+      }),
+    ).toThrow(/run\.started no cumple el Event de la API[\s\S]*runId/);
+    expect(store.events.since(0)).toEqual([]);
   });
 
   test("es append-only: UPDATE y DELETE fallan", () => {

@@ -1,4 +1,10 @@
+import type { ProjectId, RunId, StepRunId } from "@clanker/api";
 import type { Store } from "@clanker/core";
+
+// Ids fijos con ULID: el store rechaza un `run_1` aunque pase el tipo.
+const projectId: ProjectId = "prj_00000000000000000000000001";
+const runId: RunId = "run_00000000000000000000000001";
+const stepRunId: StepRunId = "stp_00000000000000000000000001";
 
 /**
  * Escenarios de base sembrada. Cada uno deja el Store como lo dejaría la app en ese momento;
@@ -12,13 +18,13 @@ export const scenarios = {
   /** Un run con un paso en curso. */
   "loop-running": (store) => {
     store.tx((tx) => {
-      tx.emit({ type: "run.started", origin: "core", projectId: "prj_demo", runId: "run_1" });
+      tx.emit({ type: "run.started", origin: "core", projectId, runId });
       tx.emit({
         type: "step.started",
         origin: "core",
-        projectId: "prj_demo",
-        runId: "run_1",
-        stepRunId: "stp_1",
+        projectId,
+        runId,
+        stepRunId,
         payload: { step: "implement" },
       });
     });
@@ -27,12 +33,12 @@ export const scenarios = {
   /** Un run estacionado esperando que se resuelva su bloqueo. */
   "issue-blocked": (store) => {
     store.tx((tx) => {
-      tx.emit({ type: "run.started", origin: "core", projectId: "prj_demo", runId: "run_1" });
+      tx.emit({ type: "run.started", origin: "core", projectId, runId });
       tx.emit({
         type: "run.parked",
         origin: "core",
-        projectId: "prj_demo",
-        runId: "run_1",
+        projectId,
+        runId,
         subject: { type: "issue", id: "CLA-1" },
         payload: { reason: "depende de CLA-2" },
       });

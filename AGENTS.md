@@ -53,6 +53,8 @@ El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run 
 
 Lo que ya define `@clanker/api` (ids con prefijo, `EventType`, `Origin`, `SubjectRef`, `Event`, `EventFilter`) se importa de ahí, no se redeclara en el core: en el schema con `.$type<...>()`, que no cambia la migración.
 
+Los ids de prueba salen de `newId("run")` o son ULIDs válidos (`run_00000000000000000000000001`): `run_1` pasa el tipo, pero el store rechaza el evento.
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:
