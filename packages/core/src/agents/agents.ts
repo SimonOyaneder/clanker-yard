@@ -9,11 +9,11 @@ import {
   type RoleMode,
   type StepRunId,
 } from "@clanker/api";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
-import { agentSessions, agentTurns, type DefPin } from "../store/schema";
+import { agentSessions, agentTurns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import { estimateCostMicros } from "./pricing";
 import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
@@ -437,6 +437,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     }
 
     tx.db.insert(agentTurns).values({ sessionId, seq, ts, model, ...tokens, costMicros }).run();
+    addStepUsage(tx, c, sessionId, tokens.tokensIn + tokens.tokensOut + tokens.tokensCacheRead + tokens.tokensCacheWrite, costMicros);
     tx.db
       .update(agentSessions)
       .set({
@@ -474,6 +475,20 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     turns.costMicros += costMicros;
   }
 
+  /** Suma lo consumido al paso que corría; un resume con el mismo id de sesión lo cuenta en el paso que lo pidió. */
+  function addStepUsage(tx: Tx, c: Conversation, sessionId: string, tokens: number, costMicros: number): void {
+    const { stepRunId } = c.placement;
+    if (stepRunId === undefined) return;
+    tx.db
+      .insert(stepUsage)
+      .values({ stepRunId, sessionId, tokens, costMicros })
+      .onConflictDoUpdate({
+        target: [stepUsage.stepRunId, stepUsage.sessionId],
+        set: { tokens: sql`${stepUsage.tokens} + ${tokens}`, costMicros: sql`${stepUsage.costMicros} + ${costMicros}` },
+      })
+      .run();
+  }
+
   /**
    * Cierra la sesión. El total del runtime (`total_cost_usd` menos lo que la sesión ya traía) manda
    * sobre las estimaciones por turno: se suma solo la diferencia con lo que `recordTurn` ya sumó. Si el
@@ -509,6 +524,8 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
         })
         .where(eq(agentSessions.id, sessionId))
         .run();
+      const tokensOf = (u: Usage) => u.tokensIn + u.tokensOut + u.tokensCacheRead + u.tokensCacheWrite;
+      addStepUsage(tx, c, sessionId, tokensOf(spent) - tokensOf(turns), spent.costMicros - turns.costMicros);
       if (runtimeKnowsTotal && turns.turns > 0) {
         const gap = Math.abs(reported.costMicros - turns.costMicros);
         if (gap * 100 > reported.costMicros * USAGE_MISMATCH_PERCENT) {

@@ -5,6 +5,8 @@ export * from "./contract";
 export * from "./decisions";
 export * from "./domain";
 export * from "./flow";
+export * from "./legacy-metrics";
+export * from "./metrics";
 export * from "./pack";
 export * from "./prs";
 export * from "./recipe";

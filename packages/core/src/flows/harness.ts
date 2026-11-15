@@ -73,6 +73,8 @@ export function harness(
     persist?: boolean;
     reopen?: HarnessHome;
     onClockJump?: () => void;
+    /** Un resume vuelve con el mismo id de sesión, como Claude; por defecto abre uno nuevo. */
+    resumeKeepsSession?: boolean;
     /** El worktree que tiene tomado cada corrida; por defecto todas tienen el mismo. */
     workspaceOf?: (runId: RunId) => { path: string; base: string } | undefined;
   } = {},
@@ -107,7 +109,7 @@ export function harness(
     start: (spec) =>
       Promise.resolve(run({ kind: "start", sessionId: `${bootPrefix}ses-${calls.length + 1}`, spec, subject: subjectOf(spec.prompt), prompt: spec.prompt }, spec.cwd)),
     resume: (ref, message) =>
-      Promise.resolve(run({ kind: "resume", sessionId: `${bootPrefix}ses-${calls.length + 1}`, subject: subjectOf(message), prompt: message }, ref.cwd)),
+      Promise.resolve(run({ kind: "resume", sessionId: options.resumeKeepsSession ? ref.sessionId : `${bootPrefix}ses-${calls.length + 1}`, subject: subjectOf(message), prompt: message }, ref.cwd)),
   };
 
   const agents = createAgents({ store, defs, runtime });

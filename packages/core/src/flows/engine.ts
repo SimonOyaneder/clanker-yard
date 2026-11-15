@@ -13,8 +13,9 @@ import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
 import { openNote } from "../decisions/decisions";
 import type { Defs } from "../defs/defs";
+import { recordRunMetrics } from "../metrics/record";
 import { newId } from "../store/conventions";
-import { actionEffects, agentSessions, runs, stepRuns, type DefPin } from "../store/schema";
+import { actionEffects, agentSessions, runs, stepRuns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ConsolidatorDef, type ExternalEvent, type RetryPolicy, type WaitDef, type WaitResult } from "./catalog";
 import { edgeFor, edgesOf, maxRoundsOf, takeEdge } from "./edges";
@@ -1128,6 +1129,7 @@ export function createEngine(deps: EngineDeps): Engine {
         .set({ rounds, status: result === "done" ? "done" : "failed", outcome: result, endedAt })
         .where(eq(runs.id, run.id))
         .run();
+      recordRunMetrics(tx, run.id);
       tx.emit({
         type: "run.finished",
         origin: "core",
@@ -1158,7 +1160,7 @@ export function createEngine(deps: EngineDeps): Engine {
     },
   ): number {
     const cost = Number(
-      tx.db.select({ total: sum(agentSessions.costMicros) }).from(agentSessions).where(eq(agentSessions.stepRunId, step.id)).get()?.total ?? 0,
+      tx.db.select({ total: sum(stepUsage.costMicros) }).from(stepUsage).where(eq(stepUsage.stepRunId, step.id)).get()?.total ?? 0,
     );
     const closed = tx.db
       .update(stepRuns)
@@ -1641,6 +1643,7 @@ export function createEngine(deps: EngineDeps): Engine {
         canceled.push(...steps.map((s) => s.id));
         const endedAt = now();
         tx.db.update(runs).set({ status: "canceled", parkReason: null, endedAt }).where(eq(runs.id, run.id)).run();
+        recordRunMetrics(tx, run.id);
         tx.emit({
           type: "run.finished",
           origin: "core",

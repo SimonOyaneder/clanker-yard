@@ -14,6 +14,7 @@ import {
   RunId,
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
+import { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectSummary, RoleMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
 import { PrRef, PrState } from "./prs";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
@@ -192,6 +193,8 @@ const projects = {
   create: base.input(NewProject).output(ClankerProject),
   /** Cambia solo los campos presentes; las mismas validaciones que `create`. */
   update: base.input(ProjectPatch.extend({ id: ProjectId })).output(ClankerProject),
+  /** Totales, rondas y costo por rol de las corridas cerradas del proyecto. `NOT_FOUND` si no existe. */
+  summary: base.input(z.object({ id: ProjectId })).output(ProjectSummary),
 };
 
 const prs = {
@@ -244,6 +247,15 @@ const runs = {
   start: base.input(StartRun).output(RunDetail),
 };
 
+const metrics = {
+  /** Por costo, de más a menos. */
+  byRole: base.input(MetricsFilter.default({})).output(z.array(RoleMetrics)),
+  /** Por día de cierre, del más antiguo al más reciente. */
+  byDay: base.input(DayMetricsFilter.default({ utcOffsetMinutes: 0 })).output(z.array(DayMetrics)),
+  /** Por costo, de más a menos. */
+  byModel: base.input(MetricsFilter.default({})).output(z.array(ModelMetrics)),
+};
+
 const decisions = {
   /** La bandeja: de la más reciente a la más antigua. Sin filtro trae todas, resueltas incluidas. */
   list: base.input(DecisionFilter.default({})).output(z.array(Decision)),
@@ -251,5 +263,5 @@ const decisions = {
   get: base.input(z.object({ id: DecisionId })).output(Decision),
 };
 
-export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions };
+export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, metrics };
 export type Contract = typeof contract;

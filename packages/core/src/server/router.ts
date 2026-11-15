@@ -9,6 +9,7 @@ import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
 import { RunNotFoundError, RunStartError } from "../flows/engine";
+import { createMetrics } from "../metrics/metrics";
 import type { Packs } from "../packs/packs";
 import { DefValidationError } from "../defs/defs";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
@@ -55,6 +56,7 @@ export function createRouter(deps: RouterDeps) {
   const { store } = deps;
   const schemaVersion = readSchemaVersion(store.db.$client);
   const { artifacts, flows, projects, repos, recipeTester, runs } = deps;
+  const metrics = createMetrics(store);
   const prs = createPrs({ connections: deps.connections, packs: deps.packs });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
@@ -180,6 +182,7 @@ export function createRouter(deps: RouterDeps) {
       update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
         asApiError(() => projects.update(id, patch, context.origin)),
       ),
+      summary: os.projects.summary.handler(({ input }) => metrics.summary(projectOrNotFound(input.id).id)),
     },
     prs: {
       get: os.prs.get.handler(async ({ input }) => {
@@ -210,6 +213,11 @@ export function createRouter(deps: RouterDeps) {
       start: os.runs.start.handler(({ input, context }) =>
         asApiErrorAsync(() => runs.start(input, context.origin)),
       ),
+    },
+    metrics: {
+      byRole: os.metrics.byRole.handler(({ input }) => metrics.byRole(input)),
+      byDay: os.metrics.byDay.handler(({ input }) => metrics.byDay(input)),
+      byModel: os.metrics.byModel.handler(({ input }) => metrics.byModel(input)),
     },
     decisions: {
       list: os.decisions.list.handler(({ input }) => deps.decisions.list(input)),

@@ -328,6 +328,20 @@ describe("decisions", () => {
   });
 });
 
+describe("metrics", () => {
+  test("sin corridas cerradas todo viene vacío, y el resumen de un proyecto inexistente es NOT_FOUND", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const project = await client.projects.create({ slug: "demo", name: "Demo", tracker: "local" });
+
+    expect(await client.metrics.byRole()).toEqual([]);
+    expect(await client.metrics.byModel({ projectId: project.id })).toEqual([]);
+    expect(await client.metrics.byDay({ utcOffsetMinutes: -180 })).toEqual([]);
+    expect(await client.projects.summary({ id: project.id })).toMatchObject({ runs: 0, costMicros: 0, avgCostMicros: null, byRole: [] });
+    await expect(client.projects.summary({ id: "prj_01J0000000000000000000000A" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
 describe("events", () => {
   test("list filtra por tipo y respeta after y limit", async () => {
     const core = await start();

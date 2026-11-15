@@ -195,6 +195,10 @@ Se prueba en `packages/testkit/src/prepare-push.test.ts` y, el guard de council 
 - Un prompt no pide lo que hace el core (push, PR, checks, respuestas en el PR o el tracker) ni nada propio de un repo o empresa: eso llega como contexto del rol (`pack`, `repo`). El test de la plantilla lo verifica.
 - Un rol o modo nuevo debe calzar con lo que referencian los flujos de la plantilla: su lista está en `template.test.ts`. Tras cambiar un esquema de reporte, `npx vitest run -u packages/core/src/template` regenera el snapshot; revisa el diff.
 
+## Métricas
+
+`recordRunMetrics(tx, runId)` (`packages/core/src/metrics/record.ts`) llena `run_metrics` y `run_role_costs` en la misma tx que cierra la corrida (`@fin` o cancelación), desde `runs.rounds`, los `step_runs` (outcomes por nodo) y `step_usage` y las `agent_sessions` de sus pasos (costo y tokens por rol, modelo y effort; `step_usage` acumula lo que cada paso consumió de su sesión, y es de donde `closeStep` saca el costo del paso: un resume con el mismo id de sesión no deja su costo en el paso original). Todo lo que consume la UI sale de ahí vía `createMetrics` (`metrics.byRole|byDay|byModel`, `projects.summary`): los costos suman todas las corridas, hijas de subflujo incluidas; los conteos (`runs`), solo las raíz. Los días son del cierre, en la zona `utcOffsetMinutes`. La importación del loop viejo (`parseLegacyMetrics`, `@clanker/api`) escribe estas mismas tablas. `clanker metrics compare --legacy <metrics.jsonl>` (`apps/cli`, `npm run clanker -w @clanker/cli -- ...`) compara promedios por rol contra lo que lleva el core.
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:

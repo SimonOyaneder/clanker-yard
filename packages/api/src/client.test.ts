@@ -83,6 +83,9 @@ const router = os.router({
     update: os.projects.update.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    summary: os.projects.summary.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
   },
   prs: {
     get: os.prs.get.handler(() => {
@@ -107,6 +110,11 @@ const router = os.router({
     start: os.runs.start.handler(() => {
       throw new Error("no se usa en este test");
     }),
+  },
+  metrics: {
+    byRole: os.metrics.byRole.handler(() => []),
+    byDay: os.metrics.byDay.handler(() => []),
+    byModel: os.metrics.byModel.handler(() => []),
   },
   decisions: {
     list: os.decisions.list.handler(() => []),

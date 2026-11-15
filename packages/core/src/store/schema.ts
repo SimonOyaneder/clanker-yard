@@ -191,6 +191,26 @@ export const agentTurns = sqliteTable(
 );
 
 /**
+ * Lo que un paso consumió de una sesión. Un resume que reusa el id de sesión deja `agent_sessions.step_run_id`
+ * en el paso original, así que el costo de un paso (y de su corrida) sale de aquí, no de la sesión. Sin FK a
+ * `step_runs`, como `agent_sessions.step_run_id`: Agents corre sesiones sueltas.
+ */
+export const stepUsage = sqliteTable(
+  "step_usage",
+  {
+    stepRunId: text("step_run_id").$type<StepRunId>().notNull(),
+    sessionId: text("session_id").notNull(),
+    /** Entrada, salida y caché (lectura y escritura). */
+    tokens: integer().notNull(),
+    costMicros: integer("cost_micros").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.stepRunId, t.sessionId] }),
+    foreignKey({ columns: [t.sessionId], foreignColumns: [agentSessions.id] }),
+  ],
+);
+
+/**
  * USD por millón de tokens, en micros (USD × 10⁶), para estimar el costo de un turno cuando el
  * runtime no lo reporta. `model` es un nombre de familia (`opus`): sirve a todo id de modelo que
  * lo contenga, y un precio más largo (`opus-4-8`) gana. Rige el de mayor `valid_from` anterior al turno.
@@ -711,4 +731,49 @@ export const pullRequests = sqliteTable(
     owned: integer({ mode: "boolean" }).notNull().default(false),
   },
   (t) => [uniqueIndex("pull_requests_repo_number").on(t.repoId, t.number)],
+);
+
+/**
+ * Lo que una corrida cerrada dejó, calculado al cerrarla (`recordRunMetrics`); de aquí salen todas
+ * las métricas. `result` es el outcome de la corrida o `canceled`. Sin columnas de un rol: las rondas
+ * de review, bot y CI salen de `rounds` (contador → vueltas) y `outcomes` (nodo → outcome → pasos).
+ */
+export const runMetrics = sqliteTable(
+  "run_metrics",
+  {
+    runId: text("run_id")
+      .$type<RunId>()
+      .primaryKey()
+      .references(() => runs.id),
+    result: text().notNull(),
+    /** De `started_at` a `ended_at`: incluye lo que la corrida estuvo estacionada. */
+    minutes: real().notNull(),
+    rounds: text({ mode: "json" }).$type<Record<string, number>>().notNull(),
+    outcomes: text({ mode: "json" }).$type<Record<string, Record<string, number>>>().notNull(),
+    /** Lo que costaron las sesiones de los pasos de esta corrida, sin las de sus hijas. */
+    costMicros: integer("cost_micros").notNull(),
+  },
+  (t) => [
+    check("run_metrics_rounds_json", sql`json_valid(${t.rounds})`),
+    check("run_metrics_outcomes_json", sql`json_valid(${t.outcomes})`),
+  ],
+);
+
+/** El costo de un rol en una corrida: un rol usa un solo modelo por corrida (lo fija el perfil). */
+export const runRoleCosts = sqliteTable(
+  "run_role_costs",
+  {
+    runId: text("run_id")
+      .$type<RunId>()
+      .notNull()
+      .references(() => runs.id),
+    /** Slug del rol. */
+    role: text().notNull(),
+    model: text().notNull(),
+    effort: text(),
+    /** Entrada, salida y caché (lectura y escritura). */
+    tokens: integer().notNull(),
+    costMicros: integer("cost_micros").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.role] })],
 );

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc --noEmit" },
-  "dependencies": { "@clanker/api": "*" }
+  "scripts": { "typecheck": "tsc --noEmit", "clanker": "tsx src/main.ts" },
+  "dependencies": { "@clanker/api": "*" },
+  "devDependencies": { "tsx": "^4.23.15" }
 }
