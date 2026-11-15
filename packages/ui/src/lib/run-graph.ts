@@ -224,13 +224,14 @@ function stateOf(steps: readonly Step[], kind: GraphNodeKind, now: number): Node
 }
 
 /** El estado de cada nodo del grafo según los pasos de la corrida. */
-export function nodeStates(shape: GraphShape, run: Pick<RunDetail, "steps" | "status" | "outcome">, now: number): Map<string, NodeState> {
+export function nodeStates(shape: GraphShape, run: Pick<RunDetail, "steps" | "outcome">, now: number): Map<string, NodeState> {
   const byNode = new Map<string, Step[]>()
   for (const step of run.steps) byNode.set(step.nodeId, [...(byNode.get(step.nodeId) ?? []), step])
   const states = new Map<string, NodeState>()
   for (const n of shape.nodes) {
     if (n.kind === "end") {
-      const reached = run.status === "done" && END_OUTCOME[n.id as keyof typeof END_OUTCOME] === run.outcome
+      // Llegar a `@blocked` o `@failed` termina la corrida como `failed`: el fin lo dice el outcome, no el estado.
+      const reached = END_OUTCOME[n.id as keyof typeof END_OUTCOME] === run.outcome
       states.set(n.id, reached ? { ...PENDING, status: "done", visits: 1 } : PENDING)
     } else if (n.kind === "join") {
       states.set(n.id, joinState(byNode, n.id.slice(0, -"#join".length), now))

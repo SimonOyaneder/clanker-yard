@@ -68,6 +68,18 @@ test("una corrida terminada marca por dónde acabó el flujo", async () => {
   expect(states.get(joinId("reviews"))).toMatchObject({ status: "done", outcome: "ok" })
 })
 
+test("una corrida que llega a @failed o @blocked queda failed y marca ese fin", async () => {
+  const [, done] = await runs()
+  const shape = shapeOf(done!.flowDef, done!.steps)
+
+  for (const end of ["failed", "blocked"] as const) {
+    const ended: RunDetail = { ...done!, status: "failed", outcome: end }
+    const states = nodeStates(shape, ended, NOW)
+    expect(states.get(`@${end}`)?.status).toBe("done")
+    expect(states.get("@done")?.status).toBe("pending")
+  }
+})
+
 test("las ramas de un forEach son las que la corrida ya creó, en orden de ítem", () => {
   const def: FlowDef = {
     schema: 1,
