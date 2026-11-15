@@ -37,6 +37,8 @@ interface Props {
   issues: CachedIssue[]
   /** La cola que calcula el core (`projects.queue`). */
   queue: QueueEntry[]
+  /** Por qué el core no pudo calcular la cola (p. ej. el tracker sin cuenta conectada); `queue` viene vacía. */
+  queueError?: string
   /** Las decisiones del proyecto; las pendientes son las que estacionan una corrida o esperan respuesta. */
   decisions: Decision[]
   /** Los cupos de los carriles de la máquina. */
@@ -94,7 +96,7 @@ export function ProjectFrame({ project, tab, onTab, children }: { project: Clank
 }
 
 // Operación: qué corre en cada carril, qué espera a una persona, qué viene y por qué no corre.
-export function ProjectView({ project, runs, issues, queue, decisions, lanes, breakers, prs }: Props) {
+export function ProjectView({ project, runs, issues, queue, queueError, decisions, lanes, breakers, prs }: Props) {
   const roots = runs.filter((r) => r.parentRunId === null)
   const live = roots.filter((r) => isLive(r.status))
   const parked = parkedRuns(roots)
@@ -138,7 +140,9 @@ export function ProjectView({ project, runs, issues, queue, decisions, lanes, br
       )}
 
       <ParkedList runs={parked} decisions={decisions} subjectOf={subjectOf} borrowers={borrowersOf(roots)} project={project} />
-      {roots.length || queue.length ? <QueueList title="En cola" entries={queued} project={project} empty={emptyQueue(project)} /> : null}
+      {roots.length || queue.length || queueError ? (
+        <QueueList title="En cola" entries={queued} project={project} empty={queueError ? `No se pudo calcular la cola. ${queueError}` : emptyQueue(project)} />
+      ) : null}
       <QueueList title="Bloqueadas" entries={blocked} project={project} />
       <RunGroup title="Terminadas" runs={finished} subjectOf={subjectOf} now={now} project={project} />
     </>

@@ -17,13 +17,14 @@ afterEach(cleanup)
 
 interface Scenario {
   entries?: (issues: QueueEntry["issue"][]) => QueueEntry[]
+  queueError?: string
   runs?: (runs: Run[]) => Run[]
   decisions?: Decision[]
   breakers?: Breaker[]
   project?: Partial<ClankerProject>
 }
 
-async function setup({ entries = () => [], runs = () => [], decisions = [], breakers = [], project: overrides = {} }: Scenario = {}) {
+async function setup({ entries = () => [], queueError, runs = () => [], decisions = [], breakers = [], project: overrides = {} }: Scenario = {}) {
   const data = createMemoryAppData(NOW)
   const project = { ...(await data.projects())[0]!, ...overrides }
   const issues = await data.issues(project.id)
@@ -43,7 +44,7 @@ async function setup({ entries = () => [], runs = () => [], decisions = [], brea
         <AppActionsContext.Provider value={actions as unknown as AppActions}>
           <TooltipProvider>
             <ProjectFrame project={project} tab="operation" onTab={() => {}}>
-              <ProjectView project={project} runs={runs(memoryRuns)} issues={issues} queue={entries(issues)} decisions={decisions} lanes={LANES} breakers={breakers} prs={[]} />
+              <ProjectView project={project} runs={runs(memoryRuns)} issues={issues} queue={entries(issues)} queueError={queueError} decisions={decisions} lanes={LANES} breakers={breakers} prs={[]} />
             </ProjectFrame>
           </TooltipProvider>
         </AppActionsContext.Provider>
@@ -94,6 +95,13 @@ test("una cola vacía dice qué filtro la dejó vacía", async () => {
   await setup({ runs: (runs) => runs, project: { queueFilter: { status: ["todo"], excludeLabels: ["no-clanker"] } } })
 
   expect(screen.getByText(/0 issues en todo sin el label no-clanker/)).toBeTruthy()
+})
+
+test("una cola que el core no pudo calcular dice por qué y deja ver el resto de la operación", async () => {
+  await setup({ queueError: "No hay una cuenta de Linear conectada: conéctala en Conexiones (connections.linearAuth)." })
+
+  expect(screen.getByText(/No se pudo calcular la cola\. No hay una cuenta de Linear conectada/)).toBeTruthy()
+  expect(stat("Carril dev")).toBeTruthy()
 })
 
 // Un rebase en mantenimiento mientras dev está lleno, una corrida estacionada que le prestó su PR y un breaker abierto.

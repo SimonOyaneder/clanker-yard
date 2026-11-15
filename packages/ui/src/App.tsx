@@ -153,13 +153,17 @@ function Shell() {
     const [runs, issues, queue, decisions, lanes, breakers, prs] = await Promise.all([
       appData.runs({ projectId: project.id }),
       appData.issues(project.id),
-      appData.queue(project.id),
+      // Una cola que no se puede calcular (el tracker sin cuenta conectada) no esconde el resto de la operación.
+      appData.queue(project.id).then(
+        (entries) => ({ queue: entries }),
+        (e: unknown) => ({ queue: [], queueError: messageOf(e) }),
+      ),
       appData.decisions({ projectId: project.id, status: ["pending"] }),
       appData.lanes(),
       appData.breakers(),
       appData.openPrs(),
     ])
-    return { runs, issues, queue, decisions, lanes, breakers, prs }
+    return { runs, issues, ...queue, decisions, lanes, breakers, prs }
   })
 
   // Los PRs vienen del caché del core (`prs.list`) y se releen con cada `pr.changed`: nada de polling en la UI.

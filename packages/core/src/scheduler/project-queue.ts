@@ -9,7 +9,7 @@ import type { Tracker } from "../tracker/tracker";
 import type { Repos } from "../workspaces/repos";
 import { type QueuePrFact, tickDev } from "./queue";
 
-/** El core no puede calcular la cola de este proyecto (no tiene el adapter de su tracker): el mensaje dice qué falta. */
+/** El core no puede calcular la cola de este proyecto (no tiene el adapter de su tracker o no puede leerlo): el mensaje dice qué falta. */
 export class QueueUnavailableError extends Error {}
 
 export interface ProjectQueueDeps {
@@ -89,7 +89,11 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
         .from(runs)
         .where(and(eq(runs.projectId, project.id), eq(runs.subjectType, "issue"), eq(runs.lane, "dev"), isNull(runs.parentRunId)))
         .all();
-      const [me, prs] = await Promise.all([tracker.viewer(), prFacts([...blockerIds], project.stackOn === "ci_green")]);
+      // Sin saber quién es la persona no hay cola (decide qué issues son suyas); sin cuenta conectada el adapter lanza.
+      const viewer = tracker.viewer().catch((error: unknown) => {
+        throw new QueueUnavailableError(`No se pudo leer tu usuario de ${project.tracker} para calcular la cola de ${project.slug}: ${(error as Error).message}`);
+      });
+      const [me, prs] = await Promise.all([viewer, prFacts([...blockerIds], project.stackOn === "ci_green")]);
       const skipped = new Set<string>(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
       const boosted = new Map(store.db.select().from(issueBoosts).all().map((row) => [row.issueId, row.createdAt]));
       return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs, skipped, boosted });

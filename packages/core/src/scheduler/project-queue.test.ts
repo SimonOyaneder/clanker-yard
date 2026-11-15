@@ -120,6 +120,16 @@ describe("la cola de un proyecto", () => {
     await expect(queueOf().of(jira.id)).rejects.toThrow(QueueUnavailableError);
   });
 
+  test("si el tracker no dice quién es la persona (sin cuenta conectada), QueueUnavailableError con su motivo", async () => {
+    const project = createProject();
+    const disconnected: Tracker = { ...strictTracker(), viewer: () => Promise.reject(new Error("No hay una cuenta de Linear conectada")) };
+    const queue = createProjectQueue({ store, projects, issues, repos, trackers: { local: disconnected }, prs: { get: readPr } });
+
+    const failure = queue.of(project.id);
+    await expect(failure).rejects.toThrow(QueueUnavailableError);
+    await expect(failure).rejects.toThrow(/No se pudo leer tu usuario de local para calcular la cola de demo: No hay una cuenta de Linear conectada/);
+  });
+
   describe("apilar sobre el PR del bloqueante", () => {
     async function blockedPair(stackOn: "ready" | "ci_green" | "any_open") {
       const repoA = repos.add({ name: "app", path: "/tmp/app", remote: "acme/app" });

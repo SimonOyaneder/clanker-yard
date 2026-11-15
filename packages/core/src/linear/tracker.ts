@@ -152,7 +152,7 @@ export function createLinearTracker({
     if (accounts.length === 1) return accounts[0]!.account;
     throw new LinearApiError(
       accounts.length === 0
-        ? "No hay una cuenta de Linear conectada: conéctala con connections.linearAuth."
+        ? "No hay una cuenta de Linear conectada: conéctala en Conexiones (connections.linearAuth)."
         : `Hay varias cuentas de Linear conectadas (${accounts.map((c) => c.account).join(", ")}): indica con cuál trabajar.`,
     );
   }
