@@ -2,6 +2,8 @@
 
 Orquestador de agentes de código sobre issues y PRs. Monorepo con npm workspaces (Node 24, TypeScript estricto).
 
+Este archivo lo lee cada agente y ya pasa los 120 KB: agrega reglas, desvíos y trampas que el código no dice, en pocas líneas. La referencia de un módulo (args, outcomes y output de una acción, qué hace cada función) va en su TSDoc, no aquí; si hace falta, una línea con dónde vive.
+
 ## El diseño es la fuente de verdad
 
 Vive en `docs/design.html` (260 KB, no lo leas entero ni lo edites). Cita siempre la sección por su id, por ejemplo `docs/design.html#d-data`. Para leer una sección en texto plano:
