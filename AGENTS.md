@@ -151,7 +151,7 @@ El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packa
 - Outcomes: `ok` (output `commits`, `tree`), `replan` (hunk sin asignar, repetido o inexistente; mensaje fuera de formato; hunks que no se aplican; test rojo; árbol distinto) y `hook-failed` (un hook rechazó el commit: va al dev). En ambos `output.failures` es el extracto. El máximo de 2 vueltas al committer lo pone el flujo: `replan: { to: "commit", maxRounds: 2, exhausted: ... }`.
 - Los cambios que git no parte en hunks (binarios, archivos vacíos nuevos o borrados, cambios de modo) son un hunk entero con `header` entre paréntesis (`(binario)`), para que el committer los pueda asignar.
 - El mensaje debe cumplir Conventional Commits, o el `messagePattern` que pase el pack; el core le saca las líneas de atribución a una IA (`Co-Authored-By`, `Claude-Session`, "Generated with"). Parte de la base del lease: un worktree con commits propios lanza.
-- Todo `git` del core sale de `packages/core/src/git/git.ts` (`git`, `gitRaw`, `tryGit`, `GitError` con `output`): no definas otro helper.
+- Todo `git` del core sale de `packages/core/src/git/git.ts` (`git`, `gitRaw`, `tryGit`, `GitError` con `output`): no definas otro helper. Ese git hereda solo `PATH`, `HOME`, `USER`, `LANG`, `TMPDIR` y `SHELL` más el `env` que le pases (los hooks y el config del worktree los escribe el agente); un secreto nuevo nunca llega por ahí.
 - Se prueba en `packages/testkit/src/commits.test.ts` (repos git reales).
 
 ## Brief y artefactos del worktree

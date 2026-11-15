@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Connections } from "../connections/connections";
 import type { Askpass } from "./askpass";
+import { pickEnv } from "./git";
 
 const execFileAsync = promisify(execFile);
 
@@ -64,7 +65,7 @@ export function createGitRemote({ askpass, connections }: GitRemoteOptions): Git
     try {
       const { stdout } = await execFileAsync("git", ["-c", "credential.helper=", ...args], {
         cwd,
-        env: { ...inheritedEnv(), ...session.env },
+        env: { ...pickEnv(INHERITED_ENV), ...session.env },
         encoding: "utf8",
       });
       return { ok: true as const, stdout: stdout.trimEnd() };
@@ -113,14 +114,6 @@ export function createGitRemote({ askpass, connections }: GitRemoteOptions): Git
   };
 }
 
-function inheritedEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of INHERITED_ENV) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
-}
 
 const STALE_LEASE = /\(stale info\)/;
 /** Con credenciales que GitHub rechaza, git termina en "Authentication failed" tras el 401. */

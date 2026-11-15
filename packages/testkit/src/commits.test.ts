@@ -17,7 +17,7 @@ import {
   type WorkspaceLease,
   type Workspaces,
 } from "@clanker/core";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 
 // Se prueba aquí y no en el core: necesita repos git reales (tempGitRepo).
@@ -68,6 +68,7 @@ async function setup(files: Record<string, string> = {}, recipe?: unknown) {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   workspaces.release(lease);
   repo.cleanup();
   store.close();
@@ -370,6 +371,24 @@ describe("hooks del repo", () => {
     expect(git("rev-parse", "HEAD")).toBe(base);
     expect(git("status", "--porcelain", "--untracked-files=all")).toBe(before);
     expect(verifyWorktrees()).toEqual([]);
+  });
+
+  test("un hook no ve los secretos del entorno del core", async () => {
+    await setup();
+    write("b.txt", "b2\n");
+    const [id] = Object.values(await hunkIds());
+    vi.stubEnv("GH_TOKEN", "secreto");
+    vi.stubEnv("ANTHROPIC_API_KEY", "secreto");
+    const seen = join(dataDir, "hook-env");
+    const hook = join(repo.dir, ".git", "hooks", "pre-commit");
+    mkdirSync(dirname(hook), { recursive: true });
+    writeFileSync(hook, `#!/bin/sh\necho "gh=$GH_TOKEN anthropic=$ANTHROPIC_API_KEY" > ${seen}\n`);
+    chmodSync(hook, 0o755);
+
+    const result = await run([{ message: "feat: b", hunks: [id!] }]);
+
+    expect(result.outcome).toBe("ok");
+    expect(readFileSync(seen, "utf8")).toBe("gh= anthropic=\n");
   });
 
   test("un hook que cambia archivos al commitear da árbol distinto y replan", async () => {

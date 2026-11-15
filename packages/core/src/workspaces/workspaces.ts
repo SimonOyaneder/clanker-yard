@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import type { RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
-import { git, tryGit } from "../git/git";
+import { git, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { execLogged, type ExecResult } from "./exec";
 import { newId } from "../store/conventions";
@@ -380,7 +380,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       );
     }
     const hasRemote = await hasOrigin(cfg);
-    if (hasRemote) await git(cfg.path, ["fetch", REMOTE]);
+    if (hasRemote) await git(cfg.path, ["fetch", REMOTE], pickEnv(USER_REMOTE_ENV));
     const baseSha = await resolveBase(cfg, row.baseRef);
     const localExists = await refExists(cfg, `refs/heads/${row.branch}`);
     const remoteExists = hasRemote && (await refExists(cfg, `refs/remotes/${REMOTE}/${row.branch}`));

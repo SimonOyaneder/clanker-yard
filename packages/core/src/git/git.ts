@@ -19,12 +19,35 @@ export class GitError extends Error {
   }
 }
 
-/** Corre `git` en `cwd` y devuelve stdout tal cual: a un patch sin su salto final `git apply` lo rechaza. */
+/**
+ * Lo único que hereda del core un `git` local. El core puede traer `GH_TOKEN`, `ANTHROPIC_API_KEY` y otros
+ * secretos de la shell que lanzó la app, y en un worktree los hooks (`git commit`) y el config del repo
+ * (`core.fsmonitor` corre en cualquier `add` o `diff`) los escribe el agente.
+ */
+const INHERITED_ENV = ["PATH", "HOME", "USER", "LANG", "TMPDIR", "SHELL"];
+
+/** Lo que el `fetch` de `origin` con las credenciales del usuario necesita además (agente SSH y proxies). */
+export const USER_REMOTE_ENV = ["SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"];
+
+/** Las variables `keys` del entorno del core que están definidas. */
+export function pickEnv(keys: readonly string[]): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
+/**
+ * Corre `git` en `cwd` y devuelve stdout tal cual: a un patch sin su salto final `git apply` lo rechaza.
+ * Hereda solo `INHERITED_ENV`, más `env`.
+ */
 export async function gitRaw(cwd: string, args: string[], env: Record<string, string> = {}): Promise<string> {
   try {
     const { stdout } = await execFileAsync("git", args, {
       cwd,
-      env: { ...process.env, ...env },
+      env: { ...pickEnv(INHERITED_ENV), ...env },
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,
     });
