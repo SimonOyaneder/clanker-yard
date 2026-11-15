@@ -19,6 +19,7 @@ import { prWaits } from "./github/pr-waits";
 import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/publish";
 import { prPushFixupsAction } from "./github/push-fixups";
+import { prPushLeaseAction, workspaceRebaseAction } from "./github/rebase-pr";
 import { githubRemote } from "./github/remote-config";
 import { createPacks } from "./packs/packs";
 import { createLinearTracker } from "./linear/tracker";
@@ -35,7 +36,13 @@ import type { Store } from "./store/store";
 import { createIssues } from "./tracker/issues";
 import { createLocalTracker } from "./tracker/local";
 import { createRepos } from "./workspaces/repos";
-import { createWorkspaces, workspaceAcquireAction, workspaceReleaseAction, workspaceSyncBaseAction } from "./workspaces/workspaces";
+import {
+  createWorkspaces,
+  workspaceAcquireAction,
+  workspaceAttachAction,
+  workspaceReleaseAction,
+  workspaceSyncBaseAction,
+} from "./workspaces/workspaces";
 
 /** Cuánto espera el cierre a que terminen los pasos en curso antes de dejarlos atrás. */
 const DRAIN_MS = 10_000;
@@ -113,12 +120,16 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const prs = createPrs({ connections: opts.connections, packs });
   const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtime) ? runtime : undefined });
   flows.registerAction(workspaceAcquireAction(workspaces));
+  flows.registerAction(workspaceAttachAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
   flows.registerAction(workspaceSyncBaseAction(workspaces));
   flows.registerAction(recipes.checkAction);
   flows.registerAction(commitsApplyAction({ workspaces, recipes }));
   flows.registerAction(prPublishAction({ store, workspaces, recipes, repos: repos.config, connections: opts.connections, packs }));
   flows.registerAction(prPushFixupsAction({ store, workspaces, repos: repos.config, prs }));
+  const rebasePr = { store, workspaces, repos: repos.config, prs };
+  flows.registerAction(workspaceRebaseAction(rebasePr));
+  flows.registerAction(prPushLeaseAction(rebasePr));
   const feedback = { connections: opts.connections, packs };
   for (const action of [prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction]) flows.registerAction(action(feedback));
   for (const wait of Object.values(prWaits(prs))) flows.registerWait(wait);

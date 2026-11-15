@@ -63,6 +63,8 @@ const CheckArgs = z.object({
    * los define, una receta que usa `{{slot}}` falla.
    */
   slot: z.int().positive().optional(),
+  /** Tras un rebase: corre antes de los checks los comandos `afterRebase` de la receta (`docs/design.html#d-ops`). */
+  afterRebase: z.boolean().optional(),
 });
 
 /** Un comando que corrió. `extract` son las últimas 60 líneas y `artifact` el hash con el que quedaron guardadas. */
@@ -175,8 +177,20 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
     opts: { files: string[]; slot?: number },
     ctx: ActionCtx,
   ): Promise<CommandRun> {
+    return runTemplate(ws, recipe, name, recipe.commands[name]!, opts, ctx);
+  }
+
+  /** `runCommand` para un comando que no está en `commands` (un `afterRebase`): `name` rotula su extracto. */
+  async function runTemplate(
+    ws: WorkspaceRef,
+    recipe: Pick<Recipe, "env" | "wrap">,
+    name: string,
+    template: string,
+    opts: { files: string[]; slot?: number },
+    ctx: ActionCtx,
+  ): Promise<CommandRun> {
     const { render, env, wrap } = rendering(ws, recipe, opts);
-    const command = [...wrap, render(recipe.commands[name]!, true)].join(" ");
+    const command = [...wrap, render(template, true)].join(" ");
 
     let exitCode: number;
     let extract: string;
@@ -255,7 +269,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
     args: CheckArgs,
     outcomes: ["ok", "fail"],
     effects: "local",
-    async run({ ws, scope, slot }, ctx) {
+    async run({ ws, scope, slot, afterRebase }, ctx) {
       let recipe;
       try {
         recipe = readRecipe(ws.path) ?? NO_RECIPE;
@@ -279,14 +293,19 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
 
         // Se corre en orden y se corta en el primer rojo: los checks siguientes casi siempre dependen de los
         // anteriores (un typecheck roto llena de ruido el lint y los tests), y así el agente recibe un solo extracto.
+        // Los `afterRebase` van primero: regeneran lo que los checks leen (packwerk, la versión de schema.rb).
+        const steps = [
+          ...(afterRebase ? recipe.afterRebase.map((template, i) => ({ stage: `afterRebase:${i}`, name: "afterRebase", template })) : []),
+          ...recipe.checks.map((name) => ({ stage: `check:${name}`, name, template: recipe.commands[name]! })),
+        ];
         const checks: Array<CommandRun | { name: string; skipped: true }> = [];
-        for (const name of recipe.checks) {
-          if (scope === "changed" && changed.length === 0 && templateVariables(recipe.commands[name]!).includes("files")) {
+        for (const { stage, name, template } of steps) {
+          if (scope === "changed" && changed.length === 0 && templateVariables(template).includes("files")) {
             checks.push({ name, skipped: true });
             continue;
           }
-          const result = await ctx.once(`check:${name}`, () =>
-            runCommand(ws, recipe, name, { files, slot: slot ?? lease?.idx }, stepCtx),
+          const result = await ctx.once(stage, () =>
+            runTemplate(ws, recipe, name, template, { files, slot: slot ?? lease?.idx }, stepCtx),
           );
           checks.push(result);
           if (!result.ok) break;

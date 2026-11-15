@@ -9,6 +9,7 @@ import { git, GitError, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { diffBetween, snapshotTree } from "../git/tree";
 import { defaultLogDir, excerpt, execLogged, stepLogPath, type ExecResult } from "./exec";
+import { continueRebase, rebaseInProgress, rebaseOnto, startRebase, type RebaseStep } from "./rebase";
 import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
 import { runs, workspaces } from "../store/schema";
@@ -108,6 +109,13 @@ export interface Workspaces {
    */
   acquire(request: AcquireRequest): Promise<WorkspaceLease>;
   /**
+   * Retoma el PR ya publicado de `branch`: trae el remoto, toma el lease (creando el worktree desde la
+   * branch remota si no existe) y avanza la branch local a la punta de `origin/<branch>` con un
+   * fast-forward, que pasa a ser el `remote_sha`. Lanza `AttachError` si la branch no está en el remoto o
+   * la local tiene commits que el remoto no (adelantada o divergida): sin lease en ese caso.
+   */
+  attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean }>;
+  /**
    * Al bootear, antes de que Flows reabra los pasos: los worktrees de corridas vivas siguen suyos
    * (lease renovado, mismo token, latido de nuevo), los de corridas ya terminadas se sueltan y los que
    * se quedaron a medio crear pierden su lease para que el paso `workspace.acquire` los tome de nuevo.
@@ -157,6 +165,17 @@ export interface Workspaces {
    * la base nueva es la que ya haya en el checkout. Reintentar tras un corte a medias retoma desde el respaldo.
    */
   syncBase(lease: WorkspaceRef): Promise<SyncBaseResult>;
+  /**
+   * Rebasea el PR sobre la punta de `base` (por defecto la que tiene el worktree; `origin/main` y `main`
+   * son la misma) con `--onto`, y guarda la base nueva. Precondiciones, o lanza `RebaseError`: `HEAD` es el
+   * `remote_sha`, el árbol está limpio, no hay un rebase en curso y el PR no tiene council (que nunca se
+   * fuerza). Si `base` no es la que el worktree tenía (el PR de abajo se mergeó y GitHub lo movió),
+   * `from` es la última punta que pusheamos de la base vieja: el `remote_sha` de su workspace o, sin él,
+   * `origin/<base vieja>`; así no hay que calcularlo a mano aunque se mergeara con squash. Outcomes: `clean`;
+   * `conflict` (rebase detenido con HEAD detached, `conflicts` con los archivos); `error` (falló sin
+   * conflicto: `--abort` y la branch queda igual). Con `continue` sigue un rebase detenido, ver `continueRebase`.
+   */
+  rebase(lease: WorkspaceRef, opts: RebaseOptions): Promise<RebaseResult>;
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
   git(lease: WorkspaceRef, ...args: string[]): Promise<string>;
   /**
@@ -181,6 +200,26 @@ export class BranchNotAllowedError extends Error {}
 
 /** `syncBase` no puede seguir y reintentar no lo arregla (commits propios, branch ya publicada, conexión revocada). */
 export class SyncBaseError extends Error {}
+
+/** `attach` no puede retomar la branch y reintentar no lo arregla (no está en el remoto, adelantada o divergida, conexión revocada). */
+export class AttachError extends Error {}
+
+/** `rebase` no se puede hacer y reintentar no lo arregla (precondiciones, council, `from` que no calza). */
+export class RebaseError extends Error {}
+
+export interface RebaseOptions {
+  /** El PR tuvo threads `[clanker-council]`: no se rebasea nunca. */
+  council: boolean;
+  /** La base que el PR tiene ahora; sin ella, la del worktree. */
+  base?: string;
+  /** Sigue el rebase detenido por conflicto en lugar de empezar uno. */
+  continue?: boolean;
+}
+
+export type RebaseResult =
+  | { outcome: "clean"; baseSha: string; head: string }
+  | { outcome: "conflict"; applying?: string; conflicts: string[]; failures: string }
+  | { outcome: "error"; failures: string };
 
 export type SyncBaseResult =
   | { outcome: "same"; baseSha: string }
@@ -749,6 +788,131 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     }
   }
 
+  async function attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean }> {
+    const cfg = repos(request.repo);
+    const branch = request.branch.replace(/^refs\/heads\//, "");
+    if (cfg.remote && (await fetchRepo(request.repo)) === "unauthorized") {
+      throw new AttachError(
+        `GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${request.repo}: la conexión quedó revocada, reconéctala.`,
+      );
+    }
+    const remoteTip = await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE}/${branch}`]);
+    if (remoteTip === undefined) {
+      throw new AttachError(`${branch} no está en el remoto de ${request.repo}: no hay un PR que retomar.`);
+    }
+
+    const lease = await acquire(request);
+    try {
+      const head = await gitIn(lease, "rev-parse", "HEAD");
+      const fastForwarded = head !== remoteTip;
+      if (fastForwarded) {
+        if (!(await isAncestor(lease.path, head, remoteTip))) {
+          const ahead = await isAncestor(lease.path, remoteTip, head);
+          throw new AttachError(
+            `${branch} local (${head.slice(0, 9)}) ${ahead ? "tiene commits que el remoto no" : "y el remoto"} ` +
+              `(${remoteTip.slice(0, 9)}) ${ahead ? "tiene" : "divergieron"}: no se puede avanzar con un fast-forward.`,
+          );
+        }
+        await gitIn(lease, "merge", "--ff-only", "--no-autostash", remoteTip);
+      }
+      const saved = store.tx(({ db }) =>
+        db
+          .update(workspaces)
+          .set({ headSha: remoteTip, remoteSha: remoteTip })
+          .where(and(eq(workspaces.id, lease.workspaceId), eq(workspaces.fencingToken, lease.fencingToken)))
+          .returning({ id: workspaces.id })
+          .get(),
+      );
+      if (!saved) throw new StaleLeaseError(`El lease de ${branch} se perdió mientras se retomaba: otra corrida tomó el workspace.`);
+      return { ...lease, fastForwarded };
+    } catch (error) {
+      release(lease);
+      throw error;
+    }
+  }
+
+  async function rebase(lease: WorkspaceRef, { council, base, continue: resume = false }: RebaseOptions): Promise<RebaseResult> {
+    const row = rowOf(lease);
+    const cfg = repos(row.repoId);
+    const run = (...args: string[]) => gitIn(lease, ...args);
+    if (council) {
+      throw new RebaseError(`${row.branch} tiene threads [clanker-council]: un rebase reescribiría su historia y un PR con council nunca se fuerza.`);
+    }
+    const target = normalizeBase(base ?? row.baseRef);
+    const inProgress = await rebaseInProgress(run);
+
+    let step: RebaseStep;
+    let onto: string;
+    if (resume) {
+      // Un rebase que el agente ya terminó por su cuenta solo falta registrarlo.
+      onto = inProgress ? await rebaseOnto(run) : await resolveBase(cfg, target);
+      if (!inProgress && !(await isAncestor(lease.path, onto, "HEAD"))) {
+        throw new RebaseError(`No hay un rebase en curso en ${row.branch} y su HEAD no está sobre ${target}: no hay nada que continuar.`);
+      }
+      step = inProgress ? await continueRebase(run) : { status: "done" };
+    } else {
+      onto = await resolveBase(cfg, target);
+      const head = await run("rev-parse", "HEAD");
+      if (inProgress) throw new RebaseError(`${row.branch} ya tiene un rebase en curso: sigue con \`continue\` o abórtalo.`);
+      if (row.remoteSha === null || head !== row.remoteSha) {
+        throw new RebaseError(
+          `HEAD de ${row.branch} (${head.slice(0, 9)}) no es lo último que se pusheó (${row.remoteSha?.slice(0, 9) ?? "nada"}): ` +
+            "rebasearlo pisaría o perdería commits. Retoma la branch con attach.",
+        );
+      }
+      if ((await run("status", "--porcelain")) !== "") {
+        throw new RebaseError(`${row.branch} tiene cambios sin commitear: un rebase con el árbol sucio perdería trabajo.`);
+      }
+      const from = await rebaseFrom(row, cfg, target, lease.path);
+      step = await startRebase(run, { onto, ...(from !== undefined && { from }) });
+    }
+
+    if (step.status !== "done") {
+      const { status, ...rest } = step;
+      return { outcome: status, ...rest } as RebaseResult;
+    }
+    const head = await run("rev-parse", "HEAD");
+    const saved = store.tx(({ db }) =>
+      db
+        .update(workspaces)
+        .set({ baseRef: target, baseSha: onto, headSha: head })
+        .where(and(eq(workspaces.id, lease.workspaceId), eq(workspaces.fencingToken, lease.fencingToken)))
+        .returning({ id: workspaces.id })
+        .get(),
+    );
+    if (!saved) throw new StaleLeaseError(`El lease de ${row.branch} se perdió mientras se rebaseaba: otra corrida tomó el workspace.`);
+    return { outcome: "clean", baseSha: onto, head };
+  }
+
+  /**
+   * El `from` de `rebase --onto`: solo si el PR cambió de base (el de abajo se mergeó), la última punta
+   * que pusheamos de la base vieja. Sin cambio de base, `undefined`: un `rebase` común ya deja afuera los
+   * commits que son de la base.
+   */
+  async function rebaseFrom(row: typeof workspaces.$inferSelect, cfg: RepoConfig, target: string, path: string): Promise<string | undefined> {
+    if (target === row.baseRef) return undefined;
+    const parents = store.db
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.repoId, row.repoId), eq(workspaces.branch, row.baseRef), isNotNull(workspaces.remoteSha)))
+      .all();
+    const parent = parents.find((p) => p.state !== "archived") ?? parents.at(-1);
+    const from =
+      parent?.remoteSha ?? (await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE}/${row.baseRef}`]));
+    if (!from) {
+      throw new RebaseError(
+        `${row.branch} cambió de base (${row.baseRef} -> ${target}) y no se sabe cuál fue la última punta de ${row.baseRef}: ` +
+          "no hay un workspace suyo con push ni queda origin/" + row.baseRef + ".",
+      );
+    }
+    if (!(await isAncestor(path, from, "HEAD"))) {
+      throw new RebaseError(
+        `La última punta de ${row.baseRef} (${from.slice(0, 9)}) no es ancestro de ${row.branch}: ya no está apilada sobre ella.`,
+      );
+    }
+    return from;
+  }
+
   function release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void {
     stopHeartbeat(lease.workspaceId, lease.fencingToken);
     store.tx(({ db, emit }) => {
@@ -821,6 +985,8 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
 
   return {
     acquire,
+    attach,
+    rebase,
     push,
     recover,
     extendLeases,
@@ -907,6 +1073,34 @@ export function workspaceAcquireAction(workspaces: Workspaces) {
       }
       const { workspaceId, path, branch, baseRef, baseSha, fencingToken } = lease;
       return { outcome: "ok", output: { workspaceId, path, branch, baseRef, baseSha, fencingToken } };
+    },
+  };
+}
+
+/**
+ * La acción `workspace.attach` (`docs/design.html#d-flows`, carril maintenance): retoma el PR ya publicado
+ * de `branch` con `workspaces.attach`. El output es un `$ws` más `fastForwarded`. Lo que `attach` no puede
+ * hacer (no está en el remoto, adelantada o divergida) es `PermanentActionError`.
+ */
+export function workspaceAttachAction(workspaces: Workspaces): ActionDef<typeof WorkspaceAcquireArgs> {
+  return {
+    name: "workspace.attach",
+    args: WorkspaceAcquireArgs,
+    outcomes: ["ok"],
+    effects: "local",
+    async run(args, ctx: ActionCtx) {
+      try {
+        const { workspaceId, path, branch, baseRef, baseSha, fencingToken, fastForwarded } = await workspaces.attach({
+          ...args,
+          runId: ctx.runId,
+        });
+        return { outcome: "ok", output: { workspaceId, path, branch, baseRef, baseSha, fencingToken, fastForwarded } };
+      } catch (error) {
+        if (error instanceof AttachError || error instanceof BranchNotAllowedError) {
+          throw new PermanentActionError(error.message, { cause: error });
+        }
+        throw error;
+      }
     },
   };
 }

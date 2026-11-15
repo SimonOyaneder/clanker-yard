@@ -118,13 +118,16 @@ export type { KeychainSecretsOptions } from "./secrets/keychain";
 export type { Secrets } from "./secrets/secrets";
 
 export {
+  AttachError,
   BranchNotAllowedError,
   createWorkspaces,
   LEASE_TTL_MS,
+  RebaseError,
   StaleLeaseError,
   SyncBaseError,
   WorkspaceBusyError,
   workspaceAcquireAction,
+  workspaceAttachAction,
   workspaceReleaseAction,
   workspaceSyncBaseAction,
   WorktreeSetupError,
@@ -172,6 +175,8 @@ export { prWaits } from "./github/pr-waits";
 export { prPublishAction } from "./github/publish";
 export type { PrPublishDeps } from "./github/publish";
 export { prPushFixupsAction } from "./github/push-fixups";
+export { prPushLeaseAction, workspaceRebaseAction } from "./github/rebase-pr";
+export type { RebasePrDeps } from "./github/rebase-pr";
 export type { PrPushFixupsDeps } from "./github/push-fixups";
 export { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
 export type { PrFeedbackDeps } from "./github/pr-feedback";
