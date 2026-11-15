@@ -1,6 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
-import { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubPatForm } from "./connections";
+import { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubDeviceFlow, GitHubPatForm } from "./connections";
 import {
   ArtifactHash,
   ArtifactKind,
@@ -128,6 +128,17 @@ const connections = {
   setPat: base.input(z.object({ token: z.string().min(1) })).output(Connection),
   /** El link y la lista de permisos para crear el PAT. */
   githubPatForm: base.output(GitHubPatForm),
+  /**
+   * Inicia el device flow de la GitHub App y devuelve el código que hay que escribir en `verificationUri`
+   * (el core no abre nada). Responde en cuanto GitHub entrega el código; el core sigue sondeando el token
+   * respetando `interval` y `slow_down`, y al aprobar conecta la cuenta (`auth: "app"`) con un
+   * `connection.changed`. Si el usuario no aprueba a tiempo, lo rechaza o el core pierde el flujo, no pasa
+   * nada más que un evento `error` con scope `github.device_flow`. Un `startDeviceFlow` nuevo cancela el
+   * anterior. Falla con `BAD_REQUEST` si el core no tiene el `client_id` de la App
+   * (`docs/github-app.md`) o GitHub rechaza el inicio (por ejemplo, device flow sin habilitar). Sin
+   * `meta.mcp`: lo hace una persona.
+   */
+  startDeviceFlow: base.output(GitHubDeviceFlow),
   /**
    * Inicia el login de Linear (OAuth con PKCE) y devuelve el `url` que hay que abrir en el navegador: el
    * core no lo abre. Responde en cuanto el core escucha el redirect; la cuenta aparece al aprobar, con un

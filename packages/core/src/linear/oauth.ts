@@ -36,14 +36,6 @@ export interface LinearTokens {
   scopes: string[];
 }
 
-/** Lo que `Secrets` guarda de una cuenta de Linear: el refresh token rota, así que va junto al access token. */
-export const LinearSession = z.object({
-  accessToken: z.string().min(1),
-  refreshToken: z.string().min(1),
-  accessExpiresAt: z.int(),
-});
-export type LinearSession = z.infer<typeof LinearSession>;
-
 export interface Pkce {
   verifier: string;
   challenge: string;

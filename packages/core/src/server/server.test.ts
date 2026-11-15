@@ -20,6 +20,7 @@ import { readSchemaVersion } from "../store/migrate";
 import { agentSessions } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
+import { startFakeGitHubOAuth } from "../github/fake-github-oauth";
 import { startFakeLinear } from "../linear/fake-linear";
 import { startServer, type CoreServer } from "./server";
 import { apiDeps } from "./testing";
@@ -184,7 +185,7 @@ describe("connections", () => {
     const listed = await client.connections.list();
 
     expect(listed).toEqual([
-      { provider: "github", account: "simon", scopes: ["contents", "pull_requests"], status: "active" },
+      { provider: "github", account: "simon", scopes: ["contents", "pull_requests"], status: "active", auth: "pat" },
     ]);
     expect(JSON.stringify(listed)).not.toContain(token);
   });
@@ -249,6 +250,36 @@ describe("connections", () => {
       code: "BAD_REQUEST",
       message: expect.stringContaining("API key"),
     });
+  });
+
+  test("startDeviceFlow sin client_id es BAD_REQUEST con el paso a seguir", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+
+    await expect(client.connections.startDeviceFlow()).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringMatching(/config\.json.*CLANKER_GITHUB_APP_CLIENT_ID/),
+    });
+  });
+
+  test("startDeviceFlow devuelve el código del usuario y no conecta nada hasta que aprueba", async () => {
+    const oauth = await startFakeGitHubOAuth({ clientId: "Iv23liTEST", now: Date.now });
+    try {
+      connections = createConnections(store, createFileSecrets({ dir: secretsDir }), {
+        githubApp: { clientId: "Iv23liTEST", endpoints: oauth.endpoints, sleep: () => new Promise(() => undefined) },
+      });
+      const core = await start();
+      const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+
+      expect(await client.connections.startDeviceFlow()).toEqual({
+        userCode: "WDJB-MJHT",
+        verificationUri: expect.stringMatching(/\/login\/device$/),
+        expiresIn: 900,
+      });
+      expect(await client.connections.list()).toEqual([]);
+    } finally {
+      await oauth.close();
+    }
   });
 
   test("linearAuth sin client_id es BAD_REQUEST con el paso a seguir", async () => {

@@ -120,6 +120,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     connections: () => client.connections.list(),
     githubPatForm: () => client.connections.githubPatForm(),
     setGithubPat: (token) => client.connections.setPat({ token }),
+    startGithubDeviceFlow: () => client.connections.startDeviceFlow(),
     linearAuth: async () => (await client.connections.linearAuth()).url,
     testClaude: (mode) => client.connections.testClaude(mode ? { mode } : {}),
     setClaudeApiKey: (key) => client.connections.setClaudeApiKey({ key }),

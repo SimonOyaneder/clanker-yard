@@ -6,18 +6,19 @@ import { basename, dirname } from "node:path";
 /**
  * Sirve un remoto bare por HTTP con `git http-backend` detrás de Basic auth: el origin con el que push y
  * fetch pasan por credenciales, como contra GitHub. `url` es la URL del repo; `authorizations` anota con
- * qué credenciales llegó cada request. Para aceptar pushes el bare necesita `http.receivepack=true`.
+ * qué credenciales llegó cada request (`password` puede ser una función, para un token que rota). Para
+ * aceptar pushes el bare necesita `http.receivepack=true`.
  */
 export async function startGitHttpServer(
   bareDir: string,
-  credentials: { user: string; password: string },
+  credentials: { user: string; password: string | (() => string) },
 ): Promise<{ url: string; authorizations: string[]; close(): Promise<void> }> {
   const authorizations: string[] = [];
-  const expected = `Basic ${Buffer.from(`${credentials.user}:${credentials.password}`).toString("base64")}`;
+  const password = () => (typeof credentials.password === "function" ? credentials.password() : credentials.password);
   const server: Server = createServer((req, res) => {
     const authorization = req.headers.authorization;
     if (authorization !== undefined) authorizations.push(authorization);
-    if (authorization !== expected) {
+    if (authorization !== `Basic ${Buffer.from(`${credentials.user}:${password()}`).toString("base64")}`) {
       req.resume();
       res.writeHead(401, { "www-authenticate": 'Basic realm="fake"' }).end("unauthorized");
       return;

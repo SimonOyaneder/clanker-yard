@@ -8,6 +8,7 @@ import type {
   DefKind,
   Event,
   EventType,
+  GitHubAuth,
   IssueId,
   IssueFilter,
   IssueRef,
@@ -249,6 +250,8 @@ export const connections = sqliteTable(
     secretRef: text("secret_ref").notNull(),
     /** ms epoch; NULL si el token no vence. */
     expiresAt: integer("expires_at"),
+    /** Solo GitHub: `pat` (pegado a mano) o `app` (device flow de la GitHub App). NULL en el resto. */
+    auth: text().$type<GitHubAuth>(),
   },
   (t) => [
     primaryKey({ columns: [t.provider, t.account] }),

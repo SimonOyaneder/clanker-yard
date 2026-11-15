@@ -60,6 +60,7 @@ describe("setPat", () => {
       scopes: ["contents", "pull_requests", "issues", "checks", "statuses"],
       status: "active",
       expiresAt: EXPIRES_AT,
+      auth: "pat",
     });
     expect(connections.list()).toEqual([connection]);
     expect(await connections.token("github", "octocat")).toBe(TOKEN);

@@ -400,3 +400,29 @@ test("las resueltas guardan lo que se eligió y sin pendientes la bandeja dice q
   await expect(decision(page, GATE).getByRole("region", { name: "Resolución" })).toContainText("Publicar el saludo");
   await snapBoth(page, "bandeja-resueltas");
 });
+
+test("conectar con la GitHub App muestra el código, y al aprobarlo la cuenta aparece sola con su token", async ({ app, window: page }) => {
+  // El main solo abre https, así que la página del GitHub falso (http) no abre nada: lo recogemos del IPC y la abrimos nosotros.
+  await app.evaluate(({ ipcMain }) => {
+    (globalThis as { openedUrl?: string }).openedUrl = undefined;
+    ipcMain.on("host:open-external", (_event, url: string) => ((globalThis as { openedUrl?: string }).openedUrl = url));
+  });
+  await sidebar(page).getByRole("button", { name: "Conexiones" }).click();
+  const github = card(page, "GitHub");
+  await github.getByRole("button", { name: "Conectar con la GitHub App" }).click();
+
+  await expect(github.getByLabel("Código de GitHub")).toHaveText("WDJB-MJHT");
+  await expect(github.getByText("aprueba la GitHub App")).toBeVisible();
+  await snapBoth(page, "conexiones-github-app-codigo");
+
+  const openedUrl = () => app.evaluate(() => (globalThis as { openedUrl?: string }).openedUrl);
+  await expect.poll(openedUrl).toMatch(/\/login\/device$/);
+  // Aprobar es abrir la página del código: el GitHub falso lo da por escrito y el core lo ve en el siguiente sondeo.
+  expect((await fetch((await openedUrl())!)).ok).toBe(true);
+
+  await expect(github.getByText("Conectado con la GitHub App")).toBeVisible();
+  await expect(github.getByText("@octocat")).toBeVisible();
+  await expect(github.getByText("conectada", { exact: true })).toBeVisible();
+  await expect(github.getByLabel("Fine-grained personal access token")).toBeHidden();
+  await snapBoth(page, "conexiones-github-app");
+});

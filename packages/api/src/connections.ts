@@ -7,6 +7,10 @@ import * as z from "zod";
 export const ConnectionProvider = z.enum(["github", "linear", "claude"]);
 export type ConnectionProvider = z.infer<typeof ConnectionProvider>;
 
+/** Cómo se conectó GitHub: con un fine-grained PAT pegado a mano o con el device flow de la GitHub App. */
+export const GitHubAuth = z.enum(["pat", "app"]);
+export type GitHubAuth = z.infer<typeof GitHubAuth>;
+
 export const ConnectionStatus = z.enum(["active", "expired", "revoked"]);
 export type ConnectionStatus = z.infer<typeof ConnectionStatus>;
 
@@ -23,6 +27,8 @@ export const Connection = z.object({
   expiresAt: z.int().nonnegative().optional(),
   /** `true` solo si sigue activa y el token vence en 7 días o menos: la UI avisa para rotarlo. */
   expiresSoon: z.boolean().optional(),
+  /** Solo en GitHub. Con `app`, `expiresAt` es el vencimiento del refresh token, que el core renueva solo. */
+  auth: GitHubAuth.optional(),
 });
 export type Connection = z.infer<typeof Connection>;
 
@@ -41,6 +47,18 @@ export const GitHubPatForm = z.object({
   ),
 });
 export type GitHubPatForm = z.infer<typeof GitHubPatForm>;
+
+/**
+ * El código que el usuario escribe en `verificationUri` para aprobar la GitHub App (device flow). La
+ * cuenta aparece sola, con un `connection.changed`, cuando aprueba.
+ */
+export const GitHubDeviceFlow = z.object({
+  userCode: z.string().min(1),
+  verificationUri: z.url(),
+  /** Segundos que dura el código desde que se emitió; después hay que iniciar de nuevo. Relativo: el reloj de la ventana puede no coincidir con el del core. */
+  expiresIn: z.int().positive(),
+});
+export type GitHubDeviceFlow = z.infer<typeof GitHubDeviceFlow>;
 
 /** Con qué credencial corre Claude: el login de suscripción de quien instaló la app, o una API key. */
 export const ClaudeMode = z.enum(["subscription", "api-key"]);

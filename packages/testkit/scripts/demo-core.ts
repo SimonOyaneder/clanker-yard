@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanker/api/node";
-import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startCore, startFakeLinear } from "@clanker/core";
+import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startCore, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core";
 import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
@@ -19,7 +19,7 @@ import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCH
 // (`summary-scenario.ts`): el proyecto de las capturas del Resumen.
 //
 // Las conexiones nunca salen a internet: GitHub es el simulador (`startGitHubSim`, acepta el PAT
-// `github_pat_demo`), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
+// `github_pat_demo` y el token del device flow del OAuth falso), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
 // esperar, escribe `<CLANKER_HOME>/demo-control.json` con `{ "clockDays": 40, "claude": "login_expired" }`: el
 // reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario.
 //
@@ -57,7 +57,14 @@ const withRecipe = tempGitRepo({
 });
 const withBrokenRecipe = tempGitRepo({ commits: [{ message: "chore: add a broken recipe", files: { ".clanker/recipe.json": JSON.stringify({ version: 1, checks: ["no-existe"] }) } }] });
 
-const github = await startGitHubSim({ origin: repo, token: "github_pat_demo", ...(prsScenario && { repo: "octocat/demo" }) });
+// El device flow de la GitHub App: abrir su `verification_uri` aprueba (no hay github.com), y el token que emite
+// también lo acepta el simulador. Sondea cada 1 s para que el E2E no espere los 5 s de GitHub.
+const githubOAuth = await startFakeGitHubOAuth({ clientId: "Iv23liDEMO", now: Date.now, interval: 1 });
+const github = await startGitHubSim({
+  origin: repo,
+  token: (bearer) => bearer === "github_pat_demo" || githubOAuth.isAccessTokenValid(bearer),
+  ...(prsScenario && { repo: "octocat/demo" }),
+});
 if (prsScenario) {
   // El pack de ejemplo tal cual, activado para la org del simulador y sin sus flujos ni roles (el escenario no los corre).
   const packDir = join(home, "packs", "acme");
@@ -82,6 +89,7 @@ const core = await startCore({
   dataDir: home,
   connections: createConnections(store, createFileSecrets({ dir: join(home, "secrets") }), {
     github: { baseUrl: github.baseUrl },
+    githubApp: { clientId: "Iv23liDEMO", endpoints: githubOAuth.endpoints },
     linear: { clientId: "demo-client", redirectPort: 0, endpoints: linear.endpoints },
     claude: claude.options,
     now: () => CLOCK_START + (control().clockDays ?? 0) * 86_400_000,
@@ -212,7 +220,7 @@ function stop(): Promise<void> {
     removeCoreJson(home!);
     await core.close();
     store.close();
-    await Promise.all([github.close(), linear.close()]);
+    await Promise.all([github.close(), githubOAuth.close(), linear.close()]);
     claude.cleanup();
     for (const r of [repo, withRecipe, withBrokenRecipe]) r.cleanup();
     process.exit(0);

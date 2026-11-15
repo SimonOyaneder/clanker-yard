@@ -74,6 +74,7 @@ export {
   ClaudeSetupError,
   createConnections,
   EXPIRY_WARNING_DAYS,
+  GITHUB_REFRESH_MARGIN_MS,
   LINEAR_REDIRECT_PORT,
 } from "./connections/connections";
 export type {
@@ -81,6 +82,7 @@ export type {
   ConnectInput,
   Connections,
   ConnectionsOptions,
+  GitHubAppOptions,
   LinearLogin,
   LinearOptions,
 } from "./connections/connections";
@@ -91,6 +93,10 @@ export type { FakeLinear, FakeLinearOptions } from "./linear/fake-linear";
 export type { FakeIssue, FakeProject, FakeTeam, FakeWorkspace } from "./linear/fake-workspace";
 export { createLinearTracker } from "./linear/tracker";
 export { GitHubPatError } from "./github/pat";
+export { GitHubAuthError } from "./github/device-flow";
+export type { GitHubOAuthEndpoints } from "./github/device-flow";
+export { startFakeGitHubOAuth } from "./github/fake-github-oauth";
+export type { FakeGitHubOAuth, FakeGitHubOAuthOptions, FakeGitHubOAuthRequest } from "./github/fake-github-oauth";
 export { PrNotFoundError } from "./github/pr-query";
 export { healthyGitHub, recorded, startFakeGitHub } from "./github/fake-github";
 export type { FakeGitHub, FakeRequest, RecordedResponse } from "./github/fake-github";

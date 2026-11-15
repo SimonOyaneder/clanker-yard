@@ -89,8 +89,8 @@ export interface GitHubSimOptions {
   defaultBranch?: string;
   /** Quien llama (`GET /user`, autor de lo que se escribe por la API). */
   account?: string;
-  /** Si viene, solo este token es válido; sin él, cualquier `bearer` no vacío. */
-  token?: string;
+  /** Si viene, solo este token (o el que acepte la función, para un token que rota) es válido; sin él, cualquier `bearer` no vacío. */
+  token?: string | ((bearer: string) => boolean);
   /** Login del bot de review (`botLgtm`, `botFindings`). */
   bot?: string;
   /** Prefijo de los comentarios del council (`councilThread`). */
@@ -883,7 +883,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   function respond(request: FakeRequest): RecordedResponse {
     const resource: QuotaResource = request.path === "/graphql" ? "graphql" : request.path.startsWith("/search/") ? "search" : "core";
     const bearer = request.authorization?.match(/^(?:bearer|token) (.+)$/i)?.[1];
-    if (revoked || !bearer || (token !== undefined && bearer !== token)) {
+    if (revoked || !bearer || (token !== undefined && !(typeof token === "function" ? token(bearer) : bearer === token))) {
       return withQuota(recorded("user.bad-credentials"), resource, false);
     }
     const quota = quotas[resource];

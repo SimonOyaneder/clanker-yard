@@ -86,7 +86,9 @@ El core lee el `client_id` al arrancar, de dos lugares (el entorno gana):
   `dataDir` es `~/Library/Application Support/Clanker Yard` en macOS, `~/.local/share/clanker-yard` en Linux y `%APPDATA%\Clanker Yard` en Windows; con `CLANKER_HOME`, esa carpeta. Es el lugar para la app de escritorio, que lanzada desde el Dock no hereda variables de la terminal.
 - La variable `CLANKER_GITHUB_APP_CLIENT_ID`, para dev y tests.
 
-Un `config.json` que no es JSON, trae claves desconocidas o un `clientId` vacío hace fallar el arranque con el motivo y la ruta. Reinicia el core para que lo lea. El device flow en sí (`connections.startDeviceFlow`) lo agrega CLA-100.
+Un `config.json` que no es JSON, trae claves desconocidas o un `clientId` vacío hace fallar el arranque con el motivo y la ruta. Reinicia el core para que lo lea. ## 5. Conectar desde la app
+
+En Conexiones, GitHub, **Conectar con la GitHub App**: la app muestra un código (`WDJB-MJHT`) y abre https://github.com/login/device; escríbelo y aprueba. La cuenta aparece sola, con el badge "GitHub App". El core renueva el token (8 h) solo; si GitHub rechaza la renovación (revocaste la App o pasaron 6 meses sin uso), la conexión queda en rojo, lo que publica espera y basta con volver a pulsar el botón. Si el core responde que falta el `client_id` o que el device flow está deshabilitado, revisa los pasos 2 y 4. Se puede cambiar de PAT a App (y al revés) sobre la misma cuenta: la última que conectes reemplaza a la anterior.
 
 ## Después
 

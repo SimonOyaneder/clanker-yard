@@ -1,5 +1,6 @@
 import { API_MAJOR, type ClientOrigin, contract, type PrRef, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
+import { GitHubAuthError } from "../github/device-flow";
 import { GitHubPatError, githubPatForm } from "../github/pat";
 import { PrNotFoundError } from "../github/pr-query";
 import { createMergeScope } from "../github/merge-scope";
@@ -173,6 +174,16 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       githubPatForm: os.connections.githubPatForm.handler(() => githubPatForm()),
+      startDeviceFlow: os.connections.startDeviceFlow.handler(async ({ context }) => {
+        try {
+          return await deps.connections.startDeviceFlow(context.origin);
+        } catch (error) {
+          if (error instanceof GitHubAuthError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        }
+      }),
       linearAuth: os.connections.linearAuth.handler(async ({ context }) => {
         try {
           // `done` no se espera: el resultado llega como `connection.changed`, y un fallo se le muestra

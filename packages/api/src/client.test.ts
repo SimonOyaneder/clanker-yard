@@ -47,6 +47,9 @@ const router = os.router({
       url: "https://github.com/settings/personal-access-tokens/new",
       permissions: [],
     })),
+    startDeviceFlow: os.connections.startDeviceFlow.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     linearAuth: os.connections.linearAuth.handler(() => {
       throw new Error("no se usa en este test");
     }),

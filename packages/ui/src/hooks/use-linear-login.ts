@@ -8,7 +8,7 @@ import { useHost } from "@/host"
 const LOGIN_WAIT_MS = 5 * 60_000
 
 /** Lo que cambia cuando el login termina: la cuenta nueva, o la misma con otro vencimiento. */
-const signature = (c: Connection | undefined) => (c ? `${c.account}:${c.status}:${c.expiresAt ?? ""}` : "")
+export const connectionSignature = (c: Connection | undefined) => (c ? `${c.account}:${c.status}:${c.expiresAt ?? ""}` : "")
 
 export interface LinearLogin {
   /** El link con que se inició el login, mientras se espera la aprobación. */
@@ -31,14 +31,14 @@ export function useLinearLogin(connection: Connection | undefined, onChanged: ()
     try {
       const url = await appData.linearAuth()
       host.openExternal(url)
-      setPending({ url, before: signature(connection) })
+      setPending({ url, before: connectionSignature(connection) })
       onChanged()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [appData, host, connection, onChanged])
 
-  const done = pending !== null && signature(connection) !== pending.before
+  const done = pending !== null && connectionSignature(connection) !== pending.before
   useEffect(() => {
     if (!pending) return
     if (done) {

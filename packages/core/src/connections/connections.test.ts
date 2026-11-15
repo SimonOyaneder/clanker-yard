@@ -43,7 +43,7 @@ describe("connect", () => {
       "ui",
     );
 
-    expect(connection).toEqual({ ...github, status: "active", expiresAt: 1_800_000_000_000 });
+    expect(connection).toEqual({ ...github, status: "active", expiresAt: 1_800_000_000_000, auth: "pat" });
     expect(connections.list()).toEqual([connection]);
     expect(await connections.token("github", "simon")).toBe(TOKEN);
   });
@@ -58,7 +58,7 @@ describe("connect", () => {
     await connections.connect({ ...github, scopes: ["contents"], token: "ghp_nuevo" }, "cli");
 
     expect(connections.list()).toEqual([
-      { provider: "github", account: "simon", scopes: ["contents"], status: "active" },
+      { provider: "github", account: "simon", scopes: ["contents"], status: "active", auth: "pat" },
     ]);
     expect(await connections.token("github", "simon")).toBe("ghp_nuevo");
   });

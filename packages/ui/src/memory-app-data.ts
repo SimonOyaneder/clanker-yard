@@ -271,7 +271,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
   // Conexiones de ejemplo: GitHub en regla, Linear vencida y Claude sin configurar.
   const day = 86_400_000
   const connections: Connection[] = [
-    { provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 60 * day, expiresSoon: false },
+    { provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 60 * day, expiresSoon: false, auth: "pat" },
     { provider: "linear", account: "clanker-yard", scopes: ["read", "write"], status: "expired", expiresAt: now - 2 * day },
   ]
   const connect = (c: Connection) => {
@@ -525,7 +525,12 @@ export function createMemoryAppData(now = Date.now()): AppData {
     }),
     setGithubPat: async (token) => {
       if (token.startsWith("bad")) throw new Error("GitHub rechazó el token: es inválido, está vencido o fue revocado. Crea uno nuevo y vuelve a pegarlo.")
-      return connect({ provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 90 * day, expiresSoon: false })
+      return connect({ provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 90 * day, expiresSoon: false, auth: "pat" })
+    },
+    // No hay GitHub: la cuenta queda conectada de una vez, como si el usuario ya hubiera aprobado.
+    startGithubDeviceFlow: async () => {
+      connect({ provider: "github", account: "octocat", scopes: [], status: "active", expiresAt: now + 183 * day, expiresSoon: false, auth: "app" })
+      return { userCode: "WDJB-MJHT", verificationUri: "https://github.com/login/device", expiresIn: 900 }
     },
     // No hay navegador ni redirect: la cuenta queda conectada de una vez.
     linearAuth: async () => {
