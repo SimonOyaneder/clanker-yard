@@ -21,7 +21,7 @@ import type { Store } from "./store/store";
 import { createIssues } from "./tracker/issues";
 import { createLocalTracker } from "./tracker/local";
 import { createRepos } from "./workspaces/repos";
-import { createWorkspaces, workspaceAcquireAction, workspaceReleaseAction } from "./workspaces/workspaces";
+import { createWorkspaces, workspaceAcquireAction, workspaceReleaseAction, workspaceSyncBaseAction } from "./workspaces/workspaces";
 
 /** Cuánto espera el cierre a que terminen los pasos en curso antes de dejarlos atrás. */
 const DRAIN_MS = 10_000;
@@ -73,6 +73,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
+  flows.registerAction(workspaceSyncBaseAction(workspaces));
   installBuiltins({ defs, flows });
 
   // Antes de aceptar trabajo, en este orden: sin procesos de un core anterior que sigan escribiendo,

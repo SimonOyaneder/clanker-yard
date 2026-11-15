@@ -1,15 +1,16 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
-import { git, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
+import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/catalog";
+import { git, GitError, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
-import { execLogged, type ExecResult } from "./exec";
+import { diffBetween, snapshotTree } from "../git/tree";
+import { excerpt, execLogged, type ExecResult } from "./exec";
 import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
-import { PermanentActionError } from "../flows/catalog";
 import { runs, workspaces } from "../store/schema";
 import type { Store } from "../store/store";
 
@@ -127,6 +128,22 @@ export interface Workspaces {
   push(lease: WorkspaceLease, opts?: { council?: boolean }): Promise<PushOutcome>;
   /** Trae las branches del remoto a `refs/remotes/origin/*` con el mismo mecanismo que `push`. */
   fetch(repo: string): Promise<FetchOutcome>;
+  /**
+   * La base vigente del worktree: la de `acquire`, o la que dejó el último `syncBase`. Lo que las
+   * acciones sobre el worktree deben usar para el diff de la issue, no el `baseSha` de `$ws`, que no se
+   * actualiza.
+   */
+  baseSha(lease: WorkspaceRef): string;
+  /**
+   * Trae el remoto y lleva el worktree a la punta nueva de su base. Sin movimiento, `same`. Si se movió,
+   * solo se rebasea una branch que no está en el remoto y sin commits propios (si no, lanza
+   * `SyncBaseError`: eso es `rebasePr`): el árbol completo, con cambios sin commit y archivos nuevos,
+   * queda respaldado en `refs/clanker/backup/<branch>` (un commit sobre la base vieja; el último respaldo
+   * pisa al anterior), el worktree pasa a la base nueva y los cambios se vuelven a aplicar con
+   * `apply --3way`. Con `conflict` las marcas quedan en los archivos. Sin `repos().remote` no hay fetch:
+   * la base nueva es la que ya haya en el checkout. Reintentar tras un corte a medias retoma desde el respaldo.
+   */
+  syncBase(lease: WorkspaceRef): Promise<SyncBaseResult>;
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
   git(lease: WorkspaceRef, ...args: string[]): Promise<string>;
   /**
@@ -145,6 +162,22 @@ export class StaleLeaseError extends Error {}
 
 /** La branch no se puede usar como workspace; el mensaje dice por qué. */
 export class BranchNotAllowedError extends Error {}
+
+/** `syncBase` no puede seguir y reintentar no lo arregla (commits propios, branch ya publicada, conexión revocada). */
+export class SyncBaseError extends Error {}
+
+export type SyncBaseResult =
+  | { outcome: "same"; baseSha: string }
+  | { outcome: "rebased"; baseSha: string; from: string; backup: string }
+  | {
+      outcome: "conflict";
+      baseSha: string;
+      from: string;
+      backup: string;
+      /** Archivos que el dev debe resolver: con marcas, o sin ellas si git no pudo aplicar su cambio (ahí su versión está en `backup`). */
+      conflicts: string[];
+      failures: string;
+    };
 
 export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   const { store, dataDir, repos, identity, remote, procs, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
@@ -530,6 +563,137 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return "ok";
   }
 
+  /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
+  async function gitIn(lease: WorkspaceRef, ...args: string[]): Promise<string> {
+    validate(lease);
+    return git(lease.path, args, {
+      GIT_AUTHOR_NAME: identity.name,
+      GIT_AUTHOR_EMAIL: identity.email,
+      GIT_COMMITTER_NAME: identity.name,
+      GIT_COMMITTER_EMAIL: identity.email,
+    });
+  }
+
+  function rowOf(lease: WorkspaceRef): typeof workspaces.$inferSelect {
+    validate(lease);
+    return store.db.select().from(workspaces).where(eq(workspaces.id, lease.workspaceId)).get()!;
+  }
+
+  function baseSha(lease: WorkspaceRef): string {
+    const sha = rowOf(lease).baseSha;
+    if (sha === null) throw new Error(`El workspace ${lease.branch} todavía no tiene base: sigue creándose.`);
+    return sha;
+  }
+
+  async function fetchRepo(repo: string): Promise<FetchOutcome> {
+    const { remote, url, account } = remoteOf(repo);
+    return withRepoLock(repo, () => remote.fetch({ cwd: repos(repo).path, url, account }));
+  }
+
+  async function syncBase(lease: WorkspaceRef): Promise<SyncBaseResult> {
+    const row = rowOf(lease);
+    const cfg = repos(row.repoId);
+    if (cfg.remote && (await fetchRepo(row.repoId)) === "unauthorized") {
+      throw new SyncBaseError(
+        `GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${row.repoId}: la conexión quedó revocada, reconéctala.`,
+      );
+    }
+    const from = baseSha(lease);
+    const target = await resolveBase(cfg, row.baseRef);
+    if (target === from) return { outcome: "same", baseSha: target };
+
+    const backupRef = `refs/clanker/backup/${row.branch}`;
+    const head = await gitIn(lease, "rev-parse", "HEAD");
+    if (head === from) {
+      if (row.remoteSha !== null || (await refExists(cfg, `refs/remotes/${REMOTE}/${row.branch}`))) {
+        throw new SyncBaseError(
+          `${row.branch} ya está en el remoto: la base nueva se integra con un rebase del PR, no con syncBase.`,
+        );
+      }
+      const tree = await snapshotTree(lease.path);
+      const backup = await gitIn(lease, "commit-tree", tree, "-p", "HEAD", "-m", `clanker: respaldo de ${row.branch} antes de rebasear`);
+      await gitIn(lease, "update-ref", backupRef, backup);
+    } else if (!(head === target && (await isResumable(lease, backupRef, from)))) {
+      throw new SyncBaseError(
+        `${row.branch} tiene commits propios (HEAD ${head.slice(0, 9)}, base ${from.slice(0, 9)}): ` +
+          "con commits, la base nueva se integra con un rebase del PR, no con syncBase.",
+      );
+    }
+
+    // Todo sale del respaldo, así que un corte entre el reset y el apply se retoma desde aquí.
+    const patch = await diffBetween(lease.path, `${backupRef}^`, backupRef);
+    await gitIn(lease, "reset", "--quiet", "--hard", target);
+    // El reset no toca los archivos nuevos sin seguimiento, que el patch vuelve a crear.
+    await gitIn(lease, "clean", "--quiet", "--force", "-d");
+    const applied = patch === "" ? undefined : await applyThreeWay(lease, patch);
+    const unmerged = (await gitIn(lease, "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=U"))
+      .split("\n")
+      .filter(Boolean);
+    // `apply --3way` deja el index con entradas sin mergear: el dev solo ve archivos modificados, como antes.
+    await gitIn(lease, "reset", "--quiet");
+    const unapplied = applied && !applied.ok ? applied.unapplied.filter((path) => !unmerged.includes(path)) : [];
+    // Un fallo sin archivos que nombrar no es un conflicto: antes de guardar la base nueva, para que el reintento retome.
+    if (applied && !applied.ok && unmerged.length + unapplied.length === 0) throw applied.error;
+
+    const saved = store.tx(({ db }) =>
+      db
+        .update(workspaces)
+        .set({ baseSha: target, headSha: target })
+        .where(and(eq(workspaces.id, lease.workspaceId), eq(workspaces.fencingToken, lease.fencingToken)))
+        .returning({ id: workspaces.id })
+        .get(),
+    );
+    if (!saved) {
+      throw new StaleLeaseError(`El lease de ${row.branch} se perdió mientras se rebaseaba: otra corrida tomó el workspace.`);
+    }
+
+    if (applied === undefined || applied.ok) return { outcome: "rebased", baseSha: target, from, backup: backupRef };
+    const conflicts = [...unmerged, ...unapplied];
+    const failures = [
+      `Rebase sobre ${target.slice(0, 9)} (la base era ${from.slice(0, 9)}): conflicto en ${conflicts.join(", ")}.`,
+      unmerged.length > 0 ? "Las marcas <<<<<<< están en los archivos del worktree." : "",
+      unapplied.length > 0
+        ? `Sin marcas, git no pudo aplicar el cambio de ${unapplied.join(", ")}: su versión anterior está en ${backupRef}.`
+        : "",
+      excerpt(applied.error.output),
+    ];
+    return {
+      outcome: "conflict",
+      baseSha: target,
+      from,
+      backup: backupRef,
+      conflicts,
+      failures: failures.filter(Boolean).join("\n"),
+    };
+  }
+
+  /** El respaldo de un `syncBase` cortado tras el reset: un commit sobre la base vieja. */
+  async function isResumable(lease: WorkspaceRef, backupRef: string, from: string): Promise<boolean> {
+    const parent = await tryGit(lease.path, ["rev-parse", "--verify", "--quiet", `${backupRef}^`]);
+    return parent === from;
+  }
+
+  /** `apply --3way`: git sale con 1 si deja conflictos, y eso es un resultado. */
+  async function applyThreeWay(
+    lease: WorkspaceRef,
+    patch: string,
+  ): Promise<{ ok: true } | { ok: false; error: GitError; unapplied: string[] }> {
+    const dir = mkdtempSync(join(tmpdir(), "clanker-sync-"));
+    try {
+      const file = join(dir, "changes.patch");
+      writeFileSync(file, patch);
+      await gitIn(lease, "apply", "--3way", file);
+      return { ok: true };
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      // Un archivo que git no puede ni mezclar (el cambio toca un archivo que la base nueva borró) no deja marcas.
+      const unapplied = [...error.output.matchAll(/^error: (.+): (?:does not exist in index|patch does not apply)$/gm)].map((m) => m[1]!);
+      return { ok: false, error, unapplied };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   function release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void {
     stopHeartbeat(lease.workspaceId, lease.fencingToken);
     store.tx(({ db, emit }) => {
@@ -605,10 +769,9 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     push,
     recover,
     extendLeases,
-    async fetch(repo) {
-      const { remote, url, account } = remoteOf(repo);
-      return withRepoLock(repo, () => remote.fetch({ cwd: repos(repo).path, url, account }));
-    },
+    fetch: fetchRepo,
+    baseSha,
+    syncBase,
     release,
     held: (runId) =>
       store.db
@@ -617,15 +780,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         .where(and(eq(workspaces.holderRunId, runId), eq(workspaces.state, "leased")))
         .get(),
     validate,
-    async git(lease, ...args) {
-      validate(lease);
-      return git(lease.path, args, {
-        GIT_AUTHOR_NAME: identity.name,
-        GIT_AUTHOR_EMAIL: identity.email,
-        GIT_COMMITTER_NAME: identity.name,
-        GIT_COMMITTER_EMAIL: identity.email,
-      });
-    },
+    git: gitIn,
     async exec(lease, command, { runId, stepId, env = {}, signal = new AbortController().signal }) {
       validate(lease);
       return execLogged({
@@ -656,6 +811,7 @@ export const WorkspaceOutput = z.object({
   workspaceId: z.string(),
   path: z.string(),
   branch: z.string(),
+  /** La base al tomar el worktree: tras `workspace.syncBase` la vigente es `workspaces.baseSha(ws)`. */
   baseSha: z.string(),
   fencingToken: z.int(),
 });
@@ -701,5 +857,32 @@ export function workspaceReleaseAction(workspaces: Workspaces) {
       workspaces.release({ ...args, runId: ctx.runId });
       return { outcome: "ok" };
     },
+  };
+}
+
+const SyncBaseArgs = z.object({ ws: WorkspaceOutput });
+
+/**
+ * La acción `workspace.syncBase` (`docs/design.html#d-flows`, nodo sync). Outcomes `same`, `rebased` (el
+ * flujo vuelve a correr los checks) y `conflict` (output `conflicts` y `failures`, lo que va al dev).
+ * Lo que `syncBase` no puede hacer (commits propios, branch publicada) es `PermanentActionError`.
+ */
+export function workspaceSyncBaseAction(workspaces: Workspaces): ActionDef<typeof SyncBaseArgs> {
+  return {
+    name: "workspace.syncBase",
+    args: SyncBaseArgs,
+    outcomes: ["same", "rebased", "conflict"],
+    effects: "local",
+    // Una vez por visita: si el corte llega después del rebase, el reintento no ve un `same` porque la base ya se movió.
+    run: ({ ws }, ctx: ActionCtx) =>
+      ctx.once("sync", async () => {
+        try {
+          const { outcome, ...output } = await workspaces.syncBase(ws);
+          return { outcome, output };
+        } catch (error) {
+          if (error instanceof SyncBaseError) throw new PermanentActionError(error.message, { cause: error });
+          throw error;
+        }
+      }),
   };
 }

@@ -70,16 +70,18 @@ export function commitsApplyAction({
     { ws, plan, messagePattern, slot }: z.infer<typeof ApplyArgs>,
     ctx: ActionCtx,
   ): Promise<ActionResult> {
+    // La vigente: `workspace.syncBase` pudo mover la base después de `workspace.acquire`.
+    const baseSha = workspaces.baseSha(ws);
     const head = await workspaces.git(ws, "rev-parse", "HEAD");
     // Reintentar no mueve la branch de vuelta a la base.
-    if (head !== ws.baseSha) {
+    if (head !== baseSha) {
       throw new PermanentActionError(
-        `commits.apply parte de la base ${ws.baseSha.slice(0, 9)}, pero ${ws.branch} ya está en ${head.slice(0, 9)}: ` +
+        `commits.apply parte de la base ${baseSha.slice(0, 9)}, pero ${ws.branch} ya está en ${head.slice(0, 9)}: ` +
           `el plan se hizo sobre hunks.json, que es el diff contra esa base.`,
       );
     }
     const saved = await snapshotTree(ws.path);
-    const hunks = listHunks(await diffBetween(ws.path, ws.baseSha, saved));
+    const hunks = listHunks(await diffBetween(ws.path, baseSha, saved));
 
     const messages = plan.commits.map((commit) => cleanMessage(commit.message));
     const problems = planProblems(plan.commits, messages, hunks, messagePattern);
@@ -95,7 +97,7 @@ export function commitsApplyAction({
     const dir = mkdtempSync(join(tmpdir(), "clanker-verify-"));
     const verify: WorkspaceRef = { ...ws, path: join(dir, "worktree") };
     try {
-      await workspaces.git(ws, "worktree", "add", "--detach", verify.path, ws.baseSha);
+      await workspaces.git(ws, "worktree", "add", "--detach", verify.path, baseSha);
       for (const command of recipe?.setup?.worktree ?? []) {
         const setup = await workspaces.exec(verify, command, { runId: ctx.runId, stepId: ctx.stepId, signal: ctx.signal });
         if (setup.exitCode !== 0) {

@@ -113,9 +113,11 @@ export {
   createWorkspaces,
   LEASE_TTL_MS,
   StaleLeaseError,
+  SyncBaseError,
   WorkspaceBusyError,
   workspaceAcquireAction,
   workspaceReleaseAction,
+  workspaceSyncBaseAction,
 } from "./workspaces/workspaces";
 export { EXCERPT_MAX_LINES } from "./workspaces/exec";
 export type { ExecResult } from "./workspaces/exec";

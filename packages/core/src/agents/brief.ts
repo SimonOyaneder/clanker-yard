@@ -71,7 +71,7 @@ export function createBriefs({
       await excludeRunDir(cwd);
 
       const snapshot = await snapshotTree(cwd);
-      const diff = await diffBetween(cwd, lease.baseSha, snapshot);
+      const diff = await diffBetween(cwd, workspaces.baseSha(lease), snapshot);
 
       const files = new Map<string, { content: string; kind: ArtifactKind; mime?: string }>();
       const paths: Record<string, string> = {};

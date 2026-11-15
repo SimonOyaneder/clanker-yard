@@ -192,7 +192,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, fake }: Reci
         // Una receta mal escrita no se arregla reintentando.
         throw asPermanent(error);
       }
-      const changed = await changedFiles(ws, ws.baseSha);
+      const changed = await changedFiles(ws, workspaces.baseSha(ws));
       const files = scope === "changed" ? changed : [];
 
       // Se corre en orden y se corta en el primer rojo: los checks siguientes casi siempre dependen de los
