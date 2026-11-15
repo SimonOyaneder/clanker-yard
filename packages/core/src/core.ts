@@ -25,6 +25,7 @@ import { createLinearTracker } from "./linear/tracker";
 import { createProcs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
 import { createRunStarter } from "./projects/start-run";
+import { createProjectQueue } from "./scheduler/project-queue";
 import { createRecipes, readRecipe, type ScriptedRecipe } from "./recipe/recipe";
 import { createRecipeTester } from "./recipe/recipe-test";
 import { createSlots } from "./slots/slots";
@@ -152,6 +153,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     repos,
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
     runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers }),
+    queue: createProjectQueue({ store, projects, issues, repos, trackers, prs }),
     flows,
     artifacts,
     decisions: createDecisions(store),

@@ -83,6 +83,9 @@ const router = os.router({
     update: os.projects.update.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    queue: os.projects.queue.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     summary: os.projects.summary.handler(() => {
       throw new Error("no se usa en este test");
     }),

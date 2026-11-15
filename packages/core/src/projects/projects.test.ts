@@ -49,6 +49,7 @@ describe("create", () => {
       queueFilter: {},
       conventions: {},
       parallel: 1,
+      stackOn: "ci_green",
       status: "active",
       flowParams: {},
       maxCostUsd: null,

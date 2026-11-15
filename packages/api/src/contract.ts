@@ -18,6 +18,7 @@ import { DefFilter, DefRecord, DefRef } from "./defs";
 import { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectSummary, RoleMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
 import { PrRef, PrState } from "./prs";
+import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
 import { Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
@@ -169,6 +170,12 @@ const projects = {
   create: base.input(NewProject).output(ClankerProject),
   /** Cambia solo los campos presentes; las mismas validaciones que `create`. */
   update: base.input(ProjectPatch.extend({ id: ProjectId })).output(ClankerProject),
+  /**
+   * La cola del proyecto, calculada por el core a partir del caché de issues, sus corridas y sus PRs:
+   * primero las `ready` (en el orden en que se lanzarían), luego `waiting` y `blocked`, cada una con su
+   * motivo. `NOT_FOUND` si el proyecto no existe; `BAD_REQUEST` si el core no tiene adapter de su tracker.
+   */
+  queue: base.input(z.object({ id: ProjectId })).output(z.array(QueueEntry)),
   /** Totales, rondas y costo por rol de las corridas cerradas del proyecto. `NOT_FOUND` si no existe. */
   summary: base.input(z.object({ id: ProjectId })).output(ProjectSummary),
 };

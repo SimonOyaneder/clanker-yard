@@ -136,6 +136,10 @@ describe("crear y leer", () => {
 });
 
 describe("claim, setStatus y comment", () => {
+  test("viewer es la persona que reclama", async () => {
+    expect(await tracker.viewer()).toEqual({ id: "local", name: "Local" });
+  });
+
   test("claim asigna a la persona y pasa a in_progress", async () => {
     const ref = await create("x");
     await tracker.claim(ref);

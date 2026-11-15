@@ -16,6 +16,7 @@ import type { Packs } from "../packs/packs";
 import { DefValidationError, type Defs } from "../defs/defs";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { IssueNotCachedError, type RunStarter } from "../projects/start-run";
+import { QueueUnavailableError, type ProjectQueue } from "../scheduler/project-queue";
 import { RecipeSyntaxError } from "../recipe/recipe";
 import { RecipeTestError, type RecipeTester } from "../recipe/recipe-test";
 import { readSchemaVersion } from "../store/migrate";
@@ -41,6 +42,8 @@ export interface RouterDeps {
   recipeTester: RecipeTester;
   /** `runs.start`: reclama la issue y lanza el flujo. */
   runs: RunStarter;
+  /** `projects.queue`. */
+  queue: ProjectQueue;
   flows: Engine;
   artifacts: Artifacts;
   decisions: Decisions;
@@ -188,6 +191,7 @@ export function createRouter(deps: RouterDeps) {
       update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
         asApiError(() => projects.update(id, patch, context.origin)),
       ),
+      queue: os.projects.queue.handler(({ input }) => asApiErrorAsync(() => deps.queue.of(input.id))),
       summary: os.projects.summary.handler(({ input }) => metrics.summary(projectOrNotFound(input.id).id)),
     },
     prs: {
@@ -305,6 +309,7 @@ function toApiError(error: unknown): unknown {
   }
   if (
     error instanceof InvalidProjectError ||
+    error instanceof QueueUnavailableError ||
     error instanceof RunStartError ||
     error instanceof DecisionResolveError ||
     error instanceof InvalidRepoError ||

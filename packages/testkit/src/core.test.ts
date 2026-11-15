@@ -241,6 +241,34 @@ describe("runs.start con los repos del proyecto", () => {
   });
 });
 
+describe("projects.queue", () => {
+  test("una issue ya lanzada sale de la cola, también cuando su corrida termina, y la otra sigue lista", async () => {
+    const client = await boot();
+    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const project = await createToyProject(client, { repo: repoId });
+    const first = await client.issues.createLocal({ projectId: project.id, title: "Una", priority: 1 });
+    const second = await client.issues.createLocal({ projectId: project.id, title: "Otra" });
+    const nextFinished = await follow(client, project.id, ["run.finished"]);
+
+    expect((await client.projects.queue({ id: project.id })).map((e) => [e.issue.id, e.state])).toEqual([
+      [first.id, "ready"],
+      [second.id, "ready"],
+    ]);
+    await client.runs.start({ projectId: project.id, issueId: first.id });
+    await nextFinished();
+
+    expect((await client.projects.queue({ id: project.id })).map((e) => [e.issue.id, e.state])).toEqual([[second.id, "ready"]]);
+  });
+
+  test("un proyecto que no existe es NOT_FOUND", async () => {
+    const client = await boot();
+
+    await expect(client.projects.queue({ id: "prj_00000000000000000000000000" })).rejects.toSatisfy(
+      (e) => e instanceof ORPCError && e.code === "NOT_FOUND",
+    );
+  });
+});
+
 describe("arranque", () => {
   test("las plantillas juguete y techlead-clasico quedan instaladas como builtin y arrancar de nuevo no suma versiones", async () => {
     await boot();

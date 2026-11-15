@@ -246,6 +246,10 @@ export function createLinearTracker({
     if (!issueUpdate.success) throw new LinearApiError(`Linear no aplicó el cambio en ${ref.key} (success: false).`);
   }
 
+  async function viewer(): Promise<Person> {
+    return (await gql<{ viewer: Person }>(QUERIES.viewer)).viewer;
+  }
+
   return {
     id: "linear",
     capabilities: { relations: true, subIssues: true, milestones: true, priorities: true, estimates: true },
@@ -281,19 +285,21 @@ export function createLinearTracker({
       return { ...issue, comments };
     },
 
+    viewer,
+
     async claim(ref) {
-      const { viewer } = await gql<{ viewer: Person }>(QUERIES.viewer);
+      const me = await viewer();
       const { issue, teamId } = await readIssue(ref);
-      if (issue.assignee !== undefined && issue.assignee.id !== viewer.id) {
+      if (issue.assignee !== undefined && issue.assignee.id !== me.id) {
         throw new LinearApiError(`La issue ${ref.key} ya está asignada a ${issue.assignee.name}: no se puede reclamar.`);
       }
       const target = await stateFor(issue, teamId, "in_progress");
-      await update(ref, { assigneeId: viewer.id, stateId: target.id });
+      await update(ref, { assigneeId: me.id, stateId: target.id });
 
       // Linear puede aceptar el cambio y no aplicarlo (ENG-9084): solo vale lo que se relee.
       const { issue: after } = await readIssue(ref);
       const problems = [
-        ...(after.assignee?.id === viewer.id ? [] : [`sigue asignada a ${after.assignee?.name ?? "nadie"}`]),
+        ...(after.assignee?.id === me.id ? [] : [`sigue asignada a ${after.assignee?.name ?? "nadie"}`]),
         ...(after.status === "in_progress" ? [] : [`sigue en "${after.rawStatus}"`]),
       ];
       if (problems.length > 0) {

@@ -109,8 +109,8 @@ function Shell() {
   const project = projects.find((p) => p.slug === slug) ?? barProjects(projects)[0] ?? projects[0] ?? null
   const projectData = useLiveQuery(project ? `project:${project.id}` : "no-project", async () => {
     if (!project) return null
-    const [runs, issues] = await Promise.all([appData.runs({ projectId: project.id }), appData.issues(project.id)])
-    return { runs, issues }
+    const [runs, issues, queue] = await Promise.all([appData.runs({ projectId: project.id }), appData.issues(project.id), appData.queue(project.id)])
+    return { runs, issues, queue }
   })
 
   const forcePrs = useRef(false)
@@ -455,7 +455,7 @@ function Shell() {
                 ) : runId ? (
                   <RunPane key={runId} runId={runId} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />
                 ) : (
-                  <ProjectView project={project} runs={detail.runs} issues={detail.issues} />
+                  <ProjectView project={project} runs={detail.runs} issues={detail.issues} queue={detail.queue} />
                 )}
               </div>
             </main>

@@ -3,6 +3,7 @@ import type {
   IssueDetail,
   IssueFilter,
   IssueRef,
+  Person,
   Project,
   ProjectRef,
   StatusCategory,
@@ -22,6 +23,8 @@ export interface Tracker {
   listIssues(project: ProjectRef, filter: IssueFilter): Promise<Issue[]>;
   /** Con relaciones y comentarios. Lanza `IssueNotFoundError` si no existe. */
   getIssue(ref: IssueRef): Promise<IssueDetail>;
+  /** La persona de la conexión: a quien asigna `claim` y cuyas issues el scheduler considera propias. */
+  viewer(): Promise<Person>;
   /** Asigna la issue a la persona de la conexión y la pasa a `in_progress`. */
   claim(ref: IssueRef): Promise<void>;
   setStatus(ref: IssueRef, status: StatusCategory): Promise<void>;

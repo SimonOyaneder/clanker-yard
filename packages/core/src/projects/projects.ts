@@ -130,6 +130,7 @@ export function createProjects(store: Store, defs: Defs): Projects {
           defaultFlowId: input.defaultFlowId ?? null,
           defaultProfileId: input.defaultProfileId ?? null,
           parallel: input.parallel,
+          stackOn: input.stackOn,
           status: "active",
           flowParams: input.flowParams,
           queueFilter: input.queueFilter,

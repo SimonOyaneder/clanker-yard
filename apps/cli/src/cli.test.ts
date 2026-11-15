@@ -18,6 +18,7 @@ const project = ClankerProject.parse({
   queueFilter: {},
   conventions: {},
   parallel: 2,
+  stackOn: "ci_green",
   status: "active",
   flowParams: {},
   maxCostUsd: null,

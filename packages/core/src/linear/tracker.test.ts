@@ -170,6 +170,10 @@ describe("claim", () => {
     team = w.addTeam("ENG", states("with-review"));
   });
 
+  test("viewer es la persona del token", async () => {
+    expect(await tracker().viewer()).toEqual({ id: w.viewer.id, name: w.viewer.name });
+  });
+
   test("asigna a la persona del token y pasa la issue a in_progress", async () => {
     const issue = w.addIssue({ team, title: "x" });
 

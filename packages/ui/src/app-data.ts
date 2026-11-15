@@ -11,6 +11,7 @@ import type {
   GitHubPatForm,
   NewProject,
   ProjectId,
+  QueueEntry,
   RecipeStatus,
   RecipeTestResult,
   Repo,
@@ -42,6 +43,8 @@ export interface AppData {
   createProject(input: NewProject): Promise<ClankerProject>
   /** Las issues del caché del proyecto. */
   issues(projectId: ProjectId): Promise<CachedIssue[]>
+  /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */
+  queue(projectId: ProjectId): Promise<QueueEntry[]>
   /** De la más reciente a la más antigua, sin pasos. */
   runs(filter?: RunFilter): Promise<Run[]>
   run(id: RunId): Promise<RunDetail>

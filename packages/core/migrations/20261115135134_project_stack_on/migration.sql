@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `stack_on` text DEFAULT 'ci_green' NOT NULL;

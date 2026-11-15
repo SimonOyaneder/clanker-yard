@@ -18,6 +18,7 @@ export interface StartServerOptions extends Pick<
   | "repos"
   | "recipeTester"
   | "runs"
+  | "queue"
   | "flows"
   | "artifacts"
   | "decisions"

@@ -10,6 +10,7 @@ import { createFlows, type Flows } from "../flows/flows";
 import { createPacks } from "../packs/packs";
 import { createProjects } from "../projects/projects";
 import { createRunStarter } from "../projects/start-run";
+import { createProjectQueue } from "../scheduler/project-queue";
 import { createRecipeTester } from "../recipe/recipe-test";
 import { createSlots } from "../slots/slots";
 import type { Store } from "../store/store";
@@ -28,7 +29,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "artifacts" | "decisions" | "defs"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "artifacts" | "decisions" | "defs"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -41,12 +42,21 @@ export function apiDeps(
   const projects = createProjects(store, defs);
   const repos = createRepos(store);
   const local = createLocalTracker(store);
+  const issues = createIssues(store, local);
   return {
     projects,
     packs: createPacks({ defs }),
     repos,
     recipeTester: createRecipeTester({ store, repos, slots: createSlots({ store }), dataDir }),
-    runs: createRunStarter({ store, defs, projects, repos, issues: createIssues(store, local), flows, trackers: { local } }),
+    runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local } }),
+    queue: createProjectQueue({
+      store,
+      projects,
+      issues,
+      repos,
+      trackers: { local },
+      prs: { get: () => Promise.reject(new Error("este test no lee PRs")) },
+    }),
     flows,
     artifacts,
     decisions: createDecisions(store),

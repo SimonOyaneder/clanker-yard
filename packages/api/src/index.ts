@@ -14,5 +14,6 @@ export * from "./prs";
 export * from "./recipe";
 export * from "./repos";
 export * from "./projects";
+export * from "./queue";
 export * from "./runs";
 export * from "./tracker";

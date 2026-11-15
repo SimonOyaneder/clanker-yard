@@ -1,4 +1,4 @@
-import { FlowDef, type ClankerProject, type Origin, type StartRun } from "@clanker/api";
+import { FlowDef, type Origin, type StartRun } from "@clanker/api";
 import type * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { RunStartError, type Engine, type RunView } from "../flows/engine";
@@ -7,6 +7,7 @@ import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
 import type { Repos } from "../workspaces/repos";
 import { ProjectNotFoundError, type Projects } from "./projects";
+import { repoOf } from "./repo-of";
 
 /** La issue no está en el caché de issues. */
 export class IssueNotCachedError extends Error {}
@@ -103,9 +104,4 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
       return flows.getRun(runId);
     },
   };
-}
-
-function repoOf(project: ClankerProject, labels: readonly string[]): string | undefined {
-  const byLabel = project.repos.find((bound) => bound.labels.some((label) => labels.includes(label)));
-  return (byLabel ?? project.repos[0])?.repoId;
 }

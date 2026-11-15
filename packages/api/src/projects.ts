@@ -17,6 +17,14 @@ export const ProjectRepo = z.object({
 });
 export type ProjectRepo = z.infer<typeof ProjectRepo>;
 
+/**
+ * Cuándo el PR de una issue bloqueante deja que la siguiente se apile sobre él (`docs/design.html#d-ops`):
+ * `ready` cuando su flujo terminó ok, `ci_green` cuando está abierto (draft o no) con el CI verde aunque
+ * falte el LGTM, `any_open` apenas hay un PR abierto.
+ */
+export const StackOn = z.enum(["ready", "ci_green", "any_open"]);
+export type StackOn = z.infer<typeof StackOn>;
+
 const ProjectRepos = z.array(ProjectRepo);
 const MaxCostUsd = z.number().positive().nullable();
 
@@ -45,6 +53,8 @@ export const ClankerProject = z.object({
   conventions: Conventions,
   /** Cupo del carril dev. */
   parallel: z.int().positive(),
+  /** Cuándo una issue se apila sobre el PR de su bloqueante. */
+  stackOn: StackOn,
   status: ProjectStatus,
   /** Pisa los defaults de `params` del flujo (por ejemplo `reviewRounds`) sin crear una versión del flujo. */
   flowParams: z.record(z.string(), z.unknown()),
@@ -70,6 +80,7 @@ export const NewProject = z
     queueFilter: IssueFilter.default({}),
     conventions: Conventions.default({}),
     parallel: z.int().positive().default(1),
+    stackOn: StackOn.default("ci_green"),
     flowParams: z.record(z.string(), z.unknown()).default({}),
     maxCostUsd: MaxCostUsd.default(null),
   })
@@ -102,6 +113,7 @@ export const ProjectPatch = z.object({
   queueFilter: IssueFilter.optional(),
   conventions: Conventions.optional(),
   parallel: z.int().positive().optional(),
+  stackOn: StackOn.optional(),
   status: ProjectStatus.optional(),
   flowParams: z.record(z.string(), z.unknown()).optional(),
   maxCostUsd: MaxCostUsd.optional(),

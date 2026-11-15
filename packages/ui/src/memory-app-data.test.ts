@@ -78,3 +78,17 @@ test("probar la receta de un repo sin receta válida lo rechaza diciendo cuál e
   expect(await data.testRecipe(found.repo.id)).toMatchObject({ ok: true })
   expect((await data.repos()).find((r) => r.repo.id === found.repo.id)?.lastTest?.ok).toBe(true)
 })
+
+test("la cola de ejemplo son las issues en todo sin corrida", async () => {
+  const data = createMemoryAppData(NOW)
+  const [project] = await data.projects()
+  const issues = await data.issues(project!.id)
+  const runs = await data.runs({ projectId: project!.id })
+
+  const queue = await data.queue(project!.id)
+
+  expect(queue.map((e) => e.issue.id)).toEqual(
+    issues.filter((i) => i.status === "todo" && !runs.some((r) => r.subject.id === i.id)).map((i) => i.id),
+  )
+  expect(queue.every((e) => e.state === "ready")).toBe(true)
+})

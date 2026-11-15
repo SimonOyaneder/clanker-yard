@@ -177,6 +177,10 @@ export function createLocalTracker(
       return { ...toIssue(row), comments };
     },
 
+    async viewer() {
+      return me;
+    },
+
     async claim(ref) {
       store.tx((tx) => {
         const row = find(tx.db, ref);

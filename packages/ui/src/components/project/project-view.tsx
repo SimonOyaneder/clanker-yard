@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, Run } from "@clanker/api"
+import type { CachedIssue, ClankerProject, QueueEntry, Run } from "@clanker/api"
 import { Copy, Play } from "lucide-react"
 import { Ago, Hint, Pill, SectionTitle, StatBar } from "@/components/common"
 import { RunStatusIcon, RunStatusPill, isLive } from "@/components/project/status"
@@ -20,13 +20,21 @@ interface Props {
   project: ClankerProject
   runs: Run[]
   issues: CachedIssue[]
+  /** La cola que calcula el core (`projects.queue`). */
+  queue: QueueEntry[]
 }
+
+const QUEUE_STATE = {
+  ready: { label: "lista", tone: tone.green, hint: "Se puede lanzar ya." },
+  waiting: { label: "esperando", tone: tone.sky, hint: "Espera a una issue bloqueante en curso; se reevalúa sola." },
+  blocked: { label: "bloqueada", tone: tone.amber, hint: "Necesita que alguien haga algo con lo que la bloquea." },
+} as const
 
 /** Las issues de un proyecto por su id, para ponerle clave y título a cada corrida. */
 export const issuesById = (issues: CachedIssue[]) => new Map<string, CachedIssue>(issues.map((i) => [i.id, i]))
 
 // Operación del proyecto: qué corre, qué espera a una persona y qué viene.
-export function ProjectView({ project, runs, issues }: Props) {
+export function ProjectView({ project, runs, issues, queue }: Props) {
   const live = runs.filter((r) => isLive(r.status))
   const inProgress = live.filter((r) => r.status !== "parked")
   const parked = live.filter((r) => r.status === "parked")
@@ -35,8 +43,6 @@ export function ProjectView({ project, runs, issues }: Props) {
   const now = useNow(inProgress.length > 0)
   const byId = issuesById(issues)
   const status = PROJECT_STATUS[project.status]
-  const liveSubjects = new Set(live.map((r) => r.subject.id))
-  const queue = issues.filter((i) => i.status === "todo" && !liveSubjects.has(i.id))
 
   return (
     <div className="flex flex-col gap-6">
@@ -81,8 +87,8 @@ export function ProjectView({ project, runs, issues }: Props) {
         <section className="flex flex-col gap-2">
           <SectionTitle count={queue.length}>En cola</SectionTitle>
           <ul className="overflow-hidden rounded-lg border bg-card">
-            {queue.map((issue) => (
-              <QueueRow key={issue.id} issue={issue} project={project} />
+            {queue.map((entry) => (
+              <QueueRow key={entry.issue.id} entry={entry} project={project} />
             ))}
           </ul>
         </section>
@@ -156,9 +162,11 @@ function RunRow({ run, issue, now, project }: { run: Run; issue: CachedIssue | u
   )
 }
 
-function QueueRow({ issue, project }: { issue: CachedIssue; project: ClankerProject }) {
+function QueueRow({ entry, project }: { entry: QueueEntry; project: ClankerProject }) {
   const actions = useAppActions()
-  const runnable = project.status === "active"
+  const { issue } = entry
+  const state = QUEUE_STATE[entry.state]
+  const runnable = project.status === "active" && entry.state === "ready"
   const run = () => void actions.startRun(project, issue)
   return (
     <li className="border-b last:border-b-0">
@@ -168,7 +176,18 @@ function QueueRow({ issue, project }: { issue: CachedIssue; project: ClankerProj
             <span className="size-3.5 flex-none rounded-full border border-muted-foreground/50" />
             <span className="w-20 flex-none truncate font-mono text-xs text-muted-foreground">{issueKey(issue)}</span>
             <span className="min-w-0 flex-1 truncate">{issue.title}</span>
-            <Hint label={runnable ? "Lanza el flujo del proyecto sobre esta issue (también en ⌘K)" : "El proyecto no está activo: reanúdalo para lanzar corridas"}>
+            <Pill className={state.tone} hint={`${state.hint} ${entry.reason}`}>
+              {state.label}
+            </Pill>
+            <Hint
+              label={
+                runnable
+                  ? "Lanza el flujo del proyecto sobre esta issue (también en ⌘K)"
+                  : project.status !== "active"
+                    ? "El proyecto no está activo: reanúdalo para lanzar corridas"
+                    : `No se puede lanzar todavía: ${entry.reason}`
+              }
+            >
               <span>
                 <Button size="xs" variant="outline" disabled={!runnable} onClick={run} className={cn(!runnable && "pointer-events-none")}>
                   <Play /> Correr

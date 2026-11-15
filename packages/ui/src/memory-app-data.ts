@@ -27,6 +27,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       queueFilter: {},
       conventions: {},
       parallel: 1,
+      stackOn: "ci_green",
       status: "active",
       flowParams: {},
       maxCostUsd: null,
@@ -43,6 +44,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       queueFilter: {},
       conventions: {},
       parallel: 2,
+      stackOn: "ci_green",
       status: "paused",
       flowParams: {},
       maxCostUsd: null,
@@ -230,6 +232,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
         queueFilter: input.queueFilter ?? {},
         conventions: input.conventions ?? {},
         parallel: input.parallel ?? 1,
+        stackOn: input.stackOn ?? "ci_green",
         status: "active",
         flowParams: input.flowParams ?? {},
         maxCostUsd: input.maxCostUsd ?? null,
@@ -238,6 +241,11 @@ export function createMemoryAppData(now = Date.now()): AppData {
       return created
     },
     issues: async (projectId) => issues.filter((i) => i.projectId === projectId),
+    // Sin bloqueos en los datos de ejemplo: la cola son las issues en todo que ninguna corrida tomó.
+    queue: async (projectId) =>
+      issues
+        .filter((i) => i.projectId === projectId && i.status === "todo" && !runs.some((r) => r.subject.id === i.id))
+        .map((issue) => ({ issue, state: "ready" as const, reason: "lista sobre la branch por defecto", base: { kind: "default" as const }, dependsOn: [] })),
     runs: async (filter = {}) =>
       runs
         .filter((r) => (!filter.projectId || r.projectId === filter.projectId) && (!filter.status || filter.status.includes(r.status)))
