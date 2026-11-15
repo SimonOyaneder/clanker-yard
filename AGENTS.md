@@ -75,6 +75,14 @@ Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Sec
 
 Solo el core habla con el remoto, y el token nunca llega al entorno de git ni de los hooks del repo. `createGitRemote({ askpass, connections })` (`packages/core/src/git/`) corre `git -c credential.helper= push|fetch <url explícita>` con `GIT_TERMINAL_PROMPT=0` y `GIT_ASKPASS` apuntando a un script que `createAskpass` escribe en un directorio 0700: el script cambia un ticket (60 s, 2 lecturas) por el usuario y la contraseña por un socket unix del core. Se usa a través de `workspaces.push(lease)` (`--force-with-lease` contra `remote_sha`; outcomes `ok`, `lease-rejected` sin reintento y `unauthorized`, que deja la conexión `revoked` con `connections.markRevoked`) y `workspaces.fetch(repo)`; `RepoConfig.remote` trae la URL y la cuenta. Los tests (`packages/testkit/src/git-remote.test.ts`) levantan un servidor git HTTP local con Basic auth sobre un bare temporal: nunca GitHub ni tokens reales.
 
+## Proceso del core
+
+El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packages/core/dist/main.js` con `npm run build -w @clanker/core`; las migraciones quedan en `packages/core/migrations`, al lado). `--data-dir` (o `CLANKER_HOME`) dice dónde; con `CLANKER_HOME` el core no toca el Keychain (secretos en archivo bajo `secrets/`) y los logs van a `<CLANKER_HOME>/logs`. Lo lanza `ensureCore({ dataDir, logDir, entry, origin })` de `@clanker/api/node`, que también tiene `clankerDirs()` (rutas por SO) y `readCoreJson`/`connectToCore`.
+
+- Orden de arranque: `core.lock` (`wx`; un pid muerto se recupera) → abrir y migrar la base → abrir el puerto → `boot_id` en `meta` → `core.json` (0600). Quien lee `core.json` ya puede llamar a la API.
+- Un cierre normal (SIGTERM, SIGINT, `system.shutdown`) borra `core.json` y `core.lock`; un crash los deja y el próximo arranque los recupera.
+- Los tests de proceso (`packages/core/src/process/process.test.ts`) construyen el bundle y lanzan el core real sobre un `CLANKER_HOME` temporal. A mano: `CLANKER_HOME=$(mktemp -d) node packages/core/dist/main.js`.
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:
