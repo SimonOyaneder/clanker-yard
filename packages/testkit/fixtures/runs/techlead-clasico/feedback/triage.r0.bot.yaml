@@ -1,0 +1,9 @@
+match: { mode: bot, round: "*" }
+result:
+  status: success
+  structured:
+    outcome: fix
+    summary: "El hallazgo del bot es válido"
+    payload:
+      items:
+        - { id: b1, verdict: valid, fix: "Validar el monto antes de crear el Transfer" }

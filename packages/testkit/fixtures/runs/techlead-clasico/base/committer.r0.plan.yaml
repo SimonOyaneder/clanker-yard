@@ -1,0 +1,11 @@
+match: { mode: plan, round: "*" }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Un commit"
+    payload:
+      commits:
+        - { message: "fix(transfers): validate the amount", hunks: [h1, h2], tests: [spec/models/transfer_spec.rb], whyAtomic: "Un solo cambio con su test" }
+      pr: { title: "fix(transfers): validate the amount", body: "Valida el monto de un Transfer." }
+      notes: []

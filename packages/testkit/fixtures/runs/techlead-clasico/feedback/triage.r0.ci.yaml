@@ -1,0 +1,9 @@
+match: { mode: ci, round: "*" }
+result:
+  status: success
+  structured:
+    outcome: foreign
+    summary: "El CI rojo no es del cambio"
+    payload:
+      items:
+        - { id: c1, verdict: flaky, reply: "Spec flaky conocido, pasa sin cambios" }

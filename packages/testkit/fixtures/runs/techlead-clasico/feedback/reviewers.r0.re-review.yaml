@@ -1,0 +1,7 @@
+match: { role: "*", mode: re-review }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Sin hallazgos"
+    payload: { findings: [], previous: [] }

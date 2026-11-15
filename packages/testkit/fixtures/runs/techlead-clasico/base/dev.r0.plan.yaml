@@ -1,0 +1,14 @@
+# Plan sin dudas de la issue: plan-check se salta.
+match: { mode: plan, round: "*" }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Plan listo"
+    payload:
+      approach: "Validar el monto en Transfer"
+      files: [app/models/transfer.rb]
+      tests: [spec/models/transfer_spec.rb]
+      mold: app/models/payout.rb
+      assumptions: []
+      issueDoubts: []

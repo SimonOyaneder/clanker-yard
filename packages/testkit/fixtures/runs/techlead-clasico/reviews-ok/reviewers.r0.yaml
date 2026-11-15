@@ -1,0 +1,8 @@
+# Los cuatro reviewers (mismo esquema de reporte) dan ok en la primera ronda.
+match: { role: "*", mode: review }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Sin hallazgos"
+    payload: { findings: [], previous: [] }

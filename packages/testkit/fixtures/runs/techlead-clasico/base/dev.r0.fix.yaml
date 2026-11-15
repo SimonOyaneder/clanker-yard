@@ -1,0 +1,12 @@
+# Cada ronda de fix llega con un round distinto (el del contador del edge que la trajo).
+match: { mode: fix, round: "*" }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Arreglado"
+    payload:
+      files: [app/models/transfer.rb]
+      rejected: []
+      deletedTests: []
+      cuts: []

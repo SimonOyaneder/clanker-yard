@@ -1,0 +1,11 @@
+# Los cuatro reviewers piden el mismo cambio en todas las rondas: items.merge lo junta en una instrucción.
+match: { role: "*", mode: review }
+result:
+  status: success
+  structured:
+    outcome: changes
+    summary: "1 amarillo"
+    payload:
+      findings:
+        - { id: f1, severity: yellow, path: app/models/transfer.rb, line: 42, claim: "Falta validar el monto", fix: "Agregar la validación" }
+      previous: []

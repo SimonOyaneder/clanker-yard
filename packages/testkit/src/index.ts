@@ -7,3 +7,5 @@ export type { Scenario } from "./scenarios";
 export { createFakeRuntime } from "./fake-runtime";
 export type { FakeRuntime, FakeRuntimeOptions } from "./fake-runtime";
 export type { RecipeResult } from "./fake-script";
+export { registerFlowStubs } from "./flow-stubs";
+export type { FlowStubs, FlowStubsOptions, StubResult } from "./flow-stubs";

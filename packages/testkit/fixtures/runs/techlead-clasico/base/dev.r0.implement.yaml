@@ -1,0 +1,12 @@
+match: { mode: implement, round: "*" }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Implementado"
+    payload:
+      files: [app/models/transfer.rb, spec/models/transfer_spec.rb]
+      rejected: []
+      deletedTests: []
+      cuts:
+        - { behavior: "Valida el monto de un Transfer", paths: [app/models/transfer.rb, spec/models/transfer_spec.rb] }
