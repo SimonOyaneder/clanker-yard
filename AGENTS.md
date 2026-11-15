@@ -55,6 +55,13 @@ Lo que ya define `@clanker/api` (ids con prefijo, `EventType`, `Origin`, `Subjec
 
 Los ids de prueba salen de `newId("run")` o son ULIDs válidos (`run_00000000000000000000000001`): `run_1` pasa el tipo, pero el store rechaza el evento.
 
+## Secretos y conexiones
+
+Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Secrets` del core (`get`, `set`, `delete` por ref); la base guarda solo la ref (`connections.secret_ref`) y los eventos nunca llevan el valor. `createKeychainSecrets` usa el Keychain de macOS con el comando `security` (funciona con `ELECTRON_RUN_AS_NODE`, donde no hay `safeStorage`); `createFileSecrets` cifra un archivo con una llave junto a él, para tests y Linux. `createConnections(store, secrets)` es lo único que escribe `connections` y emite `connection.changed`; el token lo lee solo el core con `connections.token()`.
+
+- Nunca guardes aquí el token OAuth de la suscripción de Claude (`docs/claude-subscription.md`).
+- Los tests no tocan el Keychain real: usan `createFileSecrets` en un directorio temporal, o un `.keychain-db` temporal creado con `security create-keychain` y pasado en `keychain` (ver `secrets.test.ts`).
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:

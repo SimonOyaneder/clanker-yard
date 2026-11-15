@@ -1,5 +1,6 @@
 import { API_MAJOR, type ClientOrigin, contract } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
+import type { Connections } from "../connections/connections";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
 import { eventsAfter } from "./event-stream";
@@ -11,6 +12,7 @@ export interface CoreContext {
 
 export interface RouterDeps {
   store: Store;
+  connections: Connections;
   coreVersion: string;
   bootId: string;
   /** ms epoch */
@@ -58,6 +60,9 @@ export function createRouter(deps: RouterDeps) {
         );
         deps.onShutdown({ drain: input.drain });
       }),
+    },
+    connections: {
+      list: os.connections.list.handler(() => deps.connections.list()),
     },
     events: {
       list: os.events.list.handler(({ input }) =>

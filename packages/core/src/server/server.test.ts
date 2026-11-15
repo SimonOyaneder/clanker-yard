@@ -1,32 +1,43 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { request } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { API_MAJOR, type Event, contract, createClient } from "@clanker/api";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
 import { createRouterClient, getEventMeta } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { createConnections, type Connections } from "../connections/connections";
+import { createFileSecrets } from "../secrets/encrypted-file";
 import { readSchemaVersion } from "../store/migrate";
 import { openStore, type Store } from "../store/store";
 import { startServer, type CoreServer } from "./server";
 
 let store: Store;
+let connections: Connections;
+let secretsDir: string;
 let server: CoreServer | undefined;
 const onShutdown = vi.fn();
 
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
+  secretsDir = mkdtempSync(join(tmpdir(), "clanker-server-"));
+  connections = createConnections(store, createFileSecrets({ dir: secretsDir }));
 });
 
 afterEach(async () => {
   await server?.close();
   server = undefined;
   store.close();
+  rmSync(secretsDir, { recursive: true, force: true });
   onShutdown.mockReset();
 });
 
 async function start(allowedOrigins?: string[]): Promise<CoreServer> {
   server = await startServer({
     store,
+    connections,
     coreVersion: "1.2.3",
     dataDir: "/tmp/clanker",
     onShutdown,
@@ -113,6 +124,25 @@ describe("auth", () => {
     expect(second.token).not.toBe(token);
     expect(Buffer.from(second.token, "base64url")).toHaveLength(32);
     expect(second.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/rpc$/);
+  });
+});
+
+describe("connections", () => {
+  test("list devuelve las cuentas conectadas y ningún token", async () => {
+    const token = "ghp_super-secret-token-value";
+    await connections.connect(
+      { provider: "github", account: "simon", scopes: ["contents", "pull_requests"], token },
+      "ui",
+    );
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+    const listed = await client.connections.list();
+
+    expect(listed).toEqual([
+      { provider: "github", account: "simon", scopes: ["contents", "pull_requests"], status: "active" },
+    ]);
+    expect(JSON.stringify(listed)).not.toContain(token);
   });
 });
 

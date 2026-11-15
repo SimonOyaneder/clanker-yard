@@ -9,7 +9,7 @@ import { createRouter, type CoreContext, type CoreRouter, type RouterDeps } from
 
 export interface StartServerOptions extends Pick<
   RouterDeps,
-  "store" | "coreVersion" | "dataDir" | "onShutdown"
+  "store" | "connections" | "coreVersion" | "dataDir" | "onShutdown"
 > {
   /** Origins de navegador que pueden llamar a la API (la ventana de la app). Cualquier otro Origin se rechaza. */
   allowedOrigins?: readonly string[];

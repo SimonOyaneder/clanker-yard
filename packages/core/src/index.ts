@@ -36,3 +36,9 @@ export type {
 export { createFlows, FlowValidationError } from "./flows/flows";
 export type { FlowVersion, Flows, FlowsDeps, SaveFlowOptions } from "./flows/flows";
 export type { ActionDef, ConsolidatorDef, RoleInfo, WaitDef } from "./flows/catalog";
+export { createConnections } from "./connections/connections";
+export type { ConnectInput, Connections } from "./connections/connections";
+export { createFileSecrets } from "./secrets/encrypted-file";
+export { createKeychainSecrets } from "./secrets/keychain";
+export type { KeychainSecretsOptions } from "./secrets/keychain";
+export type { Secrets } from "./secrets/secrets";

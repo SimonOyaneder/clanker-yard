@@ -34,6 +34,7 @@ const router = os.router({
     })),
     shutdown: os.system.shutdown.handler(() => {}),
   },
+  connections: { list: os.connections.list.handler(() => []) },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
     stream: os.events.stream.handler(async function* ({ input }) {

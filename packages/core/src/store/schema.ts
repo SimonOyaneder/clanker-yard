@@ -1,4 +1,6 @@
 import type {
+  ConnectionProvider,
+  ConnectionStatus,
   Event,
   EventType,
   Origin,
@@ -142,5 +144,26 @@ export const agentSessions = sqliteTable(
       foreignColumns: [defVersions.defId, defVersions.version],
     }),
     check("agent_sessions_report_json", sql`${t.report} IS NULL OR json_valid(${t.report})`),
+  ],
+);
+
+/**
+ * Una cuenta conectada a un proveedor. Sin secretos: `secret_ref` es la clave bajo la que `Secrets`
+ * guarda el token, nunca el token.
+ */
+export const connections = sqliteTable(
+  "connections",
+  {
+    provider: text().$type<ConnectionProvider>().notNull(),
+    account: text().notNull(),
+    scopes: text({ mode: "json" }).$type<string[]>().notNull(),
+    status: text().$type<ConnectionStatus>().notNull(),
+    secretRef: text("secret_ref").notNull(),
+    /** ms epoch; NULL si el token no vence. */
+    expiresAt: integer("expires_at"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.provider, t.account] }),
+    check("connections_scopes_json", sql`json_valid(${t.scopes})`),
   ],
 );

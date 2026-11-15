@@ -1,5 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
+import { Connection } from "./connections";
 import { Event, EventFilter } from "./domain";
 
 /**
@@ -93,5 +94,10 @@ const events = {
     .output(eventIterator(Event)),
 };
 
-export const contract = { system, events };
+const connections = {
+  /** Cuentas conectadas, sin sus tokens. */
+  list: base.output(z.array(Connection)),
+};
+
+export const contract = { system, events, connections };
 export type Contract = typeof contract;
