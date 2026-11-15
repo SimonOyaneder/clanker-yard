@@ -16,6 +16,7 @@ import {
   StaleLeaseError,
   WorkspaceBusyError,
   workspaceAcquireAction,
+  workspaceReleaseAction,
   type Store,
   type WorkspaceLease,
   type Workspaces,
@@ -334,5 +335,31 @@ describe("workspace.acquire", () => {
     expect(result.outcome).toBe("ok");
     expect(result.output).toMatchObject({ branch: "cla-1", baseRef: "main", fencingToken: 1 });
     expect(result.output).not.toHaveProperty("lost");
+  });
+});
+
+describe("held y workspace.release", () => {
+  test("held da el worktree que la corrida tiene tomado y deja de darlo al soltarlo", async () => {
+    const id = repo("r1");
+    expect(workspaces.held(runA)).toBeUndefined();
+
+    const lease = await acquire(id, "cla-1");
+
+    expect(workspaces.held(runA)).toEqual({ path: lease.path, base: "main" });
+    expect(workspaces.held(runB)).toBeUndefined();
+    workspaces.release(lease);
+    expect(workspaces.held(runA)).toBeUndefined();
+  });
+
+  test("la acción suelta el lease que acquire devolvió, solo con el id y el token", async () => {
+    const id = repo("r1");
+    const acquired = await workspaceAcquireAction(workspaces).run({ repo: id, branch: "cla-1", base: "main" }, { runId: runA });
+    const { workspaceId, fencingToken } = acquired.output as { workspaceId: string; fencingToken: number };
+
+    const released = await workspaceReleaseAction(workspaces).run({ workspaceId, fencingToken }, { runId: runA });
+
+    expect(released.outcome).toBe("ok");
+    expect(workspaces.held(runA)).toBeUndefined();
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
   });
 });

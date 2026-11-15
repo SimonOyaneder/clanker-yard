@@ -4,12 +4,12 @@ import { API_MAJOR } from "@clanker/api";
 import { removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { sql } from "drizzle-orm";
 import pkg from "../../package.json" with { type: "json" };
-import { createConnections } from "../connections/connections";
+import { startCore } from "../core";
+import { createClaudeRuntime } from "../agents/claude/claude-runtime";
+import { subscriptionCredentials } from "../agents/claude/credentials";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createKeychainSecrets } from "../secrets/keychain";
 import type { Secrets } from "../secrets/secrets";
-import { startServer } from "../server/server";
-import { createIssues } from "../tracker/issues";
 import { meta } from "../store/schema";
 import { openStore } from "../store/store";
 import { acquireCoreLock } from "./lock";
@@ -53,7 +53,6 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
       path: join(opts.dataDir, "clanker.db"),
       migrationsFolder: opts.migrationsFolder,
     });
-    const connections = createConnections(store, secretsFor(opts));
 
     let stopping: Promise<void> | undefined;
     const shutdown = (reason: string) => {
@@ -61,7 +60,7 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
         log.write("info", `apagando (${reason})`);
         try {
           removeCoreJson(opts.dataDir);
-          await server.close();
+          await core.close();
           store.db.$client.exec("PRAGMA wal_checkpoint(TRUNCATE)");
           store.close();
           lock.release();
@@ -72,15 +71,16 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
       })();
     };
 
-    // Todavía no hay agentes ni pasos que drenar: `drain` no cambia nada hasta que existan.
-    const server = await startServer({
+    // `system.shutdown({ drain })` todavía no interrumpe a los agentes: el cierre espera un momento a los pasos en curso.
+    const core = await startCore({
       store,
-      connections,
-      issues: createIssues(store),
-      coreVersion: pkg.version,
       dataDir: opts.dataDir,
+      secrets: secretsFor(opts),
+      runtimes: [createClaudeRuntime({ credentials: subscriptionCredentials(), home: opts.dataDir })],
+      coreVersion: pkg.version,
       onShutdown: () => setImmediate(() => shutdown("system.shutdown")),
     });
+    const { server } = core;
     store.tx((tx) => {
       tx.db
         .insert(meta)

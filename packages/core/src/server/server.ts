@@ -9,8 +9,10 @@ import { createRouter, type CoreContext, type CoreRouter, type RouterDeps } from
 
 export interface StartServerOptions extends Pick<
   RouterDeps,
-  "store" | "connections" | "issues" | "coreVersion" | "dataDir" | "onShutdown"
+  "store" | "connections" | "issues" | "projects" | "flows" | "artifacts" | "coreVersion" | "dataDir" | "onShutdown"
 > {
+  /** Identifica a este arranque; por defecto uno nuevo. Quien arma los módulos que lo necesitan (Flows) lo fija antes. */
+  bootId?: string;
   /** Origins de navegador que pueden llamar a la API (la ventana de la app). Cualquier otro Origin se rechaza. */
   allowedOrigins?: readonly string[];
 }
@@ -34,7 +36,7 @@ export interface CoreServer {
  */
 export async function startServer(opts: StartServerOptions): Promise<CoreServer> {
   const token = randomBytes(32).toString("base64url");
-  const bootId = newId("boot");
+  const bootId = opts.bootId ?? newId("boot");
   const allowedOrigins = new Set(opts.allowedOrigins);
   const router = createRouter({ ...opts, bootId, startedAt: Date.now() });
   const handler = new RPCHandler(router, {

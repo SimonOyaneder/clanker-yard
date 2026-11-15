@@ -66,6 +66,27 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
   },
+  projects: {
+    list: os.projects.list.handler(() => []),
+    get: os.projects.get.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    create: os.projects.create.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    update: os.projects.update.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+  },
+  runs: {
+    list: os.runs.list.handler(() => []),
+    get: os.runs.get.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    start: os.runs.start.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+  },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
     stream: os.events.stream.handler(async function* ({ input }) {

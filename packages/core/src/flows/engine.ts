@@ -63,6 +63,7 @@ export interface StepView {
 
 export interface RunView {
   id: RunId;
+  projectId: ProjectId | null;
   flow: { slug: string; version: number };
   subject: SubjectRef;
   lane: RunRow["lane"];
@@ -103,9 +104,22 @@ export interface Engine {
    * y del perfil. Falla, sin crear nada, si faltan params o los maxRounds apuntan a un valor inválido.
    */
   start(flow: string, subject: SubjectRef, params?: Record<string, unknown>, opts?: StartOptions): RunId;
+  /** Lanza `RunNotFoundError` si no existe. */
   getRun(runId: RunId): RunView;
+  /** Las corridas más recientes primero, sin sus pasos. */
+  listRuns(filter?: { projectId?: ProjectId; status?: readonly RunRow["status"][] }): Omit<RunView, "steps">[];
   /** Deja de despachar y espera a los pasos en curso. */
   close(): Promise<void>;
+}
+
+/** `start` rechazó el pedido (flujo o perfil que no existen, params inválidos): no se creó nada y el mensaje dice qué cambiar. */
+export class RunStartError extends Error {}
+
+/** La corrida pedida no existe. */
+export class RunNotFoundError extends Error {
+  constructor(runId: RunId) {
+    super(`No existe la corrida ${runId}.`);
+  }
 }
 
 /** Un cierre con un attempt que ya no es el vigente: otro dueño tomó el paso y este resultado se descarta. */
@@ -168,7 +182,7 @@ export function createEngine(deps: EngineDeps): Engine {
   function start(flowSlug: string, subject: SubjectRef, given: Record<string, unknown> = {}, opts: StartOptions = {}): RunId {
     const id = store.tx((tx) => {
       const def = defs.resolve("flow", flowSlug, { repoId: opts.repoId });
-      if (!def) throw new Error(`No existe el flujo "${flowSlug}".`);
+      if (!def) throw new RunStartError(`No existe el flujo "${flowSlug}".`);
       const live = tx.db
         .select({ id: runs.id })
         .from(runs)
@@ -187,27 +201,31 @@ export function createEngine(deps: EngineDeps): Engine {
       const unsupported = Object.entries(flow.nodes).filter(([, n]) => n.type !== "agent" && n.type !== "action");
       if (unsupported.length > 0) {
         const list = unsupported.map(([nodeId, n]) => `${nodeId} (${n.type})`).join(", ");
-        throw new Error(`El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${list}. Solo agent y action.`);
+        throw new RunStartError(`El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${list}. Solo agent y action.`);
       }
       const params = effectiveParams(flow, given);
-      for (const node of Object.values(flow.nodes)) {
-        for (const edge of edgesOf(node)) maxRoundsOf(edge, params);
+      try {
+        for (const node of Object.values(flow.nodes)) {
+          for (const edge of edgesOf(node)) maxRoundsOf(edge, params);
+        }
+      } catch (error) {
+        throw new RunStartError(describe(error), { cause: error });
       }
 
       const roles: Record<string, DefPin> = {};
       for (const node of Object.values(flow.nodes)) {
         if (node.type !== "agent" || roles[node.role]) continue;
         const role = defs.resolve("role", node.role, { repoId: opts.repoId });
-        if (!role) throw new Error(`El flujo "${flowSlug}" usa el rol "${node.role}", que no existe.`);
+        if (!role) throw new RunStartError(`El flujo "${flowSlug}" usa el rol "${node.role}", que no existe.`);
         roles[node.role] = { id: role.id, version: role.version };
       }
       let profile: DefPin | undefined;
       if (opts.profile !== undefined) {
         const found = defs.resolve("profile", opts.profile, { repoId: opts.repoId });
-        if (!found) throw new Error(`No existe el perfil "${opts.profile}".`);
+        if (!found) throw new RunStartError(`No existe el perfil "${opts.profile}".`);
         profile = { id: found.id, version: found.version };
       } else if (Object.keys(roles).length > 0) {
-        throw new Error(`El flujo "${flowSlug}" tiene pasos agent: pasa el perfil con que corre.`);
+        throw new RunStartError(`El flujo "${flowSlug}" tiene pasos agent: pasa el perfil con que corre.`);
       }
 
       const run = tx.db
@@ -249,13 +267,13 @@ export function createEngine(deps: EngineDeps): Engine {
     const declared = flow.params ?? {};
     const unknown = Object.keys(given).filter((name) => !Object.hasOwn(declared, name));
     if (unknown.length > 0) {
-      throw new Error(`El flujo "${flow.id}" no declara los params: ${unknown.join(", ")}.`);
+      throw new RunStartError(`El flujo "${flow.id}" no declara los params: ${unknown.join(", ")}.`);
     }
     const params: Record<string, unknown> = {};
     for (const [name, spec] of Object.entries(declared)) {
       if (Object.hasOwn(given, name)) params[name] = given[name];
       else if (typeof spec === "object") params[name] = spec.default;
-      else throw new Error(`Falta el param "${name}" del flujo "${flow.id}".`);
+      else throw new RunStartError(`Falta el param "${name}" del flujo "${flow.id}".`);
     }
     return params;
   }
@@ -734,13 +752,11 @@ export function createEngine(deps: EngineDeps): Engine {
 
   // --- lectura ---------------------------------------------------------------------------------
 
-  function getRun(runId: RunId): RunView {
-    const run = store.db.select().from(runs).where(eq(runs.id, runId)).get();
-    if (!run) throw new Error(`No existe la corrida ${runId}.`);
+  function viewOf(run: RunRow): Omit<RunView, "steps"> {
     const flow = defs.get("flow", run.flowDefId, run.flowVersion);
-    const steps = store.db.select().from(stepRuns).where(eq(stepRuns.runId, runId)).orderBy(asc(stepRuns.id)).all();
     return {
       id: run.id,
+      projectId: run.projectId,
       flow: { slug: flow?.slug ?? run.flowDefId, version: run.flowVersion },
       subject: { type: run.subjectType, id: run.subjectId },
       lane: run.lane,
@@ -752,10 +768,34 @@ export function createEngine(deps: EngineDeps): Engine {
       costMicros: run.costMicros,
       startedAt: run.startedAt,
       endedAt: run.endedAt,
+    };
+  }
+
+  function getRun(runId: RunId): RunView {
+    const run = store.db.select().from(runs).where(eq(runs.id, runId)).get();
+    if (!run) throw new RunNotFoundError(runId);
+    const steps = store.db.select().from(stepRuns).where(eq(stepRuns.runId, runId)).orderBy(asc(stepRuns.id)).all();
+    return {
+      ...viewOf(run),
       steps: steps.map(({ id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, costMicros }) => ({
         id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, costMicros,
       })),
     };
+  }
+
+  function listRuns({ projectId, status }: { projectId?: ProjectId; status?: readonly RunRow["status"][] } = {}) {
+    return store.db
+      .select()
+      .from(runs)
+      .where(
+        and(
+          projectId === undefined ? undefined : eq(runs.projectId, projectId),
+          status === undefined ? undefined : inArray(runs.status, [...status]),
+        ),
+      )
+      .orderBy(desc(runs.id))
+      .all()
+      .map(viewOf);
   }
 
   async function close(): Promise<void> {
@@ -764,7 +804,7 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(inFlight);
   }
 
-  return { start, getRun, close };
+  return { start, getRun, listRuns, close };
 }
 
 class StepTimeout extends Error {

@@ -1,0 +1,11 @@
+# El guion del rol de prueba de la plantilla `juguete` (packages/core/src/builtin/juguete.ts): saluda una vez.
+match: { mode: saludar }
+events:
+  - { at: 0, text: "Saludo y termino" }
+  - { at: 0, usage: { model: haiku, in: 120, out: 30, costUsd: 0.0125 } }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "saludé"
+    payload: { saludo: "hola" }

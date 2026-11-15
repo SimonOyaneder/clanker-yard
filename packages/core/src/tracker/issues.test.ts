@@ -3,6 +3,7 @@ import { createRouterClient, ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { Connections } from "../connections/connections";
 import { createRouter } from "../server/router";
+import { apiDeps } from "../server/testing";
 import { newId } from "../store/conventions";
 import { openStore, type Store } from "../store/store";
 import { createIssues, type Issues } from "./issues";
@@ -179,6 +180,7 @@ describe("API", () => {
       store,
       connections: {} as Connections,
       issues,
+      ...apiDeps(store, "/tmp/clanker"),
       coreVersion: "0",
       bootId: "boot",
       startedAt: 0,
@@ -190,6 +192,7 @@ describe("API", () => {
 
   test("crea una issue local por la API y la lee de vuelta con get y con list", async () => {
     const api = client("cli");
+    const { id: projectId } = await api.projects.create({ slug: "demo", name: "Demo", tracker: "local" });
 
     const created = await api.issues.createLocal({
       projectId,
@@ -218,6 +221,7 @@ describe("API", () => {
 
   test("las issues locales siguientes quedan en el mismo proyecto y list filtra por estado", async () => {
     const api = client();
+    const { id: projectId } = await api.projects.create({ slug: "demo", name: "Demo", tracker: "local" });
     await api.issues.createLocal({ projectId, title: "a" });
     await api.issues.createLocal({ projectId, title: "b", status: "backlog" });
 
@@ -231,6 +235,18 @@ describe("API", () => {
         (i) => i.title,
       ),
     ).toEqual(["b"]);
+  });
+
+  test("createLocal en un proyecto que no existe es NOT_FOUND y en uno de otro tracker es BAD_REQUEST", async () => {
+    const api = client();
+    const linear = await api.projects.create({ slug: "linear", name: "Linear", tracker: "linear", trackerRef: "BA" });
+
+    await expect(api.issues.createLocal({ projectId, title: "x" })).rejects.toSatisfy(
+      (e) => e instanceof ORPCError && e.code === "NOT_FOUND",
+    );
+    await expect(api.issues.createLocal({ projectId: linear.id, title: "x" })).rejects.toSatisfy(
+      (e) => e instanceof ORPCError && e.code === "BAD_REQUEST" && /solo un proyecto local/.test(e.message),
+    );
   });
 
   test("get de una issue que no está en el caché es NOT_FOUND", async () => {

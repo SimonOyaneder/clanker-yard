@@ -6,6 +6,7 @@ import { createRouterClient, ORPCError } from "@orpc/server";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createRouter } from "../server/router";
+import { apiDeps } from "../server/testing";
 import { openStore, type Store } from "../store/store";
 import { syncCursors } from "../store/schema";
 import { createIssues } from "../tracker/issues";
@@ -188,6 +189,7 @@ describe("API", () => {
       store,
       connections,
       issues: createIssues(store),
+      ...apiDeps(store, dir),
       coreVersion: "0",
       bootId: "boot",
       startedAt: 0,

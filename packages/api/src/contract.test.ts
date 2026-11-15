@@ -3,18 +3,30 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 import { type Contract, type Event, contract } from "./index";
 
 describe("contrato", () => {
-  test("exporta los routers system, events, connections, artifacts e issues con sus procedimientos", () => {
-    expect(Object.keys(contract).sort()).toEqual(["artifacts", "connections", "events", "issues", "system"]);
+  test("exporta los routers system, events, connections, artifacts, issues, projects y runs con sus procedimientos", () => {
+    expect(Object.keys(contract).sort()).toEqual([
+      "artifacts",
+      "connections",
+      "events",
+      "issues",
+      "projects",
+      "runs",
+      "system",
+    ]);
     expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm", "linearAuth", "disconnect"]);
     expect(Object.keys(contract.system).sort()).toEqual(["health", "info", "shutdown"]);
     expect(Object.keys(contract.events).sort()).toEqual(["list", "stream"]);
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);
     expect(Object.keys(contract.issues).sort()).toEqual(["createLocal", "get", "list"]);
+    expect(Object.keys(contract.projects).sort()).toEqual(["create", "get", "list", "update"]);
+    expect(Object.keys(contract.runs).sort()).toEqual(["get", "list", "start"]);
     for (const procedure of [
       ...Object.values(contract.system),
       ...Object.values(contract.events),
       ...Object.values(contract.artifacts),
       ...Object.values(contract.issues),
+      ...Object.values(contract.projects),
+      ...Object.values(contract.runs),
     ]) {
       expect(isContractProcedure(procedure)).toBe(true);
     }
@@ -24,6 +36,19 @@ describe("contrato", () => {
     const schema = contract.events.list["~orpc"].inputSchema!["~standard"];
     expect(await schema.validate({})).toMatchObject({ value: { after: 0, limit: 100, filter: {} } });
     expect(await schema.validate({ limit: 501 })).toHaveProperty("issues");
+  });
+
+  test("projects.create: un proyecto local no lleva trackerRef y uno de otro tracker lo necesita", async () => {
+    const schema = contract.projects.create["~orpc"].inputSchema!["~standard"];
+    const base = { slug: "demo", name: "Demo" };
+
+    expect(await schema.validate({ ...base, tracker: "local" })).toMatchObject({
+      value: { parallel: 1, flowParams: {} },
+    });
+    expect(await schema.validate({ ...base, tracker: "local", trackerRef: "x" })).toHaveProperty("issues");
+    expect(await schema.validate({ ...base, tracker: "linear" })).toHaveProperty("issues");
+    expect(await schema.validate({ ...base, tracker: "linear", trackerRef: "BA" })).not.toHaveProperty("issues");
+    expect(await schema.validate({ ...base, slug: "Mi Proyecto", tracker: "local" })).toHaveProperty("issues");
   });
 
   test("los tipos del cliente salen del contrato", () => {

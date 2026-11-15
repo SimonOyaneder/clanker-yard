@@ -98,7 +98,9 @@ export interface Workspaces {
    */
   acquire(request: AcquireRequest): Promise<WorkspaceLease>;
   /** Suelta el lease y deja el worktree `idle`. No hace nada si el token ya no es el vigente. */
-  release(lease: WorkspaceLease): void;
+  release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void;
+  /** El worktree que `runId` tiene tomado: dónde corren sus agentes y su base. */
+  held(runId: RunId): { path: string; base: string } | undefined;
   /** Lanza `StaleLeaseError` si `lease` ya no es el lease vigente del worktree. */
   validate(lease: WorkspaceRef): void;
   /**
@@ -539,6 +541,12 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         }
       });
     },
+    held: (runId) =>
+      store.db
+        .select({ path: workspaces.path, base: workspaces.baseRef })
+        .from(workspaces)
+        .where(and(eq(workspaces.holderRunId, runId), eq(workspaces.state, "leased")))
+        .get(),
     validate,
     async git(lease, ...args) {
       validate(lease);
@@ -614,6 +622,25 @@ export function workspaceAcquireAction(workspaces: Workspaces) {
         runId: ctx.runId,
       });
       return { outcome: "ok", output: { workspaceId, path, branch, baseRef, baseSha, fencingToken } };
+    },
+  };
+}
+
+const WorkspaceReleaseArgs = z.object({
+  workspaceId: z.string(),
+  fencingToken: z.number().int().positive(),
+});
+
+/** La acción `workspace.release`: suelta el worktree que `workspace.acquire` tomó, con su `$ws.workspaceId` y `$ws.fencingToken`. */
+export function workspaceReleaseAction(workspaces: Workspaces) {
+  return {
+    name: "workspace.release",
+    args: WorkspaceReleaseArgs,
+    outcomes: ["ok"],
+    effects: "local" as const,
+    async run(args: z.infer<typeof WorkspaceReleaseArgs>, ctx: { runId: RunId }) {
+      workspaces.release({ ...args, runId: ctx.runId });
+      return { outcome: "ok" };
     },
   };
 }

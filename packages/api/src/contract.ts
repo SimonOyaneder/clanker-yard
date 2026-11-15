@@ -9,7 +9,10 @@ import {
   EventFilter,
   IssueId,
   ProjectId,
+  RunId,
 } from "./domain";
+import { ClankerProject, NewProject, ProjectPatch } from "./projects";
+import { Run, RunDetail, RunFilter, StartRun } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 
 /**
@@ -148,13 +151,40 @@ const issues = {
   /** Del caché, con sus relaciones. */
   get: base.input(z.object({ id: IssueId })).output(CachedIssue),
   /**
-   * Crea una issue en el tracker local (demos y fixtures) y la deja en el caché. Mientras no exista la
-   * tabla `projects`, el proyecto local de la issue se llama como su `projectId`.
+   * Crea una issue en el tracker local (demos y fixtures) y la deja en el caché. El proyecto debe
+   * existir y ser de tracker `local`; si no, falla con `NOT_FOUND` o `BAD_REQUEST`.
    */
   createLocal: base
     .input(NewLocalIssue.extend({ projectId: ProjectId }))
     .output(CachedIssue),
 };
 
-export const contract = { system, events, connections, artifacts, issues };
+const projects = {
+  list: base.output(z.array(ClankerProject)),
+  /** Falla con `NOT_FOUND` si no existe. */
+  get: base.input(z.object({ id: ProjectId })).output(ClankerProject),
+  /**
+   * Falla con `BAD_REQUEST` si el slug o el par (tracker, trackerRef) ya existen, o si el flujo o el
+   * perfil por defecto no existen.
+   */
+  create: base.input(NewProject).output(ClankerProject),
+  /** Cambia solo los campos presentes; las mismas validaciones que `create`. */
+  update: base.input(ProjectPatch.extend({ id: ProjectId })).output(ClankerProject),
+};
+
+const runs = {
+  /** De la más reciente a la más antigua. Sin pasos: están en `get`. */
+  list: base.input(RunFilter.default({})).output(z.array(Run)),
+  /** Con sus pasos, sus outcomes y el costo. `NOT_FOUND` si no existe. */
+  get: base.input(z.object({ id: RunId })).output(RunDetail),
+  /**
+   * Lanza el flujo del proyecto (o `flow`) sobre una issue del proyecto y vuelve sin esperar: el
+   * progreso llega por `events.stream` filtrando por el `runId`. Es idempotente: si ya hay una corrida
+   * viva de ese flujo sobre la issue devuelve esa. `BAD_REQUEST` si el proyecto no está activo, no hay
+   * flujo, faltan params o falta el perfil; `NOT_FOUND` si el proyecto o la issue no existen.
+   */
+  start: base.input(StartRun).output(RunDetail),
+};
+
+export const contract = { system, events, connections, artifacts, issues, projects, runs };
 export type Contract = typeof contract;

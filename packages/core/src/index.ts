@@ -1,3 +1,5 @@
+export { startCore } from "./core";
+export type { Core, StartCoreOptions } from "./core";
 export { startServer } from "./server/server";
 export type { CoreServer, StartServerOptions } from "./server/server";
 export { microsToUsd, newId, usdToMicros } from "./store/conventions";
@@ -53,7 +55,7 @@ export type {
   RoleInfo,
   WaitDef,
 } from "./flows/catalog";
-export { DEFAULT_MAX_AGENTS, OUTPUT_INLINE_MAX_BYTES, TICK_MS } from "./flows/engine";
+export { DEFAULT_MAX_AGENTS, OUTPUT_INLINE_MAX_BYTES, RunNotFoundError, RunStartError, TICK_MS } from "./flows/engine";
 export type { RunView, StartOptions, StepView } from "./flows/engine";
 export {
   createConnections,
@@ -97,9 +99,16 @@ export {
   StaleLeaseError,
   WorkspaceBusyError,
   workspaceAcquireAction,
+  workspaceReleaseAction,
 } from "./workspaces/workspaces";
 export { EXCERPT_MAX_LINES } from "./workspaces/exec";
 export type { ExecResult } from "./workspaces/exec";
+export { createRepos } from "./workspaces/repos";
+export type { Repos } from "./workspaces/repos";
+
+export { JUGUETE_FLOW, JUGUETE_PROFILE, JUGUETE_ROLE } from "./builtin/juguete";
+export { createProjects, InvalidProjectError, ProjectNotFoundError } from "./projects/projects";
+export type { Projects } from "./projects/projects";
 export type {
   AcquireRequest,
   ExecOptions,

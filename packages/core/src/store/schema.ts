@@ -13,6 +13,7 @@ import type {
   Person,
   Priority,
   ProjectId,
+  ProjectStatus,
   RunId,
   StatusCategory,
   StepRunId,
@@ -211,6 +212,45 @@ export const workspaces = sqliteTable(
       .on(t.repoId, t.branch)
       .where(sql`${t.state} != 'archived'`),
   ],
+);
+
+/**
+ * Un proyecto de Clanker (`docs/design.html#d-data`). `default_flow_id` y `default_profile_id` guardan
+ * el slug de la def, no su id. `runs.project_id` y `issues.project_id` apuntan aquí sin FK: los
+ * escenarios y tests siembran filas con proyectos que no existen.
+ */
+export const projects = sqliteTable(
+  "projects",
+  {
+    id: text().$type<ProjectId>().primaryKey(),
+    slug: text().notNull(),
+    name: text().notNull(),
+    tracker: text().$type<TrackerId>().notNull(),
+    trackerRef: text("tracker_ref").notNull(),
+    defaultFlowId: text("default_flow_id"),
+    defaultProfileId: text("default_profile_id"),
+    parallel: integer().notNull().default(1),
+    status: text().$type<ProjectStatus>().notNull().default("active"),
+    flowParams: text("flow_params", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("projects_slug").on(t.slug),
+    uniqueIndex("projects_tracker_ref").on(t.tracker, t.trackerRef),
+    check("projects_parallel_positive", sql`${t.parallel} >= 1`),
+    check("projects_flow_params_json", sql`json_valid(${t.flowParams})`),
+  ],
+);
+
+/** Un checkout de git del usuario, de donde cuelgan los worktrees de Workspaces. */
+export const repos = sqliteTable(
+  "repos",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    path: text().notNull(),
+    defaultBranch: text("default_branch").notNull(),
+  },
+  (t) => [uniqueIndex("repos_path").on(t.path)],
 );
 
 /** Estado de polling y cuota por recurso: ETags (`etag`, `cursor`) y la última cuota que GitHub informó. */

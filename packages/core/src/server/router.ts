@@ -1,10 +1,12 @@
-import { API_MAJOR, type ClientOrigin, contract } from "@clanker/api";
+import { API_MAJOR, type ClientOrigin, contract, type ProjectId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubPatError, githubPatForm } from "../github/pat";
 import { LinearAuthError } from "../linear/oauth";
 import type { Connections } from "../connections/connections";
-import { join } from "node:path";
-import { createArtifacts } from "../artifacts/artifacts";
+import type { Artifacts } from "../artifacts/artifacts";
+import type { Engine } from "../flows/engine";
+import { RunNotFoundError, RunStartError } from "../flows/engine";
+import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
@@ -19,6 +21,9 @@ export interface RouterDeps {
   store: Store;
   connections: Connections;
   issues: Issues;
+  projects: Projects;
+  flows: Engine;
+  artifacts: Artifacts;
   coreVersion: string;
   bootId: string;
   /** ms epoch */
@@ -33,7 +38,12 @@ const os = implement(contract).$context<CoreContext>();
 export function createRouter(deps: RouterDeps) {
   const { store } = deps;
   const schemaVersion = readSchemaVersion(store.db.$client);
-  const artifacts = createArtifacts({ store, dir: join(deps.dataDir, "artifacts") });
+  const { artifacts, flows, projects } = deps;
+  const projectOrNotFound = (id: ProjectId) => {
+    const project = projects.get(id);
+    if (!project) throw new ORPCError("NOT_FOUND", { message: `No existe el proyecto ${id}.` });
+    return project;
+  };
   const platform = process.platform;
   if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
     throw new Error(
@@ -48,8 +58,7 @@ export function createRouter(deps: RouterDeps) {
         apiMajor: API_MAJOR,
         schemaVersion,
         bootId: deps.bootId,
-        // Todavía no existe la tabla de corridas.
-        activeRuns: 0,
+        activeRuns: flows.listRuns({ status: ["queued", "running", "waiting"] }).length,
       })),
       info: os.system.info.handler(() => ({
         pid: process.pid,
@@ -115,9 +124,61 @@ export function createRouter(deps: RouterDeps) {
         if (!issue) throw new ORPCError("NOT_FOUND", { message: `No hay una issue ${input.id} en el caché.` });
         return issue;
       }),
-      createLocal: os.issues.createLocal.handler(({ input, context }) =>
-        deps.issues.createLocal(input, context.origin),
+      createLocal: os.issues.createLocal.handler(({ input, context }) => {
+        const project = projectOrNotFound(input.projectId);
+        if (project.tracker !== "local") {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `El proyecto ${project.slug} es de ${project.tracker}: solo un proyecto local guarda sus issues en el core.`,
+          });
+        }
+        return deps.issues.createLocal(input, context.origin);
+      }),
+    },
+    projects: {
+      list: os.projects.list.handler(() => projects.list()),
+      get: os.projects.get.handler(({ input }) => projectOrNotFound(input.id)),
+      create: os.projects.create.handler(({ input, context }) =>
+        asApiError(() => projects.create(input, context.origin)),
       ),
+      update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
+        asApiError(() => projects.update(id, patch, context.origin)),
+      ),
+    },
+    runs: {
+      list: os.runs.list.handler(({ input }) => flows.listRuns(input)),
+      get: os.runs.get.handler(({ input }) => asApiError(() => flows.getRun(input.id))),
+      start: os.runs.start.handler(({ input }) => {
+        const project = projectOrNotFound(input.projectId);
+        if (project.status !== "active") {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `El proyecto ${project.slug} está ${project.status}: reactívalo (projects.update) antes de lanzar corridas.`,
+          });
+        }
+        const issue = deps.issues.get(input.issueId);
+        if (!issue) {
+          throw new ORPCError("NOT_FOUND", { message: `No hay una issue ${input.issueId} en el caché.` });
+        }
+        if (issue.projectId !== project.id) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `La issue ${issue.ref.key} es de otro proyecto, no de ${project.slug}.`,
+          });
+        }
+        const flow = input.flow ?? project.defaultFlowId;
+        if (flow === null) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `El proyecto ${project.slug} no tiene flujo por defecto: pasa \`flow\` o fija defaultFlowId con projects.update.`,
+          });
+        }
+        // Los flowParams del proyecto son del flujo por defecto: otro flujo no los declara.
+        const params = { ...(flow === project.defaultFlowId ? project.flowParams : {}), ...input.params };
+        const runId = asApiError(() =>
+          flows.start(flow, { type: "issue", id: issue.id }, params, {
+            projectId: project.id,
+            profile: project.defaultProfileId ?? undefined,
+          }),
+        );
+        return flows.getRun(runId);
+      }),
     },
     events: {
       list: os.events.list.handler(({ input }) =>
@@ -138,6 +199,21 @@ export function createRouter(deps: RouterDeps) {
 }
 
 export type CoreRouter = ReturnType<typeof createRouter>;
+
+/** Los errores de un pedido inválido o de algo que no existe llegan al cliente con su mensaje; el resto es un bug del core. */
+function asApiError<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (error) {
+    if (error instanceof ProjectNotFoundError || error instanceof RunNotFoundError) {
+      throw new ORPCError("NOT_FOUND", { message: error.message, cause: error });
+    }
+    if (error instanceof InvalidProjectError || error instanceof RunStartError) {
+      throw new ORPCError("BAD_REQUEST", { message: error.message, cause: error });
+    }
+    throw error;
+  }
+}
 
 /** El `Last-Event-ID` del reconectado manda sobre `after`: es lo último que el cliente vio. */
 function resumeFrom(lastEventId: string | undefined, after: number | undefined): number {

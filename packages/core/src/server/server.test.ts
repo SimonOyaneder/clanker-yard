@@ -16,6 +16,7 @@ import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { startFakeLinear } from "../linear/fake-linear";
 import { startServer, type CoreServer } from "./server";
+import { apiDeps } from "./testing";
 
 let store: Store;
 let connections: Connections;
@@ -45,6 +46,7 @@ async function start(allowedOrigins?: string[]): Promise<CoreServer> {
     store,
     connections,
     issues: createIssues(store),
+    ...apiDeps(store, dataDir),
     coreVersion: "1.2.3",
     dataDir,
     onShutdown,

@@ -5,4 +5,6 @@ export * from "./contract";
 export * from "./domain";
 export * from "./flow";
 export * from "./recipe";
+export * from "./projects";
+export * from "./runs";
 export * from "./tracker";
