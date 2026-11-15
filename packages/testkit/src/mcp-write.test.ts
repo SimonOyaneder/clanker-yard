@@ -147,6 +147,15 @@ describe("create, update y delete", () => {
     expect(await h.api.defs.get({ kind: "flow", id: own.def!.id })).toMatchObject({ body: { name: "Mi juguete" } });
   });
 
+  test("una def builtin o de pack que archivó el core no se restaura desde la API", async () => {
+    const juguete = (await flowDef("juguete"))!;
+    // Lo que hace el sync de un pack con lo que ya no trae.
+    h.store.db.$client.prepare("update defs set archived_at = 1 where id = ?").run(juguete.id);
+
+    await expect(h.api.defs.restore({ kind: "flow", id: juguete.id })).rejects.toThrow(/es de scope builtin/);
+    expect(await flowDef("juguete")).toMatchObject({ archivedAt: 1 });
+  });
+
   test("delete archiva con deshacer desde la API, y origin mcp en los eventos", async () => {
     const { def } = (await h.call("create", { kind: "flow", body: aprobar() })) as DefWrite;
 

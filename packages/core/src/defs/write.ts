@@ -118,7 +118,9 @@ export function createDefWriter({ defs, flows }: { defs: Defs; flows: Pick<Flows
     },
 
     restore(kind, id, origin) {
-      find(kind, id);
+      const def = find(kind, id);
+      // Una builtin o de pack solo la archiva el core (un pack que ya no la trae): restaurarla la revive hasta el próximo sync.
+      if (!WRITABLE_SCOPES.includes(def.scope)) throw new DefWriteError(scopeMessage(def));
       defs.restore(kind, id, origin);
       return find(kind, id);
     },

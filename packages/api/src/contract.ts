@@ -524,7 +524,7 @@ const defs = {
     .meta({ mcp: { tool: "delete", kind: DEF_WRITE_KINDS } })
     .input(DefArchive)
     .output(DefRecord),
-  /** Deshace `archive`; una vigente no cambia. `NOT_FOUND` si no existe. Emite `def.restored`. Sin `meta.mcp`: el deshacer lo ofrece la UI. */
+  /** Deshace `archive`; una vigente no cambia. `NOT_FOUND` si no existe; `BAD_REQUEST` si su scope es `builtin` o `pack`. Emite `def.restored`. Sin `meta.mcp`: el deshacer lo ofrece la UI. */
   restore: base.input(DefArchive).output(DefRecord),
 };
 
