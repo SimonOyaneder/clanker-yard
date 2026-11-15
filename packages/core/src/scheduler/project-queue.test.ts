@@ -62,11 +62,11 @@ async function sync(projectId: ProjectId) {
   await issues.sync(local, { projectId, project: { tracker: "local", id: projectId } });
 }
 
-function openPr(issueId: string, repoId: string, number: number, headRef: string) {
+function openPr(issueId: string, repoId: string, number: number, headRef: string, detail?: PrState) {
   store.tx((tx) =>
     tx.db
       .insert(pullRequests)
-      .values({ id: newId("pr"), repoId, number, nodeId: `n${number}`, headRef, baseRef: "main", headSha: "abc", state: "open", isDraft: true, issueId, owned: true })
+      .values({ id: newId("pr"), repoId, number, nodeId: `n${number}`, headRef, baseRef: "main", headSha: "abc", state: "open", isDraft: true, issueId, owned: true, detail })
       .run(),
   );
 }
@@ -145,6 +145,16 @@ describe("la cola de un proyecto", () => {
 
       expect(entry).toMatchObject({ state: "ready", base: { kind: "stacked", parent: { key: "app#12" } } });
       expect(reads).toEqual([{ account: "octocat", repo: "acme/app", number: 12 }]);
+    });
+
+    test("ci_green usa el estado que Watch dejó en el caché sin leer GitHub", async () => {
+      const { project, repoA, parentId } = await blockedPair("ci_green");
+      openPr(parentId, repoA, 12, "cla-1-padre", prState("draft", "green"));
+
+      const [entry] = await queueOf().of(project.id);
+
+      expect(entry).toMatchObject({ state: "ready", base: { kind: "stacked", parent: { key: "app#12" } } });
+      expect(reads).toEqual([]);
     });
 
     test("ci_green con el CI rojo no apila", async () => {

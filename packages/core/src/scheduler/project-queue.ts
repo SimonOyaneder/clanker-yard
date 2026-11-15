@@ -19,7 +19,10 @@ export interface ProjectQueueDeps {
   repos: Repos;
   /** Los adapters que este core conoce, por id de tracker. */
   trackers: Readonly<Record<string, Tracker>>;
-  /** Solo se lee con `stackOn: "ci_green"`, para saber si el PR sigue abierto y si su CI está verde. */
+  /**
+   * Solo con `stackOn: "ci_green"`, para saber si el PR sigue abierto y si su CI está verde, y solo si Watch
+   * todavía no dejó su estado en `pull_requests.detail`: la cola se calcula en cada tick y en cada vista.
+   */
   prs: Pick<Prs, "get">;
 }
 
@@ -55,7 +58,7 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
         const remote = repo && repos.config(repo.id).remote;
         if (!remote) return { ...fact, ci: "unread", ciError: "el repo no tiene remoto de GitHub o no hay una cuenta conectada" };
         try {
-          const pr = await prs.get({ account: remote.account, repo: remote.repo, number: row.number });
+          const pr = row.detail ?? (await prs.get({ account: remote.account, repo: remote.repo, number: row.number }));
           if (pr.state === "merged" || pr.state === "closed") return undefined;
           return { ...fact, ci: pr.ci.state === "green" ? "green" : "not_green" };
         } catch (error) {
