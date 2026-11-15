@@ -1,6 +1,6 @@
 import type { PrRef } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
 import { ApplyArgs, cleanMessage, commitsApplyAction } from "../commits/apply";
 import { preparePush } from "../commits/prepare-push";
@@ -10,7 +10,7 @@ import { claimPr } from "../flows/subjects";
 import type { Packs } from "../packs/packs";
 import type { Recipes } from "../recipe/recipe";
 import { newId } from "../store/conventions";
-import { prParents, pullRequests, runs, workspaces as workspaceRows } from "../store/schema";
+import { type CombinedBaseParent, combinedBases, prParents, pullRequests, runs, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
 import type { RepoConfig, Workspaces } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
@@ -56,7 +56,9 @@ export interface PrPublishDeps {
  *   arregla reintentando y un 401 sí puede (reconectando la cuenta), así que ese lanza con su backoff.
  * - PR: se busca el abierto de la branch antes de crearlo. Título y cuerpo salen del plan del committer
  *   (que sigue la plantilla del pack) sin las secciones de `conventions.pr.omitSections`; `dependsOn`
- *   agrega "Depende de repo#n". Queda en `pull_requests` (`owned`) enlazado a la issue y la corrida, y
+ *   agrega "Depende de repo#n". Con una base combinada (`combined_bases`, ver `workspaces.combineBase`) el PR
+ *   se abre contra la branch del primer padre, con una nota al principio del cuerpo de qué otros PRs aportan
+ *   commits, y cuelga de todos ellos (`pr_parents`). Queda en `pull_requests` (`owned`) enlazado a la issue y la corrida, y
  *   emite `pr.opened`.
  *
  * Outcomes: `ok` (output `pr`: la `PrRef`, más `url` y `head`) y `replan` (`failures` va de vuelta al
@@ -94,15 +96,23 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     const [owner = "", name = ""] = remote.repo.split("/");
     const pack = packs.packFor({ githubOrg: owner });
     const title = cleanMessage(plan.pr.title).split("\n")[0]!.trim();
-    const body = prBody(cleanMessage(plan.pr.body), pack.conventions.pr?.omitSections ?? [], args.dependsOn);
+    // Con base combinada, el PR apunta al primer padre: GitHub admite una sola base y el resto viaja en los merges de la branch.
+    const combined = store.db
+      .select()
+      .from(combinedBases)
+      .where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, row.baseRef), eq(combinedBases.status, "active")))
+      .get();
+    const parents = combined?.parents ?? [];
+    const baseRef = parents[0]?.branch ?? row.baseRef;
+    const body = prBody(cleanMessage(plan.pr.body), pack.conventions.pr?.omitSections ?? [], args.dependsOn, parents);
 
     const pull = await ctx.once("pr", async () => {
       workspaces.validate(ws);
       const client = deps.connections.githubClient(remote.account);
       try {
         const existing = await findOpenPull(client, owner, name, ws.branch);
-        const pull = existing ?? (await openPull(client, owner, name, { title, body, head: ws.branch, base: row.baseRef, draft: args.draft }));
-        recordPull(store, ctx, { repoId: row.repoId, repo: remote.repo, pull, headRef: ws.branch, baseRef: row.baseRef });
+        const pull = existing ?? (await openPull(client, owner, name, { title, body, head: ws.branch, base: baseRef, draft: args.draft }));
+        recordPull(store, ctx, { repoId: row.repoId, repo: remote.repo, pull, headRef: ws.branch, baseRef, parentBranches: parents.map((p) => p.branch) });
         return pull;
       } catch (error) {
         if (error instanceof RequestError && error.status === 401) deps.connections.markRevoked("github", remote.account, "core");
@@ -150,7 +160,7 @@ async function openPull(
 function recordPull(
   store: Store,
   ctx: ActionCtx,
-  { repoId, repo, pull, headRef, baseRef }: { repoId: string; repo: string; pull: Pull; headRef: string; baseRef: string },
+  { repoId, repo, pull, headRef, baseRef, parentBranches }: { repoId: string; repo: string; pull: Pull; headRef: string; baseRef: string; parentBranches: string[] },
 ): void {
   const run = store.db.select().from(runs).where(eq(runs.id, ctx.runId)).get();
   store.tx((tx) => {
@@ -178,13 +188,13 @@ function recordPull(
     if (!saved) return;
     // La corrida de la issue también es la dueña del PR: un council o un rebase sobre él espera a que ella termine o se estacione.
     claimPr(tx, ctx.runId, saved.id);
-    // Su base es la branch de otro PR abierto del repo: cuelga de él hasta que se mergee (`stack.restack`).
-    const parent = db
+    // Su base es la branch de otro PR abierto del repo (o, con base combinada, de varios): cuelga de ellos hasta que se mergeen (`stack.restack`).
+    const parents = db
       .select({ id: pullRequests.id })
       .from(pullRequests)
-      .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.headRef, baseRef), eq(pullRequests.state, "open")))
-      .get();
-    if (parent) db.insert(prParents).values({ childId: saved.id, parentId: parent.id }).run();
+      .where(and(eq(pullRequests.repoId, repoId), inArray(pullRequests.headRef, [baseRef, ...parentBranches]), eq(pullRequests.state, "open")))
+      .all();
+    for (const parent of parents) db.insert(prParents).values({ childId: saved.id, parentId: parent.id }).run();
     emit({
       type: "pr.opened",
       origin: "core",
@@ -196,8 +206,11 @@ function recordPull(
   });
 }
 
-/** El cuerpo sin las secciones omitidas, con el aviso de dependencia arriba si el PR está apilado. */
-function prBody(body: string, omit: string[], dependsOn: string[]): string {
+/**
+ * El cuerpo sin las secciones omitidas, con arriba el aviso de la base combinada (si el PR tiene `combined`: sus
+ * padres en orden) y el de dependencia si el PR está apilado.
+ */
+function prBody(body: string, omit: string[], dependsOn: string[], combined: readonly CombinedBaseParent[]): string {
   const omitted = new Set(omit.map((title) => title.trim().toLowerCase()));
   const kept: string[] = [];
   let skipping: number | undefined;
@@ -213,5 +226,16 @@ function prBody(body: string, omit: string[], dependsOn: string[]): string {
     if (skipping === undefined) kept.push(line);
   }
   const text = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  return dependsOn.length === 0 ? text : `Depende de ${dependsOn.join(", ")}\n\n${text}`.trim();
+  const notes = [
+    ...(combined.length > 1
+      ? [
+          `Base combinada: este PR apunta a \`${combined[0]!.branch}\` (${combined[0]!.key}) pero también trae los commits de ${combined
+            .slice(1)
+            .map((parent) => `${parent.key} (\`${parent.branch}\`)`)
+            .join(", ")}. Al mergearse un padre, la base se recalcula y el PR cambia de base solo.`,
+        ]
+      : []),
+    ...(dependsOn.length > 0 ? [`Depende de ${dependsOn.join(", ")}`] : []),
+  ];
+  return [...notes, text].join("\n\n").trim();
 }

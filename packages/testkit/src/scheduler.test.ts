@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event, type ProjectId } from "@clanker/api";
-import { createConnections, createFileSecrets, createIssues, createLocalTracker, createRepos, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { combinedBaseBranch, createConnections, createFileSecrets, createIssues, createLocalTracker, createRepos, newId, openStore, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -78,6 +78,43 @@ describe("el Scheduler del core", () => {
     });
     expect(eventsOf(["issue.claimed"]).map((e) => e.payload.issueId).sort()).toEqual([first.id, second.id].sort());
     expect(await client.projects.queue({ id: project.id })).toEqual([]);
+  });
+
+  test("una issue bloqueada por dos PRs en ramas distintas sale de la base combinada de los dos", async () => {
+    repo.cleanup();
+    repo = tempGitRepo({
+      commits: [{ message: "chore: base", files: { "a.txt": "a\n", "b.txt": "b\n" } }],
+      branches: { "cla-1": [{ message: "feat: uno", files: { "a.txt": "uno\n" } }], "cla-2": [{ message: "feat: dos", files: { "b.txt": "dos\n" } }] },
+    });
+    const client = await boot();
+    const project = await toyProject(client, 2);
+    // Pausado mientras se arma la cola: si no, la issue se lanzaría antes de que existan sus padres.
+    await client.projects.update({ id: project.id, status: "paused" });
+    const local = createLocalTracker(store);
+    const [one, two] = [await local.createIssue(project.id, { title: "uno", status: "in_progress" }), await local.createIssue(project.id, { title: "dos", status: "in_progress" })];
+    const child = await client.issues.createLocal({ projectId: project.id, title: "Con dos padres" });
+    await local.relate(one.ref, "blocks", child.ref);
+    await local.relate(two.ref, "blocks", child.ref);
+    await createIssues(store, local).sync(local, { projectId: project.id, project: { tracker: "local", id: project.id } }, "cli");
+    const repoId = createRepos(store).list()[0]!.id;
+    for (const [i, parent] of [one, two].entries()) {
+      const issueId = createIssues(store, local).list({ projectId: project.id }).find((issue) => issue.ref.id === parent.ref.id)!.id;
+      store.db.$client
+        .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, issue_id, owned) VALUES (?, ?, ?, ?, ?, 'main', 'abc', 'open', 1, ?, 1)")
+        .run(newId("pr"), repoId, 20 + i, `n${i}`, `cla-${i + 1}`, issueId);
+    }
+
+    await client.projects.update({ id: project.id, status: "active", stackOn: "any_open", repos: [{ repoId, labels: [] }] });
+
+    const branch = combinedBaseBranch(child.ref.key);
+    await until(async () => {
+      expect(await client.runs.list({ projectId: project.id })).toMatchObject([{ subject: { id: child.id }, status: "done", params: { base: branch } }]);
+    });
+    // La branch de la issue sale de la base sintética: trae los dos padres, y la base quedó registrada.
+    const { branch: issueBranch } = store.db.$client.prepare("SELECT branch FROM workspaces").get() as { branch: string };
+    expect(repo.git("merge-base", "--is-ancestor", "cla-1", issueBranch)).toBe("");
+    expect(repo.git("merge-base", "--is-ancestor", "cla-2", issueBranch)).toBe("");
+    expect(store.db.$client.prepare("SELECT status FROM combined_bases WHERE branch = ?").all(branch)).toEqual([{ status: "active" }]);
   });
 
   test("al arrancar lanza lo que ya estaba en la cola", async () => {

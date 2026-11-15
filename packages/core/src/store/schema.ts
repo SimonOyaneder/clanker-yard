@@ -299,6 +299,42 @@ export const workspaces = sqliteTable(
   ],
 );
 
+export const COMBINED_BASE_STATUSES = ["active", "conflict", "dissolved"] as const;
+
+/** Un padre de una base combinada con la punta que se juntó (`CombinedParent` de `workspaces/combine.ts`). */
+export interface CombinedBaseParent {
+  key: string;
+  branch: string;
+  sha: string;
+}
+
+/**
+ * La base sintética de una issue con dos o más padres (`docs/design.html#d-ops`, "Bases combinadas"): la
+ * branch local `clanker/base/<issue>` con la punta de la branch por defecto (`default_sha`) y un merge de cada
+ * padre, en orden (`parents`: el primero es la base del PR en GitHub). Guarda con qué se armó, para
+ * recalcularla cuando se mergea un padre. `head_sha` es la última punta que quedó aplicada (NULL si la base
+ * nunca se pudo armar): un restack parte de ahí, así que un `conflict` al recalcular no la pisa.
+ */
+export const combinedBases = sqliteTable(
+  "combined_bases",
+  {
+    repoId: text("repo_id").notNull(),
+    branch: text().notNull(),
+    issueId: text("issue_id")
+      .notNull()
+      .references(() => issues.id),
+    defaultSha: text("default_sha").notNull(),
+    parents: text({ mode: "json" }).$type<CombinedBaseParent[]>().notNull(),
+    headSha: text("head_sha"),
+    status: text({ enum: COMBINED_BASE_STATUSES }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.repoId, t.branch] }),
+    uniqueIndex("combined_bases_issue").on(t.issueId),
+    check("combined_bases_parents_json", sql`json_valid(${t.parents})`),
+  ],
+);
+
 /**
  * Un proyecto de Clanker (`docs/design.html#d-data`). `default_flow_id` y `default_profile_id` guardan
  * el slug de la def, no su id. `runs.project_id` y `issues.project_id` apuntan aquí sin FK: los

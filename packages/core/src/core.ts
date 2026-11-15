@@ -62,6 +62,7 @@ import {
   createWorkspaces,
   workspaceAcquireAction,
   workspaceAttachAction,
+  workspaceCombineBaseAction,
   workspaceReleaseAction,
   workspaceSyncBaseAction,
 } from "./workspaces/workspaces";
@@ -215,6 +216,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(workspaceAttachAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
   flows.registerAction(workspaceSyncBaseAction(workspaces));
+  flows.registerAction(workspaceCombineBaseAction(workspaces));
   flows.registerAction(recipes.checkAction);
   flows.registerAction(commitsApplyAction({ workspaces, recipes }));
   flows.registerAction(prPublishAction({ store, workspaces, recipes, repos: repos.config, connections: opts.connections, packs }));
@@ -281,6 +283,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     flows,
     runs,
     queue: createProjectQueue({ store, projects, issues, repos, trackers, prs }),
+    workspaces,
     lanes,
     runtime: runtime.id,
     breakers,

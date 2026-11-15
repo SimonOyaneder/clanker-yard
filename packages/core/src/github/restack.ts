@@ -1,15 +1,15 @@
 import { PrRef } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../connections/connections";
 import { openDecision } from "../decisions/decisions";
 import { PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
 import { git, GitError, isAncestor, tryGit } from "../git/git";
-import { prParents, pullRequests } from "../store/schema";
+import { combinedBases, prParents, pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
 import { emitOnce } from "../watch/marks";
-import { AttachError, RebaseError, type RepoConfig, type Workspaces } from "../workspaces/workspaces";
+import { AttachError, RebaseError, type BaseConflict, type RepoConfig, type RestackResult, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
 import type { Prs } from "./prs";
 
@@ -41,6 +41,7 @@ export type ChildReport = { pr: PrRef; branch: string } & (
 );
 
 type PrRow = typeof pullRequests.$inferSelect;
+type CombinedBase = typeof combinedBases.$inferSelect;
 
 /** Lo que se parte de un padre para restackear a sus hijos: la última punta de su branch, la base nueva (o el sha de su punta) y su nombre. */
 interface Start {
@@ -69,6 +70,9 @@ const MERGEABLE_WAIT_MS = 10_000;
  *   patch-id, push con lease. Después, el cambio de base del PR si GitHub no lo hizo y, si su cuerpo
  *   nombra la base vieja, una nota no bloqueante ("descripción obsoleta"). Los nietos parten de la
  *   punta que el hijo tenía antes y de la nueva.
+ * - Un hijo con base combinada (`combined_bases`, ver `workspaces.restackCombined`) no usa el `from` ni el `onto`
+ *   del padre: recalcula la base con los padres que siguen abiertos y el PR pasa a apuntar al primero (o a la
+ *   branch por defecto si no queda ninguno). Su conflicto no dispara `pr.conflict`: queda una nota para una persona.
  * - Un hijo que no se puede restackear queda como estaba y no frena a los demás: `conflict` (la branch
  *   intacta, y un evento `pr.conflict` para el flujo de rebase) o
  *   `skipped` con su razón (council, merge de otra branch, lease rechazado, branch adelantada, sin
@@ -179,21 +183,29 @@ async function restackChain(
 
   async function restackChildren(parent: PrRow, start: Start, merged: string | undefined): Promise<void> {
     for (const child of childrenOf(store, parent.id)) {
-      const stage = await ctx.once(`restack:${child.number}`, () => restackChild(child, start));
+      const stage = await ctx.once(`restack:${child.number}`, () => restackChild(child, start, merged));
       const { report } = stage;
       if (report.status === "restacked" || report.status === "uptodate") {
         const head = report.status === "restacked" ? report.head : undefined;
-        await ctx.once(`retarget:${child.number}`, () => retarget(child, parent, start.base, head, merged));
+        await ctx.once(`retarget:${child.number}`, () => retarget(child, parent, stage.base, head, merged));
       }
       children.push(report);
       if (stage.next) await restackChildren(child, stage.next, undefined);
     }
   }
 
-  async function restackChild(child: PrRow, start: Start): Promise<{ report: ChildReport; next?: Start }> {
+  /** Lo que se intentó con un hijo: el resultado y la base que el PR debe tener en GitHub después. */
+  interface Attempt {
+    result: RestackResult | BaseConflict;
+    base: string;
+    /** Los datos del `pr.conflict` para el flujo de rebase; una base combinada no lo tiene (ver `restackCombined`). */
+    conflict?: { from: string; onto: string };
+  }
+
+  async function restackChild(child: PrRow, start: Start, merged: string | undefined): Promise<{ report: ChildReport; next?: Start; base: string }> {
     const childRef: PrRef = { account: remote.account, repo: remote.repo, number: child.number };
     const base = { pr: childRef, branch: child.headRef };
-    const skipped = (reason: string) => ({ report: { ...base, status: "skipped" as const, reason } });
+    const skipped = (reason: string) => ({ report: { ...base, status: "skipped" as const, reason }, base: start.base });
 
     const state = await prs.get(childRef);
     if (state.threads.councilEver) return skipped("tiene threads [clanker-council]: un restack reescribiría su historia y nunca se fuerza.");
@@ -207,36 +219,52 @@ async function restackChain(
       throw error;
     }
     try {
-      const onto = start.onto ?? (await workspaces.git(lease, "rev-parse", `refs/remotes/origin/${start.base}`));
-      const result = await workspaces.restack(lease, { council: false, onto, from: start.from, base: start.base });
+      const combined = combinedBaseOf(child);
+      const { result, base: toBase, conflict } = combined ? await restackCombined(lease, combined, merged) : await restackPlain(lease, start);
       switch (result.outcome) {
         case "restacked":
           return {
-            report: { ...base, status: "restacked", previousHead: result.previousHead, head: result.head, commits: result.commits, draft: state.state === "draft", base: start.base },
+            report: { ...base, status: "restacked", previousHead: result.previousHead, head: result.head, commits: result.commits, draft: state.state === "draft", base: toBase },
             next: { from: result.previousHead, onto: result.head, base: child.headRef },
+            base: toBase,
           };
         case "uptodate":
-          return { report: { ...base, status: "uptodate" } };
+          return { report: { ...base, status: "uptodate" }, base: toBase };
         case "conflict":
-          // La misma clave que usa Watch (el sha de la punta): si ya vio el conflicto, el flujo de rebase ya salió.
-          store.tx((tx) =>
-            emitOnce(
-              tx,
-              child,
-              {
-                type: "pr.conflict",
-                keys: [state.headSha],
+        case "base-conflict": {
+          const files = result.outcome === "conflict" ? result.conflicts : result.files;
+          if (conflict) {
+            // La misma clave que usa Watch (el sha de la punta): si ya vio el conflicto, el flujo de rebase ya salió.
+            store.tx((tx) =>
+              emitOnce(
+                tx,
+                child,
+                {
+                  type: "pr.conflict",
+                  keys: [state.headSha],
+                  runId: ctx.runId,
+                  payload: () => ({ repo: remote.repo, number: child.number, sha: state.headSha, base: toBase, ...conflict, files }),
+                },
+                Date.now(),
+              ),
+            );
+          } else {
+            store.tx((tx) =>
+              openDecision(tx, {
+                kind: "note",
+                title: `Base combinada en conflicto en ${remote.repo}#${child.number}`,
+                body: `No se pudo recalcular la base combinada de ${child.headRef} tras mergearse ${merged}: conflicto en ${files.join(", ")}. El PR quedó como estaba; el flujo de rebase por conflicto no sabe rehacer una base combinada, así que hay que resolverlo a mano.`,
                 runId: ctx.runId,
-                payload: () => ({ repo: remote.repo, number: child.number, sha: state.headSha, base: start.base, from: start.from, onto, files: result.conflicts }),
-              },
-              Date.now(),
-            ),
-          );
-          return { report: { ...base, status: "conflict", files: result.conflicts, failures: result.failures } };
+                subject: { type: "pr", id: child.id },
+              }),
+            );
+          }
+          return { report: { ...base, status: "conflict", files, failures: result.failures }, base: toBase };
+        }
         case "foreign-merge":
-          return skipped(result.failures);
+          return { report: { ...base, status: "skipped", reason: result.failures }, base: toBase };
         case "empty":
-          return skipped(`no le quedan commits propios sobre ${start.base}.`);
+          return { report: { ...base, status: "skipped", reason: `no le quedan commits propios sobre ${toBase}.` }, base: toBase };
         case "lease-rejected":
           return skipped(`${child.headRef} ya no está donde el core la dejó en el remoto: alguien más pusheó.`);
         case "unauthorized":
@@ -248,6 +276,42 @@ async function restackChain(
     } finally {
       workspaces.release(lease);
     }
+  }
+
+  async function restackPlain(lease: WorkspaceRef, start: Start): Promise<Attempt> {
+    const onto = start.onto ?? (await workspaces.git(lease, "rev-parse", `refs/remotes/origin/${start.base}`));
+    const result = await workspaces.restack(lease, { council: false, onto, from: start.from, base: start.base });
+    return { result, base: start.base, conflict: { from: start.from, onto } };
+  }
+
+  /**
+   * Un PR sobre una base combinada (`combined_bases`): la base se recalcula con los padres que siguen abiertos
+   * (sin el mergeado, que es `merged`) y el PR pasa a apuntar al primero, o a la branch por defecto si no queda
+   * ninguno. Si choca no hay `pr.conflict`: el flujo de rebase rebasea sobre una branch y no sabe rehacer la
+   * base combinada, así que el conflicto queda como una nota para una persona.
+   */
+  async function restackCombined(lease: WorkspaceRef, combined: CombinedBase, merged: string | undefined): Promise<Attempt> {
+    const open = new Set(
+      store.db
+        .select({ headRef: pullRequests.headRef })
+        .from(pullRequests)
+        .where(and(eq(pullRequests.repoId, repoId), inArray(pullRequests.headRef, combined.parents.map((parent) => parent.branch)), eq(pullRequests.state, "open")))
+        .all()
+        .map((row) => row.headRef),
+    );
+    const parents = combined.parents.filter((parent) => parent.branch !== merged && open.has(parent.branch));
+    const result = await workspaces.restackCombined(lease, { council: false, branch: combined.branch, parents });
+    return { result, base: parents[0]?.branch ?? deps.repos(repoId).defaultBranch };
+  }
+
+  /** La base combinada vigente de la issue del hijo, si su PR se abrió sobre una. */
+  function combinedBaseOf(child: PrRow): CombinedBase | undefined {
+    if (child.issueId === null) return undefined;
+    return store.db
+      .select()
+      .from(combinedBases)
+      .where(and(eq(combinedBases.repoId, repoId), eq(combinedBases.issueId, child.issueId), ne(combinedBases.status, "dissolved")))
+      .get();
   }
 
   /**

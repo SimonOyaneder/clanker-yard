@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { RunId } from "@clanker/api";
+import { IssueId, type RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
 import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/catalog";
@@ -11,10 +11,11 @@ import { diffBetween, snapshotTree } from "../git/tree";
 import { defaultLogDir, excerpt, execLogged, stepLogPath, type ExecResult } from "./exec";
 import { createArchive, type CleanupResult } from "./archive";
 import { continueRebase, rebaseInProgress, rebaseOnto, startRebase, type RebaseStep } from "./rebase";
-import { planRestack } from "./restack";
+import { planCombinedBase, type CombinedParent } from "./combine";
+import { planRestack, type Git } from "./restack";
 import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
-import { runs, workspaces } from "../store/schema";
+import { combinedBases, runs, workspaces } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 
 const REMOTE = "origin";
@@ -215,6 +216,33 @@ export interface Workspaces {
    * `from` existen. Guarda `base` como `baseRef` y `onto` como `baseSha`.
    */
   restack(lease: WorkspaceRef, opts: RestackOptions): Promise<RestackResult>;
+  /**
+   * Arma la base combinada de una issue con varios padres (`docs/design.html#d-ops`, `workspace.combineBase`):
+   * trae el remoto y deja en la branch local `branch` (`combinedBaseBranch`) la punta de la branch por defecto con un
+   * merge --no-ff de cada padre encima, en orden, sin tocar ningún worktree. La registra en `combined_bases`
+   * con la punta de cada padre. No se pushea: sus merges viajan en la branch de la issue, que sale de aquí. Si
+   * los padres chocan (entre sí o con la branch por defecto) no mueve la branch y deja la base en `conflict`;
+   * `changed` es `false` si ya estaba así con los mismos padres (no hay nada nuevo que avisar). Rehacerla con
+   * los mismos padres da el mismo sha. Lanza si falta la branch de un padre o `branch` no es un nombre válido.
+   */
+  combineBase(request: CombineRequest): Promise<CombineResult>;
+  /**
+   * Deja de usar la base combinada `branch` del repo: la marca `dissolved` y borra la branch sintética. No hace
+   * nada si no existe o ya estaba disuelta. Es lo que queda cuando se mergean todos los padres y cuando la
+   * issue sale a otra base.
+   */
+  dissolveBase(repo: string, branch: string): Promise<void>;
+  /**
+   * `restack` de un PR cuya base es la combinada `branch`: la recalcula con los padres que quedan (`parents`,
+   * abiertos y en orden: la branch por defecto actual con un merge de cada uno, o solo la branch por defecto si ya
+   * no queda ninguno), y deja los commits propios (los que siguen a la última punta registrada de la base
+   * combinada) sobre la base nueva, como `restack`. Con `restacked` o `uptodate` la base nueva queda registrada
+   * (y disuelta si no quedan padres) y el worktree guarda `branch` (o la branch por defecto) como base. Si los
+   * padres que quedan ya no se pueden juntar es `base-conflict`: nada se mueve y la base queda en `conflict`.
+   * Mismas precondiciones que `restack`; lanza `RebaseError` si la base combinada no está vigente o su última
+   * punta ya no está en la historia del PR.
+   */
+  restackCombined(lease: WorkspaceRef, opts: RestackCombinedOptions): Promise<RestackResult | BaseConflict>;
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
   git(lease: WorkspaceRef, ...args: string[]): Promise<string>;
   /**
@@ -278,6 +306,38 @@ export type RestackResult =
   | { outcome: "foreign-merge"; merge: string; failures: string }
   | { outcome: "empty" }
   | { outcome: Exclude<PushOutcome, "ok"> };
+
+export interface CombineRequest {
+  repo: string;
+  issueId: IssueId;
+  /** La branch sintética de la issue: `combinedBaseBranch`. */
+  branch: string;
+  /** Los PRs padre en orden: el primero es la base del PR en GitHub. */
+  parents: readonly Pick<CombinedParent, "key" | "branch">[];
+}
+
+/** Los padres no se pueden juntar: `parent` choca con la branch por defecto y los padres anteriores (`merged`), en `files`. */
+export interface BaseConflict {
+  outcome: "base-conflict";
+  parent: string;
+  merged: string[];
+  files: string[];
+  failures: string;
+}
+
+export type CombineResult = { outcome: "combined"; branch: string; head: string; parents: CombinedParent[] } | (BaseConflict & { changed: boolean });
+
+export interface RestackCombinedOptions {
+  /** El PR tuvo threads `[clanker-council]`: nunca se fuerza. */
+  council: boolean;
+  /** La branch sintética de la issue. */
+  branch: string;
+  /** Los padres que quedan, abiertos y en orden. */
+  parents: readonly Pick<CombinedParent, "key" | "branch">[];
+}
+
+/** La branch sintética de la base combinada de una issue (`clanker/base/<issue>`). */
+export const combinedBaseBranch = (issueKey: string): string => `clanker/base/${issueKey}`;
 
 export type SyncBaseResult =
   | { outcome: "same"; baseSha: string }
@@ -1125,6 +1185,87 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     if (await rebaseInProgress(run)) await run("rebase", "--abort");
   }
 
+  const gitAt = (cfg: RepoConfig): Git => (args, env, input) => git(cfg.path, args, env, input);
+
+  /** La punta de cada padre (la de `origin` si hay, si no la local). */
+  async function tipsOf(cfg: RepoConfig, parents: RestackCombinedOptions["parents"]): Promise<CombinedParent[]> {
+    return Promise.all(parents.map(async ({ key, branch }) => ({ key, branch, sha: await resolveBase(cfg, branch) })));
+  }
+
+  function combinedRow(repoId: string, branch: string) {
+    return store.db.select().from(combinedBases).where(and(eq(combinedBases.repoId, repoId), eq(combinedBases.branch, branch))).get();
+  }
+
+  async function combineBase({ repo, issueId, branch, parents }: CombineRequest): Promise<CombineResult> {
+    const cfg = repos(repo);
+    await assertBranchAllowed(cfg, branch);
+    if (cfg.remote && (await fetchRepo(repo)) === "unauthorized") {
+      throw new Error(`GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${repo}: la conexión quedó revocada, reconéctala.`);
+    }
+    return withRepoLock(repo, async () => {
+      const defaultSha = await resolveBase(cfg, cfg.defaultBranch);
+      const tips = await tipsOf(cfg, parents);
+      const plan = await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity });
+      const previous = combinedRow(repo, branch);
+      const values = { repoId: repo, branch, issueId, defaultSha, parents: tips };
+      const save = (row: { headSha: string | null; status: "active" | "conflict" }) =>
+        store.tx(({ db }) => db.insert(combinedBases).values({ ...values, ...row }).onConflictDoUpdate({ target: [combinedBases.repoId, combinedBases.branch], set: { ...values, ...row } }).run());
+      if (plan.status === "conflict") {
+        const known = previous?.status === "conflict" && JSON.stringify(previous.parents) === JSON.stringify(tips);
+        save({ headSha: previous?.headSha ?? null, status: "conflict" });
+        return { outcome: "base-conflict", parent: plan.parent.key, merged: plan.merged, files: plan.conflicts, failures: plan.failures, changed: !known };
+      }
+      await git(cfg.path, ["update-ref", `refs/heads/${branch}`, plan.head]);
+      save({ headSha: plan.head, status: "active" });
+      return { outcome: "combined", branch, head: plan.head, parents: tips };
+    });
+  }
+
+  async function dissolveBase(repo: string, branch: string): Promise<void> {
+    const dissolved = store.tx(({ db }) =>
+      db
+        .update(combinedBases)
+        .set({ status: "dissolved" })
+        .where(and(eq(combinedBases.repoId, repo), eq(combinedBases.branch, branch), ne(combinedBases.status, "dissolved")))
+        .returning({ branch: combinedBases.branch })
+        .get(),
+    );
+    if (dissolved) await withRepoLock(repo, () => tryGit(repos(repo).path, ["update-ref", "-d", `refs/heads/${branch}`]));
+  }
+
+  async function restackCombined(lease: WorkspaceRef, { council, branch, parents }: RestackCombinedOptions): Promise<RestackResult | BaseConflict> {
+    const row = rowOf(lease);
+    const cfg = repos(row.repoId);
+    const combined = combinedRow(row.repoId, branch);
+    if (combined === undefined || combined.status === "dissolved" || combined.headSha === null) {
+      throw new RebaseError(`${row.branch} no tiene una base combinada vigente (${branch}): no se sabe cuál fue la última punta de su base.`);
+    }
+    const defaultSha = await resolveBase(cfg, cfg.defaultBranch);
+    const tips = await tipsOf(cfg, parents);
+    const plan = tips.length === 0 ? { status: "ok" as const, head: defaultSha } : await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity });
+    if (plan.status === "conflict") {
+      store.tx(({ db }) => db.update(combinedBases).set({ status: "conflict" }).where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, branch))).run());
+      return { outcome: "base-conflict", parent: plan.parent.key, merged: plan.merged, files: plan.conflicts, failures: plan.failures };
+    }
+
+    // Sin esto `from..HEAD` abarcaría toda la historia: pasa si la base combinada se rehízo y el PR no la tiene (un corte entre el push y el registro).
+    const head = await gitIn(lease, "rev-parse", "HEAD");
+    if (!(await isAncestor(lease.path, plan.head, head)) && !(await isAncestor(lease.path, combined.headSha, head))) {
+      throw new RebaseError(`La última punta de la base combinada ${branch} (${combined.headSha.slice(0, 9)}) no está en la historia de ${row.branch}: no se sabe cuáles son sus commits propios.`);
+    }
+    const result = await restack(lease, { council, onto: plan.head, from: combined.headSha, base: tips.length === 0 ? cfg.defaultBranch : branch });
+    if (result.outcome !== "restacked" && result.outcome !== "uptodate") return result;
+    if (tips.length === 0) {
+      await dissolveBase(row.repoId, branch);
+    } else {
+      await withRepoLock(row.repoId, () => git(cfg.path, ["update-ref", `refs/heads/${branch}`, plan.head]));
+      store.tx(({ db }) =>
+        db.update(combinedBases).set({ defaultSha, parents: tips, headSha: plan.head, status: "active" }).where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, branch))).run(),
+      );
+    }
+    return result;
+  }
+
   async function reread(runId: RunId): Promise<void> {
     const held = store.db
       .select()
@@ -1149,6 +1290,9 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     attach,
     rebase,
     restack,
+    combineBase,
+    dissolveBase,
+    restackCombined,
     push,
     recover,
     extendLeases,
@@ -1313,5 +1457,39 @@ export function workspaceSyncBaseAction(workspaces: Workspaces): ActionDef<typeo
           throw error;
         }
       }),
+  };
+}
+
+const CombineBaseArgs = z.object({
+  repo: z.string(),
+  issueId: IssueId,
+  /** La clave de la issue en su tracker: nombra la branch sintética (`clanker/base/<clave>`). */
+  issueKey: z.string().min(1),
+  parents: z.array(z.object({ key: z.string(), branch: z.string() })).min(2),
+});
+
+/**
+ * La acción `workspace.combineBase` (`docs/design.html#d-ops`): `workspaces.combineBase` para un flujo. Outcome
+ * `combined` (output `base`, la branch sintética que pasa a ser la `base` del `workspace.acquire`, y `head`) o
+ * `conflict` (los padres chocan: output `parent`, `merged`, `files` y `failures`). Una branch que no se puede
+ * usar es `PermanentActionError`. El Scheduler no pasa por aquí: arma la base antes de lanzar la corrida.
+ */
+export function workspaceCombineBaseAction(workspaces: Workspaces): ActionDef<typeof CombineBaseArgs> {
+  return {
+    name: "workspace.combineBase",
+    args: CombineBaseArgs,
+    outcomes: ["combined", "conflict"],
+    effects: "local",
+    async run({ repo, issueId, issueKey, parents }) {
+      try {
+        const result = await workspaces.combineBase({ repo, issueId, branch: combinedBaseBranch(issueKey), parents });
+        if (result.outcome === "combined") return { outcome: "combined", output: { base: result.branch, head: result.head } };
+        const { parent, merged, files, failures } = result;
+        return { outcome: "conflict", output: { parent, merged, files, failures } };
+      } catch (error) {
+        if (error instanceof BranchNotAllowedError) throw new PermanentActionError(error.message, { cause: error });
+        throw error;
+      }
+    },
   };
 }

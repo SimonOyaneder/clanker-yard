@@ -149,6 +149,7 @@ export type { Secrets } from "./secrets/secrets";
 export {
   AttachError,
   BranchNotAllowedError,
+  combinedBaseBranch,
   createWorkspaces,
   LEASE_TTL_MS,
   RebaseError,
@@ -157,6 +158,7 @@ export {
   WorkspaceBusyError,
   workspaceAcquireAction,
   workspaceAttachAction,
+  workspaceCombineBaseAction,
   workspaceReleaseAction,
   workspaceSyncBaseAction,
   WorktreeSetupError,
@@ -180,8 +182,12 @@ export { createRunStarter, IssueNotCachedError } from "./projects/start-run";
 export type { RunStarter, RunStarterDeps } from "./projects/start-run";
 export type {
   AcquireRequest,
+  BaseConflict,
+  CombineRequest,
+  CombineResult,
   ExecOptions,
   RepoConfig,
+  RestackCombinedOptions,
   WorkspaceLease,
   WorkspaceRef,
   Workspaces,

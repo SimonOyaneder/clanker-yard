@@ -7,6 +7,9 @@ import { createIssues } from "../tracker/issues";
 import { createLocalTracker } from "../tracker/local";
 import type { Tracker } from "../tracker/tracker";
 import { createRepos } from "../workspaces/repos";
+import { pullRequests } from "../store/schema";
+import { newId } from "../store/conventions";
+import type { CombineRequest, CombineResult, Workspaces } from "../workspaces/workspaces";
 import { createLaneSettings } from "./lanes";
 import { createProjectQueue, type ProjectQueue } from "./project-queue";
 import { createScheduler, SCHEDULER_TICK_MS, type Breakers } from "./scheduler";
@@ -28,13 +31,15 @@ interface Options {
   reopen?: HarnessHome;
   /** Lo que la cola dice de cada issue `ready`: depende de estos PRs de otros repos. */
   dependsOn?: string[];
+  /** Lo que arma las bases combinadas; sin él, ninguna issue de estos tests tiene una. */
+  workspaces?: Pick<Workspaces, "combineBase" | "dissolveBase">;
 }
 
 /**
  * El Scheduler sobre el motor de flujos real, un tracker local y acciones que esperan a que el test las suelte.
  * Cada issue corre `dev`: `check` estaciona (gate) las issues de `parkFirst` y `work` espera a `release`.
  */
-function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn }: Options = {}) {
+function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn, workspaces }: Options = {}) {
   const h = createHarness({ persist: true, reopen, laneCapacity: () => lanes.capacity() });
   cleanups.push(h.cleanup);
   const lanes = createLaneSettings(h.store);
@@ -53,6 +58,7 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
     id: "dev",
     name: "Dev",
     trigger: { type: "issue.queued" },
+    params: { base: { type: "string", default: "main" } },
     start: "check",
     nodes: {
       check: { type: "action", action: "check", args: {}, on: { ok: "work", gate: "ask" } },
@@ -94,6 +100,7 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
     flows: h.flows,
     runs: { start: (input, origin) => (starts.push(input), realRuns.start(input, origin)) },
     queue,
+    workspaces: workspaces ?? { combineBase: () => Promise.reject(new Error("no se esperaba armar una base combinada")), dissolveBase: () => Promise.resolve() },
     lanes,
     runtime: "fake",
     breakers,
@@ -413,5 +420,93 @@ describe("lanzar issues por carril", () => {
     after.scheduler.start();
     after.finish(a);
     await until(() => expect(after.status(c)).toBe("running"));
+  });
+});
+
+describe("bases combinadas", () => {
+  /** Una issue bloqueada por dos issues en curso con un PR abierto cada una, en ramas distintas del mismo repo. */
+  async function blockedByTwo(workspaces: Pick<Workspaces, "combineBase" | "dissolveBase">) {
+    const h = setup({ parallel: 2, workspaces });
+    const repoId = createRepos(h.store).add({ name: "app", path: "/tmp/app", remote: "acme/app" });
+    h.projects.update(h.projectId, { repos: [{ repoId, labels: [] }], stackOn: "any_open" }, "cli");
+    const [one, two] = [await h.local.createIssue(h.projectId, { title: "uno", status: "in_progress" }), await h.local.createIssue(h.projectId, { title: "dos", status: "in_progress" })];
+    const child = await h.create("con dos padres");
+    await h.local.relate(one.ref, "blocks", child.ref);
+    await h.local.relate(two.ref, "blocks", child.ref);
+    await h.issues.sync(h.local, { projectId: h.projectId, project: { tracker: "local", id: h.projectId } });
+    const cached = h.issues.list({ projectId: h.projectId });
+    [one, two].forEach((parent, i) => {
+      const issueId = cached.find((issue) => issue.ref.id === parent.ref.id)!.id;
+      h.store.tx((tx) =>
+        tx.db.insert(pullRequests).values({ id: newId("pr"), repoId, number: 10 + i, nodeId: `n${i}`, headRef: `cla-${i + 1}`, baseRef: "main", headSha: "abc", state: "open", isDraft: true, issueId, owned: true }).run(),
+      );
+    });
+    return { h, repoId, child, two };
+  }
+
+  const dissolve = () => Promise.resolve();
+
+  test("arma la base combinada antes de lanzar y la corrida sale de su branch sintética", async () => {
+    const requests: CombineRequest[] = [];
+    const combineBase = (request: CombineRequest): Promise<CombineResult> => {
+      requests.push(request);
+      return Promise.resolve({ outcome: "combined", branch: request.branch, head: "abc", parents: [] });
+    };
+    const { h, repoId, child } = await blockedByTwo({ combineBase, dissolveBase: dissolve });
+
+    await h.scheduler.tick();
+
+    expect(requests).toEqual([
+      { repo: repoId, issueId: child.id, branch: `clanker/base/${child.ref.key}`, parents: [{ key: "app#10", branch: "cla-1" }, { key: "app#11", branch: "cla-2" }] },
+    ]);
+    expect(h.runOf(child)).toMatchObject({ status: "running", params: { base: `clanker/base/${child.ref.key}` } });
+    expect(h.events("issue.skipped")).toEqual([]);
+  });
+
+  test("padres que chocan: la issue no se lanza, queda su motivo y una nota no bloqueante una sola vez", async () => {
+    let changed = true;
+    const combineBase = (): Promise<CombineResult> => {
+      const result: CombineResult = { outcome: "base-conflict", parent: "app#11", merged: ["app#10"], files: ["a.txt"], failures: "Conflicto en a.txt.", changed };
+      changed = false;
+      return Promise.resolve(result);
+    };
+    const { h, child } = await blockedByTwo({ combineBase, dissolveBase: dissolve });
+
+    await h.scheduler.tick();
+    await h.scheduler.tick();
+
+    expect(h.status(child)).toBeUndefined();
+    expect(await h.scheduler.queue.of(h.projectId)).toMatchObject([
+      { issue: { id: child.id }, state: "waiting", reason: expect.stringContaining("app#11 choca con la branch por defecto y app#10 en a.txt") },
+    ]);
+    expect(h.events("issue.skipped")).toHaveLength(1);
+    expect(h.decisions.list({ kind: ["note"] })).toMatchObject([{ projectId: h.projectId, subject: { type: "issue", id: child.id }, status: "pending" }]);
+  });
+
+  test("si falta la branch de un padre, la issue queda esperando con el error y no se lanza", async () => {
+    const combineBase = () => Promise.reject(new Error("La base cla-2 no existe"));
+    const { h, child } = await blockedByTwo({ combineBase, dissolveBase: dissolve });
+
+    await h.scheduler.tick();
+
+    expect(h.status(child)).toBeUndefined();
+    expect(await h.scheduler.queue.of(h.projectId)).toMatchObject([{ state: "waiting", reason: "La base cla-2 no existe" }]);
+  });
+
+  test("una issue con un solo padre se apila sobre su branch y disuelve una base combinada anterior", async () => {
+    const dissolved: [string, string][] = [];
+    const { h, child, two } = await blockedByTwo({
+      combineBase: () => Promise.reject(new Error("no se esperaba armar una base combinada")),
+      dissolveBase: (repo, branch) => (dissolved.push([repo, branch]), Promise.resolve()),
+    });
+    // Se mergeó uno de los padres: queda un PR abierto.
+    h.store.db.$client.prepare("UPDATE pull_requests SET state = 'closed' WHERE number = 11").run();
+    await h.local.setStatus(two.ref, "done");
+    await h.issues.sync(h.local, { projectId: h.projectId, project: { tracker: "local", id: h.projectId } });
+
+    await h.scheduler.tick();
+
+    expect(h.runOf(child)).toMatchObject({ status: "running", params: { base: "cla-1" } });
+    expect(dissolved).toEqual([[expect.any(String), `clanker/base/${child.ref.key}`]]);
   });
 });

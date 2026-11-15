@@ -65,6 +65,8 @@ export function apiDeps(
       trackers: { local },
       prs: { get: () => Promise.reject(new Error("este test no lee PRs")) },
     }),
+    // Sin repos git: este core de pruebas no arma bases combinadas.
+    workspaces: { combineBase: () => Promise.reject(new Error("este core de pruebas no tiene workspaces")), dissolveBase: () => Promise.resolve() },
     lanes,
     runtime: noRuntime.id,
   });

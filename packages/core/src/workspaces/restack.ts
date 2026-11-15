@@ -65,7 +65,7 @@ export async function planRestack(git: Git, { onto, from, committer }: { onto: s
   return { status: "ok", head: tip, commits: own.length };
 }
 
-async function isAncestor(git: Git, ancestor: string, descendant: string): Promise<boolean> {
+export async function isAncestor(git: Git, ancestor: string, descendant: string): Promise<boolean> {
   return git(["merge-base", "--is-ancestor", ancestor, descendant]).then(
     () => true,
     (error) => {
@@ -76,9 +76,14 @@ async function isAncestor(git: Git, ancestor: string, descendant: string): Promi
 }
 
 /** El árbol de aplicar `commit` sobre `tip` (con `commit^` de base), o los archivos en conflicto. */
-async function cherryPickTree(git: Git, tip: string, commit: string) {
+function cherryPickTree(git: Git, tip: string, commit: string) {
+  return mergeTree(git, tip, commit, [`--merge-base=${commit}^`]);
+}
+
+/** El árbol de juntar `theirs` en `ours` con `merge-tree` (sin worktree), o los archivos en conflicto. */
+export async function mergeTree(git: Git, ours: string, theirs: string, options: string[] = []) {
   try {
-    const out = await git(["merge-tree", "--write-tree", "--name-only", `--merge-base=${commit}^`, tip, commit]);
+    const out = await git(["merge-tree", "--write-tree", "--name-only", ...options, ours, theirs]);
     return { ok: true as const, tree: out.split("\n")[0]! };
   } catch (error) {
     if (!(error instanceof GitError)) throw error;

@@ -1,7 +1,8 @@
-import type { CachedIssue, ClankerProject, IssueId, Origin, ProjectId, QueueEntry, StartRun } from "@clanker/api";
+import type { CachedIssue, ClankerProject, IssueId, Origin, ProjectId, QueueEntry } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { RuntimeId } from "../agents/runtime";
 import type { Breakers as AllBreakers } from "../breakers/breakers";
+import { openDecision } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
 import { hasRoom } from "../flows/lanes";
 import type { Projects } from "../projects/projects";
@@ -13,6 +14,7 @@ import type { Store, Tx } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
 import type { Repos } from "../workspaces/repos";
+import { combinedBaseBranch, type Workspaces } from "../workspaces/workspaces";
 import type { LaneSettings } from "./lanes";
 import type { ProjectQueue } from "./project-queue";
 
@@ -54,6 +56,8 @@ export interface SchedulerDeps {
   runs: Pick<RunStarter, "start">;
   /** La cola sin las marcas del Scheduler (`createProjectQueue`). */
   queue: ProjectQueue;
+  /** Arma (y disuelve) la base combinada de una issue con varios padres antes de lanzar su corrida. */
+  workspaces: Pick<Workspaces, "combineBase" | "dissolveBase">;
   lanes: LaneSettings;
   /** El runtime con que corren los agentes de este core: su breaker pausa todos los lanzamientos. */
   runtime: RuntimeId;
@@ -73,7 +77,8 @@ export interface Scheduler {
   tick(): Promise<void>;
   /**
    * `projects.queue` con lo que el último tick no pudo lanzar: una issue `ready` que se saltó (reclamo
-   * perdido, relacionada con una corrida en vuelo, repo o runtime en pausa) sale `waiting` con ese motivo.
+   * perdido, relacionada con una corrida en vuelo, repo o runtime en pausa, padres de una base combinada que
+   * chocan) sale `waiting` con ese motivo.
    */
   queue: ProjectQueue;
   /** Pide (o devuelve) que el Scheduler no lance la issue. Lanza `ProjectNotFoundError` o `IssueNotInProjectError`. */
@@ -162,16 +167,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         const { issue } = entry;
         if (closed || !hasRoom(store.db, lanes.capacity(), { lane: "dev", projectId: project.id })) break;
 
-        const held = holdBack(project, issue, entry.base, cache, inFlight);
+        const held = holdBack(project, issue, cache, inFlight);
         if (held !== undefined) {
           marks.set(issue.id, held);
           continue;
         }
-        const params: StartRun["params"] = {
-          ...(entry.base.kind === "stacked" ? { base: entry.base.parent.branch } : {}),
-          ...(entry.dependsOn.length > 0 ? { dependsOn: entry.dependsOn } : {}),
-        };
         try {
+          const resolved = await baseParams(project, issue, entry.base);
+          if (resolved.held !== undefined) {
+            marks.set(issue.id, resolved.held);
+            continue;
+          }
+          const params = { ...resolved.params, ...(entry.dependsOn.length > 0 ? { dependsOn: entry.dependsOn } : {}) };
           await deps.runs.start({ projectId: project.id, issueId: issue.id, params }, "core");
           inFlight.add(issue.id);
         } catch (error) {
@@ -184,24 +191,55 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   }
 
-  /** Por qué esta issue `ready` no se lanza ahora (relacionada con algo en vuelo, repo o runtime en pausa, base que aún no existe), o `undefined`. */
-  function holdBack(
+  /** Por qué esta issue `ready` no se lanza ahora (relacionada con algo en vuelo, repo o runtime en pausa), o `undefined`. */
+  function holdBack(project: ClankerProject, issue: CachedIssue, cache: readonly CachedIssue[], inFlight: ReadonlySet<string>): string | undefined {
+    const related = conflictsWithRunning(issue, cache, inFlight);
+    if (related !== undefined) return `relacionada con ${related.ref.key}, que está en vuelo: no corren a la vez`;
+    const repoId = repoOfIssue(project, issue);
+    const paused = (repoId === undefined ? undefined : pausedBecause(`repo:${repoId}`)) ?? pausedBecause(`runtime:${deps.runtime}`);
+    return paused;
+  }
+
+  /** El repo donde correrá la issue, si ya se sabe (ver `issuePlan`). */
+  function repoOfIssue(project: ClankerProject, issue: CachedIssue): string | undefined {
+    const plan = issuePlan(store, repos, project, issue);
+    return plan.kind === "repos" ? plan.next?.repoId : undefined;
+  }
+
+  /**
+   * Los params de la corrida para la base de la cola. Una base combinada se arma aquí, antes de lanzar: la corrida
+   * sale de su branch sintética. Si los padres chocan la issue no se lanza (`held` con el motivo) y, la primera vez,
+   * queda una nota no bloqueante; espera a que se mergee un padre. Una base que ya no es combinada disuelve la que
+   * hubiera quedado de un intento anterior.
+   */
+  async function baseParams(
     project: ClankerProject,
     issue: CachedIssue,
     base: Extract<QueueEntry, { state: "ready" }>["base"],
-    cache: readonly CachedIssue[],
-    inFlight: ReadonlySet<string>,
-  ): string | undefined {
-    const related = conflictsWithRunning(issue, cache, inFlight);
-    if (related !== undefined) return `relacionada con ${related.ref.key}, que está en vuelo: no corren a la vez`;
-    const plan = issuePlan(store, repos, project, issue);
-    const repoId = plan.kind === "repos" ? plan.next?.repoId : undefined;
-    const paused = (repoId === undefined ? undefined : pausedBecause(`repo:${repoId}`)) ?? pausedBecause(`runtime:${deps.runtime}`);
-    if (paused !== undefined) return paused;
-    if (base.kind === "combined") {
-      return `su base combinada de ${base.parents.map((p) => p.key).join(" y ")} todavía no se puede crear: espera a que se mergee un padre`;
+  ): Promise<{ params: Record<string, unknown>; held?: undefined } | { held: string }> {
+    const repo = repoOfIssue(project, issue);
+    const branch = combinedBaseBranch(issue.ref.key);
+    if (base.kind !== "combined") {
+      if (repo !== undefined) await deps.workspaces.dissolveBase(repo, branch);
+      return { params: base.kind === "stacked" ? { base: base.parent.branch } : {} };
     }
-    return undefined;
+    const parents = base.parents.map((p) => p.key).join(" y ");
+    if (repo === undefined) return { held: `su base combinada de ${parents} necesita un repo y el proyecto no tiene ninguno para esta issue` };
+    const combined = await deps.workspaces.combineBase({ repo, issueId: issue.id, branch, parents: base.parents });
+    if (combined.outcome === "combined") return { params: { base: combined.branch } };
+    const clash = `${combined.parent} choca con la branch por defecto${combined.merged.length > 0 ? ` y ${combined.merged.join(", ")}` : ""} en ${combined.files.join(", ")}`;
+    if (combined.changed) {
+      store.tx((tx) =>
+        openDecision(tx, {
+          kind: "note",
+          title: `${issue.ref.key} espera: los padres de su base combinada chocan`,
+          body: `No se lanza ${issue.ref.key} sobre ${parents}: ${clash}. No hace falta hacer nada; se vuelve a intentar sola cuando se mergee un padre.`,
+          projectId: project.id,
+          subject: { type: "issue", id: issue.id },
+        }),
+      );
+    }
+    return { held: `los padres de su base combinada (${parents}) chocan, ${clash}: espera a que se mergee un padre` };
   }
 
   function pausedBecause(scope: string): string | undefined {
