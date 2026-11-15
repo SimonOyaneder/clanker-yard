@@ -19,7 +19,7 @@ import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefFilter, DefRecord, DefRef, D
 import { Learning, LearningFilter, LearningPatch, NewLearning } from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
-import { ClankerProject, NewProject, ProjectPatch } from "./projects";
+import { ClankerProject, NewProject, ProjectUpdate } from "./projects";
 import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
@@ -212,8 +212,11 @@ const projects = {
    * un label con otro repo del proyecto.
    */
   create: base.input(NewProject).output(ClankerProject),
-  /** Cambia solo los campos presentes; las mismas validaciones que `create`. */
-  update: base.input(ProjectPatch.extend({ id: ProjectId })).output(ClankerProject),
+  /**
+   * Cambia solo los campos presentes, planos junto al `id` (`{ id, name }`, no `{ id, patch: { name } }`); las
+   * mismas validaciones que `create`. Un campo que no existe es `BAD_REQUEST`.
+   */
+  update: base.input(ProjectUpdate).output(ClankerProject),
   /**
    * Pausa el proyecto: el Scheduler deja de lanzar sus issues. No toca a otros proyectos ni lo que ya corre (sus
    * corridas y el carril de mantenimiento siguen). Emite `project.paused` con el actor. `NOT_FOUND` si no existe;
@@ -578,7 +581,7 @@ const defs = {
     .input(DefCreate)
     .output(DefWrite),
   /**
-   * Reemplaza el body y guarda una versión nueva si cambió (el mismo contenido no suma versiones ni emite
+   * Reemplaza el body de la def (por su id o su slug) y guarda una versión nueva si cambió (el mismo contenido no suma versiones ni emite
    * eventos). Con `dryRun` solo valida y devuelve el diff contra la versión vigente. Para deshacer un cambio,
    * `get` de la versión anterior y `update` con su body. `NOT_FOUND` si no existe; `BAD_REQUEST` si el body es
    * inválido, la def está archivada o su scope es `builtin` o `pack` (los regenera el core: pisarlas es

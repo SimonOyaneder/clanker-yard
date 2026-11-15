@@ -1,4 +1,4 @@
-import { type ClankerProject, NewProject, type Origin, ProjectPatch, type ProjectId, type RepoId } from "@clanker/api";
+import { type ClankerProject, NewProject, type Origin, ProjectPatch, ProjectUpdate, type ProjectId, type RepoId } from "@clanker/api";
 import { createRouterClient, ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
@@ -196,6 +196,15 @@ describe("statusMapping", () => {
     projects.update(project.id, { statusMapping: { Todo: "backlog" } }, "ui");
 
     expect(cursors()).toEqual([cursorKey(project)]);
+  });
+
+  test("un campo desconocido es un error claro, también el patch anidado: no se ignora en silencio", () => {
+    const id = newId("prj");
+    const wrapped = ProjectUpdate.safeParse({ id, patch: { name: "Otro" } });
+    expect(wrapped.success).toBe(false);
+    expect(wrapped.error?.issues[0]?.message).toMatch(/no tiene el campo "patch".*planos junto a id.*Acepta: name, /);
+    expect(ProjectPatch.safeParse({ nombre: "x", paralel: 2 }).error?.issues[0]?.message).toMatch(/los campos "nombre", "paralel"/);
+    expect(ProjectUpdate.safeParse({ id, name: "Otro" }).success).toBe(true);
   });
 
   test("el contrato rechaza una categoría que no existe", () => {

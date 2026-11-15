@@ -491,6 +491,20 @@ describe("decisions", () => {
   });
 });
 
+describe("projects.update", () => {
+  test("un campo desconocido, como un patch anidado, es BAD_REQUEST con qué hacer, y no se ignora", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+    const project = await client.projects.create({ slug: "demo", name: "Demo", tracker: "local" });
+
+    const error = await client.projects.update({ id: project.id, patch: { name: "Otro" } } as never).catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("planos junto a id"), data: { issues: [{ message: expect.stringContaining("planos junto a id") }] } });
+    expect((await client.projects.get({ id: project.id })).name).toBe("Demo");
+    expect((await client.projects.update({ id: project.id, name: "Otro" })).name).toBe("Otro");
+  });
+});
+
 describe("metrics", () => {
   test("sin corridas cerradas todo viene vacío, y el resumen de un proyecto inexistente es NOT_FOUND", async () => {
     const core = await start();

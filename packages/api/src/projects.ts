@@ -113,8 +113,13 @@ export const NewProject = z
   });
 export type NewProject = z.input<typeof NewProject>;
 
-/** Lo que `projects.update` puede cambiar. `null` borra el flujo o el perfil por defecto. */
-export const ProjectPatch = z.object({
+function unknownFieldMessage(issue: z.core.$ZodRawIssue): string | undefined {
+  if (issue.code !== "unrecognized_keys") return undefined;
+  const keys = issue.keys.map((k) => `"${k}"`).join(", ");
+  return `projects.update no tiene ${issue.keys.length === 1 ? "el campo" : "los campos"} ${keys}: los campos a cambiar van planos junto a id, sin objeto patch. Acepta: ${Object.keys(patchShape).join(", ")}.`;
+}
+
+const patchShape = {
   name: z.string().min(1).optional(),
   defaultFlowId: z.string().min(1).nullable().optional(),
   defaultProfileId: z.string().min(1).nullable().optional(),
@@ -129,5 +134,14 @@ export const ProjectPatch = z.object({
   status: ProjectStatus.optional(),
   flowParams: z.record(z.string(), z.unknown()).optional(),
   maxCostUsd: MaxCostUsd.optional(),
-});
+};
+
+/**
+ * Lo que `projects.update` puede cambiar, plano junto al `id` (no dentro de un `patch`). `null` borra el
+ * flujo o el perfil por defecto. Un campo que no existe es un error: ignorarlo dejaba un update que no hace nada.
+ */
+export const ProjectPatch = z.strictObject(patchShape, { error: unknownFieldMessage });
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
+
+/** La entrada de `projects.update`: el `id` y los campos de `ProjectPatch`. */
+export const ProjectUpdate = z.strictObject({ ...patchShape, id: ProjectId }, { error: unknownFieldMessage });

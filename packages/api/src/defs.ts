@@ -61,6 +61,7 @@ export type DefCreate = z.infer<typeof DefCreate>;
 
 export const DefUpdate = z.object({
   kind: DefWriteKind,
+  /** El id `def_...` o el slug (la def que gana para ese slug; una de scope `repo` solo por su id). */
   id: z.string().min(1),
   /** Reemplaza el body entero y crea una versión nueva; las corridas en curso siguen con la suya. */
   body: z.unknown().describe(BODY_DOC),

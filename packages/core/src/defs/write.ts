@@ -65,6 +65,13 @@ export function createDefWriter({ defs, flows }: { defs: Defs; flows: Pick<Flows
     return def;
   }
 
+  /** El `id` de `update` también puede ser el slug: la def que lo gana (user, pack, builtin; una de repo se pide por su id). */
+  function findBySlug(kind: DefWriteKind, slug: string): Def {
+    const def = defs.resolve(kind, slug);
+    if (!def) throw new DefNotFoundError(kind, slug);
+    return def;
+  }
+
   /** Lo que `create` y `update` devuelven: los errores (o su `BAD_REQUEST`), el diff si es `dryRun`, o la def guardada. */
   function conclude(
     { kind, dryRun, checked, errors, before }: { kind: DefWriteKind; dryRun: boolean; checked: Checked; errors: DefIssue[]; before: unknown },
@@ -98,7 +105,7 @@ export function createDefWriter({ defs, flows }: { defs: Defs; flows: Pick<Flows
     },
 
     update({ kind, id, body, dryRun }, origin) {
-      const current = find(kind, id);
+      const current = defs.get(kind, id) ?? findBySlug(kind, id);
       const repoId = current.repoId ?? undefined;
       const checked = check(kind, current.slug, body, repoId);
       const errors = [...checked.errors];

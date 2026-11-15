@@ -58,6 +58,18 @@ export interface CoreServer {
   close(): Promise<void>;
 }
 
+/** oRPC rechaza una entrada inválida con "Input validation failed" y deja la causa en `data.issues`; el CLI solo imprime el mensaje. */
+function explainInputValidation(error: unknown): unknown {
+  if (!(error instanceof ORPCError) || error.code !== "BAD_REQUEST" || error.message !== "Input validation failed") return error;
+  const issues: unknown = (error.data as { issues?: unknown } | undefined)?.issues;
+  if (!Array.isArray(issues) || issues.length === 0) return error;
+  const lines = issues.map((issue: { message?: string; path?: PropertyKey[] }) => {
+    const path = (issue.path ?? []).map(String).join(".");
+    return `${path === "" ? "" : `${path}: `}${issue.message ?? "inválido"}`;
+  });
+  return new ORPCError("BAD_REQUEST", { message: `Entrada inválida: ${lines.join("; ")}`, data: error.data, cause: error });
+}
+
 /**
  * Sirve la API por HTTP en 127.0.0.1 con puerto aleatorio: `/rpc` (oRPC) y `/mcp` (MCP). Antes de
  * cualquiera, cada request debe traer el token y su Host y su Origin deben ser los esperados (contra DNS
@@ -75,6 +87,13 @@ export async function startServer(opts: StartServerOptions): Promise<CoreServer>
       onError((error) => {
         if (!(error instanceof ORPCError)) console.error(error);
       }),
+      async ({ next }) => {
+        try {
+          return await next();
+        } catch (error) {
+          throw explainInputValidation(error);
+        }
+      },
     ],
   });
 
