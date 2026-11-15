@@ -37,7 +37,9 @@ export type PreparePushResult =
  * no cambia y el committer recibe todo el trabajo del agente como un diff por commitear.
  *
  * El squash pasa por `rebase --interactive --autosquash` con el editor de la secuencia en `true`
- * (`sequence.editor`; `core.editor` también, para que ningún mensaje abra un editor). Los subjects se
+ * (`sequence.editor`; `core.editor` también, para que ningún mensaje abra un editor). Sin `autoStash` ni
+ * `updateRefs` aunque el ~/.gitconfig los pida: con cambios sin commitear el rebase se niega (el
+ * `reset --hard` de un squash fallido los borraría) y no mueve otras branches. Los subjects se
  * leen enteros en memoria: filtrarlos con un pipe y `grep -q` mata a `git log` con SIGPIPE y, bajo
  * `pipefail`, no ve un `fixup!` que es el último commit. Si el árbol cambia, hay conflicto o queda
  * algún `fixup!`, vuelve al sha anterior.
@@ -95,6 +97,8 @@ async function squash(workspaces: Workspaces, ws: WorkspaceRef, base: string): P
       "rebase",
       "--interactive",
       "--autosquash",
+      "--no-autostash",
+      "--no-update-refs",
       mergeBase,
     );
   } catch (error) {

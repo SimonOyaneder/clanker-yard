@@ -126,6 +126,26 @@ describe("squash", () => {
     expect(git("status", "--porcelain")).toBe("");
   });
 
+  test("con cambios sin commitear no hay squash, aunque el git del usuario tenga rebase.autoStash", async () => {
+    // El git del core lee el ~/.gitconfig del usuario: con autoStash el rebase guardaría los cambios y
+    // el `reset --hard` de un squash fallido (aquí, árbol distinto) los borraría.
+    git("config", "rebase.autoStash", "true");
+    git("config", "merge.keep.driver", "true");
+    write(".gitattributes", "x.txt merge=keep\n");
+    commit("chore: attrs", "x.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9\n");
+    commit("feat: uno", "x.txt", "A\n2\n3\n4\n5\n6\n7\n8\n9\n");
+    commit("feat: dos", "x.txt", "A\n2\n3\n4\n5\n6\n7\n8\nB\n");
+    const known = commit("fixup! feat: uno", "x.txt", "A\n2\n3\n4\n5\nF\n7\n8\nB\n");
+    write("a.txt", "sin commitear\n");
+
+    const result = await prepare(known);
+
+    expect(result).toMatchObject({ outcome: "squash-failed", failures: expect.stringContaining("autosquash falló") });
+    expect(head()).toBe(known);
+    expect(git("status", "--porcelain")).toBe(" M a.txt");
+    expect(git("stash", "list")).toBe("");
+  });
+
   test("un fixup! sin commit destino no se deja pasar", async () => {
     commit("feat: uno", "x.txt", "1\n");
     const known = head();
