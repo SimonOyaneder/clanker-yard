@@ -15,13 +15,14 @@ import {
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
+import { GITHUB_SCOPE, repoScope, runtimeScope, type Breakers } from "../breakers/breakers";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import type { Defs } from "../defs/defs";
 import { recordRunMetrics } from "../metrics/record";
 import { microsToUsd, newId, usdToMicros } from "../store/conventions";
 import { actionEffects, agentSessions, decisions, projects, runs, stepRuns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
-import { PermanentActionError, type ActionCtx, type ActionDef, type ConsolidatorDef, type ExternalEvent, type RetryPolicy, type WaitDef, type WaitResult } from "./catalog";
+import { EnvironmentError, PermanentActionError, type ActionCtx, type ActionDef, type ConsolidatorDef, type ExternalEvent, type RetryPolicy, type WaitDef, type WaitResult } from "./catalog";
 import { edgeFor, edgesOf, maxRoundsOf, takeEdge, type Taken } from "./edges";
 import {
   agentRolesOf,
@@ -165,6 +166,11 @@ export interface EngineDeps extends SubjectsDeps {
    * el brief. Sin esto el brief lleva solo el payload del nodo.
    */
   briefFor?: (request: StepBriefRequest) => Promise<Brief>;
+  /**
+   * Los circuit breakers por causa (`docs/design.html#d-ops`) y el runtime de los agentes (su ámbito es
+   * `runtime:<id>`). Un paso cuyo ámbito está abierto no se despacha; un error de entorno abre el de su causa.
+   */
+  environment?: { breakers: Pick<Breakers, "open" | "trip">; runtime: string };
   /** Tope global de agentes a la vez. */
   maxAgents?: number;
   tickMs?: number;
@@ -325,7 +331,7 @@ interface BranchState {
 }
 
 export function createEngine(deps: EngineDeps): Engine {
-  const { store, defs, agents, artifacts, actions, consolidators, waits, workspaceOf, briefFor, now = Date.now } = deps;
+  const { store, defs, agents, artifacts, actions, consolidators, waits, workspaceOf, briefFor, environment, now = Date.now } = deps;
   const maxAgents = deps.maxAgents ?? DEFAULT_MAX_AGENTS;
   const probeEveryMs = (deps.probeEverySec ?? DEFAULT_PROBE_EVERY_SEC) * 1000;
   const bootId = deps.bootId ?? newId("boot");
@@ -648,6 +654,8 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const { step, run } of ready) {
       const planned = loadJob(run, step);
       if (!planned) continue;
+      // Pausado por un breaker: sigue pending, sin gastar intento, hasta que el breaker se cierre.
+      if (pausedBy(planned) !== undefined) continue;
       if (parkOverLimit(planned)) continue;
       const isAgent = planned.node.type === "agent";
       if (isAgent && activeAgents >= maxAgents) continue;
@@ -661,6 +669,28 @@ export function createEngine(deps: EngineDeps): Engine {
       });
       inFlight.add(job);
     }
+  }
+
+  /**
+   * Los ámbitos de breaker de los que depende un paso: un agente, de su runtime y del entorno de su repo; una
+   * acción que corre la receta, del entorno de su repo; una que publica, de GitHub. Los waits, gates y
+   * subflujos no dependen de ninguno (Watch sigue contando).
+   */
+  function scopesOf(run: RunRow, node: Node): string[] {
+    if (!environment) return [];
+    const scopes: string[] = [];
+    const repoId = workspaceFor(run)?.repoId;
+    if (node.type === "agent") scopes.push(runtimeScope(environment.runtime));
+    if (repoId !== undefined && (node.type === "agent" || (node.type === "action" && actions.get(node.action)?.needsRepoEnv))) {
+      scopes.push(repoScope(repoId));
+    }
+    if (node.type === "action" && actions.get(node.action)?.effects === "remote") scopes.push(GITHUB_SCOPE);
+    return scopes;
+  }
+
+  /** El ámbito abierto que pausa a este paso, o `undefined`. */
+  function pausedBy({ run, node }: Job): string | undefined {
+    return scopesOf(run, node).find((scope) => environment?.breakers.open(scope) !== undefined);
   }
 
   /** El paso (pending, en un wait o a medias por un corte) no se pudo cargar: falla sin correr y su corrida queda parked. */
@@ -1009,6 +1039,10 @@ export function createEngine(deps: EngineDeps): Engine {
       result = await raceAbort(action.run(args.data, ctx), signal);
     } catch (error) {
       if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
+      if (error instanceof EnvironmentError) {
+        environment?.breakers.trip({ scope: error.scope, cause: "environment", reason: error.message });
+        return deferred(error.message, now() + ENVIRONMENT_BACKOFF_MS);
+      }
       return error instanceof PermanentActionError ? permanent(error.message) : { kind: "failed", error: describe(error) };
     }
     if (!action.outcomes.includes(result.outcome)) {
@@ -1076,12 +1110,27 @@ export function createEngine(deps: EngineDeps): Engine {
         return { kind: "failed", error: result.message };
       case "login_expired":
       case "quota_exhausted":
-        return { kind: "deferred", error: result.message, notBefore: result.resetsAt ?? now() + ENVIRONMENT_BACKOFF_MS };
+        environment?.breakers.trip({
+          scope: runtimeScope(environment.runtime),
+          cause: result.status,
+          reason: result.message,
+          ...(result.resetsAt === undefined ? {} : { resetsAt: result.resetsAt }),
+        });
+        return deferred(result.message, result.resetsAt ?? now() + ENVIRONMENT_BACKOFF_MS);
       case "error_max_turns":
       case "error_max_budget_usd":
       case "report_invalid":
         return permanent(result.message);
     }
+  }
+
+  /**
+   * Falló el entorno, no el paso. Con breakers, quien manda la espera es el breaker de la causa (el paso sigue
+   * pending y no se despacha mientras esté abierto, y sigue en cuanto se cierra: reconectar no espera a un
+   * backoff); sin ellos, `notBefore`.
+   */
+  function deferred(error: string, notBefore: number): Settled {
+    return { kind: "deferred", error, notBefore: environment ? now() : notBefore };
   }
 
   /** La sesión de este paso que un corte dejó sin cerrar. */
@@ -1251,6 +1300,9 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "failed": {
+        // Con el breaker de su ámbito abierto, la falla es del entorno y no del paso (un 401 de GitHub que
+        // acaba de abrir el breaker `github`): espera sin gastar intento.
+        if (pausedBy(job) !== undefined) return requeue(job, settled.error, now(), true);
         const policy = retryOf(job.node);
         // Ni un corte ni una espera del entorno gastan intento.
         const spent = job.step.attempt - job.step.recoveries - job.step.deferrals;

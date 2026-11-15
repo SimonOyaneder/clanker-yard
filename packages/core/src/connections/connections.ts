@@ -142,6 +142,12 @@ export interface Connections {
    */
   markRevoked(provider: ConnectionProvider, account: string, origin: Origin): void;
   /**
+   * Un run real encontró el login de Claude vencido (con API key, la key rechazada): deja
+   * `claude/subscription` en `expired` o `claude/api-key` en `revoked`, y emite `connection.changed`, como
+   * si el usuario hubiera corrido `testClaude`. No hace nada si esa cuenta no está conectada.
+   */
+  markClaudeLoginLost(origin: Origin): void;
+  /**
    * El token de una cuenta, solo para el core. Lanza si la cuenta no está conectada. El de Linear se
    * refresca solo si le quedan menos de `LINEAR_REFRESH_MARGIN_MS`; si Linear rechaza el refresh, deja la
    * cuenta `revoked` (`connection.changed`) y lanza `LinearAuthError`, y mientras siga revocada lanza sin
@@ -474,6 +480,11 @@ export function createConnections(
 
     markRevoked(provider, account, origin) {
       setStatus(provider, account, "revoked", origin);
+    },
+
+    markClaudeLoginLost(origin) {
+      if (find("claude", CLAUDE_API_KEY_ACCOUNT)) setStatus("claude", CLAUDE_API_KEY_ACCOUNT, "revoked", origin);
+      else setStatus("claude", "subscription", "expired", origin);
     },
 
     async token(provider, account) {

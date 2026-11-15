@@ -32,6 +32,19 @@ export interface ActionCtx {
  */
 export class PermanentActionError extends Error {}
 
+/**
+ * Lo que una acción lanza cuando falló el entorno y no el paso (a un repo le falta su Postgres): abre el breaker
+ * de `scope` (`repo:<id>`) y el paso vuelve a pending sin gastar intento (`docs/design.html#d-flows`, "Error de entorno").
+ */
+export class EnvironmentError extends Error {
+  constructor(
+    readonly scope: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export interface ActionResult {
   /** Uno de `ActionDef.outcomes`. Un outcome de negocio (tests rojos) es un resultado, no una excepción. */
   outcome: string;
@@ -47,6 +60,8 @@ export interface ActionDef<A extends ZodType = ZodType> {
   outcomes: string[];
   /** `remote`: publica (push, PR, comentarios, tracker). `effects: "local"` en un flujo la rechaza. */
   effects: "local" | "remote";
+  /** Corre comandos del entorno del repo (su receta): si el breaker `repo:<id>` está abierto, el paso espera. */
+  needsRepoEnv?: boolean;
   /** Sin esto, la acción corre sin límite de tiempo. El nodo puede pisarlo. */
   timeoutSec?: number;
   /** Por defecto 3 reintentos con 10 s, 60 s y 5 min. El nodo puede pisarlo. */

@@ -8,9 +8,10 @@ import type { AgentRuntime, RunResult, RunSpec, SessionRef, Usage } from "../age
 import { createArtifacts } from "../artifacts/artifacts";
 import { createDecisions } from "../decisions/decisions";
 import { createDefs } from "../defs/defs";
-import { openStore, type Tx } from "../store/store";
-import type { ActionCtx, ActionResult } from "./catalog";
+import { openStore, type Store, type Tx } from "../store/store";
+import type { ActionCtx, ActionDef, ActionResult } from "./catalog";
 import type { LaneCapacity } from "./lanes";
+import type { EngineDeps } from "./engine";
 import { createFlows } from "./flows";
 
 // Un motor de flujos sobre una base en memoria y un runtime que responde con un guion, para los
@@ -82,6 +83,8 @@ export function harness(
     handOverWorkspaces?: (tx: Tx, from: RunId, to: RunId) => void;
     /** La capacidad de cada carril; sin ella ningún carril tiene tope. */
     laneCapacity?: () => LaneCapacity;
+    /** Los breakers y el runtime de los agentes; recibe la base del harness para armar `createBreakers` sobre ella. */
+    environment?: (store: Store) => EngineDeps["environment"];
   } = {},
 ) {
   const dir = options.reopen?.dir ?? mkdtempSync(join(tmpdir(), "clanker-flows-"));
@@ -137,6 +140,7 @@ export function harness(
     onClockJump: options.onClockJump,
     handOverWorkspaces: options.handOverWorkspaces,
     laneCapacity: options.laneCapacity,
+    environment: options.environment?.(store),
   });
   let crashed = false;
   /** Un corte: deja de despachar y no espera a lo que tenía en vuelo (un proceso muerto no termina nada). */
@@ -162,11 +166,13 @@ export function harness(
     name: string,
     outcomes: string[],
     fn: (args: Record<string, unknown>, ctx: ActionCtx) => Promise<ActionResult> | ActionResult = () => ({ outcome: "ok" }),
+    traits: Partial<Pick<ActionDef, "effects" | "needsRepoEnv">> = {},
   ) {
     flows.registerAction({
       name,
       outcomes,
-      effects: "local",
+      effects: traits.effects ?? "local",
+      needsRepoEnv: traits.needsRepoEnv,
       args: anyArgs,
       run: async (args, ctx) => fn(args, ctx),
     });

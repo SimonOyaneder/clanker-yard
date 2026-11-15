@@ -1,6 +1,7 @@
 import type { CachedIssue, ClankerProject, IssueId, Origin, ProjectId, QueueEntry, StartRun } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { RuntimeId } from "../agents/runtime";
+import type { Breakers as AllBreakers } from "../breakers/breakers";
 import type { Engine } from "../flows/engine";
 import { hasRoom } from "../flows/lanes";
 import type { Projects } from "../projects/projects";
@@ -25,6 +26,7 @@ const TRIGGERS = [
   "issue.synced",
   "issue.queued",
   "pr.merged",
+  "breaker.closed",
   "project.created",
   "project.updated",
   "project.resumed",
@@ -34,12 +36,10 @@ const TRIGGERS = [
 const IN_FLIGHT = ["queued", "running", "waiting", "parked", "paused"] as const;
 
 /**
- * Los circuit breakers por causa (`docs/design.html#d-ops`): `repo:<id>` y `runtime:<id>`. Devuelve por qué
- * está abierto el de `scope`, o `undefined` si no. El Scheduler no lanza issues de un ámbito pausado.
+ * Los circuit breakers por causa (`docs/design.html#d-ops`, `breakers/`): el Scheduler no lanza issues de un
+ * `repo:<id>` ni del `runtime:<id>` pausados. El breaker `github` solo frena a quien publica, no el lanzamiento.
  */
-export interface Breakers {
-  open(scope: string): string | undefined;
-}
+export type Breakers = Pick<AllBreakers, "open">;
 
 export interface SchedulerDeps {
   store: Store;
@@ -55,7 +55,7 @@ export interface SchedulerDeps {
   lanes: LaneSettings;
   /** El runtime con que corren los agentes de este core: su breaker pausa todos los lanzamientos. */
   runtime: RuntimeId;
-  /** Sin él nada está pausado: los breakers son de otra issue. */
+  /** Sin él nada está pausado. */
   breakers?: Breakers;
   tickMs?: number;
 }

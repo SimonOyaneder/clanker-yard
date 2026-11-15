@@ -11,10 +11,12 @@ import {
   createSlots,
   createWorkspaces,
   DefValidationError,
+  EnvironmentError,
   EXCERPT_MAX_LINES,
   newId,
   openStore,
   PermanentActionError,
+  repoScope,
   StaleLeaseError,
   type ActionCtx,
   type Artifacts,
@@ -671,5 +673,32 @@ describe("recipe.check con slots", () => {
     await worktree({}, recipeWith());
 
     await expect(check()).rejects.toBeInstanceOf(PermanentActionError);
+  });
+});
+
+describe("recipe.check con requires", () => {
+  const withRequires = (requires: Array<{ name: string; check: string }>) => ({
+    version: 1,
+    requires,
+    commands: { t: "touch checked && true" },
+    checks: ["t"],
+  });
+
+  test("un servicio caído es un error de entorno del repo, no un check rojo, y no corre los checks", async () => {
+    await worktree({}, withRequires([{ name: "Postgres", check: "exit 2" }, { name: "Redis", check: "true" }, { name: "Doppler", check: "exit 1" }]));
+
+    const error = await check().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(EnvironmentError);
+    expect((error as EnvironmentError).scope).toBe(repoScope("r1"));
+    expect((error as Error).message).toBe("Al repo le falta su entorno, no responde: Postgres, Doppler.");
+    expect(existsSync(join(lease!.path, "checked"))).toBe(false);
+  });
+
+  test("con todos los requires arriba corre los checks", async () => {
+    await worktree({}, withRequires([{ name: "Postgres", check: "true" }]));
+
+    expect((await check()).outcome).toBe("ok");
+    expect(existsSync(join(lease!.path, "checked"))).toBe(true);
   });
 });

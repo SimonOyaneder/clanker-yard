@@ -7,8 +7,10 @@ import * as z from "zod";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Defs } from "../defs/defs";
 import { DefValidationError } from "../defs/defs";
-import { PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
+import { repoScope } from "../breakers/breakers";
+import { EnvironmentError, PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
 import type { SlotLease, Slots } from "../slots/slots";
+import { failedRequires } from "./requires";
 import { agentSessions, runs, stepRuns, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
 import { excerpt } from "../workspaces/exec";
@@ -211,6 +213,24 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
     return { name, ok: exitCode === 0, exitCode, extract, artifact };
   }
 
+  /**
+   * Los `requires` de la receta son el entorno del repo: si alguno no responde el problema no es del paso ni
+   * del código del agente, así que abre el breaker `repo:<id>` (`EnvironmentError`) en vez de dar un check rojo.
+   */
+  async function assertRequires(ws: WorkspaceRef, recipe: Recipe, slot: number | undefined, ctx: ActionCtx): Promise<void> {
+    if (fake || recipe.requires.length === 0) return;
+    const { render, env } = rendering(ws, recipe, { slot, files: [] });
+    const down = await failedRequires(
+      recipe,
+      (template) => render(template, true),
+      async (command) => (await workspaces.exec(ws, command, { runId: ctx.runId, stepId: ctx.stepId, env, signal: ctx.signal })).exitCode,
+    );
+    if (down.length === 0) return;
+    const workspace = store.db.select({ repoId: workspaceRows.repoId }).from(workspaceRows).where(eq(workspaceRows.id, ws.workspaceId)).get();
+    if (!workspace) throw new PermanentActionError(`El workspace ${ws.workspaceId} no existe en la base.`);
+    throw new EnvironmentError(repoScope(workspace.repoId), `Al repo le falta su entorno, no responde: ${down.join(", ")}.`);
+  }
+
   /** El slot del pool del carril de la corrida, para el worktree `ws`. */
   function acquireSlot(ws: WorkspaceRef, pools: NonNullable<Recipe["slots"]>, ctx: ActionCtx): Promise<SlotLease> {
     const run = store.db.select({ lane: runs.lane }).from(runs).where(eq(runs.id, ctx.runId)).get();
@@ -269,6 +289,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
     args: CheckArgs,
     outcomes: ["ok", "fail"],
     effects: "local",
+    needsRepoEnv: true,
     async run({ ws, scope, slot, afterRebase }, ctx) {
       let recipe;
       try {
@@ -283,6 +304,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
       try {
         // Si el lease del slot se pierde, los comandos se matan.
         const stepCtx = lease ? { ...ctx, signal: AbortSignal.any([ctx.signal, lease.lost]) } : ctx;
+        await assertRequires(ws, recipe, slot ?? lease?.idx, stepCtx);
         const changed = await changedFiles(ws, workspaces.baseSha(ws));
         const files = scope === "changed" ? changed : [];
         const specsChanged = changed.filter((file) => SPEC_FILE.test(file));

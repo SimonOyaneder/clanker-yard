@@ -9,6 +9,8 @@ import { createArtifacts } from "./artifacts/artifacts";
 import { installBuiltins } from "./builtin/install";
 import { commitsApplyAction } from "./commits/apply";
 import type { Connections } from "./connections/connections";
+import { createBreakers } from "./breakers/breakers";
+import { environmentProbe } from "./breakers/probes";
 import { createDecisions } from "./decisions/decisions";
 import { createDefs, type Defs } from "./defs/defs";
 import { createFlows } from "./flows/flows";
@@ -139,8 +141,24 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const projects = createProjects(store, defs);
   const trackers = { local, linear: createLinearTracker({ connections: opts.connections, endpoint: opts.linearEndpoint }) };
   const lanes = createLaneSettings(store);
+  const breakers = createBreakers({
+    store,
+    runtime: runtime.id,
+    probe: environmentProbe({ connections: opts.connections, repos, runtime: runtime.id }),
+    label: (scope) => (scope.startsWith("repo:") ? `repo ${repos.get(scope.slice("repo:".length))?.name ?? scope}` : scope),
+  });
+  // Antes de despachar nada: un breaker que dejó un corte sigue pausando lo suyo.
+  breakers.start();
+  // Un run real que encuentra el login de Claude vencido deja la cuenta `claude` en rojo, como un `testClaude`.
+  const stopMarkingLogin = store.events.subscribe(
+    ({ payload }) => {
+      if (runtime.id === "claude-sdk" && payload.cause === "login_expired") opts.connections.markClaudeLoginLost("core");
+    },
+    { types: ["breaker.opened"] },
+  );
   const flows = createFlows({
     store,
+    environment: { breakers, runtime: runtime.id },
     laneCapacity: lanes.capacity,
     defs,
     agents,
@@ -226,6 +244,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     queue: createProjectQueue({ store, projects, issues, repos, trackers, prs }),
     lanes,
     runtime: runtime.id,
+    breakers,
   });
   const server = await startServer({
     store,
@@ -259,6 +278,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       const graceMs = drain ? DRAIN_MS : 0;
       // Antes de apagar el motor: un cierre no abre corridas nuevas.
       await scheduler.close();
+      breakers.close();
+      stopMarkingLogin();
       const stopped = flows.close({ graceMs });
       // Con `drain`, hasta que las acciones terminen solas; sin él, el SIGTERM sale de inmediato.
       await Promise.race([stopped, delay(graceMs, undefined, { ref: false })]);

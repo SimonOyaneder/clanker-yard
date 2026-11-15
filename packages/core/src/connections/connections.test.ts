@@ -297,6 +297,23 @@ describe("claude", () => {
     expect(claude.list()[0]?.status).toBe("active");
   });
 
+  test("un run real con el login vencido deja la suscripción expired, o la API key revoked, sin llamar a Claude", async () => {
+    const stubs = withClaude({ replies: [[init(), pong], [init("ANTHROPIC_API_KEY"), pong]] });
+    const claude = connectionsWith(stubs);
+    claude.markClaudeLoginLost("core");
+    expect(claude.list()).toEqual([]);
+
+    await claude.testClaude("subscription", "ui");
+    claude.markClaudeLoginLost("core");
+    expect(claude.list()).toMatchObject([{ account: "subscription", status: "expired" }]);
+    expect(store.events.since(0).at(-1)).toMatchObject({ origin: "core", payload: { provider: "claude", account: "subscription", status: "expired" } });
+
+    await claude.setClaudeApiKey(KEY, "ui");
+    claude.markClaudeLoginLost("core");
+    expect(claude.list()).toMatchObject([{ account: "api-key", status: "revoked" }, { account: "subscription", status: "expired" }]);
+    expect(stubs.envs).toHaveLength(2);
+  });
+
   test("la API key se guarda en Secrets, queda activa y los runs la usan en vez de la suscripción", async () => {
     const stubs = withClaude({ replies: [[init("ANTHROPIC_API_KEY"), pong]] });
     const claude = connectionsWith(stubs);

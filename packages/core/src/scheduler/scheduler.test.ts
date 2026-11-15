@@ -253,6 +253,31 @@ describe("lanzar issues por carril", () => {
     expect(h.status(issue)).toBe("running");
   });
 
+  test("el breaker github no frena el lanzamiento: solo frena a quien publica", async () => {
+    const h = setup({ parallel: 1, breakers: { open: (scope) => (scope === "github" ? "sin conexión" : undefined) } });
+    const issue = await h.create("a");
+
+    await h.scheduler.tick();
+
+    expect(h.status(issue)).toBe("running");
+  });
+
+  test("al cerrarse un breaker lanza lo que esperaba sin aguardar el tick de 5 min", async () => {
+    vi.useFakeTimers();
+    let paused = true;
+    const h = setup({ parallel: 1, breakers: { open: (scope) => (paused && scope === "runtime:fake" ? "sin cuota" : undefined) } });
+    const issue = await h.create("a");
+    h.scheduler.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.status(issue)).toBeUndefined();
+
+    paused = false;
+    h.store.tx((tx) => tx.emit({ type: "breaker.closed", origin: "core", payload: { scope: "runtime:fake" } }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(h.status(issue)).toBe("running");
+  });
+
   test("projects.skipIssue saca la issue de la cola y devolverla la deja lanzar", async () => {
     const h = setup({ parallel: 2 });
     const skipped = await h.create("saltada", 1);
