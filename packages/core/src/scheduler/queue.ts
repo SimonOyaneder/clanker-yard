@@ -43,6 +43,8 @@ export interface TickDevInput {
   issues: readonly CachedIssue[];
   runs: readonly QueueRun[];
   prs: readonly QueuePrFact[];
+  /** Ids de issues que el usuario pidió no lanzar (`projects.skipIssue`): quedan en la cola como `blocked`. */
+  skipped?: ReadonlySet<string>;
 }
 
 const LIVE: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting", "parked", "paused"]);
@@ -56,6 +58,8 @@ const CLOSED: ReadonlySet<StatusCategory> = new Set(["done", "canceled"]);
  * Elegible: su estado está en `queueFilter.status` (default `todo`), calza `queueFilter.labels`, no tiene
  * ninguno de `excludeLabels` (default `no-clanker`), no tiene dueño o es `me`, no tiene sub-issues abiertas
  * y ninguna corrida del carril dev la tomó (viva o terminada: una issue terminada no vuelve a la cola).
+ *
+ * Una issue que el usuario saltó (`skipped`) sale `blocked` con ese motivo.
  *
  * Orden: prioridad (0 al final), milestone (el que vence antes, luego el que no tiene fecha, luego
  * sin milestone), la que bloquea a más issues, estimate menor (sin estimate al final) y la más antigua.
@@ -87,7 +91,12 @@ export function tickDev(input: TickDevInput): QueueEntry[] {
     .sort(byQueueOrder);
 
   const world: World = { project, me, byRef, runsOf, prsOf };
-  const entries = eligible.map((issue) => classify(issue, capabilities.relations ? issue.relations.blockedBy : [], world));
+  const entries = eligible.map(
+    (issue): QueueEntry =>
+      input.skipped?.has(issue.id)
+        ? { issue, state: "blocked", reason: "saltada a mano: el usuario pidió que el Scheduler no la lance (projects.skipIssue)" }
+        : classify(issue, capabilities.relations ? issue.relations.blockedBy : [], world),
+  );
   return [...entries.filter((e) => e.state === "ready"), ...entries.filter((e) => e.state === "waiting"), ...entries.filter((e) => e.state === "blocked")];
 }
 

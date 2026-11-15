@@ -19,6 +19,8 @@ export interface StartServerOptions extends Pick<
   | "recipeTester"
   | "runs"
   | "queue"
+  | "scheduler"
+  | "lanes"
   | "flows"
   | "artifacts"
   | "decisions"

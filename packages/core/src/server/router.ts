@@ -19,7 +19,9 @@ import type { Packs } from "../packs/packs";
 import { DefValidationError, type Defs } from "../defs/defs";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { IssueNotCachedError, type RunStarter } from "../projects/start-run";
+import type { LaneSettings } from "../scheduler/lanes";
 import { QueueUnavailableError, type ProjectQueue } from "../scheduler/project-queue";
+import { IssueNotInProjectError, type Scheduler } from "../scheduler/scheduler";
 import { RecipeSyntaxError } from "../recipe/recipe";
 import { RecipeTestError, type RecipeTester } from "../recipe/recipe-test";
 import { readSchemaVersion } from "../store/migrate";
@@ -47,6 +49,10 @@ export interface RouterDeps {
   runs: RunStarter;
   /** `projects.queue`. */
   queue: ProjectQueue;
+  /** `projects.skipIssue`, y el tick que `system.setLanes` y `projects.setParallel` piden para repartir el cupo que liberaron. */
+  scheduler: Pick<Scheduler, "skipIssue" | "tick">;
+  /** `system.lanes` y `system.setLanes`. */
+  lanes: LaneSettings;
   flows: Engine;
   artifacts: Artifacts;
   decisions: Decisions;
@@ -114,6 +120,12 @@ export function createRouter(deps: RouterDeps) {
         dataDir: deps.dataDir,
         platform,
       })),
+      lanes: os.system.lanes.handler(() => deps.lanes.usage()),
+      setLanes: os.system.setLanes.handler(({ input }) => {
+        deps.lanes.set(input);
+        void deps.scheduler.tick();
+        return deps.lanes.usage();
+      }),
       shutdown: os.system.shutdown.handler(({ input, context }) => {
         store.tx((tx) =>
           tx.emit({
@@ -210,6 +222,12 @@ export function createRouter(deps: RouterDeps) {
       ),
       update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
         asApiError(() => projects.update(id, patch, context.origin)),
+      ),
+      setParallel: os.projects.setParallel.handler(({ input: { id, parallel }, context }) =>
+        asApiError(() => projects.update(id, { parallel }, context.origin)),
+      ),
+      skipIssue: os.projects.skipIssue.handler(({ input: { id, issueId, skipped }, context }) =>
+        asApiError(() => deps.scheduler.skipIssue({ projectId: id, issueId, skipped }, context.origin)),
       ),
       queue: os.projects.queue.handler(({ input }) => asApiErrorAsync(() => deps.queue.of(input.id))),
       summary: os.projects.summary.handler(({ input }) => metrics.summary(projectOrNotFound(input.id).id)),
@@ -322,6 +340,7 @@ function toApiError(error: unknown): unknown {
   }
   if (
     error instanceof InvalidProjectError ||
+    error instanceof IssueNotInProjectError ||
     error instanceof QueueUnavailableError ||
     error instanceof RunStartError ||
     error instanceof DecisionResolveError ||

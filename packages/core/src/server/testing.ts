@@ -11,7 +11,9 @@ import { createLegacyImporter } from "../import/legacy";
 import { createPacks } from "../packs/packs";
 import { createProjects } from "../projects/projects";
 import { createRunStarter } from "../projects/start-run";
+import { createLaneSettings } from "../scheduler/lanes";
 import { createProjectQueue } from "../scheduler/project-queue";
+import { createScheduler } from "../scheduler/scheduler";
 import { createRecipeTester } from "../recipe/recipe-test";
 import { createSlots } from "../slots/slots";
 import type { Store } from "../store/store";
@@ -30,7 +32,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "artifacts" | "decisions" | "defs" | "legacyImport"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "scheduler" | "lanes" | "artifacts" | "decisions" | "defs" | "legacyImport"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -44,12 +46,15 @@ export function apiDeps(
   const repos = createRepos(store);
   const local = createLocalTracker(store);
   const issues = createIssues(store, local);
-  return {
+  const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local } });
+  const lanes = createLaneSettings(store);
+  const scheduler = createScheduler({
+    store,
     projects,
-    packs: createPacks({ defs }),
-    repos,
-    recipeTester: createRecipeTester({ store, repos, slots: createSlots({ store }), dataDir }),
-    runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local } }),
+    issues,
+    trackers: { local },
+    flows,
+    runs,
     queue: createProjectQueue({
       store,
       projects,
@@ -58,6 +63,18 @@ export function apiDeps(
       trackers: { local },
       prs: { get: () => Promise.reject(new Error("este test no lee PRs")) },
     }),
+    lanes,
+    runtime: noRuntime.id,
+  });
+  return {
+    projects,
+    packs: createPacks({ defs }),
+    repos,
+    recipeTester: createRecipeTester({ store, repos, slots: createSlots({ store }), dataDir }),
+    runs,
+    queue: scheduler.queue,
+    scheduler,
+    lanes,
     flows,
     artifacts,
     decisions: createDecisions(store),

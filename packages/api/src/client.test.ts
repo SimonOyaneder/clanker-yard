@@ -32,6 +32,8 @@ const router = os.router({
       dataDir: "/tmp/clanker",
       platform: "linux" as const,
     })),
+    lanes: os.system.lanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
+    setLanes: os.system.setLanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
     shutdown: os.system.shutdown.handler(() => {}),
   },
   connections: {
@@ -81,6 +83,12 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
     update: os.projects.update.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    setParallel: os.projects.setParallel.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    skipIssue: os.projects.skipIssue.handler(() => {
       throw new Error("no se usa en este test");
     }),
     queue: os.projects.queue.handler(() => {

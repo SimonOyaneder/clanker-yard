@@ -22,7 +22,7 @@ import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
-import { Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
+import { Lanes, LanesPatch, Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 
 /**
@@ -59,6 +59,15 @@ const system = {
   ),
   /** Con `drain` el core no toma pasos nuevos y espera las acciones en curso antes de salir. */
   shutdown: base.input(z.object({ drain: z.boolean() })),
+  /** La capacidad de cada carril de la máquina y cuánto está en uso. */
+  lanes: base.output(Lanes),
+  /**
+   * Cambia la capacidad de los carriles presentes (por defecto `maintenance` 2 y `dev` 4, que es el tope
+   * global: cada proyecto además tiene su `parallel`). Rige de inmediato: las corridas que esperaban cupo
+   * se admiten y el Scheduler reparte lo que quedó libre. Una corrida que ya corre nunca se interrumpe
+   * porque baje el tope.
+   */
+  setLanes: base.input(LanesPatch).output(Lanes),
 };
 
 const events = {
@@ -171,6 +180,14 @@ const projects = {
   create: base.input(NewProject).output(ClankerProject),
   /** Cambia solo los campos presentes; las mismas validaciones que `create`. */
   update: base.input(ProjectPatch.extend({ id: ProjectId })).output(ClankerProject),
+  /** El cupo del carril dev de este proyecto (`parallel`). Rige de inmediato: el Scheduler lanza lo que quepa. */
+  setParallel: base.input(z.object({ id: ProjectId, parallel: z.int().positive() })).output(ClankerProject),
+  /**
+   * Con `skipped: true` (por defecto) el Scheduler no lanza esta issue mientras no se revierta: sigue en la
+   * cola como `blocked` con el motivo y emite `issue.skipped`. Con `false` vuelve a la cola (`issue.queued`).
+   * `NOT_FOUND` si el proyecto no existe; `BAD_REQUEST` si la issue no es de ese proyecto.
+   */
+  skipIssue: base.input(z.object({ id: ProjectId, issueId: IssueId, skipped: z.boolean().default(true) })),
   /**
    * La cola del proyecto, calculada por el core a partir del caché de issues, sus corridas y sus PRs:
    * primero las `ready` (en el orden en que se lanzarían), luego `waiting` y `blocked`, cada una con su

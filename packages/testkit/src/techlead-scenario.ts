@@ -159,6 +159,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
     connections,
     runtimes: [createFakeRuntime({ fixtures: FIXTURES, speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
+    scheduler: false,
     gitUrl: () => gitServer.url,
     linearEndpoint: linear?.endpoints.graphql,
     coreVersion: "0.0.0",

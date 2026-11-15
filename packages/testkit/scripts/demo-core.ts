@@ -67,6 +67,8 @@ const core = await startCore({
   }),
   runtimes: [createFakeRuntime({ fixtures, transcripts: join(home, "transcripts") })],
   env: { CORE_RUNTIME: "fake" },
+  // La demo deja las issues en la cola para lanzarlas a mano desde la UI.
+  scheduler: false,
   coreVersion: "0.0.0-demo",
   onShutdown: () => void stop(),
 });

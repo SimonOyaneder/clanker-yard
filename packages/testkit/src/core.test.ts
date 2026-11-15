@@ -44,6 +44,7 @@ async function boot(env: Record<string, string> = { CORE_RUNTIME: "fake" }): Pro
     connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
     runtimes: [createFakeRuntime({ fixtures: juguete, speed: Infinity })],
     env,
+    scheduler: false,
     coreVersion: "0.0.0",
     onShutdown: () => {},
   });

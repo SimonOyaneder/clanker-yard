@@ -33,7 +33,7 @@ import {
   type ParallelNode,
 } from "./parallel";
 import { readRunDetail } from "./run-detail";
-import { createSubjects, hasQueued, loanOf, type SubjectsDeps } from "./subjects";
+import { createSubjects, hasWaiting, loanOf, type SubjectsDeps } from "./subjects";
 import { isTruthy, navigate, refPath, resolveRefs } from "./refs";
 import { calledFlows, LANE_BY_TRIGGER } from "./validate";
 
@@ -209,6 +209,12 @@ export interface Engine {
    * terminó. Lanza `RunNotFoundError` si no existe. No libera el worktree.
    */
   cancel(runId: RunId): void;
+  /**
+   * Admite las corridas que esperan sujeto o cupo (primero las del carril de mantenimiento, luego las
+   * más antiguas) y despacha lo que haya quedado listo. Lo llaman las transiciones y un timer de 5 s;
+   * el Scheduler lo llama antes de repartir los cupos libres entre las issues nuevas.
+   */
+  wake(): void;
   /** Lanza `RunNotFoundError` si no existe. */
   getRun(runId: RunId): RunView;
   /** Las corridas más recientes primero, sin sus pasos. */
@@ -506,6 +512,7 @@ export function createEngine(deps: EngineDeps): Engine {
       lane: n.lane,
       writes: n.writes,
       parentRunId: n.parent?.runId ?? null,
+      projectId: n.projectId ?? null,
     });
     const run = tx.db
       .insert(runs)
@@ -602,8 +609,8 @@ export function createEngine(deps: EngineDeps): Engine {
       sweepWaits();
       sweepGates();
       sweepChildren();
-      // Una dueña que se estacionó o terminó puede dejar libre (o prestable) el sujeto de una corrida que espera.
-      if (hasQueued(store.db)) store.tx((tx) => subjects.promoteQueued(tx));
+      // Una dueña que se estacionó o terminó puede dejar libre (o prestable) el sujeto de una corrida que espera, y una que terminó o se estacionó deja un cupo.
+      if (hasWaiting(store.db)) store.tx((tx) => subjects.promoteQueued(tx));
       dispatch();
     } catch (error) {
       // Un wake que lanza tumbaría a quien lo llamó (un `start`, el cierre de otro paso, un timer).
@@ -1717,14 +1724,17 @@ export function createEngine(deps: EngineDeps): Engine {
    * paso nuevo, nada) y, si sigue viva, vuelve a la cola de su carril. Va antes que las corridas nuevas
    * porque el dispatcher toma primero las más antiguas. Si mantenimiento tiene prestado su sujeto, la
    * decisión queda resuelta pero la corrida sigue `parked` hasta que se lo devuelvan (`subjects.ended`).
+   * Lo mismo si su carril no tiene cupo: sigue `parked` hasta que lo haya.
    */
   function leaveParking(tx: Tx, run: RunRow, decisionId: DecisionId, leave: (current: RunRow) => void): void {
-    const lent = loanOf(tx.db, run.id) !== undefined;
-    const resumed: RunRow = lent ? run : { ...run, status: "running", parkReason: null };
-    if (!lent) tx.db.update(runs).set({ status: "running", parkReason: null }).where(eq(runs.id, run.id)).run();
+    // Sin cupo en su carril, igual que con el sujeto prestado: la decisión queda resuelta y la corrida sigue
+    // `parked` hasta que `promoteQueued` la devuelva (con `run.requeued`).
+    const waits = loanOf(tx.db, run.id) !== undefined || !subjects.hasLaneRoom(tx.db, run);
+    const resumed: RunRow = waits ? run : { ...run, status: "running", parkReason: null };
+    if (!waits) tx.db.update(runs).set({ status: "running", parkReason: null }).where(eq(runs.id, run.id)).run();
     leave(resumed);
     const after = tx.db.select().from(runs).where(eq(runs.id, run.id)).get();
-    if (!lent && after?.status === "running") {
+    if (!waits && after?.status === "running") {
       tx.emit({ type: "run.requeued", origin: "core", ...scopeOf(run), payload: { decisionId, reason: run.parkReason } });
     }
   }
@@ -2157,7 +2167,7 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  return { start, signal, waitKeys, resolveGate, cancel, getRun, listRuns, recover, close };
+  return { start, signal, waitKeys, resolveGate, cancel, getRun, listRuns, recover, wake, close };
 }
 
 class StepTimeout extends Error {

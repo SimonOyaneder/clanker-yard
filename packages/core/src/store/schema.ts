@@ -448,6 +448,16 @@ export const issues = sqliteTable(
   ],
 );
 
+/** Las issues que el usuario le pidió al Scheduler que no lance (`projects.skipIssue`): siguen en el caché, fuera de la cola. */
+export const issueSkips = sqliteTable(
+  "issue_skips",
+  {
+    issueId: text("issue_id").$type<IssueId>().primaryKey(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [foreignKey({ columns: [t.issueId], foreignColumns: [issues.id] })],
+);
+
 /** Las issues del tracker `local`: la fuente de verdad, no el caché. Ver `tracker/local.ts`. */
 export const localIssues = sqliteTable(
   "local_issues",

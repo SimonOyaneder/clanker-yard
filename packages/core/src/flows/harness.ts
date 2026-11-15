@@ -10,6 +10,7 @@ import { createDecisions } from "../decisions/decisions";
 import { createDefs } from "../defs/defs";
 import { openStore, type Tx } from "../store/store";
 import type { ActionCtx, ActionResult } from "./catalog";
+import type { LaneCapacity } from "./lanes";
 import { createFlows } from "./flows";
 
 // Un motor de flujos sobre una base en memoria y un runtime que responde con un guion, para los
@@ -79,6 +80,8 @@ export function harness(
     workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string; workspaceId?: string; fencingToken?: number } | undefined;
     /** Lo que hace el préstamo del sujeto con los worktrees (en producción, `workspaces.handOver`). */
     handOverWorkspaces?: (tx: Tx, from: RunId, to: RunId) => void;
+    /** La capacidad de cada carril; sin ella ningún carril tiene tope. */
+    laneCapacity?: () => LaneCapacity;
   } = {},
 ) {
   const dir = options.reopen?.dir ?? mkdtempSync(join(tmpdir(), "clanker-flows-"));
@@ -133,6 +136,7 @@ export function harness(
     bootId: options.bootId,
     onClockJump: options.onClockJump,
     handOverWorkspaces: options.handOverWorkspaces,
+    laneCapacity: options.laneCapacity,
   });
   let crashed = false;
   /** Un corte: deja de despachar y no espera a lo que tenía en vuelo (un proceso muerto no termina nada). */

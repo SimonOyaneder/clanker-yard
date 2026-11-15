@@ -30,6 +30,7 @@ beforeEach(async () => {
     connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
     runtimes: [createFakeRuntime({ fixtures: juguete, speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
+    scheduler: false,
     coreVersion: "0.0.0",
     onShutdown: () => {},
   });

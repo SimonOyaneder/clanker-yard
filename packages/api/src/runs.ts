@@ -21,6 +21,26 @@ export type ParkReason = z.infer<typeof ParkReason>;
 export const Lane = z.enum(["dev", "maintenance"]);
 export type Lane = z.infer<typeof Lane>;
 
+/** Los cupos de los carriles de la máquina (`docs/design.html#nunca-se-congela`) y cuántos hay en uso. */
+export const LaneUsage = z.object({
+  /** Corridas activas (corriendo o esperando dentro del carril); las `parked` y las `queued` no cuentan. */
+  active: z.int().nonnegative(),
+  capacity: z.int().positive(),
+});
+export const Lanes = z.object({
+  /** `capacity` es el tope global de la máquina; cada proyecto además tiene su `parallel`. */
+  dev: LaneUsage,
+  maintenance: LaneUsage,
+});
+export type Lanes = z.infer<typeof Lanes>;
+
+/** Lo que `system.setLanes` cambia: solo la capacidad de los carriles presentes. */
+export const LanesPatch = z.object({
+  dev: z.int().positive().optional(),
+  maintenance: z.int().positive().optional(),
+});
+export type LanesPatch = z.infer<typeof LanesPatch>;
+
 export const StepStatus = z.enum(["pending", "leased", "running", "waiting", "done", "failed", "canceled"]);
 export type StepStatus = z.infer<typeof StepStatus>;
 

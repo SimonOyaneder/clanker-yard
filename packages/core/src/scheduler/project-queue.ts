@@ -2,7 +2,7 @@ import type { ProjectId, QueueEntry } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Prs } from "../github/prs";
 import { ProjectNotFoundError, type Projects } from "../projects/projects";
-import { pullRequests, runs } from "../store/schema";
+import { issueSkips, pullRequests, runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
@@ -25,8 +25,8 @@ export interface ProjectQueueDeps {
 
 export interface ProjectQueue {
   /**
-   * La cola del proyecto (`tickDev`) sobre el caché de issues, sus corridas dev y los PRs abiertos del
-   * sistema de las issues bloqueantes. Lanza `ProjectNotFoundError` o `QueueUnavailableError`. No
+   * La cola del proyecto (`tickDev`) sobre el caché de issues, sus corridas dev, las issues saltadas y los
+   * PRs abiertos del sistema de las issues bloqueantes. Lanza `ProjectNotFoundError` o `QueueUnavailableError`. No
    * escribe nada, así que la cola del caché es tan fresca como el último sync.
    */
   of(projectId: ProjectId): Promise<QueueEntry[]>;
@@ -87,7 +87,8 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
         .where(and(eq(runs.projectId, project.id), eq(runs.subjectType, "issue"), eq(runs.lane, "dev"), isNull(runs.parentRunId)))
         .all();
       const [me, prs] = await Promise.all([tracker.viewer(), prFacts([...blockerIds], project.stackOn === "ci_green")]);
-      return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs });
+      const skipped = new Set<string>(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
+      return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs, skipped });
     },
   };
 }

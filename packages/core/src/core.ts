@@ -29,7 +29,9 @@ import { createLinearTracker } from "./linear/tracker";
 import { createProcs, type Procs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
 import { createRunStarter } from "./projects/start-run";
+import { createLaneSettings } from "./scheduler/lanes";
 import { createProjectQueue } from "./scheduler/project-queue";
+import { createScheduler } from "./scheduler/scheduler";
 import { createRecipes, readRecipe, type ScriptedRecipe } from "./recipe/recipe";
 import { createRecipeTester } from "./recipe/recipe-test";
 import { createSlots } from "./slots/slots";
@@ -79,6 +81,11 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   packsDir?: string;
   /** La URL de git de un repo de GitHub `owner/name`. Por defecto `https://github.com/<repo>.git`; un test la apunta a un bare local. */
   gitUrl?: (repo: string) => string;
+  /**
+   * El Scheduler lanza solo las issues de la cola de cada proyecto (`docs/design.html#d-ops`). Con `false`
+   * un test lanza las corridas a mano con `runs.start`. Por defecto `true`.
+   */
+  scheduler?: boolean;
   /** El GraphQL de Linear. Por defecto el real; un test lo apunta a `startFakeLinear`. */
   linearEndpoint?: string;
   /**
@@ -131,8 +138,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const issues = createIssues(store, local);
   const projects = createProjects(store, defs);
   const trackers = { local, linear: createLinearTracker({ connections: opts.connections, endpoint: opts.linearEndpoint }) };
+  const lanes = createLaneSettings(store);
   const flows = createFlows({
     store,
+    laneCapacity: lanes.capacity,
     defs,
     agents,
     artifacts,
@@ -206,6 +215,18 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     { types: ["run.returned"] },
   );
   if (opts.watch) watch.start();
+  const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers });
+  const scheduler = createScheduler({
+    store,
+    projects,
+    issues,
+    trackers,
+    flows,
+    runs,
+    queue: createProjectQueue({ store, projects, issues, repos, trackers, prs }),
+    lanes,
+    runtime: runtime.id,
+  });
   const server = await startServer({
     store,
     connections: opts.connections,
@@ -214,8 +235,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     packs,
     repos,
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
-    runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers }),
-    queue: createProjectQueue({ store, projects, issues, repos, trackers, prs }),
+    runs,
+    queue: scheduler.queue,
+    scheduler,
+    lanes,
     flows,
     artifacts,
     decisions: createDecisions(store),
@@ -227,12 +250,15 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     onShutdown: opts.onShutdown,
     allowedOrigins: opts.allowedOrigins,
   });
+  if (opts.scheduler !== false) scheduler.start();
 
   return {
     server,
     async close({ drain } = { drain: false }) {
       await watch.stop();
       const graceMs = drain ? DRAIN_MS : 0;
+      // Antes de apagar el motor: un cierre no abre corridas nuevas.
+      await scheduler.close();
       const stopped = flows.close({ graceMs });
       // Con `drain`, hasta que las acciones terminen solas; sin él, el SIGTERM sale de inmediato.
       await Promise.race([stopped, delay(graceMs, undefined, { ref: false })]);
