@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { connectToCore, isPidAlive } from "@clanker/api/node";
@@ -6,6 +6,11 @@ import { connectToCore, isPidAlive } from "@clanker/api/node";
 /** Cuánto espera a un core vivo que todavía no responde health (está arrancando) antes de rendirse. */
 const BOOT_WAIT_MS = 10_000;
 const POLL_MS = 50;
+/**
+ * Romper un lock viejo toma microsegundos: un `core.lock.break` más viejo que esto lo dejó un proceso
+ * que murió a mitad, y se borra.
+ */
+const BREAK_GUARD_STALE_MS = 5_000;
 
 export interface CoreLock {
   /** Borra `core.lock` si sigue siendo nuestro. */
@@ -30,11 +35,12 @@ export async function acquireCoreLock(dataDir: string): Promise<CoreLock | "runn
     const holder = readPid(lockPath);
     if (holder !== undefined) {
       if (!isPidAlive(holder)) {
-        breakStaleLock(lockPath, holder);
-        continue;
+        // Si otro lo está rompiendo, se espera como cualquier vuelta: sin `continue` no hay busy loop.
+        if (breakStaleLock(lockPath, holder)) continue;
+      } else {
+        const core = await connectToCore(dataDir, "cli");
+        if (core?.info.pid === holder) return "running";
       }
-      const core = await connectToCore(dataDir, "cli");
-      if (core?.info.pid === holder) return "running";
     }
     if (Date.now() >= deadline) {
       throw new Error(
@@ -79,20 +85,33 @@ function readPid(lockPath: string): number | undefined {
 
 /**
  * Borra un lock cuyo pid murió. Va detrás de `core.lock.break` para que dos cores que arrancan
- * juntos no borren, el segundo, el lock nuevo que acaba de crear el primero.
+ * juntos no borren, el segundo, el lock nuevo que acaba de crear el primero. `false` si otro lo
+ * está rompiendo.
  */
-function breakStaleLock(lockPath: string, deadPid: number): void {
+function breakStaleLock(lockPath: string, deadPid: number): boolean {
   const guard = `${lockPath}.break`;
   try {
     closeSync(openSync(guard, "wx"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return; // otro lo está rompiendo
-    throw error;
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (Date.now() - modifiedAt(guard) > BREAK_GUARD_STALE_MS) rmSync(guard, { force: true });
+    return false;
   }
   try {
     if (readPid(lockPath) === deadPid) rmSync(lockPath, { force: true });
   } finally {
     rmSync(guard, { force: true });
+  }
+  return true;
+}
+
+/** `Infinity` si ya no existe: quien lo tenía lo acaba de soltar. */
+function modifiedAt(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return Infinity;
+    throw error;
   }
 }
 

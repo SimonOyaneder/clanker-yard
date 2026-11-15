@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connectToCore, ensureCore, isPidAlive, readCoreJson } from "@clanker/api/node";
@@ -98,6 +98,20 @@ describe("core", () => {
 
     expect(core.info.pid).not.toBe(dead);
     expect(readFileSync(join(home, "core.lock"), "utf8")).toBe(String(core.info.pid));
+  });
+
+  test("un core.lock.break que dejó un proceso muerto a mitad no deja el arranque colgado", async () => {
+    const home = tempHome();
+    writeFileSync(join(home, "core.lock"), String(await deadPid()));
+    const guard = join(home, "core.lock.break");
+    writeFileSync(guard, "");
+    const minuteAgo = new Date(Date.now() - 60_000);
+    utimesSync(guard, minuteAgo, minuteAgo);
+
+    const core = await ensure(home);
+
+    expect(readFileSync(join(home, "core.lock"), "utf8")).toBe(String(core.info.pid));
+    expect(() => statSync(guard)).toThrow(/ENOENT/);
   });
 
   test("con un lock viejo y dos arranques a la vez, queda un solo core", async () => {
