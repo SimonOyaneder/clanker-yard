@@ -37,6 +37,8 @@ export function optionLabel(decision: Pick<Decision, "kind" | "body">, option: s
   }
   if (decision.kind === "needs_human") {
     if (option === "retry") return "Reintentar el paso"
+    if (option === "retry:latest-profile") return "Reintentar con el perfil vigente"
+    if (option === "continue:latest-profile") return "Continuar con el perfil vigente"
     if (option === "cancel") return "Cancelar la corrida"
     if (option === "continue") return "Continuar"
     if (option.startsWith(FORCE)) return `Seguir como "${option.slice(FORCE.length)}"`

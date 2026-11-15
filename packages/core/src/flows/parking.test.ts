@@ -1,6 +1,7 @@
 import type { ProjectId, RunId } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { projects } from "../store/schema";
+import { eq } from "drizzle-orm";
+import { projects, runs } from "../store/schema";
 import { DecisionResolveError } from "./engine";
 import { harness as createHarness, okReport, subjectOf, type AgentScript } from "./harness";
 
@@ -284,7 +285,7 @@ describe("paso con error sin edge", () => {
       kind: "needs_human",
       title: 'El paso "plan" no puede seguir',
       body: "se cayó",
-      options: ["retry", "force:ok", "force:changes", "cancel"],
+      options: ["retry", "retry:latest-profile", "force:ok", "force:changes", "cancel"],
       stepRunId: h.flows.getRun(runId).steps[0]?.id,
     });
     expect(h.eventsOf(runId, "run.parked")[0]?.payload).toEqual({ reason: "needs_human", decisionId: decision?.id });
@@ -306,6 +307,49 @@ describe("paso con error sin edge", () => {
       ["plan", 2, "done"],
     ]);
     expect(h.eventsOf(runId, "run.requeued")[0]?.payload).toMatchObject({ reason: "needs_human" });
+  });
+
+  describe("con el perfil vigente", () => {
+    const profileOf = (h: ReturnType<typeof harness>, runId: RunId) => {
+      const { profileVersion } = h.store.db.select().from(runs).where(eq(runs.id, runId)).get()!;
+      return profileVersion;
+    };
+    const raiseProfile = (h: ReturnType<typeof harness>) =>
+      h.defs.save({ kind: "profile", slug: "default", scope: "user", body: { roles: { dev: { model: "opus" } } }, source: "ui" });
+
+    test("retry:latest-profile reintenta con la versión vigente del perfil, sin cancelar la corrida", async () => {
+      let broken = true;
+      const h = harness({ script: () => Promise.resolve(broken ? { status: "error" as const, message: "tope" } : okReport()) });
+      h.save(planner());
+      const runId = h.startIn("planner", "ENG-1");
+      await h.finished(runId);
+      expect(profileOf(h, runId)).toBe(1);
+
+      raiseProfile(h);
+      broken = false;
+      h.flows.resolveGate(h.pending(runId)[0]?.id as never, "retry:latest-profile", "ui");
+      await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+
+      expect(profileOf(h, runId)).toBe(2);
+      expect(h.calls.map((c) => c.spec?.model)).toEqual(["sonnet", "sonnet", "opus"]);
+      expect(h.decisions.get(h.decisionsOf(runId)[0]?.id as never)).toMatchObject({ resolution: { option: "retry:latest-profile" } });
+    });
+
+    test("retry a secas sigue con la versión que fijó la corrida aunque el perfil haya cambiado", async () => {
+      let broken = true;
+      const h = harness({ script: () => Promise.resolve(broken ? { status: "error" as const, message: "tope" } : okReport()) });
+      h.save(planner());
+      const runId = h.startIn("planner", "ENG-1");
+      await h.finished(runId);
+
+      raiseProfile(h);
+      broken = false;
+      h.flows.resolveGate(h.pending(runId)[0]?.id as never, "retry", "ui");
+      await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+
+      expect(profileOf(h, runId)).toBe(1);
+      expect(h.calls.map((c) => c.spec?.model)).toEqual(["sonnet", "sonnet", "sonnet"]);
+    });
   });
 
   test("force:<outcome> sigue el edge de ese outcome sin ejecutar el paso", async () => {
@@ -353,7 +397,7 @@ describe("paso con error sin edge", () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(h.flows.getRun(runId)).toMatchObject({ status: "parked", parkReason: "needs_human" });
-    expect(h.pending(runId)[0]).toMatchObject({ options: ["retry", "cancel"], body: expect.stringContaining("gone") });
+    expect(h.pending(runId)[0]).toMatchObject({ options: ["retry", "retry:latest-profile", "cancel"], body: expect.stringContaining("gone") });
   });
 });
 
@@ -459,7 +503,7 @@ describe("tope de la corrida", () => {
       ["s1", "done", "ok"],
       ["s2", "pending", null],
     ]);
-    expect(h.pending(capped)[0]).toMatchObject({ kind: "needs_human", options: ["continue", "cancel"], stepRunId: h.flows.getRun(capped).steps[1]?.id });
+    expect(h.pending(capped)[0]).toMatchObject({ kind: "needs_human", options: ["continue", "continue:latest-profile", "cancel"], stepRunId: h.flows.getRun(capped).steps[1]?.id });
     expect(h.store.db.select().from(projects).all()[0]?.status).toBe("active");
   });
 
@@ -477,6 +521,22 @@ describe("tope de la corrida", () => {
     h.flows.resolveGate(h.pending(runId)[0]?.id as never, "continue", "ui");
     await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
     expect(h.eventsOf(runId, "run.requeued")).toHaveLength(2);
+  });
+
+  test("continue:latest-profile suma el tope y pasa la corrida a la versión vigente del perfil", async () => {
+    const h = harness();
+    h.save(chain({ maxCostUsd: 0.0004 }));
+
+    const runId = h.startIn("chain", "ENG-1");
+    await h.finished(runId);
+    h.defs.save({ kind: "profile", slug: "default", scope: "user", body: { roles: { dev: { model: "opus" } } }, source: "ui" });
+    h.flows.resolveGate(h.pending(runId)[0]?.id as never, "continue:latest-profile", "ui");
+    await vi.waitFor(() => expect(h.decisionsOf(runId)).toHaveLength(2));
+
+    // Cuenta como `continue`: con 2 × el tope caben dos pasos y el tercero vuelve a estacionar, ya con el perfil nuevo.
+    expect(h.flows.getRun(runId)).toMatchObject({ status: "parked", parkReason: "limit", costMicros: 1000 });
+    expect(h.store.db.select().from(runs).where(eq(runs.id, runId)).get()?.profileVersion).toBe(2);
+    expect(h.calls.map((c) => c.spec?.model)).toEqual(["sonnet", "opus"]);
   });
 
   test("maxSteps estaciona antes del paso que lo pasaría", async () => {

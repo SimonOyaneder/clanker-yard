@@ -167,7 +167,7 @@ describe("la noche", () => {
     });
     expect(parked.parkReason).toBe("limit");
     const [gate] = await night.client.decisions.list({ runId: parked.id, status: ["pending"] });
-    expect(gate).toMatchObject({ options: ["continue", "cancel"] });
+    expect(gate).toMatchObject({ options: ["continue", "continue:latest-profile", "cancel"] });
     expect((await devLane()).active).toBe(0);
 
     // Todas las issues que no se estacionaron terminaron con su PR en draft (el de WEB-1, ya mergeado, salió así).

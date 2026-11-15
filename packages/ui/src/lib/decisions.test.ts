@@ -29,6 +29,7 @@ test("las opciones de un gate se leen con la etiqueta de su cuerpo y las de un n
 
   const stuck = decision(2, { kind: "needs_human", options: ["retry", "force:ok", "cancel"] })
   expect(["retry", "force:ok", "cancel"].map((o) => optionLabel(stuck, o))).toEqual(["Reintentar el paso", 'Seguir como "ok"', "Cancelar la corrida"])
+  expect(["retry:latest-profile", "continue:latest-profile"].map((o) => optionLabel(stuck, o))).toEqual(["Reintentar con el perfil vigente", "Continuar con el perfil vigente"])
 })
 
 test("una nota sin opciones se marca vista; un gate sin opciones no ofrece nada", () => {

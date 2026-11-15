@@ -69,6 +69,12 @@ const HANDOFF_NOTICE =
   "La sesión anterior de esta tarea se pasó de su tope de gasto o de turnos y se cerró. Revisa el worktree (git status y git diff --stat): puede tener cambios a medias. Termina tu tarea.";
 /** Prefijo de la opción de un `needs_human` que sigue el edge de un outcome sin ejecutar el paso: `force:ok`. */
 const FORCE = "force:";
+/**
+ * Sufijo de `retry` y `continue` en una decisión de `needs_human`: antes de seguir, la corrida toma la versión
+ * vigente de su perfil en vez de la que fijó al empezar (así un tope por rol que la persona subió vale ya).
+ * Es lo único que una opción cambia del pin: los roles y los flujos siguen en su versión.
+ */
+const LATEST_PROFILE = ":latest-profile";
 export const TICK_MS = 5000;
 export const DEFAULT_MAX_AGENTS = 4;
 /** Cada cuánto se sondea un wait con `probe`; Watch avisa antes con `signal`, así que el sondeo es la red de seguridad. */
@@ -222,7 +228,10 @@ export interface Engine {
    * Resuelve la decisión que tiene estacionada a una corrida. Un gate se cierra con la opción como
    * outcome del paso. En un `needs_human` la opción es `retry` (el nodo vuelve a correr como una visita
    * nueva), `force:<outcome>` (sigue el edge de ese outcome sin ejecutar el paso) o `cancel`; en un
-   * tope de la corrida, `continue` (el tope se suma otra vez) o `cancel`. La corrida vuelve a la cola
+   * tope de la corrida, `continue` (el tope se suma otra vez) o `cancel`. `retry:latest-profile` y
+   * `continue:latest-profile` (si la corrida fijó un perfil) hacen lo mismo y antes pasan la corrida a la
+   * versión vigente de ese perfil, sin cancelarla: la corrida fija las versiones al empezar y esta es la
+   * forma de soltar un tope por rol que la persona subió. La corrida vuelve a la cola
    * de su carril, antes que las corridas nuevas, y emite `run.requeued`. Lanza `DecisionNotFoundError`
    * si no existe y `DecisionResolveError` si ya se resolvió o la opción no es una de las suyas.
    */
@@ -813,7 +822,7 @@ export function createEngine(deps: EngineDeps): Engine {
       kind: "needs_human",
       title: `El paso "${step.nodeId}" no puede seguir`,
       body: message,
-      options: ["retry", ...forced, "cancel"],
+      options: ["retry", ...(run.profileDefId === null ? [] : [`retry${LATEST_PROFILE}`]), ...forced, "cancel"],
     });
   }
 
@@ -834,7 +843,7 @@ export function createEngine(deps: EngineDeps): Engine {
           kind: "needs_human",
           title: "La corrida llegó a su tope",
           body: `${exceeded} Continuar le suma otra vez el tope; cancelar la termina.`,
-          options: ["continue", "cancel"],
+          options: ["continue", ...(run.profileDefId === null ? [] : [`continue${LATEST_PROFILE}`]), "cancel"],
         });
       });
     } catch (error) {
@@ -867,7 +876,7 @@ export function createEngine(deps: EngineDeps): Engine {
       store.db
         .select({ n: count() })
         .from(decisions)
-        .where(and(eq(decisions.runId, run.id), eq(decisions.kind, "needs_human"), sql`json_extract(${decisions.resolution}, '$.option') = 'continue'`))
+        .where(and(eq(decisions.runId, run.id), eq(decisions.kind, "needs_human"), sql`json_extract(${decisions.resolution}, '$.option') IN ('continue', ${`continue${LATEST_PROFILE}`})`))
         .get()?.n ?? 0;
     return over(1 + continued);
   }
@@ -1901,6 +1910,14 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
+  /** La corrida pasa a la versión vigente del perfil que fijó (no cambia de perfil); sin perfil fijado no hay nada que tomar. */
+  function adoptCurrentProfile(tx: Tx, run: RunRow): void {
+    if (run.profileDefId === null) return;
+    const current = defs.get("profile", run.profileDefId);
+    if (!current) throw new DecisionResolveError(`El perfil que fijó la corrida ${run.id} ya no existe.`);
+    tx.db.update(runs).set({ profileVersion: current.currentVersion }).where(eq(runs.id, run.id)).run();
+  }
+
   function resolveGate(decisionId: DecisionId, option: string, by: Origin): void {
     const canceled = store.tx((tx) => resolveDecision(tx, decisionId, option, by));
     if (canceled) abortInFlight(canceled.stepIds, new RunCanceled(canceled.runId));
@@ -1936,13 +1953,16 @@ export function createEngine(deps: EngineDeps): Engine {
       leaveParking(tx, run, decisionId, (current) => advance(tx, current, step, node, option, undefined, undefined));
     } else if (option === "cancel") {
       return { runId: run.id, stepIds: cancelFamily(tx, run.id, by) };
-    } else if (option === "continue") {
+    } else if (option === "continue" || option === `continue${LATEST_PROFILE}`) {
       // El paso listo sigue pending: al volver la corrida a running, el dispatcher lo toma.
-      leaveParking(tx, run, decisionId, () => {});
-    } else if (option === "retry") {
-      leaveParking(tx, run, decisionId, (current) =>
-        insertStep(tx, current, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined }),
-      );
+      leaveParking(tx, run, decisionId, (current) => {
+        if (option !== "continue") adoptCurrentProfile(tx, current);
+      });
+    } else if (option === "retry" || option === `retry${LATEST_PROFILE}`) {
+      leaveParking(tx, run, decisionId, (current) => {
+        if (option !== "retry") adoptCurrentProfile(tx, current);
+        insertStep(tx, current, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined });
+      });
     } else {
       const outcome = option.slice(FORCE.length);
       const { node } = jobOf(run, step);
