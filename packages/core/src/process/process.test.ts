@@ -2,12 +2,16 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createClient } from "@clanker/api";
 import { connectToCore, ensureCore, isPidAlive, readCoreJson } from "@clanker/api/node";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { buildCore } from "../../scripts/build";
 
-// Arranca el core real (`dist/main.js`) como proceso hijo sobre un CLANKER_HOME temporal.
+// Arranca el core real (`dist/main.js`) como proceso hijo sobre un CLANKER_HOME temporal. Cada core tarda
+// segundos en arrancar o cerrar cuando la suite completa corre en paralelo: el default de 5 s no alcanza.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 let entry: string;
 let homes: string[] = [];
 
@@ -61,7 +65,7 @@ async function deadPid(): Promise<number> {
  * Un repo git con una receta cuyo `requires` deja un `sleep` corriendo: `repos.testRecipe` lo lanza como
  * hijo del core. El hijo escribe su pid en un archivo (`exec` mantiene el pid del `sh`, que lidera el grupo).
  */
-function holdingRepo(home: string, shellPrefix = ""): { path: string; pidFile: string } {
+function holdingRepo(home: string, shellPrefix = ""): { home: string; path: string; pidFile: string } {
   const path = join(home, "repo");
   const pidFile = join(home, "child.pid");
   mkdirSync(join(path, ".clanker"), { recursive: true });
@@ -72,11 +76,11 @@ function holdingRepo(home: string, shellPrefix = ""): { path: string; pidFile: s
   git("init", "-q", "-b", "main");
   git("add", "--all");
   git("-c", "user.name=t", "-c", "user.email=t@t.invalid", "commit", "-q", "-m", "chore: initial commit");
-  return { path, pidFile };
+  return { home, path, pidFile };
 }
 
 /** Pide la prueba de la receta de `repo` al core y espera a que su hijo `sleep` esté corriendo; devuelve su pid. */
-async function startHeldChild(core: Awaited<ReturnType<typeof ensure>>, repo: { path: string; pidFile: string }): Promise<number> {
+async function startHeldChild(core: Awaited<ReturnType<typeof ensure>>, repo: ReturnType<typeof holdingRepo>): Promise<number> {
   const client = createClient({ url: `http://127.0.0.1:${core.info.port}/rpc`, token: core.info.token, origin: "cli" });
   const { id } = await client.repos.add({ path: repo.path });
   // La llamada queda abierta mientras el hijo vive; muere con el core.
@@ -84,7 +88,19 @@ async function startHeldChild(core: Awaited<ReturnType<typeof ensure>>, repo: { 
   await vi.waitFor(() => expect(readFileSync(repo.pidFile, "utf8").trim()).toMatch(/^\d+$/), { timeout: 10_000 });
   const pid = Number.parseInt(readFileSync(repo.pidFile, "utf8"), 10);
   expect(isPidAlive(pid)).toBe(true);
+  // El hijo puede escribir su pid antes de que el core lo registre en `procs`: sin la fila, ni el
+  // apagado ni el próximo core saben de él.
+  await vi.waitFor(() => expect(isTracked(repo.home, pid)).toBe(true), { timeout: 10_000 });
   return pid;
+}
+
+function isTracked(home: string, pid: number): boolean {
+  const db = new DatabaseSync(join(home, "clanker.db"), { readOnly: true });
+  try {
+    return db.prepare("SELECT 1 FROM procs WHERE pid = ?").get(pid) !== undefined;
+  } finally {
+    db.close();
+  }
 }
 
 const killGroup = (pid: number) => {

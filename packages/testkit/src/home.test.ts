@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore } from "@clanker/core";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { loadFixture, seedDb, writeFixture, type TestHome } from "./home";
 import { scenarios, type Scenario } from "./scenarios";
 
@@ -14,6 +14,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const home of homes.splice(0)) home.cleanup();
   rmSync(fixturesDir, { recursive: true, force: true });
 });
@@ -73,11 +74,14 @@ test("loadFixture trabaja sobre una copia: lo que escribe el core no cambia la f
 });
 
 test("loadFixture falla con la ruta si la fixture no existe, y no deja carpetas", () => {
-  const before = readdirSync(tmpdir()).filter((n) => n.startsWith("clanker-home-"));
+  // Un TMPDIR propio: otros tests en paralelo crean sus clanker-home-* en el tmpdir compartido.
+  const ownTmp = join(fixturesDir, "tmp");
+  mkdirSync(ownTmp);
+  vi.stubEnv("TMPDIR", ownTmp);
 
   expect(() => loadFixture(join(fixturesDir, "nope.sqlite"))).toThrow(/nope\.sqlite/);
 
-  expect(readdirSync(tmpdir()).filter((n) => n.startsWith("clanker-home-"))).toEqual(before);
+  expect(readdirSync(ownTmp)).toEqual([]);
 });
 
 test("writeFixture genera <escenario>.sqlite y regenerar reemplaza el anterior", () => {

@@ -68,7 +68,7 @@ async function finishedRun() {
   const project = await api.projects.create({ slug: "demo", name: "Demo", tracker: "local", defaultFlowId: "juguete", defaultProfileId: "juguete", flowParams: { repo: repoId } });
   const issue = await api.issues.createLocal({ projectId: project.id, title: "Saluda" });
   const { id } = await api.runs.start({ projectId: project.id, issueId: issue.id });
-  await vi.waitFor(async () => expect((await api.runs.get({ id })).status).toBe("done"));
+  await vi.waitFor(async () => expect((await api.runs.get({ id })).status).toBe("done"), { timeout: 10_000 });
   return { project, runId: id };
 }
 

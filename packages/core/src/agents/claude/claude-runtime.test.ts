@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HookInput, Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { AgentEvent, RunSpec } from "../runtime";
 import { createClaudeRuntime, type QueryFn } from "./claude-runtime";
 import { apiKeyCredentials, subscriptionCredentials, type ClaudeCredentials } from "./credentials";
@@ -254,6 +254,20 @@ describe("start", () => {
     const runtimeIn = (userDir: string, query: QueryFn) =>
       createClaudeRuntime({ credentials: async () => credentials, home, query, baseEnv: { CLAUDE_CONFIG_DIR: userDir } });
 
+    /**
+     * Escribe `path` hasta que el core intente recargar. En macOS el observador (FSEvents) arranca de forma
+     * asíncrona y bajo carga se pierde una escritura hecha justo después de `start`.
+     */
+    async function editUntilReloaded(path: string, attempts: () => number) {
+      await vi.waitFor(
+        async () => {
+          if (attempts() === 0) await writeFile(path, `# versión ${Date.now()}`);
+          expect(attempts()).toBeGreaterThan(0);
+        },
+        { timeout: 10_000, interval: 1_000 },
+      );
+    }
+
     test("el core llama a reloadSkills cuando cambia una skill de las sources del rol", async () => {
       const userDir = join(cwd, "claude");
       await mkdir(join(userDir, "skills", "commit"), { recursive: true });
@@ -261,29 +275,33 @@ describe("start", () => {
       const query = reloading(async () => void reloads++);
 
       const run = await runtimeIn(userDir, query).start(spec({ native: { sources: ["user"], skills: ["commit"] } }));
-      await writeFile(join(userDir, "skills", "commit", "SKILL.md"), "# nueva versión");
+      await editUntilReloaded(join(userDir, "skills", "commit", "SKILL.md"), () => reloads);
       const result = await run.result;
 
       expect(result.status).toBe("success");
-      expect(reloads).toBe(1);
-    });
+      expect(reloads).toBeGreaterThan(0);
+    }, 15_000);
 
     test("si no se puede recargar, el run sigue y el fallo sale como evento error", async () => {
       const userDir = join(cwd, "claude");
       await mkdir(join(userDir, "skills"), { recursive: true });
-      const query = reloading(() => Promise.reject(new Error("el proceso ya cerró")));
+      let attempts = 0;
+      const query = reloading(() => {
+        attempts++;
+        return Promise.reject(new Error("el proceso ya cerró"));
+      });
 
       const run = await runtimeIn(userDir, query).start(spec({ native: { sources: ["user"], skills: "all" } }));
-      await writeFile(join(userDir, "skills", "nueva.md"), "x");
-      const events = await collect(run.events);
+      const events = collect(run.events);
+      await editUntilReloaded(join(userDir, "skills", "nueva.md"), () => attempts);
 
       expect((await run.result).status).toBe("success");
-      expect(events).toContainEqual({
+      expect(await events).toContainEqual({
         type: "error",
         kind: "other",
         message: expect.stringContaining('No se pudieron recargar las skills del rol "dev": el proceso ya cerró'),
       });
-    });
+    }, 15_000);
   });
 
   test("la sesión guardada no lleva copia del contexto: retomar lo vuelve a recibir", async () => {

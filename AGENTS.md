@@ -27,6 +27,8 @@ npm test               # vitest desde la raíz (un proyecto por app y paquete)
 
 Los tres deben pasar antes de dar algo por listo; la CI corre los mismos en cada PR y en `main`. Un test de un paquete va junto a su código como `src/**/*.test.ts`.
 
+La suite completa corre en paralelo y bajo carga: un `vi.waitFor` sobre un core, una corrida o un proceso real lleva `timeout` explícito (el default de 1 s no alcanza), un test no cuenta lo que hay en el `tmpdir()` compartido (usa su propia carpeta) y no espera un solo evento de `fs.watch` justo después de empezar a observar (en macOS se pierde; reescribe hasta verlo).
+
 El core es un proceso largo: un callback de timer o de evento (`setInterval`, `.on(...)`) no lanza, porque un throw ahí tumba el core. Atrapa el error y conviértelo en un resultado (abortar un `AbortSignal`, emitir un evento).
 
 UI sola: `npm run dev -w packages/ui` abre la UI en el navegador (puerto 8890) con datos de ejemplo en memoria.
