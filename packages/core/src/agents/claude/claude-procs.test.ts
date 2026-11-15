@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,6 +70,9 @@ function sdkLike(launched: (pid: number) => void, command: { command: string; ar
     })();
 }
 
+/** Bajo carga (la suite entera en paralelo) un proceso tarda más que el segundo por defecto en caer. */
+const WAIT = { timeout: 5_000 };
+
 const rows = () => store.db.select().from(procsTable).all();
 
 test("el proceso de Claude Code arranca en su propio grupo, queda en procs con su paso y un interrupt lo baja entero", async () => {
@@ -88,21 +92,24 @@ test("el proceso de Claude Code arranca en su propio grupo, queda en procs con s
 
   await run.interrupt();
   await run.result;
-  await vi.waitFor(() => expect(rows()).toEqual([]));
+  await vi.waitFor(() => expect(rows()).toEqual([]), WAIT);
   expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
 });
 
 test("un proceso que ignora el SIGTERM del interrupt cae con SIGKILL a los killAfterMs", async () => {
+  const ready = join(home, "ready");
   const procs = createProcs({ store, bootId: "boot_now" });
   let pid = 0;
   const runtime = createClaudeRuntime({
     credentials: async () => subscriptionCredentials({ executable: "/bin/claude" }),
     home,
     procs,
-    killAfterMs: 300,
-    query: sdkLike((launched) => (pid = launched), { command: "sh", args: ["-c", "trap '' TERM; while :; do sleep 1; done"] }),
+    killAfterMs: 1000,
+    query: sdkLike((launched) => (pid = launched), { command: "sh", args: ["-c", `trap '' TERM; touch ${ready}; while :; do sleep 1; done`] }),
   });
   const run = await runtime.start(spec({ stepRunId: "stp_1" }));
+  // Un SIGTERM que llega antes de que el shell instale el trap lo mata: el interrupt espera a que lo ignore.
+  await vi.waitFor(() => expect(existsSync(ready)).toBe(true), WAIT);
 
   await run.interrupt();
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -110,7 +117,7 @@ test("un proceso que ignora el SIGTERM del interrupt cae con SIGKILL a los killA
   expect(process.kill(-pid, 0)).toBe(true);
 
   await run.result;
-  await vi.waitFor(() => expect(rows()).toEqual([]));
+  await vi.waitFor(() => expect(rows()).toEqual([]), WAIT);
   expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
 });
 
@@ -128,7 +135,7 @@ test("un crash del core deja la fila y el próximo arranque mata el proceso del 
 
   expect(createProcs({ store, bootId: "boot_new" }).killOrphans()).toBe(1);
 
-  await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(/ESRCH/));
+  await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(/ESRCH/), WAIT);
   expect(rows()).toEqual([]);
 });
 
