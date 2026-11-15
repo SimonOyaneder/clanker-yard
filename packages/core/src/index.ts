@@ -16,6 +16,10 @@ export type {
   ResumeRequest,
   RunRequest,
 } from "./agents/agents";
+export { createClaudeRuntime } from "./agents/claude/claude-runtime";
+export type { ClaudeRuntimeOptions, QueryFn } from "./agents/claude/claude-runtime";
+export { apiKeyCredentials, subscriptionCredentials } from "./agents/claude/credentials";
+export type { ClaudeCredentials, SubscriptionOptions } from "./agents/claude/credentials";
 export { DEFAULT_RUNTIME, selectRuntime } from "./agents/runtime";
 export type {
   AgentEvent,

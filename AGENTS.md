@@ -74,6 +74,14 @@ Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Sec
 - `createFakeRuntime({ fixtures })`: el runtime `fake` (`CORE_RUNTIME=fake`), un `AgentRuntime` que reproduce guiones YAML `<rol>.r<n>.yaml` (con etiqueta opcional, `dev.r1.plan.yaml`) en vez de llamar a un modelo. Ejemplo en `packages/testkit/fixtures/runs/demo`. El guion se elige por el rol de la sesión y por el modo, la ronda y la issue del brief (gana el que fija más campos de `match`; un empate es un error). Sin guion, o con un reporte que no cumple el esquema del modo, `start`/`resume` rechazan: nunca inventa un reporte. `speed` divide los tiempos de `events` (la opción `speed: Infinity` los salta), `effects` aplica patches con `git apply` en el worktree y `run` se consume con `nextRecipeResult(sessionId, comando)`.
 - Los tests de un paquete que necesiten la base usan `seedDb` (o `openStore({ path: ":memory:" })` si no hace falta un archivo); `loadFixture` es para apuntar la UI, el CLI o un E2E a un `.sqlite` generado.
 
+## Runtime de Claude
+
+`createClaudeRuntime({ credentials, home })` (`packages/core/src/agents/claude/`) es el runtime `claude-sdk`: lanza Claude Code con `@anthropic-ai/claude-agent-sdk` (versión fija, súbela a propósito). `credentials` sale de `subscriptionCredentials()` (default: el `claude` del `PATH`, sin leer ni guardar el login) o `apiKeyCredentials(key)`.
+
+- El entorno del agente se arma con lista blanca (`agentEnv`): nunca hereda `GH_TOKEN`, `GITHUB_TOKEN`, `LINEAR_*`, `SSH_AUTH_SOCK` ni `ANTHROPIC_*`. Si una variable nueva debe llegar al agente, se agrega ahí y en su test.
+- Bajo `home` deja `transcripts/<sessionId>.jsonl` (mensajes del SDK tal cual, más una línea `clanker/pre_compact` por compactación), `agent-sessions/<sessionId>.json` (lo que `resume` necesita) y `agent-env/` (`gh/` vacía y el `gitconfig` generado).
+- Los tests usan un `query` falso inyectado (`options.query`); la CI no llama a Claude. El smoke test real corre solo con `CLANKER_LIVE_CLAUDE=1 npx vitest run packages/core/src/agents/claude/claude-live.test.ts`: una consulta con haiku, gasta cuota.
+
 ## UI
 
 - Usa un componente de shadcn antes de escribir uno propio. Agrégalo desde `packages/ui` (`npx shadcn@latest add <componente>`) o pídelo al MCP de shadcn (`.mcp.json`).
