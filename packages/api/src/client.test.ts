@@ -167,6 +167,8 @@ const router = os.router({
     byRole: os.metrics.byRole.handler(() => []),
     byDay: os.metrics.byDay.handler(() => []),
     byModel: os.metrics.byModel.handler(() => []),
+    byStep: os.metrics.byStep.handler(() => []),
+    byIssue: os.metrics.byIssue.handler(() => []),
   },
   imports: {
     legacy: os.imports.legacy.handler(() => {

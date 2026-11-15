@@ -1,14 +1,18 @@
-import type { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectId, ProjectSummary, RoleMetrics } from "@clanker/api";
+import type { DayMetrics, DayMetricsFilter, IssueId, IssueMetrics, MetricsFilter, ModelMetrics, ProjectId, ProjectSummary, RoleMetrics, StepMetrics } from "@clanker/api";
 import { and, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import { runMetrics, runRoleCosts, runs } from "../store/schema";
+import { defs, runMetrics, runRoleCosts, runs, stepRuns, stepUsage } from "../store/schema";
 import type { Store } from "../store/store";
 
 export interface Metrics {
   byRole(filter?: MetricsFilter): RoleMetrics[];
   byDay(filter?: DayMetricsFilter): DayMetrics[];
   byModel(filter?: MetricsFilter): ModelMetrics[];
-  /** Solo corridas cerradas del proyecto. */
-  summary(projectId: ProjectId): ProjectSummary;
+  /** Por costo: lo que gastó cada nodo de cada flujo. Las corridas importadas no tienen pasos. */
+  byStep(filter?: MetricsFilter): StepMetrics[];
+  /** Por costo: cada issue con su costo y las vueltas de sus contadores. */
+  byIssue(filter?: MetricsFilter): IssueMetrics[];
+  /** Solo corridas cerradas del proyecto; `filter` acota por cierre y origen como en `byRole`. */
+  summary(projectId: ProjectId, filter?: Omit<MetricsFilter, "projectId">): ProjectSummary;
 }
 
 /** Lo que se calculó al cerrar cada corrida (`recordRunMetrics`), agregado. */
@@ -62,7 +66,42 @@ export function createMetrics(store: Store): Metrics {
       .all();
   }
 
-  function summary(projectId: ProjectId): ProjectSummary {
+  function byStep(filter: MetricsFilter = {}): StepMetrics[] {
+    const cost = sql<number>`sum(${stepUsage.costMicros})`.mapWith(Number);
+    return db
+      .select({ flow: defs.slug, node: stepRuns.nodeId, steps: sql<number>`count(distinct ${stepRuns.id})`.mapWith(Number), costMicros: cost })
+      .from(stepUsage)
+      .innerJoin(stepRuns, eq(stepRuns.id, stepUsage.stepRunId))
+      .innerJoin(runs, eq(runs.id, stepRuns.runId))
+      .innerJoin(runMetrics, eq(runMetrics.runId, runs.id))
+      .innerJoin(defs, eq(defs.id, runs.flowDefId))
+      .where(closed(filter))
+      .groupBy(defs.slug, stepRuns.nodeId)
+      .having(sql`${cost} > 0`)
+      .orderBy(desc(cost), defs.slug, stepRuns.nodeId)
+      .all();
+  }
+
+  function byIssue(filter: MetricsFilter = {}): IssueMetrics[] {
+    const rows = db
+      .select({ issueId: runs.subjectId, root: sql<boolean>`${runs.parentRunId} IS NULL`.mapWith(Boolean), rounds: runMetrics.rounds, costMicros: runMetrics.costMicros })
+      .from(runMetrics)
+      .innerJoin(runs, eq(runs.id, runMetrics.runId))
+      .where(and(closed(filter), eq(runs.subjectType, "issue")))
+      .all();
+    const byId = new Map<string, IssueMetrics>();
+    for (const { issueId, root, rounds, costMicros } of rows) {
+      const issue = byId.get(issueId) ?? { issueId: issueId as IssueId, runs: 0, costMicros: 0, rounds: {} };
+      byId.set(issueId, issue);
+      if (root) issue.runs++;
+      issue.costMicros += costMicros;
+      for (const [counter, n] of Object.entries(rounds)) if (n > 0) issue.rounds[counter] = (issue.rounds[counter] ?? 0) + n;
+    }
+    return [...byId.values()].sort((a, b) => b.costMicros - a.costMicros || a.issueId.localeCompare(b.issueId));
+  }
+
+  function summary(projectId: ProjectId, filter: Omit<MetricsFilter, "projectId"> = {}): ProjectSummary {
+    const scope = closed({ ...filter, projectId });
     const roots = db
       .select({
         result: runMetrics.result,
@@ -71,7 +110,7 @@ export function createMetrics(store: Store): Metrics {
       })
       .from(runMetrics)
       .innerJoin(runs, eq(runs.id, runMetrics.runId))
-      .where(and(eq(runs.projectId, projectId), isNull(runs.parentRunId)))
+      .where(and(scope, isNull(runs.parentRunId)))
       .groupBy(runMetrics.result)
       .orderBy(sql`count(*) desc`, runMetrics.result)
       .all();
@@ -83,14 +122,14 @@ export function createMetrics(store: Store): Metrics {
       })
       .from(runMetrics)
       .innerJoin(runs, eq(runs.id, runMetrics.runId))
-      .where(eq(runs.projectId, projectId))
+      .where(scope)
       .get();
     // Las rondas son del flujo de cada corrida (también de las hijas): se suman por contador.
     const rounds = db.all<{ counter: string; total: number }>(sql`
       SELECT j.key AS counter, sum(j.value) AS total
-      FROM run_metrics m
-      JOIN runs r ON r.id = m.run_id, json_each(m.rounds) j
-      WHERE r.project_id = ${projectId}
+      FROM run_metrics
+      JOIN runs ON runs.id = run_metrics.run_id, json_each(run_metrics.rounds) j
+      WHERE ${scope}
       GROUP BY j.key
       ORDER BY j.key`);
 
@@ -105,11 +144,11 @@ export function createMetrics(store: Store): Metrics {
       minutes,
       avgMinutes: runCount === 0 ? null : minutes / runCount,
       rounds: rounds.map(({ counter, total }) => ({ counter, total, perRun: runCount === 0 ? 0 : total / runCount })),
-      byRole: byRole({ projectId }),
+      byRole: byRole({ ...filter, projectId }),
       firstAt: total?.firstAt ?? null,
       lastAt: total?.lastAt ?? null,
     };
   }
 
-  return { byRole, byDay, byModel, summary };
+  return { byRole, byDay, byModel, byStep, byIssue, summary };
 }

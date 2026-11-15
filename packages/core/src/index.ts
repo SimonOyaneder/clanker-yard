@@ -177,6 +177,8 @@ export type {
   WorkspacesOptions,
 } from "./workspaces/workspaces";
 
+export { recordRunMetrics } from "./metrics/record";
+
 export { createProcs } from "./procs/procs";
 export type { Procs, ProcsOptions } from "./procs/procs";
 

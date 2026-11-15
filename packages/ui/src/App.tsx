@@ -9,7 +9,8 @@ import { Shortcut } from "@/components/common"
 import { ConnectionsView } from "@/components/connections/connections-view"
 import { InboxView } from "@/components/inbox/inbox-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
-import { ProjectView, issuesById } from "@/components/project/project-view"
+import { PROJECT_TABS, type ProjectTab, ProjectFrame, ProjectView, issuesById } from "@/components/project/project-view"
+import { ProjectSummaryTab } from "@/components/project/summary-view"
 import { RunCommandsProvider, useRunCommands } from "@/components/project/run-commands"
 import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
 import { RunView, type RunTab } from "@/components/project/run-view"
@@ -24,6 +25,7 @@ import { useClaudePlan } from "@/hooks/use-claude-plan"
 import { useDecisionResolver } from "@/hooks/use-decision-resolver"
 import { useInbox } from "@/hooks/use-inbox"
 import { useLinearLogin } from "@/hooks/use-linear-login"
+import { useSummaryControls } from "@/hooks/use-summary-controls"
 import { LiveProvider, useLive, useLiveQuery } from "@/hooks/use-live"
 import { type Host, HostProvider, useHost } from "@/host"
 import { type AppActions, AppActionsContext } from "@/lib/app-context"
@@ -40,11 +42,12 @@ import { cn } from "@/lib/utils"
 import { Hint } from "./components/common"
 
 type Module = "projects" | "prs" | "connections" | "inbox"
-// Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`.
-type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null }
+// Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`
+// y `tab` el `:tab` de `/p/:proyecto/:tab`.
+type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null; tab: ProjectTab }
 
 const sameLoc = (a: Loc, b: Loc) =>
-  a.module === b.module && (a.module === "inbox" ? a.decision === b.decision : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId))
+  a.module === b.module && (a.module === "inbox" ? a.decision === b.decision : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId && a.tab === b.tab))
 
 const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox"]
 
@@ -124,6 +127,7 @@ function Shell() {
 
   const [slug, setSlug] = useState<string | null>(() => readPref<string | null>("slug", null))
   const [runId, setRunId] = useState<RunId | null>(null)
+  const [tab, setTab] = useState<ProjectTab>("operation")
   const [module, setModuleState] = useState<Module>(() => MODULES.find((m) => m === readPref<string>("module", "projects")) ?? "projects")
   const [runTab, setRunTabState] = useState<RunTab>(() => (readPref<string>("runTab", "graph") === "timeline" ? "timeline" : "graph"))
   // El panel del paso: qué nodo y qué pestaña. El nodo es de una corrida, así que al abrir otra se cierra.
@@ -138,6 +142,8 @@ function Shell() {
 
   // El proyecto guardado puede ya no existir: se cae al primero de la barra.
   const project = projects.find((p) => p.slug === slug) ?? barProjects(projects)[0] ?? projects[0] ?? null
+  const summaryVisible = module === "projects" && !runId && tab === "summary" && !!project
+  const summaryControls = useSummaryControls(summaryVisible)
   const projectData = useLiveQuery(project ? `project:${project.id}` : "no-project", async () => {
     if (!project) return null
     const [runs, issues, queue, decisions, lanes, breakers, prs] = await Promise.all([
@@ -183,8 +189,8 @@ function Shell() {
   }, [])
 
   // Historial como el de un navegador: ⌘[ / ⌘] y los botones de pulgar del mouse.
-  const here = useRef<Loc>({ module, slug, runId, decision: decisionId })
-  here.current = { module, slug, runId, decision: decisionId }
+  const here = useRef<Loc>({ module, slug, runId, decision: decisionId, tab })
+  here.current = { module, slug, runId, decision: decisionId, tab }
   const backStack = useRef<Loc[]>([])
   const forwardStack = useRef<Loc[]>([])
   const apply = useCallback(
@@ -194,6 +200,7 @@ function Shell() {
       if (l.slug) writePref("slug", l.slug)
       setRunId(l.runId)
       setDecisionId(l.decision)
+      setTab(l.tab)
     },
     [setModule],
   )
@@ -340,6 +347,20 @@ function Shell() {
       window.removeEventListener("keydown", onKey)
     }
   }, [goConnections, goInbox, connectLinear, probeClaude])
+
+  // ⇧⌘1 y ⇧⌘2: Operación y Resumen del proyecto (también desde una corrida: vuelve al proyecto).
+  const goTab = useCallback((to: ProjectTab) => go({ module: "projects", runId: null, tab: to }), [go])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || !e.shiftKey || e.altKey || e.ctrlKey) return
+      const target = e.code === "Digit1" ? PROJECT_TABS[0] : e.code === "Digit2" ? PROJECT_TABS[1] : undefined
+      if (!target) return
+      e.preventDefault()
+      goTab(target)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [goTab])
 
   const refresh = useCallback(() => {
     if (module === "prs") {
@@ -612,16 +633,28 @@ function Shell() {
                   )
                 ) : !project ? (
                   <NoProjects onCreate={() => setNewProjectOpen(true)} />
-                ) : !detail ? (
-                  projectData.error ? (
-                    <Problem message={projectData.error} onRetry={projectData.reload} />
-                  ) : (
-                    <Loading />
-                  )
                 ) : runId ? (
-                  <RunPane key={runId} query={runQuery} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />
+                  !detail ? (
+                    projectData.error ? (
+                      <Problem message={projectData.error} onRetry={projectData.reload} />
+                    ) : (
+                      <Loading />
+                    )
+                  ) : (
+                    <RunPane key={runId} query={runQuery} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />
+                  )
                 ) : (
-                  <ProjectView project={project} {...detail} />
+                  <ProjectFrame project={project} tab={tab} onTab={goTab}>
+                    {tab === "summary" ? (
+                      <ProjectSummaryTab project={project} controls={summaryControls} onOpenOperation={() => goTab("operation")} />
+                    ) : detail ? (
+                      <ProjectView project={project} {...detail} />
+                    ) : projectData.error ? (
+                      <Problem message={projectData.error} onRetry={projectData.reload} />
+                    ) : (
+                      <Loading />
+                    )}
+                  </ProjectFrame>
                 )}
               </div>
             </main>
@@ -646,6 +679,8 @@ function Shell() {
         onOpenDecision={openDecision}
         onUndoDecision={resolver.canUndo ? () => void undo() : null}
         onDecision={module === "inbox" && inbox.current?.status === "pending" ? { decision: inbox.current, onResolve: resolveDecision, onRespond: () => inbox.setResponding(true) } : null}
+        projectTab={project && module === "projects" ? { tab, onTab: goTab } : null}
+        summary={summaryVisible ? summaryControls : null}
         onRunTab={runId && module === "projects" ? setRunTab : null}
         runCaps={runId && module === "projects" && openRunDetail ? { id: openRunDetail.id, caps: caps! } : null}
         onStep={stepNode ? { onTab: setStepTab, onClose: () => setStepNode(null) } : null}

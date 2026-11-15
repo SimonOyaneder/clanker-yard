@@ -38,7 +38,19 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
   },
   {
     title: "Proyecto",
-    items: [["Pausar o reanudar el proyecto", "⇧⌘Y"]],
+    items: [
+      ["Pausar o reanudar el proyecto", "⇧⌘Y"],
+      ["Operación del proyecto", "⇧⌘1"],
+      ["Resumen del proyecto", "⇧⌘2"],
+    ],
+  },
+  {
+    title: "Resumen",
+    items: [
+      ["Ver los gráficos como tablas, y de vuelta", "T"],
+      ["Origen: todas, importadas o Yard", "O"],
+      ["Rango: todo, 7 días o 30 días", "F"],
+    ],
   },
   {
     title: "Panel del paso",

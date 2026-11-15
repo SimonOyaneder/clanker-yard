@@ -28,3 +28,4 @@ export type {
 export { startTechleadScenario, writeTechleadFixture } from "./techlead-scenario";
 export type { BotTurn, RunDetail, TechleadScenario, TechleadScenarioOptions } from "./techlead-scenario";
 export { seedLanes } from "./lanes-scenario";
+export { seedSummary, SUMMARY_PROJECT_SLUG } from "./summary-scenario";

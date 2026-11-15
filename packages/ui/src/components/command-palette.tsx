@@ -1,6 +1,7 @@
 import type { CachedIssue, ClankerProject, Decision, DecisionId, QueueEntry, Run, RunId } from "@clanker/api"
-import { Bot, Check, CornerDownLeft, FileText, Gauge, GitPullRequest, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, ScrollText, Square, Undo2, X } from "lucide-react"
+import { BarChart3, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitPullRequest, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, ScrollText, Square, Table2, Undo2, X } from "lucide-react"
 import type { PullRequest } from "@/types"
+import type { ProjectTab } from "@/components/project/project-view"
 import type { RunTab } from "@/components/project/run-view"
 import type { StepTab } from "@/components/project/step-panel"
 import { KindIcon } from "@/components/inbox/decision-parts"
@@ -18,10 +19,12 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { useState } from "react"
+import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { useHost } from "@/host"
 import { useAppActions } from "@/lib/app-context"
 import { KIND_LABEL, optionLabel, optionsOf, takesText } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
+import { DEFAULT_RANGE, ORIGIN_LABELS, ORIGINS, RANGE_LABELS, RANGE_PRESETS } from "@/lib/summary"
 import type { RunCaps } from "@/lib/run-commands"
 import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
@@ -47,6 +50,10 @@ interface Props {
   onUndoDecision: (() => void) | null
   /** Solo en la bandeja, con una decisión pendiente a la vista: sus opciones son acciones de la paleta. */
   onDecision: { decision: Decision; onResolve: (decision: Decision, option: string) => void; onRespond: () => void } | null
+  /** Con un proyecto a la vista: la pestaña actual y cómo cambiarla. */
+  projectTab: { tab: ProjectTab; onTab: (tab: ProjectTab) => void } | null
+  /** Solo con el Resumen a la vista: sus filtros y su vista son acciones de la paleta. */
+  summary: SummaryControls | null
   /** Solo con una corrida abierta: cambia entre su grafo y su línea de tiempo. */
   onRunTab: ((tab: RunTab) => void) | null
   /** Solo con una corrida abierta: qué se le puede pedir en su estado. */
@@ -56,7 +63,7 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, projectTab, summary, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
   const host = useHost()
@@ -152,6 +159,40 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
                 <CommandShortcut>⇧⌘⌫</CommandShortcut>
               </CommandItem>
             ) : null}
+          </CommandGroup>
+        ) : null}
+
+        {projectTab && current ? (
+          <CommandGroup heading="Ir a">
+            <CommandItem value="ir a operación del proyecto" onSelect={run(() => projectTab.onTab("operation"))}>
+              <Layers /> Operación de {current.name}
+              <CommandShortcut>⇧⌘1</CommandShortcut>
+            </CommandItem>
+            <CommandItem value="ir a resumen del proyecto gasto" onSelect={run(() => projectTab.onTab("summary"))}>
+              <BarChart3 /> Resumen de {current.name}
+              <CommandShortcut>⇧⌘2</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
+
+        {summary ? (
+          <CommandGroup heading="Resumen del proyecto">
+            {RANGE_PRESETS.filter((p) => p !== "custom").map((p) => (
+              <CommandItem key={p} value={`resumen rango ${RANGE_LABELS[p]}`} onSelect={run(() => summary.setRange({ ...DEFAULT_RANGE, preset: p }))}>
+                <CalendarRange /> Rango: {RANGE_LABELS[p].toLowerCase()}
+                {p === summary.range.preset ? <CommandShortcut>actual</CommandShortcut> : null}
+              </CommandItem>
+            ))}
+            {ORIGINS.map((o) => (
+              <CommandItem key={o} value={`resumen origen ${ORIGIN_LABELS[o]}`} onSelect={run(() => summary.setOrigin(o))}>
+                <Filter /> Origen: {ORIGIN_LABELS[o].toLowerCase()}
+                {o === summary.origin ? <CommandShortcut>actual</CommandShortcut> : null}
+              </CommandItem>
+            ))}
+            <CommandItem value="resumen ver tablas gráficos" onSelect={run(summary.toggleTables)}>
+              <Table2 /> {summary.asTables ? "Ver los gráficos" : "Ver los datos como tablas"}
+              <CommandShortcut>T</CommandShortcut>
+            </CommandItem>
           </CommandGroup>
         ) : null}
 

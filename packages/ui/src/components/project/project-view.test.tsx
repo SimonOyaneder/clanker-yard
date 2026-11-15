@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
 import { RunCommandsProvider } from "@/components/project/run-commands"
-import { ProjectView } from "@/components/project/project-view"
+import { ProjectFrame, ProjectView } from "@/components/project/project-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
 import { createMemoryAppData } from "@/memory-app-data"
@@ -42,7 +42,9 @@ async function setup({ entries = () => [], runs = () => [], decisions = [], brea
       <RunCommandsProvider>
         <AppActionsContext.Provider value={actions as unknown as AppActions}>
           <TooltipProvider>
-            <ProjectView project={project} runs={runs(memoryRuns)} issues={issues} queue={entries(issues)} decisions={decisions} lanes={LANES} breakers={breakers} prs={[]} />
+            <ProjectFrame project={project} tab="operation" onTab={() => {}}>
+              <ProjectView project={project} runs={runs(memoryRuns)} issues={issues} queue={entries(issues)} decisions={decisions} lanes={LANES} breakers={breakers} prs={[]} />
+            </ProjectFrame>
           </TooltipProvider>
         </AppActionsContext.Provider>
       </RunCommandsProvider>
@@ -223,4 +225,33 @@ test("una issue saltada sale como saltada y se devuelve a la cola con un click",
   expect(screen.getByText("saltada")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: /Volver/ }))
   expect(actions.skipIssue).toHaveBeenCalledWith(expect.anything(), issues[0], false)
+})
+
+test("las pestañas Operación y Resumen están en el encabezado del proyecto y la actual queda marcada", async () => {
+  const data = createMemoryAppData(NOW)
+  const project = (await data.projects())[0]!
+  const onTab = vi.fn()
+  render(
+    <AppDataProvider value={data}>
+      <RunCommandsProvider>
+        <AppActionsContext.Provider value={{ refresh: () => {} } as unknown as AppActions}>
+          <TooltipProvider>
+            <ProjectFrame project={project} tab="operation" onTab={onTab}>
+              <p>cuerpo de la pestaña</p>
+            </ProjectFrame>
+          </TooltipProvider>
+        </AppActionsContext.Provider>
+      </RunCommandsProvider>
+    </AppDataProvider>,
+  )
+
+  // Al enfocar la pestaña se abre su tooltip, que mide con un ResizeObserver que jsdom no trae.
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  expect(screen.getByRole("tab", { name: "Operación" }).getAttribute("aria-selected")).toBe("true")
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Resumen" }))
+  expect(onTab).toHaveBeenCalledWith("summary")
 })

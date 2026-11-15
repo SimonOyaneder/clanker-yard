@@ -1,7 +1,9 @@
 import type { Breaker, CachedIssue, CachedPr, ClankerProject, Decision, Lanes, QueueEntry, Run } from "@clanker/api"
 import { Copy, Ellipsis, Pause, Play } from "lucide-react"
+import type { ReactNode } from "react"
 import { BreakerStrip } from "@/components/project/breaker-strip"
 import { Ago, Hint, Pill, SectionTitle, StatBar } from "@/components/common"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ParkedList, QueueList } from "@/components/project/issue-lists"
 import { LaneBoard } from "@/components/project/lanes"
 import { useRunCommands } from "@/components/project/run-commands"
@@ -21,6 +23,10 @@ const PROJECT_STATUS = {
   paused: { label: "pausado", tone: tone.amber, hint: "No lanza corridas nuevas; las que ya están siguen." },
   archived: { label: "archivado", tone: tone.neutral, hint: "Fuera de la barra lateral. No lanza corridas." },
 } as const
+
+/** Las pestañas del proyecto que existen hoy; Ajustes llega con su propia issue. */
+export const PROJECT_TABS = ["operation", "summary"] as const
+export type ProjectTab = (typeof PROJECT_TABS)[number]
 
 /** Los paralelismos que ofrecen el menú y ⌘K. */
 export const PARALLEL_OPTIONS = [1, 2, 3, 4, 5, 6] as const
@@ -44,22 +50,10 @@ interface Props {
 /** Las issues de un proyecto por su id, para ponerle clave y título a cada corrida. */
 export const issuesById = (issues: CachedIssue[]) => new Map<string, CachedIssue>(issues.map((i) => [i.id, i]))
 
-// Operación del proyecto: qué corre en cada carril, qué espera a una persona, qué viene y por qué no corre.
-export function ProjectView({ project, runs, issues, queue, decisions, lanes, breakers, prs }: Props) {
-  const roots = runs.filter((r) => r.parentRunId === null)
-  const live = roots.filter((r) => isLive(r.status))
-  const parked = parkedRuns(roots)
-  const finished = roots.filter((r) => !isLive(r.status))
-  const stopped = breakersOf(project, breakers)
-  const now = useNow(live.length > 0 || stopped.length > 0)
-  const subjectOf = subjectLabeler(issues, prs)
-  const usage = laneUsage(project, roots, lanes)
-  const pending = decisions.filter((d) => d.status === "pending")
+// El proyecto: su encabezado, sus pestañas y, debajo, la vista de la pestaña elegida. Las pestañas cargan sus propios
+// datos, así que una que no se puede leer (la cola de un proyecto importado sin su tracker conectado) no esconde a las otras.
+export function ProjectFrame({ project, tab, onTab, children }: { project: ClankerProject; tab: ProjectTab; onTab: (tab: ProjectTab) => void; children: ReactNode }) {
   const status = PROJECT_STATUS[project.status]
-  const queued = queue.filter((e) => e.state !== "blocked")
-  const blocked = queue.filter((e) => e.state === "blocked")
-  const spent = spentToday(runs, now)
-
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
@@ -83,6 +77,39 @@ export function ProjectView({ project, runs, issues, queue, decisions, lanes, br
         </div>
       </header>
 
+      <Tabs value={tab} onValueChange={(value) => onTab(value as ProjectTab)} className="-mt-3 gap-0">
+        <TabsList variant="line" aria-label="Vistas del proyecto" className="h-8 border-b">
+          <Hint label="Qué corre, qué espera a una persona y qué viene" keys="⇧⌘1">
+            <TabsTrigger value="operation">Operación</TabsTrigger>
+          </Hint>
+          <Hint label="Cuánto gastó el proyecto y cuántas vueltas dieron sus issues" keys="⇧⌘2">
+            <TabsTrigger value="summary">Resumen</TabsTrigger>
+          </Hint>
+        </TabsList>
+      </Tabs>
+
+      {children}
+    </div>
+  )
+}
+
+// Operación: qué corre en cada carril, qué espera a una persona, qué viene y por qué no corre.
+export function ProjectView({ project, runs, issues, queue, decisions, lanes, breakers, prs }: Props) {
+  const roots = runs.filter((r) => r.parentRunId === null)
+  const live = roots.filter((r) => isLive(r.status))
+  const parked = parkedRuns(roots)
+  const finished = roots.filter((r) => !isLive(r.status))
+  const stopped = breakersOf(project, breakers)
+  const now = useNow(live.length > 0 || stopped.length > 0)
+  const subjectOf = subjectLabeler(issues, prs)
+  const usage = laneUsage(project, roots, lanes)
+  const pending = decisions.filter((d) => d.status === "pending")
+  const queued = queue.filter((e) => e.state !== "blocked")
+  const blocked = queue.filter((e) => e.state === "blocked")
+  const spent = spentToday(runs, now)
+
+  return (
+    <>
       <StatBar
         items={[
           { label: "Carril dev", value: `${usage.dev.active}/${usage.dev.capacity}`, sub: `máquina ${usage.dev.machine.active}/${usage.dev.machine.capacity}` },
@@ -114,7 +141,7 @@ export function ProjectView({ project, runs, issues, queue, decisions, lanes, br
       {roots.length || queue.length ? <QueueList title="En cola" entries={queued} project={project} empty={emptyQueue(project)} /> : null}
       <QueueList title="Bloqueadas" entries={blocked} project={project} />
       <RunGroup title="Terminadas" runs={finished} subjectOf={subjectOf} now={now} project={project} />
-    </div>
+    </>
   )
 }
 

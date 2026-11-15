@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { ProjectId } from "./domain";
+import { IssueId, ProjectId } from "./domain";
 
 /**
  * Las métricas salen de `run_metrics` y `run_role_costs` (`docs/design.html#d-data`), que el core llena
@@ -49,6 +49,37 @@ export const DayMetricsFilter = MetricsFilter.extend({
   utcOffsetMinutes: z.int().min(-840).max(840).default(0),
 });
 export type DayMetricsFilter = z.input<typeof DayMetricsFilter>;
+
+/** El filtro de `projects.summary`: el de las demás métricas, con el proyecto como `id`. */
+export const ProjectSummaryFilter = MetricsFilter.omit({ projectId: true }).extend({ id: ProjectId });
+export type ProjectSummaryFilter = z.infer<typeof ProjectSummaryFilter>;
+
+/**
+ * Lo que gastó un nodo del flujo, sumando todas las visitas de las corridas cerradas (hijas incluidas).
+ * Sale de `step_usage`, la misma fuente que `run_role_costs`: sin las corridas importadas del loop viejo,
+ * que no tienen pasos. Solo salen los nodos que gastaron algo.
+ */
+export const StepMetrics = z.object({
+  /** Slug del flujo de la corrida. */
+  flow: z.string(),
+  node: z.string(),
+  /** Visitas del nodo que gastaron algo. */
+  steps: z.int().positive(),
+  costMicros: z.int().positive(),
+});
+export type StepMetrics = z.infer<typeof StepMetrics>;
+
+/**
+ * Lo que costó y cuántas vueltas dio cada issue en las corridas cerradas, hijas incluidas. `runs` cuenta
+ * solo las raíz; `rounds` suma cada contador del flujo de todas las corridas de la issue.
+ */
+export const IssueMetrics = z.object({
+  issueId: IssueId,
+  runs: z.int().nonnegative(),
+  costMicros: z.int().nonnegative(),
+  rounds: z.record(z.string(), z.int().positive()),
+});
+export type IssueMetrics = z.infer<typeof IssueMetrics>;
 
 export const ProjectSummary = z.object({
   /** Corridas raíz cerradas. */

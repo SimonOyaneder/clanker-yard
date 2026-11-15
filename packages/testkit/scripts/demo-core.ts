@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startCore, startFakeLinear } from "@clanker/core";
-import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, seedLanes, startGitHubSim, tempGitRepo } from "../src/index";
+import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, seedLanes, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
 // y tres repos git temporales (sin receta, con una válida y con una inválida). Publica `core.json` en
@@ -14,6 +14,9 @@ import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, seedLanes
 // Con DEMO_INBOX=1 se suma el proyecto "Bandeja de prueba", que arranca una corrida por cada tipo de decisión para
 // ver la bandeja: un gate, un paso sin edge (needs_human), un tope de gasto, una nota de revisión que no bloquea y
 // una alerta suelta.
+//
+// Con `DEMO_SCENARIO=summary` además importa el fixture del clanker-loop y le suma corridas de Yard con sus pasos
+// (`summary-scenario.ts`): el proyecto de las capturas del Resumen.
 //
 // Las conexiones nunca salen a internet: GitHub es el simulador (`startGitHubSim`, acepta el PAT
 // `github_pat_demo`), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
@@ -168,6 +171,8 @@ if (lanes) {
   await client.connections.setPat({ token: "github_pat_demo" });
   await seedLanes({ client, store, repoId });
 }
+
+if (process.env.DEMO_SCENARIO === "summary") await seedSummary({ client, store });
 
 writeCoreJson(home, {
   pid: process.pid,

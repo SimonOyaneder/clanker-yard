@@ -425,6 +425,8 @@ describe("metrics", () => {
     expect(await client.metrics.byRole()).toEqual([]);
     expect(await client.metrics.byModel({ projectId: project.id })).toEqual([]);
     expect(await client.metrics.byDay({ utcOffsetMinutes: -180 })).toEqual([]);
+    expect(await client.metrics.byStep()).toEqual([]);
+    expect(await client.metrics.byIssue()).toEqual([]);
     expect(await client.projects.summary({ id: project.id })).toMatchObject({ runs: 0, costMicros: 0, avgCostMicros: null, byRole: [] });
     await expect(client.projects.summary({ id: "prj_01J0000000000000000000000A" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
@@ -445,6 +447,11 @@ describe("imports.legacy", () => {
 
     const demo = (await client.projects.list()).find((p) => p.slug === "demo-lote-0a1b2c3d4e5f")!;
     expect(await client.projects.summary({ id: demo.id })).toMatchObject({ runs: 5, costMicros: 22_150_000 });
+    // El rango y el origen llegan al resumen: nada cerró antes de noviembre ni lo corrió Yard.
+    expect(await client.projects.summary({ id: demo.id, to: Date.UTC(2026, 10, 1) })).toMatchObject({ runs: 0, costMicros: 0 });
+    expect(await client.projects.summary({ id: demo.id, imported: false })).toMatchObject({ runs: 0, costMicros: 0 });
+    expect(await client.metrics.byStep({ projectId: demo.id })).toEqual([]);
+    expect((await client.metrics.byIssue({ projectId: demo.id })).map((i) => i.runs)).toEqual(expect.arrayContaining([1]));
     expect((await client.metrics.byRole({ imported: false }))).toEqual([]);
     expect((await client.events.list({ filter: { types: ["import.completed"] } })).map((e) => e.origin)).toEqual(["import", "import"]);
 

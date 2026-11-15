@@ -38,6 +38,19 @@
   --sidebar-accent-foreground: oklch(0.2 0.006 270);
   --sidebar-border: oklch(0.91 0.004 270);
   --sidebar-ring: oklch(0.62 0.17 285);
+  /* Gráficos: categorías en orden fijo (un rol, un color, nunca por ranking), validadas contra la tarjeta en claro y oscuro
+     (CVD adyacente >= 8, normal >= 15). `--viz-other` es el resto cuando se acaban los ocho; `--viz-measure` es la medida de
+     un gráfico de una sola serie. */
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
+  --viz-5: #e87ba4;
+  --viz-6: #008300;
+  --viz-7: #6250d6;
+  --viz-8: #e34948;
+  --viz-other: oklch(0.62 0.01 270);
+  --viz-measure: oklch(0.56 0.17 285);
 }
 
 .dark {
@@ -68,6 +81,16 @@
   --sidebar-accent-foreground: oklch(0.96 0.003 270);
   --sidebar-border: oklch(1 0 0 / 7%);
   --sidebar-ring: oklch(0.68 0.16 285);
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+  --viz-5: #d55181;
+  --viz-6: #0ca30c;
+  --viz-7: #9085e9;
+  --viz-8: #e66767;
+  --viz-other: oklch(0.6 0.01 270);
+  --viz-measure: oklch(0.68 0.16 285);
 }
 
 @theme inline {
@@ -98,6 +121,16 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-viz-1: var(--viz-1);
+  --color-viz-2: var(--viz-2);
+  --color-viz-3: var(--viz-3);
+  --color-viz-4: var(--viz-4);
+  --color-viz-5: var(--viz-5);
+  --color-viz-6: var(--viz-6);
+  --color-viz-7: var(--viz-7);
+  --color-viz-8: var(--viz-8);
+  --color-viz-other: var(--viz-other);
+  --color-viz-measure: var(--viz-measure);
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);

@@ -16,7 +16,7 @@ import {
 import { Decision, DecisionFilter } from "./decisions";
 import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
 import { LegacyImportInput, LegacyImportResult } from "./import";
-import { DayMetrics, DayMetricsFilter, MetricsFilter, ModelMetrics, ProjectSummary, RoleMetrics } from "./metrics";
+import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
 import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
 import { QueueEntry } from "./queue";
@@ -245,8 +245,11 @@ const projects = {
    * motivo. `NOT_FOUND` si el proyecto no existe; `BAD_REQUEST` si el core no tiene adapter de su tracker.
    */
   queue: base.input(z.object({ id: ProjectId })).output(z.array(QueueEntry)),
-  /** Totales, rondas y costo por rol de las corridas cerradas del proyecto. `NOT_FOUND` si no existe. */
-  summary: base.input(z.object({ id: ProjectId })).output(ProjectSummary),
+  /**
+   * Totales, rondas y costo por rol de las corridas cerradas del proyecto, por el instante en que cerraron:
+   * `from`, `to` e `imported` acotan como en `metrics.*`. `NOT_FOUND` si no existe.
+   */
+  summary: base.input(ProjectSummaryFilter).output(ProjectSummary),
 };
 
 const prs = {
@@ -447,6 +450,10 @@ const metrics = {
   byDay: base.input(DayMetricsFilter.default({ utcOffsetMinutes: 0 })).output(z.array(DayMetrics)),
   /** Por costo, de más a menos. */
   byModel: base.input(MetricsFilter.default({})).output(z.array(ModelMetrics)),
+  /** Por costo, de más a menos: lo que gastó cada nodo de cada flujo. Sin las corridas importadas. */
+  byStep: base.input(MetricsFilter.default({})).output(z.array(StepMetrics)),
+  /** Por costo, de más a menos: cada issue con su costo y sus rondas. */
+  byIssue: base.input(MetricsFilter.default({})).output(z.array(IssueMetrics)),
 };
 
 const decisions = {

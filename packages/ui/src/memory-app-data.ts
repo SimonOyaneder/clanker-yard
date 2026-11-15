@@ -2,6 +2,7 @@ import { type Breaker, type CachedIssue, type ClankerProject, type ClaudeStatus,
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildPrs } from "@/seed-prs"
+import { aggregate, seedClosedRuns } from "@/seed-metrics"
 import { seedStep, transcriptPage, type StepSeed } from "@/seed-steps"
 
 // Datos de ejemplo en memoria para desarrollar la UI sin core. Nada llega por `events`: lo que se ve es
@@ -363,6 +364,9 @@ export function createMemoryAppData(now = Date.now()): AppData {
     },
     breakers: async () => breakers.map((b) => ({ ...b })),
     openPrs: async () => [],
+    // Solo el primer proyecto tiene corridas cerradas de ejemplo; el otro trae su Resumen vacío.
+    projectMetrics: async (projectId, range) =>
+      aggregate(projectId === projects[0]!.id ? seedClosedRuns(issues.slice(0, 4).map((i) => i.id)) : [], range, now),
     issues: async (projectId) => issues.filter((i) => i.projectId === projectId),
     // Sin bloqueos en los datos de ejemplo: la cola son las issues en todo que ninguna corrida tomó; las saltadas salen bloqueadas.
     queue: async (projectId) => {

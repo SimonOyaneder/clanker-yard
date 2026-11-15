@@ -74,7 +74,10 @@ test("pausar y reanudar el proyecto con el botón y con ⇧⌘Y", async ({ windo
 
 test("subir una issue en la cola y devolver la saltada desde el menú contextual", async ({ window: page }) => {
   const queue = page.getByRole("heading", { name: /En cola/ }).locator("xpath=ancestor::section[1]");
-  await queue.getByRole("listitem").filter({ hasText: "Reglas de boundaries para engines nuevas" }).click({ button: "right" });
+  const row = queue.getByRole("listitem").filter({ hasText: "Reglas de boundaries para engines nuevas" });
+  // Con la fila pegada al borde de la ventana el menú se abre hacia arriba y soltar el botón derecho cae sobre un ítem: se sube la fila antes.
+  await row.evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await row.click({ button: "right" });
   await page.getByRole("menuitem", { name: /Subirla en la cola/ }).click();
   await expect(queue.getByRole("listitem").first()).toContainText("Reglas de boundaries para engines nuevas");
 

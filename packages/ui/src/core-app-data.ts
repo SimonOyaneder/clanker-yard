@@ -2,7 +2,7 @@ import type { Client, EventType } from "@clanker/api"
 import type { AppData } from "@/app-data"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
-export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "connections" | "repos">
+export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "connections" | "repos" | "metrics">
 
 // Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos, las sesiones de agente que el
 // panel del paso y su transcript siguen en vivo, las decisiones de la bandeja, conexiones y pruebas de receta).
@@ -75,6 +75,18 @@ export function createCoreAppData(client: CoreClient): AppData {
     openPrs: () => client.prs.list({ state: "open" }),
     issues: (projectId) => client.issues.list({ projectId }),
     queue: (projectId) => client.projects.queue({ id: projectId }),
+    projectMetrics: async (projectId, range) => {
+      const scope = { projectId, ...range }
+      const [summary, byDay, byModel, byStep, byIssue, roles] = await Promise.all([
+        client.projects.summary({ id: projectId, ...range }),
+        client.metrics.byDay({ ...scope, utcOffsetMinutes: -new Date().getTimezoneOffset() }),
+        client.metrics.byModel(scope),
+        client.metrics.byStep(scope),
+        client.metrics.byIssue(scope),
+        client.metrics.byRole({ projectId }),
+      ])
+      return { summary, byDay, byModel, byStep, byIssue, roles: roles.map((r) => r.role).sort() }
+    },
     runs: (filter) => client.runs.list(filter),
     run: (id) => client.runs.get({ id }),
     step: (id) => client.runs.step({ id }),

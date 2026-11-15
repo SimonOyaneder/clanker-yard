@@ -252,7 +252,7 @@ export function createRouter(deps: RouterDeps) {
         asApiError(() => deps.scheduler.boostIssue({ projectId: id, issueId, boosted }, context.origin)),
       ),
       queue: os.projects.queue.handler(({ input }) => asApiErrorAsync(() => deps.queue.of(input.id))),
-      summary: os.projects.summary.handler(({ input }) => metrics.summary(projectOrNotFound(input.id).id)),
+      summary: os.projects.summary.handler(({ input: { id, ...filter } }) => metrics.summary(projectOrNotFound(id).id, filter)),
     },
     prs: {
       get: os.prs.get.handler(({ input }) => readPr(input, prs.get)),
@@ -287,6 +287,8 @@ export function createRouter(deps: RouterDeps) {
       byRole: os.metrics.byRole.handler(({ input }) => metrics.byRole(input)),
       byDay: os.metrics.byDay.handler(({ input }) => metrics.byDay(input)),
       byModel: os.metrics.byModel.handler(({ input }) => metrics.byModel(input)),
+      byStep: os.metrics.byStep.handler(({ input }) => metrics.byStep(input)),
+      byIssue: os.metrics.byIssue.handler(({ input }) => metrics.byIssue(input)),
     },
     imports: {
       legacy: os.imports.legacy.handler(({ input }) => asApiError(() => deps.legacyImport.run(input))),

@@ -9,16 +9,20 @@ import type {
   ClaudeStatus,
   Connection,
   ConnectionProvider,
+  DayMetrics,
   Decision,
   DecisionFilter,
   DecisionId,
   Event,
   GitHubPatForm,
   IssueId,
+  IssueMetrics,
   Lanes,
+  ModelMetrics,
   NewProject,
   ProjectId,
   ProjectPatch,
+  ProjectSummary,
   QueueEntry,
   RecipeStatus,
   RecipeTestResult,
@@ -30,6 +34,7 @@ import type {
   RunId,
   StartRun,
   StepDetail,
+  StepMetrics,
   StepRunId,
   TranscriptPage,
 } from "@clanker/api"
@@ -41,6 +46,25 @@ export interface RepoRow {
   repo: Repo
   recipe: RecipeStatus
   lastTest: { ok: boolean; at: number } | null
+}
+
+/** El rango (ms epoch, `to` exclusivo) y el origen que acotan las métricas de un proyecto: los de `MetricsFilter`. */
+export interface MetricsRange {
+  from?: number
+  to?: number
+  /** `true` solo las corridas importadas del clanker-loop; `false` solo las de Yard. */
+  imported?: boolean
+}
+
+/** Lo que muestra el Resumen de un proyecto: todo acotado por el mismo rango y origen, menos `roles`. */
+export interface ProjectMetrics {
+  summary: ProjectSummary
+  byDay: DayMetrics[]
+  byModel: ModelMetrics[]
+  byStep: StepMetrics[]
+  byIssue: IssueMetrics[]
+  /** Todos los roles que gastaron algo en el proyecto, sin acotar y ordenados: les fija el color a cada uno aunque el rango deje fuera a otros. */
+  roles: string[]
 }
 
 // De dónde saca datos la UI y a quién le pide acciones. Los dominios son los del contrato de
@@ -64,6 +88,8 @@ export interface AppData {
   issues(projectId: ProjectId): Promise<CachedIssue[]>
   /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */
   queue(projectId: ProjectId): Promise<QueueEntry[]>
+  /** Las métricas del proyecto para su Resumen; los días son del huso de la máquina. */
+  projectMetrics(projectId: ProjectId, range: MetricsRange): Promise<ProjectMetrics>
   /** De la más reciente a la más antigua, sin pasos. */
   runs(filter?: RunFilter): Promise<Run[]>
   run(id: RunId): Promise<RunDetail>

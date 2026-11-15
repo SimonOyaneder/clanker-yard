@@ -4,8 +4,11 @@ import { join } from "node:path";
 
 const testkitDir = join(import.meta.dirname, "../../../packages/testkit");
 
-/** `lanes` siembra el proyecto de la vista de Operación (`DEMO_SCENARIO` de `packages/testkit/scripts/demo-core.ts`). */
-export type DemoScenario = "default" | "lanes";
+/**
+ * `lanes` siembra el proyecto de la vista de Operación y `summary` el del Resumen, con lo importado del clanker-loop
+ * y corridas de Yard (`DEMO_SCENARIO` de `packages/testkit/scripts/demo-core.ts`).
+ */
+export type DemoScenario = "default" | "lanes" | "summary";
 
 export interface DemoCore {
   stop(): Promise<void>;

@@ -229,6 +229,55 @@ describe("agregados", () => {
     });
   });
 
+  test("byStep suma lo que gastó cada nodo en todas sus visitas y byIssue, el costo y las rondas de cada issue", async () => {
+    // ENG-1: dev 100, review 200 (cambios), fix 300, review 400 (ok); ENG-2: dev 10, review 20 (ok); proyecto B: dev 5, review 6.
+    const h = team(scripted([100, 200, 300, 400, 10, 20, 5, 6], ["changes", "ok", "ok", "ok"]));
+    const a1 = await h.startIn(projectA, "ENG-1");
+    const a2 = await h.startIn(projectA, "ENG-2");
+    const b1 = await h.startIn(projectB, "ENG-3");
+    h.closeAt(a1, 1_000);
+    h.closeAt(a2, 5_000);
+    h.closeAt(b1, 9_000);
+
+    expect(h.metrics.byStep({ projectId: projectA })).toEqual([
+      { flow: "loop", node: "review", steps: 3, costMicros: 200 + 400 + 20 },
+      { flow: "loop", node: "fix", steps: 1, costMicros: 300 },
+      { flow: "loop", node: "implement", steps: 2, costMicros: 110 },
+    ]);
+    // Sumar los pasos es sumar la corrida: cuadra con el resumen del proyecto, con y sin rango.
+    const total = (steps: { costMicros: number }[]) => steps.reduce((sum, s) => sum + s.costMicros, 0);
+    expect(total(h.metrics.byStep({ projectId: projectA }))).toBe(h.metrics.summary(projectA).costMicros);
+    expect(h.metrics.byStep({ projectId: projectA, to: 2_000 })).toEqual([
+      { flow: "loop", node: "review", steps: 2, costMicros: 600 },
+      { flow: "loop", node: "fix", steps: 1, costMicros: 300 },
+      { flow: "loop", node: "implement", steps: 1, costMicros: 100 },
+    ]);
+
+    const issues = h.metrics.byIssue({ projectId: projectA });
+    expect(issues.map(({ costMicros, runs, rounds }) => ({ costMicros, runs, rounds }))).toEqual([
+      { costMicros: 1000, runs: 1, rounds: { review: 1 } },
+      { costMicros: 30, runs: 1, rounds: {} },
+    ]);
+    expect(h.metrics.byIssue().length).toBe(3);
+  });
+
+  test("summary acotado por rango y origen suma lo mismo que los cortes de esos filtros", async () => {
+    const h = team(scripted([100, 200, 300, 400, 10, 20], ["changes", "ok", "ok"]));
+    const a1 = await h.startIn(projectA, "ENG-1");
+    const a2 = await h.startIn(projectA, "ENG-2");
+    h.closeAt(a1, 1_000);
+    h.closeAt(a2, 5_000);
+    h.store.tx((tx) => tx.db.update(runs).set({ sourceKey: "legacy:metrics:x:ENG-1:t" }).where(eq(runs.id, a1)).run());
+
+    const lateYard = h.metrics.summary(projectA, { from: 2_000, imported: false });
+    expect(lateYard).toMatchObject({ runs: 1, costMicros: 30, rounds: [], firstAt: 5_000, lastAt: 5_000 });
+    expect(lateYard.byRole).toEqual(h.metrics.byRole({ projectId: projectA, from: 2_000, imported: false }));
+    const imported = h.metrics.summary(projectA, { imported: true });
+    expect(imported).toMatchObject({ runs: 1, costMicros: 1000, rounds: [{ counter: "review", total: 1, perRun: 1 }] });
+    expect(h.metrics.summary(projectA, { to: 1_000 })).toMatchObject({ runs: 0, costMicros: 0, avgCostMicros: null, byRole: [] });
+    expect(h.metrics.summary(projectA).costMicros).toBe(imported.costMicros + lateYard.costMicros);
+  });
+
   test("el costo de una corrida hija cuenta en los totales, pero la hija no es una corrida más", async () => {
     const h = team(scripted([100, 200, 30]));
     h.save({
