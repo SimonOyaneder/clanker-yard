@@ -1,0 +1,212 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Grises neutros con un toque frío, al estilo de Linear. El tema sigue a macOS
+   (nativeTheme.themeSource) y se puede forzar desde Ver → Apariencia. */
+:root {
+  --background: oklch(0.992 0.001 270);
+  --foreground: oklch(0.2 0.006 270);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.006 270);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.006 270);
+  --primary: oklch(0.52 0.19 285);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.955 0.003 270);
+  --secondary-foreground: oklch(0.25 0.006 270);
+  --muted: oklch(0.962 0.002 270);
+  --muted-foreground: oklch(0.5 0.01 270);
+  --accent: oklch(0.945 0.004 270);
+  --accent-foreground: oklch(0.2 0.006 270);
+  --destructive: oklch(0.58 0.22 27);
+  --border: oklch(0.91 0.004 270);
+  --input: oklch(0.89 0.004 270);
+  --ring: oklch(0.62 0.17 285);
+  --inset: oklch(0.975 0.002 270);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.972 0.002 270);
+  --sidebar-foreground: oklch(0.3 0.008 270);
+  --sidebar-primary: oklch(0.52 0.19 285);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.93 0.004 270);
+  --sidebar-accent-foreground: oklch(0.2 0.006 270);
+  --sidebar-border: oklch(0.91 0.004 270);
+  --sidebar-ring: oklch(0.62 0.17 285);
+}
+
+.dark {
+  --background: oklch(0.16 0.004 270);
+  --foreground: oklch(0.94 0.003 270);
+  --card: oklch(0.195 0.004 270);
+  --card-foreground: oklch(0.94 0.003 270);
+  --popover: oklch(0.215 0.005 270);
+  --popover-foreground: oklch(0.94 0.003 270);
+  --primary: oklch(0.68 0.16 285);
+  --primary-foreground: oklch(0.16 0.004 270);
+  --secondary: oklch(0.25 0.005 270);
+  --secondary-foreground: oklch(0.94 0.003 270);
+  --muted: oklch(0.23 0.005 270);
+  --muted-foreground: oklch(0.68 0.008 270);
+  --accent: oklch(0.255 0.006 270);
+  --accent-foreground: oklch(0.96 0.003 270);
+  --destructive: oklch(0.68 0.19 22);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.68 0.16 285);
+  --inset: oklch(0.14 0.004 270);
+  --sidebar: oklch(0.135 0.004 270);
+  --sidebar-foreground: oklch(0.86 0.005 270);
+  --sidebar-primary: oklch(0.68 0.16 285);
+  --sidebar-primary-foreground: oklch(0.16 0.004 270);
+  --sidebar-accent: oklch(0.22 0.006 270);
+  --sidebar-accent-foreground: oklch(0.96 0.003 270);
+  --sidebar-border: oklch(1 0 0 / 7%);
+  --sidebar-ring: oklch(0.68 0.16 285);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-inset: var(--inset);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "SF Mono", ui-monospace, Menlo, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    @apply bg-background font-sans text-[13px] leading-[1.45] text-foreground antialiased;
+    /* Inter: dígitos de ancho fijo y la "l" con cola para leer IDs como ENG-9126 */
+    font-feature-settings: "cv01", "cv11", "ss03";
+  }
+  /* Como en una app nativa: el chrome no se selecciona, el contenido sí. */
+  header,
+  nav,
+  button,
+  [role="tab"],
+  [role="menuitem"],
+  [data-slot="sidebar"],
+  [data-slot="kbd"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 30%, transparent);
+  }
+  /* Tailwind 4 deja los botones con cursor default: manito en todo lo que hace algo al hacer click. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([data-disabled]),
+  [role="switch"]:not([data-disabled]),
+  [role="radio"]:not([data-disabled]),
+  a[href],
+  summary,
+  label:has(input:not(:disabled)) {
+    cursor: pointer;
+  }
+}
+
+/* Barra de título: la ventana usa titleBarStyle hiddenInset */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag,
+.drag button,
+.drag a,
+.drag input,
+.drag [role="tab"] {
+  -webkit-app-region: no-drag;
+}
+
+/* Agente trabajando: anillo violeta que late */
+@keyframes cc-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 55%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.cc-pulse {
+  animation: cc-pulse 1.8s ease-out infinite;
+}
+@keyframes cc-blink {
+  50% { opacity: 0.35; }
+}
+.cc-blink {
+  animation: cc-blink 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-pulse,
+  .cc-blink {
+    animation: none;
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* xyflow con los tokens de la app (claro y oscuro). Doble clase para ganarle a .react-flow.dark */
+.react-flow.cc-flow {
+  --xy-background-color: var(--background);
+  --xy-background-pattern-color: var(--border);
+  --xy-minimap-background-color: var(--card);
+  --xy-minimap-mask-background-color: color-mix(in oklch, var(--background) 65%, transparent);
+  --xy-minimap-node-stroke-color: transparent;
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-color: var(--muted-foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: none;
+  --xy-node-boxshadow-hover: none;
+  --xy-node-boxshadow-selected: none;
+}
+.react-flow.cc-flow .react-flow__controls,
+.react-flow.cc-flow .react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.react-flow.cc-flow .react-flow__node {
+  cursor: default;
+}
