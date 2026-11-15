@@ -1,14 +1,22 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Brief, Profile, Role } from "@clanker/api";
 import { createDefs } from "../defs/defs";
 import { newId } from "../store/conventions";
 import { agentSessions } from "../store/schema";
 import { openStore, type Store } from "../store/store";
-import { ACTIVITY_INTERVAL_MS, createAgents, type Agents } from "./agents";
+import {
+  ACTIVITY_INTERVAL_MS,
+  createAgents,
+  HANDOFF_MAX_CHARS,
+  WARM_MAX_CONTEXT_TOKENS,
+  WARM_WINDOW_MS,
+  type Agents,
+} from "./agents";
 import {
   selectRuntime,
   type AgentEvent,
@@ -58,11 +66,20 @@ const role: Role = {
       outcomes: ["done"],
       session: "resume",
     },
+    fix: {
+      instructions: "Arregla lo que pidieron.",
+      report: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] },
+      outcomes: ["done"],
+      session: "resume-if-warm",
+    },
   },
 };
 
 const profile: Profile = {
-  roles: { analyst: { model: "sonnet", effort: "high", budget: { maxUsd: 0.5 } } },
+  roles: {
+    analyst: { model: "sonnet", effort: "high", budget: { maxUsd: 0.5 } },
+    "analyst-opus": { model: "opus" },
+  },
 };
 
 const validReport = { outcome: "findings", summary: "uno", payload: { findings: ["x"] } };
@@ -309,7 +326,7 @@ describe("run", () => {
 
     await expect(agents.run({ ...request(), role: "nadie" })).rejects.toThrow('No existe el rol "nadie"');
     await expect(agents.run({ ...request(), mode: "x", brief: brief("x") })).rejects.toThrow(
-      /no tiene el modo "x" \(tiene: audit, followup\)/,
+      /no tiene el modo "x" \(tiene: audit, followup, fix\)/,
     );
     await expect(agents.run({ ...request(), profile: "nadie" })).rejects.toThrow('No existe el perfil "nadie"');
     await expect(agents.run({ ...request(), brief: brief("audit", { focus: 1 }) })).rejects.toThrow(
@@ -433,6 +450,275 @@ describe("sesión previa y versiones fijadas", () => {
     });
 
     expect(calls.starts[0]).toMatchObject({ systemPrompt: "Eres un analista.", model: "sonnet" });
+  });
+});
+
+describe("política de sesión", () => {
+  const MIN = 60_000;
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Un repo real con un commit y un archivo modificado después: el `git diff --stat` del handoff sale de ahí. */
+  function repoWithChange(): string {
+    const dir = mkdtempSync(join(tmpdir(), "agents-session-"));
+    dirs.push(dir);
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, stdio: "pipe" });
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(dir, "a.ts"), "uno\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    writeFileSync(join(dir, "a.ts"), "uno\ndos\ntres\n");
+    return dir;
+  }
+
+  /** Un turno del modelo con el contexto que pesa `context` tokens, del que sale cuán grande es la sesión. */
+  const turn = (context: number): AgentEvent => ({
+    type: "usage",
+    turn: 1,
+    usage: { ...usage, turns: 1, tokensIn: 1, tokensOut: 1, tokensCacheRead: context - 11, tokensCacheWrite: 10 },
+  });
+
+  const done: Step = { result: { structured: { outcome: "done", summary: "listo", payload: { done: true } } } };
+
+  /** Corre la sesión previa (modo `audit`, sesión nueva) a la hora `at` y deja el reloj ahí. */
+  async function afterFirst(opts: { context?: number; events?: AgentEvent[]; cacheTtl?: "1h"; report?: unknown; later?: Step[] } = {}) {
+    const clock = { t: 1_000_000 };
+    const workspace = repoWithChange();
+    const env = setup(
+      [
+        {
+          result: { structured: opts.report ?? validReport },
+          events: async function* () {
+            for (const e of opts.events ?? [turn(opts.context ?? 20_000)]) yield e;
+          },
+        },
+        ...(opts.later ?? [done, done, done]),
+      ],
+      () => clock.t,
+    );
+    const profileName = opts.cacheTtl === undefined ? "default" : "lento";
+    if (opts.cacheTtl) {
+      env.defs.save({
+        kind: "profile",
+        slug: "lento",
+        scope: "user",
+        body: { roles: { analyst: { model: "sonnet", cacheTtl: opts.cacheTtl } } },
+        source: "ui",
+      });
+    }
+    const first = await env.agents.run({ ...request(), profile: profileName, workspace });
+    const next = (mode: string) => ({
+      ...request(mode),
+      profile: profileName,
+      brief: { ...brief(mode), base: "HEAD" },
+      workspace,
+      resumeFrom: first.sessionId,
+    });
+    return { ...env, clock, first, next };
+  }
+
+  test("new ignora resumeFrom: sesión nueva y sin handoff", async () => {
+    const { agents, calls, next } = await afterFirst({ later: [{ result: { structured: validReport } }] });
+
+    await agents.run(next("audit"));
+
+    expect(calls.resumes).toHaveLength(0);
+    expect(calls.starts).toHaveLength(2);
+    expect(calls.starts[1]?.prompt).not.toContain("Handoff");
+  });
+
+  test("resume retoma desde resumeFrom aunque la caché esté fría y el contexto sea enorme", async () => {
+    const { agents, calls, clock, next } = await afterFirst({ context: 150_000 });
+    clock.t += 60 * MIN;
+
+    await agents.run(next("followup"));
+
+    expect(calls.starts).toHaveLength(1);
+    expect(calls.resumes.map((r) => r.ref.sessionId)).toEqual(["stub-1"]);
+    expect(calls.resumes[0]?.message).not.toContain("Handoff");
+  });
+
+  test("resume-if-warm retoma con la caché caliente: menos de 4 min y menos de 80k", async () => {
+    const { agents, calls, clock, next } = await afterFirst({ context: WARM_MAX_CONTEXT_TOKENS - 1 });
+    clock.t += WARM_WINDOW_MS["5m"] - 1;
+
+    await agents.run(next("fix"));
+
+    expect(calls.starts).toHaveLength(1);
+    expect(calls.resumes.map((r) => r.ref.sessionId)).toEqual(["stub-1"]);
+  });
+
+  test("resume-if-warm en frío abre una sesión nueva con handoff: reporte anterior y git diff --stat", async () => {
+    const { store, agents, calls, clock, first, next } = await afterFirst();
+    clock.t += WARM_WINDOW_MS["5m"];
+
+    const result = await agents.run(next("fix"));
+
+    expect(result.status).toBe("success");
+    expect(calls.resumes).toHaveLength(0);
+    expect(calls.starts).toHaveLength(2);
+    const prompt = calls.starts[1]?.prompt ?? "";
+    expect(prompt).toContain("respondió por última vez hace 4 min");
+    expect(prompt).toContain("Reporte (findings): uno");
+    expect(prompt).toContain('"x"');
+    expect(prompt).toMatch(/Cambios contra HEAD \(git diff --stat\):\na\.ts \| 2 \+\+/);
+    expect(prompt.indexOf("Handoff")).toBeLessThan(prompt.indexOf("Arregla lo que pidieron."));
+    expect(calls.starts[1]?.systemPrompt).toBe(role.prompt);
+    expect(store.db.select().from(agentSessions).all()).toHaveLength(2);
+    expect(result.sessionId).not.toBe(first.sessionId);
+  });
+
+  test("resume-if-warm con 80k de contexto o más es frío aunque la última respuesta sea de ahora", async () => {
+    const { agents, calls, next } = await afterFirst({ context: WARM_MAX_CONTEXT_TOKENS });
+
+    await agents.run(next("fix"));
+
+    expect(calls.resumes).toHaveLength(0);
+    expect(calls.starts[1]?.prompt).toContain("su contexto pesa 80k tokens");
+  });
+
+  test("resume-if-warm sin ningún turno registrado no puede probar que la caché esté caliente", async () => {
+    const { agents, calls, next } = await afterFirst({ events: [] });
+
+    await agents.run(next("fix"));
+
+    expect(calls.resumes).toHaveLength(0);
+    expect(calls.starts[1]?.prompt).toContain("no registró ningún turno");
+  });
+
+  test("con cacheTtl 1h del perfil la caché sigue caliente pasados los 4 min, y el TTL llega al retomar", async () => {
+    const { agents, calls, clock, next } = await afterFirst({ cacheTtl: "1h" });
+    clock.t += 30 * MIN;
+
+    await agents.run(next("fix"));
+    expect(calls.resumes).toHaveLength(1);
+    expect(calls.resumes[0]?.spec.cacheTtl).toBe("1h");
+
+    clock.t += WARM_WINDOW_MS["1h"];
+    await agents.run({ ...next("fix"), brief: { ...brief("fix"), base: "HEAD" } });
+    expect(calls.resumes).toHaveLength(1);
+    expect(calls.starts).toHaveLength(2);
+  });
+
+  test("una sesión compactada no se retoma con ninguna política: la ronda siguiente va nueva con handoff", async () => {
+    const { store, agents, calls, first, next } = await afterFirst({ events: [turn(20_000), { type: "compaction" }] });
+
+    expect(store.db.select().from(agentSessions).get()).toMatchObject({ id: first.sessionId, compactions: 1 });
+    await agents.run(next("fix"));
+    await agents.run(next("followup"));
+
+    expect(calls.resumes).toHaveLength(0);
+    expect(calls.starts).toHaveLength(3);
+    expect(calls.starts[1]?.prompt).toContain("la sesión anterior de esta tarea se compactó");
+    expect(calls.starts[2]?.prompt).toContain("se compactó");
+  });
+
+  test("el handoff se acota a ~15k tokens", async () => {
+    const huge = { ...validReport, payload: { findings: ["x".repeat(HANDOFF_MAX_CHARS * 2)] } };
+    const { agents, calls, clock, next } = await afterFirst({ report: huge });
+    clock.t += 10 * MIN;
+
+    await agents.run(next("fix"));
+
+    const prompt = calls.starts[1]?.prompt ?? "";
+    expect(prompt).toContain("truncado");
+    expect(prompt.length).toBeLessThan(HANDOFF_MAX_CHARS + 5_000);
+  });
+
+  test("si git falla, el handoff lo dice y la corrida lo avisa; el agente corre igual", async () => {
+    const { store, agents, calls, clock, next } = await afterFirst();
+    clock.t += 10 * MIN;
+
+    const result = await agents.run({ ...next("fix"), workspace: "/no/existe" });
+
+    expect(result.status).toBe("success");
+    expect(calls.starts[1]?.prompt).toContain("(no se pudo calcular:");
+    const errors = store.events.since(0, { types: ["error"] }).filter((e) => e.payload.scope === "agent.handoff");
+    expect(errors).toHaveLength(1);
+  });
+});
+
+describe("prefijo compartido", () => {
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+  /** Deja correr todo lo que ya puede correr sin esperar nada externo. */
+  const settleMicrotasks = () => new Promise<void>((r) => setImmediate(r));
+
+  /** Un paso que anota cuándo parte su sesión y, si `until`, no emite su primer token hasta que se cumpla. */
+  const stepOf = (name: string, log: string[], until?: Promise<void>): Step => ({
+    result: { structured: validReport },
+    events: () => {
+      log.push(`parte ${name}`);
+      return (async function* () {
+        await until;
+        log.push(`primer token ${name}`);
+        yield { type: "first_token" } as const;
+      })();
+    },
+  });
+
+  test("las ramas con el mismo prefijo parten recién cuando la primera emite su primer token", async () => {
+    const log: string[] = [];
+    const firstToken = deferred();
+    const { agents } = setup([stepOf("A", log, firstToken.promise), stepOf("B", log), stepOf("C", log)]);
+
+    const runs = [agents.run(request()), agents.run(request()), agents.run(request())];
+    await vi.waitFor(() => expect(log).toEqual(["parte A"]));
+    await settleMicrotasks();
+    expect(log).toEqual(["parte A"]);
+    firstToken.resolve();
+    const results = await Promise.all(runs);
+
+    expect(results.map((r) => r.status)).toEqual(["success", "success", "success"]);
+    expect(log).toEqual(["parte A", "primer token A", "parte B", "parte C", "primer token B", "primer token C"]);
+  });
+
+  test("si la primera termina sin emitir nada, las demás parten igual", async () => {
+    const log: string[] = [];
+    const { agents } = setup([
+      { result: { structured: validReport }, events: () => (log.push("parte A"), (async function* () {})()) },
+      stepOf("B", log),
+    ]);
+
+    await Promise.all([agents.run(request()), agents.run(request())]);
+
+    expect(log).toEqual(["parte A", "parte B", "primer token B"]);
+  });
+
+  test("otro modelo es otro prefijo: no espera", async () => {
+    const log: string[] = [];
+    const firstToken = deferred();
+    const { agents } = setup([stepOf("A", log, firstToken.promise), stepOf("B", log)]);
+
+    const a = agents.run(request());
+    const b = agents.run({ ...request(), profileRole: "analyst-opus" });
+    await vi.waitFor(() => expect(log).toContain("primer token B"));
+    expect(log[0]).toBe("parte A");
+    firstToken.resolve();
+    await Promise.all([a, b]);
+  });
+
+  test("un paso cancelado no se queda esperando el primer token de otro", async () => {
+    const log: string[] = [];
+    const firstToken = deferred();
+    const { agents } = setup([stepOf("A", log, firstToken.promise), stepOf("B", log)]);
+
+    const a = agents.run(request());
+    await vi.waitFor(() => expect(log).toEqual(["parte A"]));
+    const controller = new AbortController();
+    const b = agents.run({ ...request(), signal: controller.signal });
+    await settleMicrotasks();
+    expect(log).toEqual(["parte A"]);
+    controller.abort();
+    await vi.waitFor(() => expect(log).toContain("parte B"));
+    firstToken.resolve();
+    await Promise.all([a, b]);
   });
 });
 

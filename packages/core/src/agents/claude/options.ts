@@ -65,7 +65,14 @@ export interface RunCtx {
   spawn?: Options["spawnClaudeCodeProcess"];
 }
 
-/** RunSpec → Options del SDK (`docs/design.html#d-agents`, "Adapter Claude"). */
+/**
+ * RunSpec → Options del SDK (`docs/design.html#d-agents`, "Adapter Claude").
+ *
+ * Orden del prefijo cacheable: herramientas → prompt del rol → `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` →
+ * contexto del repo → brief en el mensaje del usuario (`spec.prompt`). Antes del límite no entra nada
+ * que cambie entre lanzamientos (fecha, cwd, git status): el prompt del rol es el de la def tal cual y
+ * las herramientas restringidas van ordenadas, así el mismo rol repite el prefijo byte a byte.
+ */
 export function toOptions(spec: RunSpec, ctx: RunCtx): Options {
   // Los archivos de contexto van después del límite cacheable: cambian con el repo y con lo que el usuario edita.
   const references = spec.references.map((r) => `# ${r.label}\n\n${r.content}`).join("\n\n");
@@ -84,8 +91,8 @@ export function toOptions(spec: RunSpec, ctx: RunCtx): Options {
     ...(spec.tools === "all"
       ? {}
       : {
-          ...(spec.tools.allow === undefined ? {} : { tools: spec.tools.allow }),
-          ...(spec.tools.deny === undefined ? {} : { disallowedTools: spec.tools.deny }),
+          ...(spec.tools.allow === undefined ? {} : { tools: spec.tools.allow.toSorted() }),
+          ...(spec.tools.deny === undefined ? {} : { disallowedTools: spec.tools.deny.toSorted() }),
         }),
     settingSources: spec.native?.sources ?? ["user", "project"],
     skills: spec.native?.skills ?? [],

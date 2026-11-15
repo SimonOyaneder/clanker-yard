@@ -64,7 +64,10 @@ export interface RunSpec {
  * Lo que cambia al retomar: el esquema del reporte depende del modo del mensaje, y el contexto se
  * vuelve a leer (retomar también es un lanzamiento).
  */
-export type ResumeSpec = Pick<RunSpec, "outputSchema" | "maxBudgetUsd" | "maxTurns" | "native" | "references" | "stepRunId">;
+export type ResumeSpec = Pick<
+  RunSpec,
+  "outputSchema" | "maxBudgetUsd" | "maxTurns" | "native" | "references" | "stepRunId" | "cacheTtl"
+>;
 
 /**
  * Lo gastado por este run, no el acumulado de la sesión: un runtime cuyo resume arrastra el
@@ -100,6 +103,14 @@ export type RunStatus =
   | "error";
 
 export type AgentEvent =
+  /**
+   * El modelo empezó a responder: desde aquí el prefijo de la petición ya está en la caché y otra
+   * sesión con el mismo prefijo lo lee en vez de escribirlo. Va antes que cualquier `text` o
+   * `tool_start` (el primer mensaje puede ser solo razonamiento).
+   */
+  | { type: "first_token" }
+  /** La sesión se compactó (hook `PreCompact`): ya no es el historial completo, así que el core no la retoma. */
+  | { type: "compaction" }
   | { type: "text"; text: string }
   | { type: "tool_start"; tool: string; detail?: string }
   | { type: "tool_end"; tool: string }

@@ -141,6 +141,7 @@ describe("start", () => {
 
     expect(run.ref).toEqual({ runtime: "claude-sdk", sessionId: "sess-1", cwd });
     expect(events.filter((e) => e.type !== "usage")).toEqual([
+      { type: "first_token" },
       { type: "text", text: "Reviso el repo" },
       { type: "tool_start", tool: "Read", detail: "a.ts" },
       { type: "tool_end", tool: "Read" },
@@ -306,6 +307,35 @@ describe("start", () => {
 
     expect(second.calls[0]?.options).toMatchObject({ skills: ["commit"] });
     expect(second.calls[0]?.options.systemPrompt).toEqual(["Eres el dev.", "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__", "# AGENTS.md\n\nv2"]);
+  });
+
+  test("first_token sale con el primer mensaje del modelo, aunque sea solo razonamiento, y una sola vez", async () => {
+    const { query } = fakeQuery([
+      init(),
+      assistant("m1", [{ type: "thinking", thinking: "pienso" }]),
+      assistant("m1", [{ type: "text", text: "Hola" }]),
+      assistant("m2", [{ type: "text", text: "Chao" }]),
+      success(),
+    ]);
+    const run = await runtimeWith(query).start(spec());
+    const types = (await collect(run.events)).map((e) => e.type);
+
+    expect(types.filter((t) => t === "first_token")).toHaveLength(1);
+    expect(types.slice(0, 2)).toEqual(["first_token", "text"]);
+  });
+
+  test("el hook PreCompact avisa la compactación como evento", async () => {
+    const { query } = fakeQuery((call) =>
+      (async function* () {
+        yield init();
+        const hook = call.options.hooks?.PreCompact?.[0]?.hooks[0];
+        const input = { hook_event_name: "PreCompact", session_id: "sess-1", trigger: "auto" } as HookInput;
+        await hook?.(input, undefined, { signal: new AbortController().signal });
+        yield success();
+      })(),
+    );
+    const run = await runtimeWith(query).start(spec());
+    expect(await collect(run.events)).toEqual([{ type: "compaction" }]);
   });
 
   test("el hook PreCompact deja la compactación en el transcript", async () => {

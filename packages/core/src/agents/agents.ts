@@ -9,9 +9,11 @@ import {
   type RoleMode,
   type StepRunId,
 } from "@clanker/api";
-import { and, eq, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, desc, eq, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { Defs } from "../defs/defs";
+import { git } from "../git/git";
 import type { Packs } from "../packs/packs";
 import { newId } from "../store/conventions";
 import { agentSessions, agentTurns, stepUsage, type DefPin } from "../store/schema";
@@ -25,6 +27,18 @@ export const USAGE_MISMATCH_PERCENT = 2;
 
 /** `agent.activity` sale como máximo una vez por este intervalo y por sesión. */
 export const ACTIVITY_INTERVAL_MS = 2000;
+
+/** `resume-if-warm` retoma solo si el contexto de la sesión pesa menos que esto. */
+export const WARM_MAX_CONTEXT_TOKENS = 80_000;
+
+/**
+ * `resume-if-warm` retoma solo si la última respuesta fue hace menos que esto: el TTL de la caché menos
+ * un minuto de margen, para que la petición llegue antes de que venza.
+ */
+export const WARM_WINDOW_MS = { "5m": 4 * 60_000, "1h": 59 * 60_000 } as const;
+
+/** El handoff de una sesión nueva en vez de retomar pesa unos 15k tokens (≈4 caracteres por token). */
+export const HANDOFF_MAX_CHARS = 60_000;
 
 /** Dónde corre y a quién le cuenta lo que pasa. */
 interface Placement {
@@ -54,8 +68,10 @@ export interface RunRequest extends Placement {
   /** El directorio donde corre el agente. */
   workspace: string;
   /**
-   * Una sesión anterior de la que partir. Que se retome o no lo decide el modo: con `session: "new"`
-   * se ignora y la sesión es nueva.
+   * Una sesión anterior de la que partir. Que se retome o no lo decide `session` del modo: `new` la
+   * ignora; `resume` la retoma; `resume-if-warm` la retoma si su caché sigue caliente (menos de 4 min
+   * desde su última respuesta con TTL de 5 m, y menos de 80k de contexto). Una sesión compactada o fría
+   * no se retoma: la nueva lleva un handoff con el reporte de la anterior y el `git diff --stat`.
    */
   resumeFrom?: string;
 }
@@ -119,12 +135,17 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     effort: string | undefined;
     cwd: string;
     mode: RoleMode;
-    budget: Pick<ResumeSpec, "maxBudgetUsd" | "maxTurns">;
+    /** Topes y TTL de caché que salen del modo y del perfil. */
+    settings: Pick<ResumeSpec, "maxBudgetUsd" | "maxTurns" | "cacheTtl">;
     /** Lo resuelto al lanzar: el reintento por un reporte inválido lo reusa en vez de releerlo. */
     context: Pick<ResumeSpec, "native" | "references">;
     placement: Placement;
     runId: Brief["run"]["id"];
+    /** Avisa que el prefijo de esta sesión ya está en la caché; es idempotente. */
+    prefixWarmed: () => void;
   }
+
+  type SessionRow = typeof agentSessions.$inferSelect;
 
   function resolveProfileRole(placement: Placement, roleSlug: string) {
     const def = placement.profileDef
@@ -161,10 +182,106 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     return mode;
   }
 
-  /** El perfil pisa al modo campo por campo. */
-  function budgetOf(mode: RoleMode, profileBudget: { maxTurns?: number; maxUsd?: number } = {}) {
-    const { maxTurns, maxUsd } = { ...mode.budget, ...profileBudget };
-    return { maxTurns, maxBudgetUsd: maxUsd };
+  /** El perfil pisa al modo campo por campo en los topes. */
+  function settingsOf(
+    mode: RoleMode,
+    profileRole: { budget?: { maxTurns?: number; maxUsd?: number }; cacheTtl?: "5m" | "1h" },
+  ) {
+    const { maxTurns, maxUsd } = { ...mode.budget, ...profileRole.budget };
+    return { maxTurns, maxBudgetUsd: maxUsd, cacheTtl: profileRole.cacheTtl };
+  }
+
+  function sessionOf(sessionId: string): SessionRow {
+    const session = store.db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).get();
+    if (!session) throw new Error(`No existe la sesión ${sessionId}.`);
+    return session;
+  }
+
+  /**
+   * Por qué una sesión no se retoma, o `undefined` si se puede. Una compactada ya no es el historial
+   * completo, así que ninguna política la retoma. `resume-if-warm` además pide la caché caliente:
+   * retomar en frío reescribe todo el contexto, y un handoff escribe mucho menos.
+   */
+  function whyCold(session: SessionRow, policy: RoleMode["session"], cacheTtl: "5m" | "1h"): string | undefined {
+    if (session.compactions > 0) return "se compactó";
+    if (policy !== "resume-if-warm") return undefined;
+    const last = store.db
+      .select()
+      .from(agentTurns)
+      .where(eq(agentTurns.sessionId, session.id))
+      .orderBy(desc(agentTurns.seq))
+      .limit(1)
+      .get();
+    if (!last) return "no registró ningún turno, así que no se sabe si su caché sigue caliente";
+    const idleMs = now() - last.ts;
+    if (idleMs >= WARM_WINDOW_MS[cacheTtl]) {
+      return `respondió por última vez hace ${Math.round(idleMs / 60_000)} min y su caché (TTL ${cacheTtl}) ya está fría`;
+    }
+    const context = last.tokensIn + last.tokensCacheRead + last.tokensCacheWrite;
+    if (context >= WARM_MAX_CONTEXT_TOKENS) {
+      return `su contexto pesa ${Math.round(context / 1000)}k tokens (el tope para retomar es ${WARM_MAX_CONTEXT_TOKENS / 1000}k)`;
+    }
+    return undefined;
+  }
+
+  /**
+   * Lo que una sesión nueva necesita saber de la anterior: su reporte y los cambios que dejó en el worktree.
+   * El plan y las instrucciones de la ronda ya vienen en el brief. Si git falla, el handoff lo dice y la
+   * corrida lo avisa: el agente igual puede revisar el worktree por su cuenta.
+   */
+  async function handoffFor(prior: SessionRow, reason: string, req: RunRequest): Promise<string> {
+    const base = req.brief.base;
+    let stat: string;
+    try {
+      stat = (await git(req.workspace, ["diff", "--stat", base])).trim() || "(sin cambios contra la base)";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      store.tx((tx) =>
+        tx.emit({
+          type: "error",
+          origin: "core",
+          ...scope({ placement: req, runId: req.brief.run.id }),
+          payload: { scope: "agent.handoff", message: `No se pudo calcular el diff --stat del handoff: ${message}` },
+        }),
+      );
+      stat = `(no se pudo calcular: ${message})`;
+    }
+    const report = Report.safeParse(prior.report);
+    const done = report.success
+      ? `Reporte (${report.data.outcome}): ${report.data.summary}\n\n${clip(JSON.stringify(report.data.payload, null, 2), HANDOFF_MAX_CHARS / 2)}`
+      : "La sesión anterior no entregó un reporte válido.";
+    return [
+      `Handoff: la sesión anterior de esta tarea ${reason}, así que esta parte de cero en vez de retomarla. Esto es lo que dejó.`,
+      done,
+      `Cambios contra ${base} (git diff --stat):\n${clip(stat, HANDOFF_MAX_CHARS / 2)}`,
+      "Las instrucciones de esta ronda van abajo; relee del repo solo lo que vayas a tocar.",
+    ].join("\n\n");
+  }
+
+  /**
+   * Un prefijo (herramientas y prompt del rol, con el modelo) que alguna sesión está escribiendo a la caché.
+   * Quien llega con el mismo prefijo espera su primer token y recién ahí lanza, para leerlo en vez de
+   * escribirlo otra vez (las ramas de un parallel con el mismo rol, o runs de issues distintas).
+   */
+  const writingPrefix = new Map<string, Promise<void>>();
+
+  /** Devuelve qué llamar cuando el prefijo ya quedó escrito (o la sesión terminó sin escribirlo). */
+  async function claimPrefix(spec: RunSpec, signal: AbortSignal | undefined): Promise<() => void> {
+    const key = createHash("sha256")
+      .update(JSON.stringify([spec.model, spec.cacheTtl ?? "5m", spec.tools, spec.native, spec.systemPrompt]))
+      .digest("hex");
+    const writing = writingPrefix.get(key);
+    if (writing) {
+      await untilOrAborted(writing, signal);
+      return () => {};
+    }
+    let warmed!: () => void;
+    const promise = new Promise<void>((resolve) => (warmed = resolve));
+    writingPrefix.set(key, promise);
+    return () => {
+      if (writingPrefix.get(key) === promise) writingPrefix.delete(key);
+      warmed();
+    };
   }
 
   /** Lo que falta de las fuentes de contexto avisa en la corrida y no detiene al agente. */
@@ -192,56 +309,62 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     if (!roleDef) throw new Error(`No existe el rol "${req.role}".`);
     const role = Role.parse(roleDef.body);
     const mode = pickMode(role, req.role, req.mode, req.brief);
-    if (req.resumeFrom !== undefined && mode.session !== "new") {
-      return resume({ ...req, sessionId: req.resumeFrom });
-    }
     const profileRole = resolveProfileRole(req, req.profileRole ?? req.role);
-    const budget = budgetOf(mode, profileRole.budget);
+    const settings = settingsOf(mode, profileRole);
+
+    let notice = req.notice;
+    if (req.resumeFrom !== undefined && mode.session !== "new") {
+      const prior = sessionOf(req.resumeFrom);
+      const reason = whyCold(prior, mode.session, profileRole.cacheTtl ?? "5m");
+      if (reason === undefined) return resume({ ...req, sessionId: prior.id });
+      const handoff = await handoffFor(prior, reason, req);
+      notice = notice === undefined ? handoff : `${notice}\n\n${handoff}`;
+    }
     const resolved = await resolveContext(req, req.role, role, req.workspace);
 
     const spec: RunSpec = {
       role: req.role,
       cwd: req.workspace,
       systemPrompt: role.prompt,
-      prompt: promptFor(mode, req.brief, req.notice),
+      prompt: promptFor(mode, req.brief, notice),
       model: profileRole.model,
       effort: profileRole.effort,
-      cacheTtl: profileRole.cacheTtl,
       ...resolved,
       hooks: role.hooks ?? false,
       tools: role.tools ?? "all",
       outputSchema: outputSchemaFor(mode),
-      ...budget,
+      ...settings,
       stepRunId: req.stepRunId,
     };
-    const agentRun = await runtime.start(spec);
-    interruptOnAbort(req.signal, agentRun);
-    return converse(
-      {
-        roleDefId: roleDef.id,
-        roleVersion: roleDef.version,
-        roleSlug: req.role,
-        model: spec.model,
-        effort: spec.effort,
-        cwd: spec.cwd,
-        mode,
-        budget,
-        context: resolved,
-        placement: req,
-        runId: req.brief.run.id,
-      },
-      agentRun,
-      undefined,
-    );
+    const prefixWarmed = await claimPrefix(spec, req.signal);
+    try {
+      const agentRun = await runtime.start(spec);
+      interruptOnAbort(req.signal, agentRun);
+      return await converse(
+        {
+          roleDefId: roleDef.id,
+          roleVersion: roleDef.version,
+          roleSlug: req.role,
+          model: spec.model,
+          effort: spec.effort,
+          cwd: spec.cwd,
+          mode,
+          settings,
+          context: resolved,
+          placement: req,
+          runId: req.brief.run.id,
+          prefixWarmed,
+        },
+        agentRun,
+        undefined,
+      );
+    } finally {
+      prefixWarmed();
+    }
   }
 
   async function resume(req: ResumeRequest): Promise<AgentResult> {
-    const session = store.db
-      .select()
-      .from(agentSessions)
-      .where(eq(agentSessions.id, req.sessionId))
-      .get();
-    if (!session) throw new Error(`No existe la sesión ${req.sessionId}.`);
+    const session = sessionOf(req.sessionId);
     if (session.runtime !== runtime.id) {
       throw new Error(
         `La sesión ${req.sessionId} es del runtime "${session.runtime}" y el core corre con "${runtime.id}" (CORE_RUNTIME): abre una sesión nueva.`,
@@ -251,13 +374,13 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     if (!roleDef) throw new Error(`La sesión ${req.sessionId} apunta a un rol que ya no existe.`);
     const role = Role.parse(roleDef.body);
     const mode = pickMode(role, roleDef.slug, req.mode, req.brief);
-    const budget = budgetOf(mode, resolveProfileRole(req, roleDef.slug).budget);
+    const settings = settingsOf(mode, resolveProfileRole(req, roleDef.slug));
     const resolved = await resolveContext(req, roleDef.slug, role, session.cwd);
 
     const agentRun = await runtime.resume(
       { runtime: runtime.id, sessionId: session.sessionRef, cwd: session.cwd },
       promptFor(mode, req.brief, req.notice),
-      { outputSchema: outputSchemaFor(mode), ...budget, ...resolved, stepRunId: req.stepRunId },
+      { outputSchema: outputSchemaFor(mode), ...settings, ...resolved, stepRunId: req.stepRunId },
     );
     interruptOnAbort(req.signal, agentRun);
     return converse(
@@ -269,10 +392,11 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
         effort: session.effort ?? undefined,
         cwd: session.cwd,
         mode,
-        budget,
+        settings,
         context: resolved,
         placement: req,
         runId: req.brief.run.id,
+        prefixWarmed: () => {},
       },
       agentRun,
       session.id,
@@ -293,7 +417,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       `tu reporte no cumple el esquema: ${attempt.problem}`,
       {
         outputSchema: outputSchemaFor(conversation.mode),
-        ...conversation.budget,
+        ...conversation.settings,
         ...conversation.context,
         stepRunId: conversation.placement.stepRunId,
       },
@@ -414,6 +538,18 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
   /** `turns` acumula lo que ya se registró turno a turno; `end` lo reconcilia con el total del runtime. */
   async function observe(c: Conversation, sessionId: string, agentRun: AgentRun, turns: Usage): Promise<void> {
     for await (const event of agentRun.events) {
+      // Cualquier señal de vida vale: el modelo ya respondió, así que el prefijo está en la caché.
+      c.prefixWarmed();
+      if (event.type === "compaction") {
+        store.tx((tx) =>
+          tx.db
+            .update(agentSessions)
+            .set({ compactions: sql`${agentSessions.compactions} + 1` })
+            .where(eq(agentSessions.id, sessionId))
+            .run(),
+        );
+        continue;
+      }
       if (event.type === "usage") {
         store.tx((tx) => recordTurn(tx, c, sessionId, event, turns));
         continue;
@@ -611,6 +747,24 @@ function interruptOnAbort(signal: AbortSignal | undefined, agentRun: AgentRun): 
     });
   if (signal.aborted) interrupt();
   else signal.addEventListener("abort", interrupt, { once: true });
+}
+
+/** Espera a `promise`, o a que `signal` aborte: un paso cancelado no se queda esperando a otra sesión. */
+function untilOrAborted(promise: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return promise;
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    if (signal.aborted) return done();
+    signal.addEventListener("abort", done, { once: true });
+    void promise.then(done);
+  });
+}
+
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}\n… (truncado: ${text.length - max} caracteres más)`;
 }
 
 function emptyUsage(): Usage {

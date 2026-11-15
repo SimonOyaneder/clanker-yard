@@ -149,6 +149,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
 
     const logCompaction: HookCallback = async (input) => {
       if (input.hook_event_name === "PreCompact") {
+        events.push({ type: "compaction" });
         transcript.append(input.session_id, {
           type: "clanker",
           subtype: "pre_compact",
@@ -197,6 +198,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     const signals: Signals = { loginFailed: false };
     const toolNames = new Map<string, string>();
     let turn: { id: string; model: string; usage: SDKUsage } | undefined;
+    let firstToken = false;
     const counted = new Set<string>();
     let final: SDKResultMessage | undefined;
 
@@ -228,6 +230,10 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         sessionId = message.session_id;
         sessionReady(sessionId);
       } else if (message.type === "assistant") {
+        if (!firstToken) {
+          firstToken = true;
+          events.push({ type: "first_token" });
+        }
         if (turn?.id !== message.message.id) flushTurn();
         turn = { id: message.message.id, model: message.message.model, usage: message.message.usage };
         for (const block of message.message.content) {

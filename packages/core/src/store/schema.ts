@@ -143,6 +143,8 @@ export const agentSessions = sqliteTable(
     /** Por qué terminó mal: el mensaje del runtime o lo que no validó del reporte. */
     error: text(),
     turns: integer().notNull().default(0),
+    /** Cuántas veces el runtime compactó la sesión: una compactada no se retoma (la ronda siguiente parte nueva, con handoff). */
+    compactions: integer().notNull().default(0),
     tokensIn: integer("tokens_in").notNull().default(0),
     tokensOut: integer("tokens_out").notNull().default(0),
     tokensCacheRead: integer("tokens_cache_read").notNull().default(0),

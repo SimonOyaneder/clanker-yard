@@ -1,4 +1,4 @@
-import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY, type HookCallback } from "@anthropic-ai/claude-agent-sdk";
+import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY, type HookCallback, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, test } from "vitest";
 import type { RunSpec } from "../runtime";
 import { apiKeyCredentials, subscriptionCredentials } from "./credentials";
@@ -91,9 +91,49 @@ describe("toOptions", () => {
 
   test("una política de herramientas restringe con tools: allowedTools no quitaría Bash en bypass", () => {
     const options = toOptions({ ...spec, tools: { allow: ["Read", "Grep"], deny: ["WebFetch"] } }, ctx());
-    expect(options.tools).toEqual(["Read", "Grep"]);
+    expect(options.tools).toEqual(["Grep", "Read"]);
     expect(options.disallowedTools).toEqual(["WebFetch"]);
     expect(options).not.toHaveProperty("allowedTools");
+  });
+
+  test("las herramientas restringidas van en el mismo orden aunque el rol las liste distinto: el prefijo no cambia", () => {
+    const a = toOptions({ ...spec, tools: { allow: ["Read", "Grep", "Bash"] } }, ctx());
+    const b = toOptions({ ...spec, tools: { allow: ["Bash", "Read", "Grep"] } }, ctx());
+    expect(a.tools).toEqual(b.tools);
+  });
+
+  describe("prefijo cacheable", () => {
+    const boundaryAt = (systemPrompt: Options["systemPrompt"]) =>
+      (systemPrompt as string[]).indexOf(SYSTEM_PROMPT_DYNAMIC_BOUNDARY);
+
+    test("el prompt del rol va primero, luego el límite y recién ahí el contexto del repo", () => {
+      const options = toOptions(
+        { ...spec, references: [{ label: "AGENTS.md", content: "reglas" }, { label: "rule:git", content: "git" }] },
+        ctx(),
+      );
+      expect(options.systemPrompt).toEqual([
+        "Eres el dev.",
+        SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+        "# AGENTS.md\n\nreglas\n\n# rule:git\n\ngit",
+      ]);
+    });
+
+    test("lo que cambia entre lanzamientos (cwd, brief, contexto del repo, fecha) no toca nada antes del límite", () => {
+      const first = toOptions({ ...spec, cwd: "/work/a", prompt: "brief del 2026-11-15 en /work/a" }, ctx());
+      const second = toOptions(
+        {
+          ...spec,
+          cwd: "/work/b",
+          prompt: "brief del 2026-11-16 en /work/b",
+          references: [{ label: "AGENTS.md", content: "otras reglas" }],
+        },
+        ctx(),
+      );
+      const prefix = (o: Options) => (o.systemPrompt as string[]).slice(0, boundaryAt(o.systemPrompt));
+      expect(prefix(first)).toEqual(["Eres el dev."]);
+      expect(prefix(second)).toEqual(prefix(first));
+      expect(second.systemPrompt).not.toEqual(first.systemPrompt);
+    });
   });
 
   test("sin executable usa el binario del SDK", () => {

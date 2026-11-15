@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `compactions` integer DEFAULT 0 NOT NULL;
