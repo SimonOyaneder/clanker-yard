@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { API_MAJOR, type Event, contract, createClient } from "@clanker/api";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
@@ -163,6 +164,57 @@ describe("connections", () => {
 
     expect(await client.connections.list()).toEqual([]);
     expect(store.events.since(0).at(-1)).toMatchObject({ origin: "cli", payload: { status: "disconnected" } });
+  });
+
+  test("testClaude devuelve plan y uso, y connections.list muestra claude con su estado", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "clanker-server-claude-"));
+    mkdirSync(join(dir, "bin"));
+    writeFileSync(join(dir, "bin", "claude"), "#!/bin/sh\n", { mode: 0o755 });
+    const message = (m: Record<string, unknown>) => ({ session_id: "s", ...m }) as unknown as SDKMessage;
+    connections = createConnections(store, createFileSecrets({ dir: secretsDir }), {
+      claude: {
+        baseEnv: { PATH: join(dir, "bin"), HOME: dir, USER: "x" },
+        exec: async (_file, args) =>
+          args[0] === "--version" ? "2.1.325 (Claude Code)" : JSON.stringify({ loggedIn: true, subscriptionType: "max" }),
+        query: () =>
+          (async function* () {
+            yield message({ type: "system", subtype: "init", apiKeySource: "none", claude_code_version: "2.1.325" });
+            yield message({
+              type: "rate_limit_event",
+              rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.4, resetsAt: 100 },
+            });
+            yield message({ type: "result", subtype: "success", is_error: false, result: "pong" });
+          })(),
+      },
+    });
+    try {
+      const core = await start();
+      const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+      const status = await client.connections.testClaude({});
+
+      expect(status).toMatchObject({
+        mode: "subscription",
+        state: "ready",
+        plan: "max",
+        usage: { fiveHour: { utilization: 0.4, resetsAt: 100_000 } },
+      });
+      expect(await client.connections.list()).toEqual([
+        { provider: "claude", account: "subscription", scopes: ["plan:max"], status: "active" },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("testClaude con api-key sin una key guardada es BAD_REQUEST", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+    await expect(client.connections.testClaude({ mode: "api-key" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("API key"),
+    });
   });
 
   test("linearAuth sin client_id es BAD_REQUEST con el paso a seguir", async () => {

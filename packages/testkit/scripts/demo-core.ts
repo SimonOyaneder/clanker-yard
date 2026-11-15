@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient } from "@clanker/api";
 import { removeCoreJson, writeCoreJson } from "@clanker/api/node";
-import { createFileSecrets, createRepos, openStore, startCore } from "@clanker/core";
+import { createConnections, createFileSecrets, createRepos, openStore, startCore } from "@clanker/core";
 import { createFakeRuntime, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
@@ -23,7 +23,7 @@ const repo = tempGitRepo({});
 const core = await startCore({
   store,
   dataDir: home,
-  secrets: createFileSecrets({ dir: join(home, "secrets") }),
+  connections: createConnections(store, createFileSecrets({ dir: join(home, "secrets") })),
   runtimes: [createFakeRuntime({ fixtures })],
   env: { CORE_RUNTIME: "fake" },
   coreVersion: "0.0.0-demo",

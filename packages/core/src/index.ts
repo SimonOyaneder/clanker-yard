@@ -67,11 +67,13 @@ export { PermanentActionError } from "./flows/catalog";
 export { DEFAULT_MAX_AGENTS, DEFAULT_PROBE_EVERY_SEC, OUTPUT_INLINE_MAX_BYTES, RunNotFoundError, RunStartError, TICK_MS } from "./flows/engine";
 export type { RunView, StartOptions, StepView } from "./flows/engine";
 export {
+  ClaudeSetupError,
   createConnections,
   EXPIRY_WARNING_DAYS,
   LINEAR_REDIRECT_PORT,
 } from "./connections/connections";
 export type {
+  ClaudeOptions,
   ConnectInput,
   Connections,
   ConnectionsOptions,

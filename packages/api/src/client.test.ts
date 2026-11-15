@@ -46,6 +46,12 @@ const router = os.router({
     linearAuth: os.connections.linearAuth.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    testClaude: os.connections.testClaude.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    setClaudeApiKey: os.connections.setClaudeApiKey.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     disconnect: os.connections.disconnect.handler(() => {}),
   },
   artifacts: {

@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm";
 import pkg from "../../package.json" with { type: "json" };
 import { startCore } from "../core";
 import { createClaudeRuntime } from "../agents/claude/claude-runtime";
-import { subscriptionCredentials } from "../agents/claude/credentials";
+import { createConnections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createKeychainSecrets } from "../secrets/keychain";
 import type { Secrets } from "../secrets/secrets";
@@ -72,11 +72,12 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
     };
 
     // `system.shutdown({ drain })` todavía no interrumpe a los agentes: el cierre espera un momento a los pasos en curso.
+    const connections = createConnections(store, secretsFor(opts));
     const core = await startCore({
       store,
       dataDir: opts.dataDir,
-      secrets: secretsFor(opts),
-      runtimes: [createClaudeRuntime({ credentials: subscriptionCredentials(), home: opts.dataDir })],
+      connections,
+      runtimes: [createClaudeRuntime({ credentials: connections.claudeCredentials, home: opts.dataDir })],
       coreVersion: pkg.version,
       onShutdown: () => setImmediate(() => shutdown("system.shutdown")),
     });

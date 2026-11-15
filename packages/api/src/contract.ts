@@ -1,6 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
-import { Connection, ConnectionProvider, GitHubPatForm } from "./connections";
+import { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubPatForm } from "./connections";
 import {
   ArtifactHash,
   ArtifactKind,
@@ -127,6 +127,22 @@ const connections = {
    * puerto del redirect está ocupado. Sin `meta.mcp`: el login lo hace una persona.
    */
   linearAuth: base.output(z.object({ url: z.url() })),
+  /**
+   * Prueba Claude con una llamada mínima (haiku, un turno, sin herramientas): detecta el `claude`
+   * instalado y su versión, el login y el plan, y lee cuánto va usado de la cuota. `mode` por defecto es
+   * el activo: la API key si hay una guardada, y si no la suscripción. Un resultado concluyente deja la
+   * cuenta `claude` conectada (o `expired` / `revoked`) y emite `connection.changed`. Gasta un poco de
+   * cuota, así que la UI la llama al pulsar [Probar], no al pintar. `BAD_REQUEST` si pide `api-key` sin
+   * tener una guardada. Sin `meta.mcp`: un agente no debe gastar la cuota de la persona.
+   */
+  testClaude: base.input(z.object({ mode: ClaudeMode.optional() }).default({})).output(ClaudeStatus),
+  /**
+   * Guarda una API key de Anthropic como alternativa a la suscripción (en `Secrets`, nunca en la base) y
+   * la deja activa: desde entonces los agentes la usan. Antes la prueba con una llamada mínima y no
+   * guarda nada si Anthropic la rechaza (`BAD_REQUEST`). Para volver a la suscripción:
+   * `disconnect({ provider: "claude", account: "api-key" })`. Sin `meta.mcp`: un token no pasa por el MCP.
+   */
+  setClaudeApiKey: base.input(z.object({ key: z.string().min(1) })).output(Connection),
   /** Borra el token y la cuenta; no hace nada si no estaba conectada. Emite `connection.changed`. */
   disconnect: base
     .input(z.object({ provider: ConnectionProvider, account: z.string().min(1) }))

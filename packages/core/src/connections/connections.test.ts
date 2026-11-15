@@ -1,11 +1,14 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import type { QueryFn } from "../agents/claude/claude-runtime";
+import type { ExecFn } from "../agents/claude/probe";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import type { Secrets } from "../secrets/secrets";
 import { openStore, type Store } from "../store/store";
-import { createConnections, type ConnectInput, type Connections } from "./connections";
+import { ClaudeSetupError, createConnections, type ConnectInput, type Connections } from "./connections";
 
 /** Fijo: los vencimientos de los tests no deben depender del reloj real. */
 const NOW = 1_700_000_000_000;
@@ -185,5 +188,187 @@ describe("sin secretos fuera del almacén", () => {
     await connections.connect({ ...github, token: TOKEN }, "ui");
     const row = store.db.$client.prepare("SELECT secret_ref FROM connections").get();
     expect(row).toEqual({ secret_ref: "connection:github:simon" });
+  });
+});
+
+describe("claude", () => {
+  const KEY = "sk-ant-UNIQUE-key-0123456789";
+  const msg = (m: Record<string, unknown>) => ({ session_id: "s", ...m }) as unknown as SDKMessage;
+  const init = (apiKeySource = "none") => msg({ type: "system", subtype: "init", apiKeySource, claude_code_version: "2.1.325" });
+  const pong = msg({ type: "result", subtype: "success", is_error: false, result: "pong" });
+  const authFailed = [
+    msg({ type: "assistant", error: "authentication_failed", message: { id: "m", content: [], usage: {} } }),
+    msg({ type: "result", subtype: "success", is_error: true, result: "Failed to authenticate" }),
+  ];
+  const quotaOut = [
+    msg({ type: "rate_limit_event", rate_limit_info: { status: "rejected", rateLimitType: "seven_day", utilization: 1 } }),
+    msg({ type: "result", subtype: "success", is_error: true, result: "You've hit your weekly limit" }),
+  ];
+
+  /** Un `claude` presente (o no) y lo que responde cada llamada de prueba, en orden. */
+  function withClaude(opts: { installed?: boolean; loggedIn?: boolean; replies: SDKMessage[][] }) {
+    const exec: ExecFn = async (_file, args) =>
+      args[0] === "--version"
+        ? "2.1.325 (Claude Code)"
+        : JSON.stringify({ loggedIn: opts.loggedIn ?? true, subscriptionType: "team" });
+    const envs: Record<string, string>[] = [];
+    const replies = [...opts.replies];
+    const query: QueryFn = ({ options }) => {
+      envs.push(options.env as Record<string, string>);
+      const reply = replies.shift() ?? [init(), pong];
+      return (async function* () {
+        for (const m of reply) {
+          yield m;
+          if (m.type === "result" && m.is_error) throw new Error("Claude Code returned an error result");
+        }
+      })();
+    };
+    const baseEnv = { PATH: opts.installed === false ? join(dir, "vacio") : join(dir, "bin"), HOME: dir, USER: "x" };
+    if (opts.installed !== false) {
+      mkdirSync(join(dir, "bin"), { recursive: true });
+      writeFileSync(join(dir, "bin", "claude"), "#!/bin/sh\n", { mode: 0o755 });
+    }
+    return { envs, claude: { baseEnv, query, exec } };
+  }
+
+  function connectionsWith(stubs: ReturnType<typeof withClaude>) {
+    return createConnections(store, secrets, { now: () => NOW, claude: stubs.claude });
+  }
+
+  test("probar con claude instalado y logueado conecta la suscripción, sin guardar ningún secreto", async () => {
+    const claude = connectionsWith(withClaude({ replies: [] }));
+
+    const status = await claude.testClaude(undefined, "ui");
+
+    expect(status).toMatchObject({ mode: "subscription", state: "ready", plan: "team" });
+    expect(claude.list()).toEqual([
+      { provider: "claude", account: "subscription", scopes: ["plan:team"], status: "active" },
+    ]);
+    expect(store.events.since(0).map((e) => [e.origin, e.payload])).toEqual([
+      ["ui", { provider: "claude", account: "subscription", status: "active" }],
+    ]);
+    expect(store.db.$client.prepare("SELECT secret_ref FROM connections").get()).toEqual({ secret_ref: "" });
+    expect(await claude.claudeCredentials()).toMatchObject({ mode: "subscription" });
+    await expect(claude.token("claude", "subscription")).rejects.toThrow(/no guarda ningún token/);
+  });
+
+  test("sin claude instalado la respuesta lo dice y no queda ninguna cuenta", async () => {
+    const claude = connectionsWith(withClaude({ installed: false, replies: [] }));
+
+    const status = await claude.testClaude(undefined, "ui");
+
+    expect(status.state).toBe("not_installed");
+    expect(claude.list()).toEqual([]);
+    expect(store.events.since(0)).toEqual([]);
+  });
+
+  test("sin sesión iniciada no se crea la cuenta; si ya estaba conectada pasa a expired", async () => {
+    const connected = connectionsWith(withClaude({ replies: [] }));
+    await connected.testClaude(undefined, "ui");
+
+    const loggedOut = connectionsWith(withClaude({ loggedIn: false, replies: [] }));
+    expect((await loggedOut.testClaude(undefined, "ui")).state).toBe("login_required");
+
+    expect(loggedOut.list()).toEqual([
+      { provider: "claude", account: "subscription", scopes: ["plan:team"], status: "expired" },
+    ]);
+    expect(store.events.since(0).at(-1)?.payload).toEqual({
+      provider: "claude",
+      account: "subscription",
+      status: "expired",
+    });
+  });
+
+  test("el login vencido en plena llamada deja la cuenta expired", async () => {
+    const claude = connectionsWith(withClaude({ replies: [[init(), pong], [init(), ...authFailed]] }));
+    await claude.testClaude(undefined, "ui");
+
+    expect((await claude.testClaude(undefined, "ui")).state).toBe("login_expired");
+
+    expect(claude.list()[0]?.status).toBe("expired");
+  });
+
+  test("con la cuota agotada la cuenta sigue activa y la respuesta lo dice", async () => {
+    const claude = connectionsWith(withClaude({ replies: [[init(), ...quotaOut]] }));
+
+    const status = await claude.testClaude(undefined, "ui");
+
+    expect(status.state).toBe("quota_exhausted");
+    expect(claude.list()[0]?.status).toBe("active");
+  });
+
+  test("la API key se guarda en Secrets, queda activa y los runs la usan en vez de la suscripción", async () => {
+    const stubs = withClaude({ replies: [[init("ANTHROPIC_API_KEY"), pong]] });
+    const claude = connectionsWith(stubs);
+
+    const connection = await claude.setClaudeApiKey(KEY, "ui");
+
+    expect(connection).toEqual({ provider: "claude", account: "api-key", scopes: [], status: "active" });
+    expect(stubs.envs[0]?.ANTHROPIC_API_KEY).toBe(KEY);
+    expect(await secrets.get("connection:claude:api-key")).toBe(KEY);
+    const credentials = await claude.claudeCredentials();
+    expect(credentials.mode).toBe("api-key");
+    expect(credentials.env()).toEqual({ ANTHROPIC_API_KEY: KEY });
+    expect(JSON.stringify(claude.list())).not.toContain(KEY);
+    expect(JSON.stringify(store.events.since(0))).not.toContain(KEY);
+    for (const file of readdirSync(dir).filter((f) => f.startsWith("clanker.db"))) {
+      expect(readFileSync(join(dir, file)).toString("latin1"), file).not.toContain(KEY);
+    }
+  });
+
+  test("una API key que Anthropic rechaza no se guarda", async () => {
+    const claude = connectionsWith(
+      withClaude({ replies: [[init("ANTHROPIC_API_KEY"), ...authFailed]] }),
+    );
+
+    await expect(claude.setClaudeApiKey(KEY, "ui")).rejects.toThrow(ClaudeSetupError);
+
+    expect(claude.list()).toEqual([]);
+    expect(await secrets.get("connection:claude:api-key")).toBeUndefined();
+  });
+
+  test("probar sin mode usa la API key si hay una, y si Anthropic la rechaza después queda revoked", async () => {
+    const claude = connectionsWith(
+      withClaude({
+        replies: [[init("ANTHROPIC_API_KEY"), pong], [init("ANTHROPIC_API_KEY"), ...authFailed]],
+      }),
+    );
+    await claude.setClaudeApiKey(KEY, "ui");
+
+    const status = await claude.testClaude(undefined, "ui");
+
+    expect(status).toMatchObject({ mode: "api-key", state: "key_rejected" });
+    expect(claude.list()[0]).toMatchObject({ account: "api-key", status: "revoked" });
+    // Revocada o no, los runs siguen usando la key y fallan con su mensaje: no se pasan a la suscripción en silencio.
+    expect((await claude.claudeCredentials()).mode).toBe("api-key");
+  });
+
+  test("probar la suscripción con una API key guardada no la toca, y desconectar la key vuelve a la suscripción", async () => {
+    const claude = connectionsWith(withClaude({ replies: [[init("ANTHROPIC_API_KEY"), pong], [init(), pong]] }));
+    await claude.setClaudeApiKey(KEY, "ui");
+
+    expect((await claude.testClaude("subscription", "ui")).mode).toBe("subscription");
+    expect(claude.list().map((c) => [c.account, c.status])).toEqual([
+      ["api-key", "active"],
+      ["subscription", "active"],
+    ]);
+
+    await claude.disconnect("claude", "api-key", "ui");
+    expect(await secrets.get("connection:claude:api-key")).toBeUndefined();
+    expect((await claude.claudeCredentials()).mode).toBe("subscription");
+    await claude.disconnect("claude", "subscription", "ui");
+    expect(claude.list()).toEqual([]);
+  });
+
+  test("pedir probar la API key sin tener una guardada es un error accionable", async () => {
+    const claude = connectionsWith(withClaude({ replies: [] }));
+
+    await expect(claude.testClaude("api-key", "ui")).rejects.toThrow(/setClaudeApiKey/);
+  });
+
+  test("claude no se conecta con connect", async () => {
+    await expect(
+      connections.connect({ provider: "claude", account: "api-key", scopes: [], token: KEY }, "ui"),
+    ).rejects.toThrow(/setClaudeApiKey/);
   });
 });

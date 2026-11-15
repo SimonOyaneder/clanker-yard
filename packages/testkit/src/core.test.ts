@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
-import { createFileSecrets, createProcs, createRepos, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createProcs, createRepos, openStore, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -41,7 +41,7 @@ async function boot(env: Record<string, string> = { CORE_RUNTIME: "fake" }): Pro
   core = await startCore({
     store,
     dataDir: home.path,
-    secrets: createFileSecrets({ dir: join(home.path, "secrets") }),
+    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
     runtimes: [createFakeRuntime({ fixtures: juguete, speed: Infinity })],
     env,
     coreVersion: "0.0.0",

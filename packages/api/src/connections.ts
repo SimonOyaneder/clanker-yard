@@ -1,7 +1,10 @@
 import * as z from "zod";
 
-/** Quién emite el token: GitHub (PAT en la fase 1, GitHub App después) y Linear (OAuth). */
-export const ConnectionProvider = z.enum(["github", "linear"]);
+/**
+ * Quién emite el token: GitHub (PAT en la fase 1, GitHub App después), Linear (OAuth) y Claude (el
+ * login del `claude` instalado, o una API key). La cuenta de Claude es su modo (`ClaudeMode`).
+ */
+export const ConnectionProvider = z.enum(["github", "linear", "claude"]);
 export type ConnectionProvider = z.infer<typeof ConnectionProvider>;
 
 export const ConnectionStatus = z.enum(["active", "expired", "revoked"]);
@@ -38,3 +41,46 @@ export const GitHubPatForm = z.object({
   ),
 });
 export type GitHubPatForm = z.infer<typeof GitHubPatForm>;
+
+/** Con qué credencial corre Claude: el login de suscripción de quien instaló la app, o una API key. */
+export const ClaudeMode = z.enum(["subscription", "api-key"]);
+export type ClaudeMode = z.infer<typeof ClaudeMode>;
+
+export const ClaudeState = z.enum([
+  "ready",
+  "not_installed",
+  "outdated",
+  "login_required",
+  "login_expired",
+  "key_rejected",
+  "quota_exhausted",
+  "error",
+]);
+export type ClaudeState = z.infer<typeof ClaudeState>;
+
+/** Una ventana de la cuota de la suscripción (5 horas o 7 días). */
+export const ClaudeUsageWindow = z.object({
+  /** 0 a 1. */
+  utilization: z.number().min(0),
+  /** ms epoch. */
+  resetsAt: z.int().nonnegative().optional(),
+});
+export type ClaudeUsageWindow = z.infer<typeof ClaudeUsageWindow>;
+
+/** Lo que `connections.testClaude` averiguó: qué hay instalado, quién paga, el plan y cuánto va usado. */
+export const ClaudeStatus = z.object({
+  mode: ClaudeMode,
+  state: ClaudeState,
+  /** Qué hacer cuando `state` no es `ready` o `quota_exhausted`; en `quota_exhausted`, cuándo se reinicia. */
+  message: z.string().optional(),
+  /** El `claude` detectado (suscripción). */
+  executable: z.string().optional(),
+  version: z.string().optional(),
+  /** `subscriptionType` del login (`pro`, `max`, `team`...); sin él con API key. */
+  plan: z.string().optional(),
+  /** Solo con suscripción y si la respuesta trajo el evento de límites. */
+  usage: z.object({ fiveHour: ClaudeUsageWindow.optional(), sevenDay: ClaudeUsageWindow.optional() }).optional(),
+  /** ms epoch en que se reinicia la cuota, con `quota_exhausted`. */
+  resetsAt: z.int().nonnegative().optional(),
+});
+export type ClaudeStatus = z.infer<typeof ClaudeStatus>;

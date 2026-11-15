@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, mkdtempSync, rmSync, symlinkSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, type Client } from "@clanker/api";
-import { createFileSecrets, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, openStore, startCore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -24,7 +24,7 @@ beforeEach(async () => {
   core = await startCore({
     store,
     dataDir: home.path,
-    secrets: createFileSecrets({ dir: join(home.path, "secrets") }),
+    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
     runtimes: [createFakeRuntime({ fixtures: home.path, speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
     coreVersion: "0.0.0",

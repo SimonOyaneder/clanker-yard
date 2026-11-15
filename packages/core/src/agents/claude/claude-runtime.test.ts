@@ -5,7 +5,7 @@ import type { HookInput, Options, SDKMessage } from "@anthropic-ai/claude-agent-
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { AgentEvent, RunSpec } from "../runtime";
 import { createClaudeRuntime, type QueryFn } from "./claude-runtime";
-import { subscriptionCredentials, type ClaudeCredentials } from "./credentials";
+import { apiKeyCredentials, subscriptionCredentials, type ClaudeCredentials } from "./credentials";
 
 let home: string;
 let cwd: string;
@@ -101,7 +101,7 @@ function fakeQuery(script: SDKMessage[] | ((call: Call) => AsyncIterable<SDKMess
 
 function runtimeWith(query: QueryFn, creds: ClaudeCredentials = credentials) {
   return createClaudeRuntime({
-    credentials: creds,
+    credentials: async () => creds,
     home,
     query,
     baseEnv: { PATH: "/usr/bin", HOME: "/Users/x", USER: "x", GH_TOKEN: "ghp", LINEAR_API_KEY: "lin", SSH_AUTH_SOCK: "/s" },
@@ -317,6 +317,21 @@ describe("estados de fallo", () => {
     ]);
     expect(result.status).toBe("login_expired");
     expect(result.message).toMatch(/claude auth login/);
+  });
+
+  test("con API key, authentication_failed dice que la key fue rechazada y no manda a `claude auth login`", async () => {
+    const { query } = fakeQuery([
+      init("ANTHROPIC_API_KEY"),
+      assistant("m1", [], { error: "authentication_failed" }),
+      success({ is_error: true, result: "Invalid API key", structured_output: undefined }),
+    ]);
+    const run = await runtimeWith(query, apiKeyCredentials("sk-x", { executable: "/bin/claude" })).start(spec());
+
+    const result = await run.result;
+
+    expect(result.status).toBe("login_expired");
+    expect(result.message).toMatch(/API key/);
+    expect(result.message).not.toMatch(/claude auth login/);
   });
 
   test("un rate_limit_event rechazado es quota_exhausted con el reinicio en ms", async () => {

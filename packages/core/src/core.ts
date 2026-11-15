@@ -5,7 +5,7 @@ import { createAgents } from "./agents/agents";
 import { type AgentRuntime, selectRuntime } from "./agents/runtime";
 import { createArtifacts } from "./artifacts/artifacts";
 import { installBuiltins } from "./builtin/install";
-import { createConnections } from "./connections/connections";
+import type { Connections } from "./connections/connections";
 import { createDefs, type Defs } from "./defs/defs";
 import { createFlows } from "./flows/flows";
 import { createPacks } from "./packs/packs";
@@ -13,7 +13,6 @@ import { createProcs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
 import { createRunStarter } from "./projects/start-run";
 import { createRecipeTester } from "./recipe/recipe-test";
-import type { Secrets } from "./secrets/secrets";
 import { startServer, type CoreServer, type StartServerOptions } from "./server/server";
 import { newId } from "./store/conventions";
 import type { Store } from "./store/store";
@@ -31,7 +30,8 @@ const GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
 export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion" | "onShutdown" | "allowedOrigins"> {
   store: Store;
   dataDir: string;
-  secrets: Secrets;
+  /** Quien arma los runtimes la comparte: `claude-sdk` pide a `claudeCredentials` su credencial en cada run. */
+  connections: Connections;
   /** Los runtimes de agentes que este core conoce; `CORE_RUNTIME` elige entre ellos. */
   runtimes: readonly AgentRuntime[];
   /** De aquí sale `CORE_RUNTIME`. Por defecto, `process.env`. */
@@ -87,7 +87,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
 
   const server = await startServer({
     store,
-    connections: createConnections(store, opts.secrets),
+    connections: opts.connections,
     issues,
     projects,
     packs: createPacks({ defs }),

@@ -8,6 +8,16 @@ const INHERITED_ENV = ["PATH", "HOME", "USER", "LANG", "CLAUDE_CONFIG_DIR"] as c
 
 const BASH_TIMEOUT_MS = "1800000";
 
+/** De `baseEnv`, solo `INHERITED_ENV`: lo que hace falta para que `claude` encuentre su login. */
+export function inheritedEnv(baseEnv: Record<string, string | undefined>): Record<string, string> {
+  const inherited: Record<string, string> = {};
+  for (const key of INHERITED_ENV) {
+    const value = baseEnv[key];
+    if (value !== undefined) inherited[key] = value;
+  }
+  return inherited;
+}
+
 export interface AgentEnvInput {
   baseEnv: Record<string, string | undefined>;
   /** Carpeta vacía: `gh` no encuentra sesión. */
@@ -30,13 +40,8 @@ export function agentEnv({
   cacheTtl,
   credentials,
 }: AgentEnvInput): Record<string, string> {
-  const inherited: Record<string, string> = {};
-  for (const key of INHERITED_ENV) {
-    const value = baseEnv[key];
-    if (value !== undefined) inherited[key] = value;
-  }
   return {
-    ...inherited,
+    ...inheritedEnv(baseEnv),
     GH_CONFIG_DIR: ghConfigDir,
     GIT_CONFIG_GLOBAL: gitConfig,
     GIT_CONFIG_NOSYSTEM: "1",

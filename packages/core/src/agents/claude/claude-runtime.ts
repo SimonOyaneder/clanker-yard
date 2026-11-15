@@ -22,13 +22,17 @@ import type {
 import type { ClaudeCredentials } from "./credentials";
 import { createEventQueue } from "./event-queue";
 import { agentEnv, toOptions } from "./options";
-import { outcomeOf, type Signals } from "./outcome";
+import { credentialMismatch, noteSignals, outcomeOf, type Signals } from "./outcome";
 
 /** Lo único que el adapter usa de `query`: los tests inyectan uno falso. */
 export type QueryFn = (params: { prompt: string; options: Options }) => AsyncIterable<SDKMessage>;
 
 export interface ClaudeRuntimeOptions {
-  credentials: ClaudeCredentials;
+  /**
+   * Se pide al lanzar o retomar cada run, así un cambio de suscripción a API key (o al revés) vale
+   * para el próximo run sin reiniciar el core.
+   */
+  credentials: () => Promise<ClaudeCredentials>;
   /** `CLANKER_HOME`: aquí quedan `transcripts/`, `agent-sessions/` y el entorno generado de los agentes. */
   home: string;
   /** `user.name` y `user.email` del git config que ven los agentes. */
@@ -55,7 +59,7 @@ interface StoredSession {
  * agrega al mismo archivo, y de su último `result` sale lo ya gastado para reportar solo lo de este run.
  */
 export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime {
-  const { credentials, home } = options;
+  const { home } = options;
   const runQuery = options.query ?? sdkQuery;
   const baseEnv = options.baseEnv ?? process.env;
   const identity = options.gitIdentity ?? DEFAULT_GIT_IDENTITY;
@@ -91,6 +95,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     prompt: string,
     resumeId: string | undefined,
   ): Promise<AgentRun> {
+    const credentials = await options.credentials();
     const previous = resumeId === undefined ? ZERO_TOTALS : await totalsAtEndOf(transcriptOf(resumeId));
     const abort = new AbortController();
     let stopReason: string | undefined;
@@ -155,22 +160,13 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     };
 
     const onMessage = (message: SDKMessage) => {
+      noteSignals(message, signals);
       if (message.type === "system" && message.subtype === "init") {
-        const usesApiKey = message.apiKeySource !== "none";
-        if (credentials.mode === "subscription" && usesApiKey) {
-          stop(
-            `Claude iba a gastar una API key (${message.apiKeySource}) en vez de la suscripción: revisa que el entorno del agente no la traiga.`,
-          );
-        } else if (credentials.mode === "api-key" && !usesApiKey) {
-          stop("Claude no está usando la API key configurada: revisa ANTHROPIC_API_KEY.");
-        }
+        const mismatch = credentialMismatch(credentials.mode, message.apiKeySource);
+        if (mismatch !== undefined) stop(mismatch);
         sessionId = message.session_id;
         sessionReady(sessionId);
       } else if (message.type === "assistant") {
-        if (message.error === "authentication_failed") signals.loginFailed = true;
-        if (message.error === "rate_limit" || message.error === "billing_error") {
-          signals.quota ??= { creditsRequired: false };
-        }
         if (turn?.id !== message.message.id) flushTurn();
         turn = { id: message.message.id, usage: message.message.usage };
         for (const block of message.message.content) {
@@ -193,14 +189,6 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
             const tool = toolNames.get(block.tool_use_id);
             if (tool !== undefined) events.push({ type: "tool_end", tool });
           }
-        }
-      } else if (message.type === "rate_limit_event") {
-        const info = message.rate_limit_info;
-        if (info.status === "rejected") {
-          signals.quota = {
-            creditsRequired: info.errorCode === "credits_required",
-            ...(info.resetsAt === undefined ? {} : { resetsAt: info.resetsAt * 1000 }),
-          };
         }
       } else if (message.type === "result") {
         final = message;
@@ -231,7 +219,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       if (stopReason !== undefined) {
         return { status: "error", text: "", usage: tally, message: stopReason };
       }
-      const outcome = outcomeOf(final, signals);
+      const outcome = outcomeOf(final, signals, credentials.mode);
       return {
         status: outcome.status,
         text: final?.subtype === "success" ? final.result : "",

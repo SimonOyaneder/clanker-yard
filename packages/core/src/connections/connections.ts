@@ -1,5 +1,9 @@
-import type { Connection, ConnectionProvider, Origin } from "@clanker/api";
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+import type { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, Origin } from "@clanker/api";
 import { and, asc, eq, ne } from "drizzle-orm";
+import { apiKeyCredentials, subscriptionCredentials, type ClaudeCredentials } from "../agents/claude/credentials";
+import type { QueryFn } from "../agents/claude/claude-runtime";
+import { probeClaude, type ExecFn } from "../agents/claude/probe";
 import { createGitHubClient, type GitHubApiOptions, type GitHubClient } from "../github/client";
 import { validatePat } from "../github/pat";
 import { startLinearLogin } from "../linear/login";
@@ -54,10 +58,27 @@ export interface LinearLogin {
   done: Promise<Connection>;
 }
 
+/** Lo que `probeClaude` y `claudeCredentials` usan del sistema; en tests, stubs. */
+export interface ClaudeOptions {
+  /** Default `process.env`: de aquí salen el `PATH` donde buscar `claude` y lo que hereda su entorno. */
+  baseEnv?: Record<string, string | undefined>;
+  /** Default el `query` del Agent SDK. */
+  query?: QueryFn;
+  /** Default `execFile`: corre `claude --version` y `claude auth status`. */
+  exec?: ExecFn;
+}
+
+/** El modo `api-key` de Claude se guarda con esta cuenta y su clave en `Secrets`; la suscripción no guarda nada. */
+const CLAUDE_API_KEY_ACCOUNT = "api-key" satisfies ClaudeMode;
+
+/** Claude no está listo para conectarse (pidió probar una API key que no hay, o Anthropic la rechazó). */
+export class ClaudeSetupError extends Error {}
+
 export interface ConnectionsOptions {
   /** Dónde está GitHub; en tests, un servidor local. */
   github?: GitHubApiOptions;
   linear?: LinearOptions;
+  claude?: ClaudeOptions;
   /** Reloj en ms epoch, para el vencimiento. */
   now?: () => number;
 }
@@ -83,6 +104,26 @@ export interface Connections {
    * puerto del loopback está ocupado.
    */
   linearAuth(origin: Origin): Promise<LinearLogin>;
+  /**
+   * Prueba Claude (`probeClaude`: `claude` instalado, versión, login, plan y uso con una llamada mínima)
+   * con `mode`, por defecto el activo (`claudeCredentials`). Si el resultado es concluyente deja la cuenta
+   * `claude` conectada (`ready`, `quota_exhausted`), `expired` (login) o `revoked` (key rechazada) y emite
+   * `connection.changed`; `not_installed`, `outdated` y `error` no tocan la base. Lanza `ClaudeSetupError`
+   * si pide `api-key` sin tener una guardada.
+   */
+  testClaude(mode: ClaudeMode | undefined, origin: Origin): Promise<ClaudeStatus>;
+  /**
+   * Guarda la API key de Anthropic en `Secrets` y deja la cuenta `claude/api-key` activa: desde entonces
+   * `claudeCredentials` la usa. Antes la prueba; si Anthropic la rechaza o no se pudo probar lanza
+   * `ClaudeSetupError` sin guardar nada. Volver a la suscripción es `disconnect("claude", "api-key")`.
+   */
+  setClaudeApiKey(key: string, origin: Origin): Promise<Connection>;
+  /**
+   * La credencial que usa cada run de Claude: la API key si hay una guardada (cualquiera sea su estado: el
+   * run falla con un mensaje claro en vez de gastar la suscripción sin avisar) y si no, el login de la
+   * suscripción.
+   */
+  claudeCredentials(): Promise<ClaudeCredentials>;
   /**
    * El cliente de GitHub de una cuenta, el único que habla con la API: pone su token en cada request y
    * registra la cuota en `sync_cursors`. Lanza si la cuenta no está conectada.
@@ -112,7 +153,7 @@ export interface Connections {
 export function createConnections(
   store: Store,
   secrets: Secrets,
-  { github = {}, linear = {}, now = Date.now }: ConnectionsOptions = {},
+  { github = {}, linear = {}, claude = {}, now = Date.now }: ConnectionsOptions = {},
 ): Connections {
   const githubClients = new Map<string, GitHubClient>();
   const endpoints = linear.endpoints ?? LINEAR_ENDPOINTS;
@@ -137,6 +178,15 @@ export function createConnections(
     // El token primero: si la escritura en la base falla queda un secreto sin cuenta, que el
     // próximo `connect` de la misma cuenta pisa. Al revés quedaría una cuenta sin token.
     await secrets.set(secretRef, secret);
+    return writeActive({ provider, account, scopes, secretRef, expiresAt }, origin);
+  }
+
+  /** La fila `active` (crea o reemplaza) y su evento. `secretRef` vacío: la cuenta no guarda ningún secreto. */
+  function writeActive(
+    input: { provider: ConnectionProvider; account: string; scopes: string[]; secretRef: string; expiresAt?: number },
+    origin: Origin,
+  ): Connection {
+    const { provider, account, scopes, secretRef, expiresAt } = input;
     store.tx((tx) => {
       const values = {
         scopes,
@@ -156,6 +206,42 @@ export function createConnections(
       });
     });
     return toConnection(find(provider, account)!, now());
+  }
+
+  /** Cambia el estado de una cuenta conectada y emite el evento; no hace nada si ya lo tenía. */
+  function setStatus(provider: ConnectionProvider, account: string, status: "expired" | "revoked", origin: Origin) {
+    store.tx((tx) => {
+      const changed = tx.db
+        .update(connections)
+        .set({ status })
+        .where(
+          and(eq(connections.provider, provider), eq(connections.account, account), ne(connections.status, status)),
+        )
+        .returning({ account: connections.account })
+        .get();
+      if (changed) {
+        tx.emit({ type: "connection.changed", origin, payload: { provider, account, status } });
+      }
+    });
+  }
+
+  const claudeEnv = claude.baseEnv ?? process.env;
+
+  function probe(credentials: ClaudeCredentials): Promise<ClaudeStatus> {
+    return probeClaude({
+      credentials,
+      baseEnv: claudeEnv,
+      query: claude.query ?? sdkQuery,
+      ...(claude.exec === undefined ? {} : { exec: claude.exec }),
+    });
+  }
+
+  async function credentialsFor(mode: ClaudeMode): Promise<ClaudeCredentials> {
+    if (mode === "subscription") return subscriptionCredentials({ env: claudeEnv });
+    if (!find("claude", CLAUDE_API_KEY_ACCOUNT)) {
+      throw new ClaudeSetupError("No hay una API key de Claude guardada: guárdala con setClaudeApiKey.");
+    }
+    return apiKeyCredentials(await self.token("claude", CLAUDE_API_KEY_ACCOUNT), { env: claudeEnv });
   }
 
   function linearConfig() {
@@ -238,6 +324,9 @@ export function createConnections(
       if (provider === "linear") {
         throw new Error("Linear se conecta con linearAuth: su token se refresca y no se pega.");
       }
+      if (provider === "claude") {
+        throw new Error("Claude se conecta con testClaude (suscripción) o setClaudeApiKey (API key).");
+      }
       return save({ provider, account, scopes, secret: token, expiresAt }, origin);
     },
 
@@ -270,6 +359,43 @@ export function createConnections(
       return { url: login.url, done: login.done };
     },
 
+    async testClaude(requested, origin) {
+      const mode = requested ?? (find("claude", CLAUDE_API_KEY_ACCOUNT) ? "api-key" : "subscription");
+      const status = await probe(await credentialsFor(mode));
+      if (status.state === "ready" || status.state === "quota_exhausted") {
+        writeActive(
+          {
+            provider: "claude",
+            account: mode,
+            scopes: status.plan === undefined ? [] : [`plan:${status.plan}`],
+            secretRef: find("claude", mode)?.secretRef ?? "",
+          },
+          origin,
+        );
+      } else if (status.state === "login_required" || status.state === "login_expired") {
+        setStatus("claude", mode, "expired", origin);
+      } else if (status.state === "key_rejected") {
+        setStatus("claude", mode, "revoked", origin);
+      }
+      return status;
+    },
+
+    async setClaudeApiKey(key, origin) {
+      if (key === "") throw new ClaudeSetupError("La API key de Claude no puede estar vacía.");
+      const status = await probe(apiKeyCredentials(key, { env: claudeEnv }));
+      if (status.state !== "ready" && status.state !== "quota_exhausted") {
+        throw new ClaudeSetupError(status.message ?? "No pude probar la API key de Claude.");
+      }
+      return save(
+        { provider: "claude", account: CLAUDE_API_KEY_ACCOUNT, scopes: [], secret: key },
+        origin,
+      );
+    },
+
+    claudeCredentials() {
+      return credentialsFor(find("claude", CLAUDE_API_KEY_ACCOUNT) ? "api-key" : "subscription");
+    },
+
     githubClient(account) {
       if (!find("github", account)) {
         throw new Error(`No hay una cuenta github conectada como "${account}": conéctala primero.`);
@@ -297,27 +423,7 @@ export function createConnections(
     },
 
     markRevoked(provider, account, origin) {
-      store.tx((tx) => {
-        const revoked = tx.db
-          .update(connections)
-          .set({ status: "revoked" })
-          .where(
-            and(
-              eq(connections.provider, provider),
-              eq(connections.account, account),
-              ne(connections.status, "revoked"),
-            ),
-          )
-          .returning({ account: connections.account })
-          .get();
-        if (revoked) {
-          tx.emit({
-            type: "connection.changed",
-            origin,
-            payload: { provider, account, status: "revoked" },
-          });
-        }
-      });
+      setStatus(provider, account, "revoked", origin);
     },
 
     async token(provider, account) {
@@ -335,6 +441,9 @@ export function createConnections(
         if (session.accessExpiresAt - now() > LINEAR_REFRESH_MARGIN_MS) return session.accessToken;
         return refreshLinear(account);
       }
+      if (row.secretRef === "") {
+        throw new Error(`La cuenta ${provider} "${account}" no guarda ningún token: lo lee el programa que la usa.`);
+      }
       const token = await secrets.get(row.secretRef);
       if (token === undefined) {
         throw new Error(
@@ -349,7 +458,7 @@ export function createConnections(
       if (!row) return;
       // El token primero: si falla, la cuenta sigue a la vista y se puede reintentar. Al revés
       // quedaría un token vivo en el almacén sin que nadie lo vea.
-      await secrets.delete(row.secretRef);
+      if (row.secretRef !== "") await secrets.delete(row.secretRef);
       if (provider === "github") githubClients.delete(account);
       store.tx((tx) => {
         tx.db

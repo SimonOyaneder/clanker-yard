@@ -15,7 +15,7 @@ describe("contrato", () => {
       "runs",
       "system",
     ]);
-    expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm", "linearAuth", "disconnect"]);
+    expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm", "linearAuth", "testClaude", "setClaudeApiKey", "disconnect"]);
     expect(Object.keys(contract.system).sort()).toEqual(["health", "info", "shutdown"]);
     expect(Object.keys(contract.events).sort()).toEqual(["list", "stream"]);
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);

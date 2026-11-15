@@ -1,3 +1,4 @@
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,7 @@ import { compileJsonSchema, type JsonSchema } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createClaudeRuntime } from "./claude-runtime";
 import { subscriptionCredentials } from "./credentials";
+import { probeClaude } from "./probe";
 
 // Llama a Claude de verdad con el login de quien corre el test y gasta cuota: solo con
 // `CLANKER_LIVE_CLAUDE=1 npx vitest run packages/core/src/agents/claude/claude-live.test.ts`.
@@ -30,7 +32,7 @@ describe.skipIf(process.env.CLANKER_LIVE_CLAUDE !== "1")("claude-sdk en vivo", (
   test("un rol mínimo devuelve un reporte válido con la suscripción", { timeout: 120_000 }, async () => {
     const credentials = subscriptionCredentials();
     expect(credentials.executable, "no hay `claude` en el PATH").toBeDefined();
-    const runtime = createClaudeRuntime({ credentials, home });
+    const runtime = createClaudeRuntime({ credentials: async () => credentials, home });
 
     const run = await runtime.start({
       role: "live-smoke",
@@ -52,5 +54,13 @@ describe.skipIf(process.env.CLANKER_LIVE_CLAUDE !== "1")("claude-sdk en vivo", (
     expect(compileJsonSchema(outputSchema).safeParse(result.structured).success).toBe(true);
     expect(result.usage.turns).toBeGreaterThan(0);
     expect(result.usage.costSource).toBe("estimate");
+  });
+
+  test("probeClaude detecta el login y lee el plan y el uso", { timeout: 120_000 }, async () => {
+    const status = await probeClaude({ credentials: subscriptionCredentials(), baseEnv: process.env, query });
+
+    expect(status.state, status.message).toBe("ready");
+    expect(status.plan).toBeDefined();
+    expect(status.usage).toBeDefined();
   });
 });

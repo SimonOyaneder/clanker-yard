@@ -4,7 +4,7 @@ import { GitHubPatError, githubPatForm } from "../github/pat";
 import { PrNotFoundError } from "../github/pr-query";
 import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
-import type { Connections } from "../connections/connections";
+import { ClaudeSetupError, type Connections } from "../connections/connections";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Engine } from "../flows/engine";
 import { RunNotFoundError, RunStartError } from "../flows/engine";
@@ -113,6 +113,26 @@ export function createRouter(deps: RouterDeps) {
           return { url };
         } catch (error) {
           if (error instanceof LinearAuthError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        }
+      }),
+      testClaude: os.connections.testClaude.handler(async ({ input, context }) => {
+        try {
+          return await deps.connections.testClaude(input.mode, context.origin);
+        } catch (error) {
+          if (error instanceof ClaudeSetupError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        }
+      }),
+      setClaudeApiKey: os.connections.setClaudeApiKey.handler(async ({ input, context }) => {
+        try {
+          return await deps.connections.setClaudeApiKey(input.key, context.origin);
+        } catch (error) {
+          if (error instanceof ClaudeSetupError) {
             throw new ORPCError("BAD_REQUEST", { message: error.message });
           }
           throw error;

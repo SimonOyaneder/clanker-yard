@@ -173,6 +173,7 @@ export const connections = sqliteTable(
     account: text().notNull(),
     scopes: text({ mode: "json" }).$type<string[]>().notNull(),
     status: text().$type<ConnectionStatus>().notNull(),
+    /** Vacío en `claude/subscription`: el login lo lee el `claude` instalado, nunca la app. */
     secretRef: text("secret_ref").notNull(),
     /** ms epoch; NULL si el token no vence. */
     expiresAt: integer("expires_at"),
