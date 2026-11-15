@@ -136,6 +136,7 @@ El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packa
 - El entorno del agente se arma con lista blanca (`agentEnv`): nunca hereda `GH_TOKEN`, `GITHUB_TOKEN`, `LINEAR_*`, `SSH_AUTH_SOCK` ni `ANTHROPIC_*`. Si una variable nueva debe llegar al agente, se agrega ahí y en su test.
 - Bajo `home` deja `transcripts/<sessionId>.jsonl` (mensajes del SDK tal cual, más una línea `clanker/pre_compact` por compactación), `agent-sessions/<sessionId>.json` (lo que `resume` necesita) y `agent-env/` (`gh/` vacía y el `gitconfig` generado).
 - Los tests usan un `query` falso inyectado (`options.query`); la CI no llama a Claude. El smoke test real corre solo con `CLANKER_LIVE_CLAUDE=1 npx vitest run packages/core/src/agents/claude/claude-live.test.ts`: una consulta con haiku, gasta cuota.
+- Un fake de un SDK o CLI imita también cómo falla el real, comprobado contra él (con una API falsa local, sin credenciales): el Agent SDK lanza `Claude Code returned an error result` después de todo `result` con `is_error`, y un fake que no lanza dejó pasar que ningún estado de error llegaba al `result` del run.
 
 ## UI
 
