@@ -75,7 +75,7 @@ Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Sec
 
 `apps/desktop` es solo el host (`docs/design.html#remoto`, `#d-data`): `main` lanza y vigila el core, `preload` le pasa la conexión a la ventana y `renderer` monta `@clanker/ui` con un `Host` armado sobre el preload.
 
-- `createCoreSupervisor` (`src/main/core-supervisor.ts`) llama a `ensureCore` al arrancar y comprueba cada 2 s con `connectToCore`. Estados: `starting`, `live` (con `port`, `token` y `bootId`, que el preload entrega a la ventana) y `down` con el motivo. No relanza solo: el botón Reintentar de `StatusBanner` llama a `start()`. Si otro proceso (la CLI) levanta el core, pasa a `live` sin más.
+- `createCoreSupervisor` (`src/main/core-supervisor.ts`) llama a `ensureCore` al arrancar y comprueba cada 2 s con `connectToCore`. Estados: `starting`, `live` (con `port`, `token` y `bootId`) y `down` con el motivo. A la ventana le llega `windowCoreState` (`core-proxy.ts`), sin token ni puerto: nada del main le pasa el token al renderer. No relanza solo: el botón Reintentar de `StatusBanner` llama a `start()`. Si otro proceso (la CLI) levanta el core, pasa a `live` sin más.
 - Cerrar la ventana o la app no detiene el core. El menú Archivo → "Salir y detener agentes" pide `system.shutdown({ drain: true })` y sale.
 - El core es el bundle `packages/core/dist/main.js` (desktop no lo importa). Electron guarda sus cachés y preferencias en `<datos>/desktop`, así que con `CLANKER_HOME` un arranque de prueba no toca nada del usuario.
 - Todo lo de Electron que la UI necesita (menú, notificaciones, editor, tema, estado del core) pasa por `Host` (`packages/ui/src/host.ts`); `Host.core` solo existe donde el host aloja el core. El main valida cada payload que llega por IPC.

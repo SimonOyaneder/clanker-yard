@@ -3,7 +3,7 @@ import path from "node:path";
 import { clankerDirs } from "@clanker/api/node";
 import type { MenuAction, Theme } from "@clanker/ui";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, shell } from "electron";
-import { CORE_SCHEME, createCoreProxy } from "./core-proxy";
+import { CORE_SCHEME, createCoreProxy, windowCoreState } from "./core-proxy";
 import { createCoreSupervisor } from "./core-supervisor";
 import { registerHostIpc } from "./host-ipc";
 import { buildMenu } from "./menu";
@@ -95,10 +95,10 @@ void app.whenReady().then(() => {
       },
     }),
   );
-  ipcMain.handle("core:state", () => supervisor.state());
+  ipcMain.handle("core:state", () => windowCoreState(supervisor.state()));
   ipcMain.on("core:retry", () => void supervisor.start());
   ipcMain.on("core:open-logs", openLogs);
-  supervisor.onChange((state) => send("core:state", state));
+  supervisor.onChange((state) => send("core:state", windowCoreState(state)));
   registerHostIpc({ getWindow: () => mainWindow, setTheme });
 
   refreshMenu();

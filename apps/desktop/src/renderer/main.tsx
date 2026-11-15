@@ -12,7 +12,7 @@ function coreLink(): CoreLink {
   let state: CoreState = { status: "starting" };
   const listeners = new Set<() => void>();
   clanker.core.onState((next) => {
-    state = next.status === "live" ? { status: "live", version: next.version } : next;
+    state = next;
     for (const cb of listeners) cb();
   });
   return {

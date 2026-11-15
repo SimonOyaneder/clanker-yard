@@ -1,5 +1,13 @@
+import type { CoreState as WindowCoreState } from "@clanker/ui";
+import type { CoreState } from "./core-supervisor";
+
 /** Esquema por el que la ventana habla con el core: `clanker-core://core/rpc` es el `url` de `createClient`. */
 export const CORE_SCHEME = "clanker-core";
+
+/** Lo que la ventana sabe del core: si está vivo y su versión. El token y el puerto solo los usa este proxy. */
+export function windowCoreState(state: CoreState): WindowCoreState {
+  return state.status === "live" ? { status: "live", version: state.version } : state;
+}
 
 export interface CoreEndpoint {
   port: number;

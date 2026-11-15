@@ -1,12 +1,7 @@
-import type { MenuAction, Theme } from "@clanker/ui";
+import type { CoreState, MenuAction, Theme } from "@clanker/ui";
 import { contextBridge, ipcRenderer } from "electron";
 
 type Target = { slug: string; issueId?: string };
-
-export type CoreState =
-  | { status: "starting" }
-  | { status: "live"; version: string; port: number; token: string; bootId: string }
-  | { status: "down"; reason: string };
 
 // Suscripción a un canal del main; devuelve cómo cancelarla.
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -15,7 +10,8 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, handler);
 }
 
-// Todo lo que la ventana puede pedirle al main. `port` y `token` del core llegan en el estado `live`.
+// Todo lo que la ventana puede pedirle al main. Del core solo llega su estado: el token y el puerto
+// se quedan en el main, que los pone en cada llamada a `clanker-core://`.
 const bridge = {
   onMenu: (cb: (action: MenuAction) => void) => on("menu", cb),
   onNavigate: (cb: (target: Target) => void) => on("navigate", cb),

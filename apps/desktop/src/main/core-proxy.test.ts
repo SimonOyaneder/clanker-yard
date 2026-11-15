@@ -1,7 +1,7 @@
 import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
-import { createCoreProxy } from "./core-proxy";
+import { createCoreProxy, windowCoreState } from "./core-proxy";
 
 // Un "core" mínimo: guarda lo que le llega y responde lo que le diga cada test.
 let server: Server | undefined;
@@ -97,5 +97,13 @@ describe("createCoreProxy", () => {
     abort.abort();
     await reader.cancel().catch(() => {});
     await upstreamClosed;
+  });
+});
+
+describe("windowCoreState", () => {
+  test("al core vivo le saca el token, el puerto y el bootId: la ventana solo sabe que está vivo", () => {
+    const live = { status: "live", version: "1.2.3", port: 4321, token: "secreto", bootId: "boot_1" } as const;
+    expect(windowCoreState(live)).toStrictEqual({ status: "live", version: "1.2.3" });
+    expect(windowCoreState({ status: "down", reason: "salió" })).toStrictEqual({ status: "down", reason: "salió" });
   });
 });
