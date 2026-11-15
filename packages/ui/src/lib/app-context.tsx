@@ -1,17 +1,13 @@
+import type { CachedIssue, ClankerProject, RunId } from "@clanker/api"
 import { createContext, useContext } from "react"
-import type { Loop } from "@/types"
 
-// Acciones globales: las usan el header del loop, el click derecho de la sidebar y la paleta ⌘K.
+// Acciones globales: las usan los menús contextuales, la paleta ⌘K y los atajos.
 export interface AppActions {
-  selectLoop: (slug: string) => void
-  openIssue: (slug: string, issueId: string) => void
-  setArchived: (loop: Loop, archived: boolean) => void
-  requestStop: (loop: Loop) => void
-  resume: (loop: Loop) => Promise<boolean>
-  run: (loop: Loop) => Promise<boolean>
-  watch: (loop: Loop) => Promise<boolean>
-  openLinear: (loop: Loop) => void
-  openNewLoop: () => void
+  selectProject: (slug: string) => void
+  openRun: (slug: string, runId: RunId) => void
+  openNewProject: () => void
+  /** Lanza el flujo del proyecto sobre la issue y avisa el resultado con un toast. */
+  startRun: (project: ClankerProject, issue: CachedIssue) => Promise<void>
   refresh: () => void
 }
 
@@ -21,10 +17,4 @@ export function useAppActions(): AppActions {
   const ctx = useContext(AppActionsContext)
   if (!ctx) throw new Error("useAppActions fuera de AppActionsContext")
   return ctx
-}
-
-export const isRunning = (l: Loop) => l.status === "activo" || l.status === "vigilando"
-
-export function lastSession(l: Loop) {
-  return [...l.sessions].sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""))[0] ?? null
 }

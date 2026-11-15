@@ -6,7 +6,7 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
     title: "General",
     items: [
       ["Paleta de comandos", "⌘K"],
-      ["Nuevo loop", "⌘N"],
+      ["Nuevo proyecto", "⌘N"],
       ["Actualizar datos", "⌘R"],
       ["Mostrar u ocultar barra lateral", "⌘B"],
       ["Atajos de teclado", "⌘/"],
@@ -16,12 +16,10 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
     title: "Navegación",
     items: [
       ["Stacks de PR", "⇧⌘P"],
-      ["Ir al loop 1…9 de la barra", "⌘1"],
+      ["Ir al proyecto 1…9 de la barra", "⌘1"],
       ["Atrás (también ⌘[ y el botón de pulgar trasero)", "⌘←"],
       ["Adelante (también ⌘] y el botón de pulgar delantero)", "⌘→"],
-      ["Volver (sin diálogos abiertos)", "⎋"],
-      ["Pestaña Operación", "⇧⌘1"],
-      ["Pestaña Resumen", "⇧⌘2"],
+      ["Volver de la corrida al proyecto (sin diálogos abiertos)", "⎋"],
     ],
   },
   {
@@ -40,7 +38,7 @@ export function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenC
       <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
           <DialogTitle>Atajos de teclado</DialogTitle>
-          <DialogDescription>También están en el menú de la app. Click derecho en un loop o una issue para más acciones.</DialogDescription>
+          <DialogDescription>También están en el menú de la app. Click derecho en un proyecto, una corrida o una issue para más acciones.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">
           {SECTIONS.map((s) => (

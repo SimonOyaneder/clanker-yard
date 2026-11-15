@@ -1,14 +1,8 @@
-import { Archive, ArchiveRestore, ChevronRight, ExternalLink, GitPullRequest, Keyboard, Plus, RefreshCw, RotateCcw, Search, Square } from "lucide-react"
-import type { AgentInfo, Loop, PlanUsage } from "@/types"
+import type { ClankerProject, Run } from "@clanker/api"
+import { ChevronRight, Copy, GitPullRequest, Keyboard, Plus, RefreshCw, Search } from "lucide-react"
 import type { CoreState } from "@/host"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
   Sidebar,
   SidebarContent,
@@ -22,77 +16,61 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { isRunning, lastSession, useAppActions } from "@/lib/app-context"
+import { useAppActions } from "@/lib/app-context"
+import { copy } from "@/lib/clipboard"
 import { footerStatus, type FooterTone } from "@/lib/core-status"
-import { loopTone } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
+import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 import { Hint } from "./common"
-import { PlanUsageBars } from "./plan-usage"
 
 interface Props {
-  loops: Loop[]
-  starting: AgentInfo[]
+  projects: ClankerProject[]
+  /** Las corridas vivas de todos los proyectos (cualquier estado menos terminadas). */
+  liveRuns: Run[]
   selected: string | null
   prsActive: boolean
   prsBadge: { count: number; tone: "red" | "green" | "muted" } | null
   onSelectPrs: () => void
-  updatedAt: number | null
+  connected: boolean
   error: string | null
   core: CoreState | undefined
-  planUsage: PlanUsage | null
   onOpenPalette: () => void
   onOpenShortcuts: () => void
 }
 
-function badge(l: Loop): { text: string; className: string } | null {
-  if (l.agent?.kind === "background" && l.agent.state === "blocked") return { text: "te espera", className: "text-amber-600 dark:text-amber-400" }
-  if (l.status === "activo" && l.slots.length) return { text: String(l.slots.length), className: "text-muted-foreground" }
-  return null
+function badge(live: Run[]): { text: string; className: string; title: string } | null {
+  const parked = live.filter((r) => r.status === "parked").length
+  if (parked) return { text: "te espera", className: "text-amber-600 dark:text-amber-400", title: `${parked} corrida${parked === 1 ? "" : "s"} estacionada${parked === 1 ? "" : "s"} esperando una decisión` }
+  const active = live.length
+  return active ? { text: String(active), className: "text-muted-foreground", title: `${active} corrida${active === 1 ? "" : "s"} en curso` } : null
 }
 
-function LoopItem({ loop, index, active }: { loop: Loop; index: number | null; active: boolean }) {
+function ProjectItem({ project, live, index, active }: { project: ClankerProject; live: Run[]; index: number | null; active: boolean }) {
   const actions = useAppActions()
-  const b = badge(loop)
-  const bg = loop.agent?.kind === "background" && loop.agent.id
+  const b = badge(live)
+  const working = live.some((r) => r.status === "running")
   return (
     <SidebarMenuItem>
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <SidebarMenuButton
             isActive={active}
-            onClick={() => actions.selectLoop(loop.slug)}
-            title={`${loop.title} · ${loopTone[loop.status].label}${index !== null && index < 9 ? ` · ⌘${index + 1}` : ""}`}
-            className={cn("h-8", b && "pr-10")}
+            onClick={() => actions.selectProject(project.slug)}
+            title={`${project.name}${index !== null && index < 9 ? ` · ⌘${index + 1}` : ""}${b ? ` · ${b.title}` : ""}`}
+            className={cn("h-8", b && "pr-16")}
           >
-            <span
-              aria-label={loopTone[loop.status].label}
-              className={cn("size-2 flex-none rounded-full", loopTone[loop.status].dot, loop.status === "activo" && "cc-blink")}
-            />
-            <span className="truncate">{loop.title}</span>
+            <span className={cn("size-2 flex-none rounded-full", working ? "cc-blink bg-emerald-500" : project.status === "active" ? "bg-emerald-500" : "bg-muted-foreground/50")} />
+            <span className="truncate">{project.name}</span>
           </SidebarMenuButton>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-56">
-          {!isRunning(loop) && lastSession(loop) ? (
-            <ContextMenuItem onSelect={() => void actions.resume(loop)}>
-              <RotateCcw /> Reanudar en background
-            </ContextMenuItem>
-          ) : null}
-          {loop.projectUrl ? (
-            <ContextMenuItem onSelect={() => actions.openLinear(loop)}>
-              <ExternalLink /> Abrir en Linear
-            </ContextMenuItem>
-          ) : null}
-          <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => actions.setArchived(loop, !loop.archived)}>
-            {loop.archived ? <ArchiveRestore /> : <Archive />}
-            {loop.archived ? "Desarchivar" : "Archivar"}
+        <ContextMenuContent className="w-52">
+          <ContextMenuItem onSelect={() => copy(project.slug, "el slug del proyecto")}>
+            <Copy /> Copiar slug
           </ContextMenuItem>
-          {bg ? (
-            <ContextMenuItem variant="destructive" onSelect={() => actions.requestStop(loop)}>
-              <Square /> Detener EM…
-            </ContextMenuItem>
-          ) : null}
+          <ContextMenuItem onSelect={() => copy(project.id, "el ID del proyecto")}>
+            <Copy /> Copiar ID
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       {b ? <SidebarMenuBadge className={cn("text-[11px]", b.className)}>{b.text}</SidebarMenuBadge> : null}
@@ -107,14 +85,20 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ loops, starting, selected, prsActive, prsBadge, onSelectPrs, updatedAt, error, core, planUsage, onOpenPalette, onOpenShortcuts }: Props) {
+export function AppSidebar({ projects, liveRuns, selected, prsActive, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
   const actions = useAppActions()
-  const status = footerStatus(core, { error, updatedAt })
-  const inBar = loops.filter((l) => !l.archived || isRunning(l))
-  const running = inBar.filter(isRunning)
-  const stopped = inBar.filter((l) => !isRunning(l))
-  const archived = loops.filter((l) => l.archived && !isRunning(l))
-  const indexOf = (slug: string) => inBar.findIndex((l) => l.slug === slug)
+  const status = footerStatus(core, { error, connected })
+  const inBar = barProjects(projects)
+  const indexOf = (slug: string) => inBar.findIndex((p) => p.slug === slug)
+  const liveOf = (p: ClankerProject) => liveRuns.filter((r) => r.projectId === p.id)
+  const group = (s: ClankerProject["status"]) => projects.filter((p) => p.status === s)
+  const active = group("active")
+  const paused = group("paused")
+  const archived = group("archived")
+
+  const item = (p: ClankerProject, index: number | null) => (
+    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!prsActive && p.slug === selected} />
+  )
 
   return (
     <Sidebar collapsible="offcanvas" className="border-r-0">
@@ -124,15 +108,15 @@ export function AppSidebar({ loops, starting, selected, prsActive, prsBadge, onS
             <Search className="size-4" />
           </button>
         </Hint>
-        <Hint label="Nuevo loop" keys="⌘N" side="bottom">
-          <button type="button" onClick={actions.openNewLoop} aria-label="Nuevo loop" className="no-drag grid size-7 place-items-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
+        <Hint label="Nuevo proyecto" keys="⌘N" side="bottom">
+          <button type="button" onClick={actions.openNewProject} aria-label="Nuevo proyecto" className="no-drag grid size-7 place-items-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
             <Plus className="size-4" />
           </button>
         </Hint>
       </SidebarHeader>
 
       <SidebarContent className="gap-0">
-        <div className="px-4 pt-1 pb-2 text-[13px] font-semibold">Clanker Control</div>
+        <div className="px-4 pt-1 pb-2 text-[13px] font-semibold">Clanker Yard</div>
 
         <SidebarGroup className="py-1">
           <SidebarGroupContent>
@@ -160,35 +144,27 @@ export function AppSidebar({ loops, starting, selected, prsActive, prsBadge, onS
         </SidebarGroup>
 
         <SidebarGroup className="py-1">
-          <SidebarGroupLabel>Corriendo</SidebarGroupLabel>
+          <SidebarGroupLabel>Proyectos</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {running.map((l) => (
-                <LoopItem key={l.slug} loop={l} index={indexOf(l.slug)} active={!prsActive && l.slug === selected} />
-              ))}
-              {starting.map((a) => (
-                <SidebarMenuItem key={a.sessionId}>
-                  <SidebarMenuButton title="Todavía no escribe su state." className="h-8 pr-20">
-                    <span className="cc-blink size-2 flex-none rounded-full bg-violet-500" />
-                    <span className="truncate">{a.name?.replace(/^clanker ·\s*/, "")}</span>
-                  </SidebarMenuButton>
-                  <SidebarMenuBadge className="text-[11px] text-muted-foreground">arrancando</SidebarMenuBadge>
-                </SidebarMenuItem>
-              ))}
-              {!running.length && !starting.length ? <p className="px-2 py-1 text-xs text-muted-foreground">Ningún loop corriendo.</p> : null}
+              {active.map((p) => item(p, indexOf(p.slug)))}
+              {!active.length ? (
+                <div className="flex flex-col items-start gap-1.5 px-2 py-1">
+                  <p className="text-xs text-muted-foreground">{projects.length ? "Ningún proyecto activo." : "Sin proyectos."}</p>
+                  <button type="button" onClick={actions.openNewProject} className="text-xs font-medium text-primary hover:underline">
+                    Crear proyecto
+                  </button>
+                </div>
+              ) : null}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {stopped.length ? (
+        {paused.length ? (
           <SidebarGroup className="py-1">
-            <SidebarGroupLabel>Detenidos</SidebarGroupLabel>
+            <SidebarGroupLabel>Pausados</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                {stopped.map((l) => (
-                  <LoopItem key={l.slug} loop={l} index={indexOf(l.slug)} active={!prsActive && l.slug === selected} />
-                ))}
-              </SidebarMenu>
+              <SidebarMenu>{paused.map((p) => item(p, indexOf(p.slug)))}</SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         ) : null}
@@ -205,11 +181,7 @@ export function AppSidebar({ loops, starting, selected, prsActive, prsBadge, onS
               </SidebarGroupLabel>
               <CollapsibleContent>
                 <SidebarGroupContent>
-                  <SidebarMenu>
-                    {archived.map((l) => (
-                      <LoopItem key={l.slug} loop={l} index={null} active={!prsActive && l.slug === selected} />
-                    ))}
-                  </SidebarMenu>
+                  <SidebarMenu>{archived.map((p) => item(p, null))}</SidebarMenu>
                 </SidebarGroupContent>
               </CollapsibleContent>
             </SidebarGroup>
@@ -218,20 +190,19 @@ export function AppSidebar({ loops, starting, selected, prsActive, prsBadge, onS
       </SidebarContent>
 
       <SidebarFooter className="gap-2.5 border-t border-sidebar-border px-3 pt-3 pb-2">
-        <PlanUsageBars usage={planUsage} />
         <div className="flex items-center justify-between gap-2">
-        <Hint label="Actualizar ahora" keys="⌘R" side="top">
-          <button type="button" onClick={actions.refresh} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
-            <span className={cn("size-1.5 flex-none rounded-full", DOT[status.tone])} />
-            <span className="truncate">{status.text}</span>
-            <RefreshCw className="size-3 flex-none" />
-          </button>
-        </Hint>
-        <Hint label="Atajos de teclado" keys="⌘/" side="top">
-          <button type="button" onClick={onOpenShortcuts} aria-label="Atajos de teclado" className="grid size-7 place-items-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
-            <Keyboard className="size-4" />
-          </button>
-        </Hint>
+          <Hint label="Actualizar ahora" keys="⌘R" side="top">
+            <button type="button" onClick={actions.refresh} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
+              <span className={cn("size-1.5 flex-none rounded-full", DOT[status.tone])} />
+              <span className="truncate">{status.text}</span>
+              <RefreshCw className="size-3 flex-none" />
+            </button>
+          </Hint>
+          <Hint label="Atajos de teclado" keys="⌘/" side="top">
+            <button type="button" onClick={onOpenShortcuts} aria-label="Atajos de teclado" className="grid size-7 place-items-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
+              <Keyboard className="size-4" />
+            </button>
+          </Hint>
         </div>
       </SidebarFooter>
     </Sidebar>

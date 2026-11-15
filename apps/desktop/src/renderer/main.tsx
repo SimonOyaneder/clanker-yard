@@ -1,12 +1,13 @@
 import "@clanker/ui/styles.css";
-import { App, createMemoryAppData, type CoreLink, type CoreState, type Host } from "@clanker/ui";
+import { createClient } from "@clanker/api";
+import { App, createCoreAppData, type CoreLink, type CoreState, type Host } from "@clanker/ui";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 const { clanker } = window;
 
-// El core que lanza y vigila el proceso main. La UI solo necesita saber si está vivo; `port` y `token`
-// (en el estado `live` del preload) son para el `AppData` que hable con la API.
+// El core que lanza y vigila el proceso main. La UI solo necesita saber si está vivo: la API la llama por
+// `clanker-core://`, donde el main pone el token y el puerto del core de turno.
 function coreLink(): CoreLink {
   let state: CoreState = { status: "starting" };
   const listeners = new Set<() => void>();
@@ -35,9 +36,11 @@ const host: Host = {
   setTheme: clanker.setTheme,
 };
 
-// Los datos siguen siendo los de ejemplo en memoria hasta que exista el `AppData` sobre la API del core.
+// El main reemplaza el token por el real: la ventana nunca lo conoce.
+const client = createClient({ url: "clanker-core://core/rpc", token: "lo-pone-el-main", origin: "ui" });
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App appData={createMemoryAppData()} host={host} />
+    <App appData={createCoreAppData(client)} host={host} />
   </StrictMode>,
 );

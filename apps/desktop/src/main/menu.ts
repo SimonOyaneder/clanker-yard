@@ -23,7 +23,7 @@ export function buildMenu(h: MenuHandlers): void {
     {
       label: "Archivo",
       submenu: [
-        { label: "Nuevo loop…", accelerator: "CmdOrCtrl+N", click: () => h.send("new-loop") },
+        { label: "Nuevo proyecto…", accelerator: "CmdOrCtrl+N", click: () => h.send("new-project") },
         { type: "separator" },
         { label: "Ver logs del core", click: h.openLogs },
         // Cerrar la ventana o salir con ⌘Q deja el core y sus flujos corriendo; esto los apaga.
@@ -40,9 +40,6 @@ export function buildMenu(h: MenuHandlers): void {
         // ⌘R actualiza los datos; no recarga la página (eso te sacaría de la vista donde estabas).
         { label: "Actualizar", accelerator: "CmdOrCtrl+R", click: () => h.send("refresh") },
         { label: "Mostrar u ocultar barra lateral", accelerator: "CmdOrCtrl+B", click: () => h.send("toggle-sidebar") },
-        { type: "separator" },
-        { label: "Operación", accelerator: "CmdOrCtrl+Shift+1", click: () => h.send("tab:operacion") },
-        { label: "Resumen", accelerator: "CmdOrCtrl+Shift+2", click: () => h.send("tab:resumen") },
         { type: "separator" },
         {
           label: "Apariencia",

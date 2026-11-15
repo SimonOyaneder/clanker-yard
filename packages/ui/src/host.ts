@@ -2,14 +2,12 @@ import { createContext, useContext } from "react"
 
 // Acciones que el menú nativo le manda a la UI.
 export type MenuAction =
-  | "new-loop"
+  | "new-project"
   | "command"
   | "refresh"
   | "toggle-sidebar"
   | "back"
   | "forward"
-  | "tab:operacion"
-  | "tab:resumen"
   | "shortcuts"
   | "go-prs"
 

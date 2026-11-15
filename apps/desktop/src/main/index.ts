@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { clankerDirs } from "@clanker/api/node";
 import type { MenuAction, Theme } from "@clanker/ui";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, shell } from "electron";
+import { CORE_SCHEME, createCoreProxy } from "./core-proxy";
 import { createCoreSupervisor } from "./core-supervisor";
 import { registerHostIpc } from "./host-ipc";
 import { buildMenu } from "./menu";
@@ -25,6 +26,10 @@ const supervisor = createCoreSupervisor({
   logDir: dirs.logDir,
   entry: path.resolve(app.getAppPath(), "../../packages/core/dist/main.js"),
 });
+
+// La ventana llama a la API del core por `clanker-core://`: el proxy pone el token y el puerto vigentes.
+// El esquema se declara antes de `ready`.
+protocol.registerSchemesAsPrivileged([{ scheme: CORE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
 let mainWindow: BrowserWindow | null = null;
 const send = (channel: string, payload: unknown) => mainWindow?.webContents.send(channel, payload);
@@ -81,6 +86,15 @@ void app.whenReady().then(() => {
   nativeTheme.themeSource = getTheme();
   nativeTheme.on("updated", () => mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#111114" : "#fcfcfd"));
 
+  protocol.handle(
+    CORE_SCHEME,
+    createCoreProxy({
+      endpoint: () => {
+        const state = supervisor.state();
+        return state.status === "live" ? { port: state.port, token: state.token } : undefined;
+      },
+    }),
+  );
   ipcMain.handle("core:state", () => supervisor.state());
   ipcMain.on("core:retry", () => void supervisor.start());
   ipcMain.on("core:open-logs", openLogs);

@@ -141,7 +141,7 @@ export function PrsView({ data, error, onRefresh }: Props) {
             <h1 className="text-xl font-semibold tracking-tight">Stacks de PR</h1>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {prs.length} PRs abiertos de @{data.viewer.login} · {groups.filter((g) => g.prIds.length > 1).length} stacks · actualizado{" "}
-              <Ago iso={data.fetchedAt} />, se actualiza cada 5 min
+              <Ago at={data.fetchedAt} />, se actualiza cada 5 min
               {data.total > prs.length ? <span> · mostrando {prs.length} de {data.total}</span> : null}
               {data.rate ? (
                 <span
@@ -398,7 +398,7 @@ function PRRow({ pr, depth, dimmed }: { pr: PullRequest; depth: number; dimmed: 
         <ContextMenuContent className="w-56">
           <ContextMenuItem onSelect={() => host.openExternal(pr.url)}>Abrir PR en GitHub</ContextMenuItem>
           {pr.clanker ? (
-            <ContextMenuItem onSelect={() => actions.openIssue(pr.clanker!.slug, pr.clanker!.issueId)}>
+            <ContextMenuItem onSelect={() => actions.selectProject(pr.clanker!.slug)}>
               Ver {pr.clanker.issueId} en {pr.clanker.loop}
             </ContextMenuItem>
           ) : null}

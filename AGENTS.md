@@ -31,6 +31,8 @@ El core es un proceso largo: un callback de timer o de evento (`setInterval`, `.
 
 UI sola: `npm run dev -w packages/ui` abre la UI en el navegador (puerto 8890) con datos de ejemplo en memoria.
 
+Para ver la app con datos y corridas que avanzan: `CLANKER_HOME=$(mktemp -d) npm run demo-core -w @clanker/testkit` levanta un core de demo (runtime fake, plantilla `juguete`, un proyecto local con 3 issues, cada corrida dura unos 7 s) y publica su `core.json`; con el mismo `CLANKER_HOME`, `npm run dev -w apps/desktop` se conecta a él en vez de lanzar el core real. Ciérralo con Ctrl+C.
+
 App de escritorio: `npm run dev -w apps/desktop` construye el core y abre Electron (con `CLANKER_HOME=$(mktemp -d)` delante no toca tus datos; sin él usa los reales). Para capturar la ventana de verdad, arráncala con `npx electron-vite dev -- --remote-debugging-port=9333` desde `apps/desktop` y habla CDP con `http://127.0.0.1:9333/json` (`Page.captureScreenshot`, `Runtime.evaluate`, `Emulation.setEmulatedMedia` para claro y oscuro). Ciérrala con `Browser.close` por CDP, no con `pkill`: hay otras Electron corriendo. Cuando exista el E2E con Playwright `_electron` se documenta aquí.
 
 ## Paquetes y dependencias permitidas
@@ -77,7 +79,7 @@ Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Sec
 - Cerrar la ventana o la app no detiene el core. El menú Archivo → "Salir y detener agentes" pide `system.shutdown({ drain: true })` y sale.
 - El core es el bundle `packages/core/dist/main.js` (desktop no lo importa). Electron guarda sus cachés y preferencias en `<datos>/desktop`, así que con `CLANKER_HOME` un arranque de prueba no toca nada del usuario.
 - Todo lo de Electron que la UI necesita (menú, notificaciones, editor, tema, estado del core) pasa por `Host` (`packages/ui/src/host.ts`); `Host.core` solo existe donde el host aloja el core. El main valida cada payload que llega por IPC.
-- Los datos de la UI siguen siendo `createMemoryAppData` hasta que exista el `AppData` sobre la API.
+- La ventana monta `createCoreAppData(createClient({ url: "clanker-core://core/rpc", ... }))`. `clanker-core://` es un esquema que registra el main (`src/main/core-proxy.ts`): reenvía cada llamada al core vivo poniendo su token y su puerto (el renderer nunca ve el token, y sobrevive a que el core se relance en otro puerto) y contesta el preflight de CORS, que el core no sirve. Los streams de eventos pasan por partes. Con el core caído responde 503 y la UI lo muestra como un error de lectura.
 - `packages/ui/src/styles/globals.css` se exporta como `@clanker/ui/styles.css` (el único archivo interno que otro paquete puede importar) y trae `@source` para que Tailwind compile las clases de la UI desde `apps/desktop`. El Vite del desktop apunta el alias `@` al `src` de la UI.
 - Los tests de `core-supervisor` lanzan el core real sobre un `CLANKER_HOME` temporal con su propio bundle (`node scripts/build.ts <outfile>` de `packages/core`), sin pisar `dist/`.
 
@@ -197,6 +199,8 @@ El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packa
 
 ## UI
 
+- `AppData` (`packages/ui/src/app-data.ts`) es lo único que la UI le pide al core, con los tipos de `@clanker/api` (nada de dominio duplicado en la UI) y errores como promesas rechazadas con un mensaje que se muestra tal cual. `createCoreAppData(client)` es el real y `createMemoryAppData` el de ejemplo; solo `prs` no sale del core todavía y rechaza con un mensaje.
+- En vivo: `LiveProvider` sigue `events.stream` con `followEvents` (`lib/follow-events.ts`), que al caerse reconecta desde el último `seq` y descarta repetidos. Cada tanda de eventos sube `revision` y toda `useLiveQuery(key, fetcher)` vuelve a pedir lo suyo: la UI no aplica eventos a mano ni hace polling, siempre relee la fuente. Un evento nuevo que mueva lo que se ve debe estar en `LIVE_EVENTS` de `core-app-data.ts`. El arranque rellena desde el `seq` 0 (no hay forma de pedir "desde ahora").
 - Usa un componente de shadcn antes de escribir uno propio. Agrégalo desde `packages/ui` (`npx shadcn@latest add <componente>`) o pídelo al MCP de shadcn (`.mcp.json`).
 - El CLI genera `import { cn } from "cn"`: cámbialo a `import { cn } from "@/lib/utils"` (el lint falla si queda el otro).
 - Colores solo desde los tokens de `packages/ui/src/styles/globals.css` (claro y oscuro). Nada de colores sueltos.

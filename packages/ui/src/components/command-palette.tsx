@@ -1,5 +1,7 @@
-import { Archive, ArchiveRestore, BarChart3, Eye, GitPullRequest, Keyboard, LayoutList, PanelLeft, Plus, RefreshCw, RotateCcw } from "lucide-react"
-import type { Loop, PullRequest } from "@/types"
+import type { CachedIssue, ClankerProject, Run } from "@clanker/api"
+import { GitPullRequest, Keyboard, PanelLeft, Play, Plus, RefreshCw } from "lucide-react"
+import type { PullRequest } from "@/types"
+import { RunStatusIcon, isLive } from "@/components/project/status"
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,25 +13,26 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { useHost } from "@/host"
-import { isRunning, lastSession, useAppActions } from "@/lib/app-context"
-import { issueIdOf, loopTone } from "@/lib/format"
+import { useAppActions } from "@/lib/app-context"
+import { issueKey } from "@/lib/format"
+import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
-import type { LoopTab } from "./loop/loop-view"
 
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
-  loops: Loop[]
-  current: Loop | null
-  onTab: (tab: LoopTab) => void
+  projects: ClankerProject[]
+  current: ClankerProject | null
+  runs: Run[]
+  issues: CachedIssue[]
   onToggleSidebar: () => void
   onOpenShortcuts: () => void
   prs: PullRequest[]
   onGoPrs: () => void
 }
 
-// ⌘K: ir a cualquier loop o issue y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, loops, current, onTab, onToggleSidebar, onOpenShortcuts, prs, onGoPrs }: Props) {
+// ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs }: Props) {
   const actions = useAppActions()
   const host = useHost()
   const run = (fn: () => void) => () => {
@@ -37,70 +40,58 @@ export function CommandPalette({ open, onOpenChange, loops, current, onTab, onTo
     fn()
   }
 
-  const issues = current
-    ? [
-        ...current.slots.map((s) => ({ id: s.issueId, title: s.title ?? "", hint: `slot ${s.slot}` })),
-        ...(current.queueItems ?? []).map((q) => ({ id: q.id, title: q.title ?? "", hint: "en cola" })),
-        ...[...current.history].reverse().map((h) => ({ id: issueIdOf(h.issueId), title: h.title ?? "", hint: h.pr.split(" ")[0] })),
-      ].filter((x, i, all) => all.findIndex((y) => y.id === x.id) === i)
-    : []
+  const byId = new Map<string, CachedIssue>(issues.map((i) => [i.id, i]))
+  const live = new Set(runs.filter((r) => isLive(r.status)).map((r) => r.subject.id))
+  const runnable = current?.status === "active" ? issues.filter((i) => i.status === "todo" && !live.has(i.id)) : []
+  const ordered = [...barProjects(projects), ...projects.filter((p) => p.status === "archived")]
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange} title="Paleta de comandos" description="Busca un loop, una issue o una acción">
-      <CommandInput placeholder="Busca un loop, una issue o una acción…" />
+    <CommandDialog open={open} onOpenChange={onOpenChange} title="Paleta de comandos" description="Busca un proyecto, una corrida o una acción">
+      <CommandInput placeholder="Busca un proyecto, una corrida o una acción…" />
       <CommandList className="max-h-[420px]">
         <CommandEmpty>Sin resultados.</CommandEmpty>
 
-        {current ? (
-          <CommandGroup heading={current.title}>
-            {!isRunning(current) && lastSession(current) ? (
-              <CommandItem onSelect={run(() => void actions.resume(current))}>
-                <RotateCcw /> Reanudar en background
+        {current && runnable.length ? (
+          <CommandGroup heading={`Correr en ${current.name}`}>
+            {runnable.map((i) => (
+              <CommandItem key={i.id} value={`correr ${issueKey(i)} ${i.title}`} onSelect={run(() => void actions.startRun(current, i))}>
+                <Play />
+                <span className="w-[68px] flex-none truncate font-mono text-[11.5px] text-muted-foreground">{issueKey(i)}</span>
+                <span className="truncate">{i.title}</span>
               </CommandItem>
-            ) : null}
-            {!isRunning(current) ? (
-              <CommandItem onSelect={run(() => void actions.watch(current))}>
-                <Eye /> Solo vigilar PRs
-              </CommandItem>
-            ) : null}
-            <CommandItem onSelect={run(() => onTab("operacion"))}>
-              <LayoutList /> Ver operación
-              <CommandShortcut>⇧⌘1</CommandShortcut>
-            </CommandItem>
-            <CommandItem onSelect={run(() => onTab("resumen"))}>
-              <BarChart3 /> Ver resumen
-              <CommandShortcut>⇧⌘2</CommandShortcut>
-            </CommandItem>
-            <CommandItem onSelect={run(() => actions.setArchived(current, !current.archived))}>
-              {current.archived ? <ArchiveRestore /> : <Archive />}
-              {current.archived ? "Desarchivar loop" : "Archivar loop"}
-            </CommandItem>
+            ))}
           </CommandGroup>
         ) : null}
 
         <CommandSeparator />
-        <CommandGroup heading="Loops">
-          {loops.map((l, i) => (
-            <CommandItem key={l.slug} value={`loop ${l.title} ${l.slug}`} onSelect={run(() => actions.selectLoop(l.slug))}>
-              <span className={cn("ml-0.5 size-2 rounded-full", loopTone[l.status].dot)} />
-              <span className="truncate">{l.title}</span>
-              <span className="text-xs text-muted-foreground">{l.archived ? "archivado" : loopTone[l.status].label}</span>
-              {i < 9 && !l.archived ? <CommandShortcut>⌘{i + 1}</CommandShortcut> : null}
+        <CommandGroup heading="Proyectos">
+          {ordered.map((p, i) => (
+            <CommandItem key={p.id} value={`proyecto ${p.name} ${p.slug}`} onSelect={run(() => actions.selectProject(p.slug))}>
+              <span className={cn("ml-0.5 size-2 rounded-full", p.status === "active" ? "bg-emerald-500" : "bg-muted-foreground/50")} />
+              <span className="truncate">{p.name}</span>
+              <span className="text-xs text-muted-foreground">{p.status === "active" ? "" : p.status === "paused" ? "pausado" : "archivado"}</span>
+              {i < 9 && p.status !== "archived" ? <CommandShortcut>⌘{i + 1}</CommandShortcut> : null}
             </CommandItem>
           ))}
         </CommandGroup>
 
-        {issues.length && current ? (
+        {runs.length && current ? (
           <>
             <CommandSeparator />
-            <CommandGroup heading={`Issues de ${current.title}`}>
-              {issues.map((x) => (
-                <CommandItem key={x.id} value={`issue ${x.id} ${x.title}`} onSelect={run(() => actions.openIssue(current.slug, x.id))}>
-                  <span className="w-[68px] flex-none font-mono text-[11.5px] text-muted-foreground">{x.id}</span>
-                  <span className="truncate">{x.title || "sin título"}</span>
-                  <span className="ml-auto flex-none font-mono text-[11px] text-muted-foreground">{x.hint}</span>
-                </CommandItem>
-              ))}
+            <CommandGroup heading={`Corridas de ${current.name}`}>
+              {runs.map((r) => {
+                const issue = byId.get(r.subject.id)
+                return (
+                  <CommandItem key={r.id} value={`corrida ${issue ? issueKey(issue) : ""} ${issue?.title ?? ""} ${r.id}`} onSelect={run(() => actions.openRun(current.slug, r.id))}>
+                    <RunStatusIcon run={r} />
+                    <span className="w-[68px] flex-none truncate font-mono text-[11.5px] text-muted-foreground">{issue ? issueKey(issue) : r.subject.id}</span>
+                    <span className="truncate">{issue?.title ?? "issue fuera del caché"}</span>
+                    <span className="ml-auto flex-none font-mono text-[11px] text-muted-foreground">
+                      {r.flow.slug} v{r.flow.version}
+                    </span>
+                  </CommandItem>
+                )
+              })}
             </CommandGroup>
           </>
         ) : null}
@@ -128,8 +119,8 @@ export function CommandPalette({ open, onOpenChange, loops, current, onTab, onTo
             <GitPullRequest /> Ir a Stacks de PR
             <CommandShortcut>⇧⌘P</CommandShortcut>
           </CommandItem>
-          <CommandItem onSelect={run(actions.openNewLoop)}>
-            <Plus /> Nuevo loop
+          <CommandItem onSelect={run(actions.openNewProject)}>
+            <Plus /> Nuevo proyecto
             <CommandShortcut>⌘N</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={run(actions.refresh)}>

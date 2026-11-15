@@ -1,5 +1,7 @@
 export { App } from "./App"
 export type { AppData } from "./app-data"
+export { createCoreAppData } from "./core-app-data"
+export type { CoreClient } from "./core-app-data"
 export { browserHost } from "./browser-host"
 export type { CoreLink, CoreState, Host, MenuAction, Theme } from "./host"
 export { createMemoryAppData } from "./memory-app-data"

@@ -1,19 +1,37 @@
+import type {
+  CachedIssue,
+  ClankerProject,
+  Event,
+  NewProject,
+  ProjectId,
+  Run,
+  RunDetail,
+  RunFilter,
+  RunId,
+  StartRun,
+} from "@clanker/api"
 import { createContext, useContext } from "react"
-import type { AppConfig, IssueDetail, Launched, LoopSummary, NewLoopInput, PRsResult, Result, Snapshot } from "@/types"
+import type { PRsResult } from "@/types"
 
-// De dónde saca datos la UI y a quién le pide acciones. La implementación real habla con la API
-// del core; `createMemoryAppData` sirve datos de ejemplo para desarrollar sin core.
+// De dónde saca datos la UI y a quién le pide acciones. Los dominios son los del contrato de
+// `@clanker/api`. `createCoreAppData` habla con el core; `createMemoryAppData` sirve datos de ejemplo
+// para desarrollar sin core. Todo lo que falla rechaza con un `Error` cuyo mensaje se muestra tal cual.
 export interface AppData {
-  snapshot(): Promise<Result<Snapshot>>
-  issue(slug: string, issueId: string): Promise<Result<IssueDetail>>
-  summary(slug: string): Promise<Result<LoopSummary>>
-  config(): Promise<Result<AppConfig>>
-  prs(force: boolean): Promise<Result<PRsResult>>
-  setArchived(slug: string, archived: boolean): Promise<Result<null>>
-  newLoop(input: NewLoopInput): Promise<Result<Launched>>
-  runLoop(slug: string, mode: "run" | "watch"): Promise<Result<Launched>>
-  resume(slug: string, sessionId: string): Promise<Result<Launched>>
-  stop(agentId: string): Promise<Result<null>>
+  projects(): Promise<ClankerProject[]>
+  createProject(input: NewProject): Promise<ClankerProject>
+  /** Las issues del caché del proyecto. */
+  issues(projectId: ProjectId): Promise<CachedIssue[]>
+  /** De la más reciente a la más antigua, sin pasos. */
+  runs(filter?: RunFilter): Promise<Run[]>
+  run(id: RunId): Promise<RunDetail>
+  /** Vuelve sin esperar: el progreso llega por `events`. */
+  startRun(input: StartRun): Promise<RunDetail>
+  /**
+   * Eventos con `seq > after` (los que ya están y después los nuevos, sin duplicados) hasta que `signal`
+   * se aborta. La promesa resuelve cuando la conexión está abierta.
+   */
+  events(after: number, signal: AbortSignal): Promise<AsyncIterable<Event>>
+  prs(force: boolean): Promise<PRsResult>
 }
 
 const AppDataContext = createContext<AppData | null>(null)

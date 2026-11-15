@@ -1,0 +1,13 @@
+# Lo mismo que `../juguete` pero con tiempos reales, para ver una corrida avanzar en la UI (`npm run demo-core`).
+match: { mode: saludar }
+events:
+  - { at: 0, text: "Leo la issue" }
+  - { at: 2500, usage: { model: haiku, in: 120, out: 30, costUsd: 0.004 } }
+  - { at: 5000, text: "Saludo y termino" }
+  - { at: 7000, usage: { model: haiku, in: 140, out: 40, costUsd: 0.0085 } }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "saludé"
+    payload: { saludo: "hola" }

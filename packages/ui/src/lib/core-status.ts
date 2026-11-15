@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from "react"
 import type { CoreLink, CoreState } from "@/host"
-import { ago } from "@/lib/format"
 
 const noSubscribe = () => () => {}
 const noState = () => undefined
@@ -12,16 +11,15 @@ export function useCoreState(link: CoreLink | undefined): CoreState | undefined 
 
 export type FooterTone = "live" | "pending" | "down" | "error"
 
-// Texto y color del pie de la barra lateral. Con core propio manda su estado; sin él, el último poll de datos.
+// Texto y color del pie de la barra lateral. Con core propio manda su estado; después, si los datos
+// fallan o si el stream de eventos está conectado.
 export function footerStatus(
   core: CoreState | undefined,
-  data: { error: string | null; updatedAt: number | null },
-  now = Date.now(),
+  data: { error: string | null; connected: boolean },
 ): { text: string; tone: FooterTone } {
   if (core?.status === "down") return { text: "core caído", tone: "down" }
   if (core?.status === "starting") return { text: "iniciando core…", tone: "pending" }
   if (data.error) return { text: "error leyendo datos", tone: "error" }
-  if (core) return { text: "core en vivo", tone: "live" }
-  if (data.updatedAt) return { text: `en vivo · ${ago(new Date(data.updatedAt).toISOString(), now)}`, tone: "live" }
-  return { text: "cargando…", tone: "pending" }
+  if (data.connected) return { text: "core en vivo", tone: "live" }
+  return { text: "conectando…", tone: "pending" }
 }

@@ -111,7 +111,7 @@ export function PRNode({ data }: NodeProps & { data: PRNodeData }) {
               type="button"
               onClick={(e) => {
                 e.stopPropagation()
-                actions.openIssue(pr.clanker!.slug, pr.clanker!.issueId)
+                actions.selectProject(pr.clanker!.slug)
               }}
               className="-mx-1 -mb-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[11px] text-violet-700 hover:bg-violet-500/10 dark:text-violet-300"
             >
@@ -127,7 +127,7 @@ export function PRNode({ data }: NodeProps & { data: PRNodeData }) {
       <ContextMenuContent className="w-56">
         <ContextMenuItem onSelect={() => host.openExternal(pr.url)}>Abrir PR en GitHub</ContextMenuItem>
         {pr.clanker ? (
-          <ContextMenuItem onSelect={() => actions.openIssue(pr.clanker!.slug, pr.clanker!.issueId)}>
+          <ContextMenuItem onSelect={() => actions.selectProject(pr.clanker!.slug)}>
             Ver {pr.clanker.issueId} en {pr.clanker.loop}
           </ContextMenuItem>
         ) : null}
