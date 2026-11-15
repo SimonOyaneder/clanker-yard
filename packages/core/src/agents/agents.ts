@@ -924,7 +924,8 @@ function promptFor(mode: RoleMode, brief: Brief, notice?: string): string {
   return notice === undefined ? message : `${notice}\n\n${message}`;
 }
 
-function outputSchemaFor(mode: RoleMode): JsonSchema {
+/** El esquema de salida de un modo: el sobre de `Report` con su `outcome` y su `payload`. */
+export function outputSchemaFor(mode: RoleMode): JsonSchema {
   return {
     ...reportEnvelope,
     properties: {
