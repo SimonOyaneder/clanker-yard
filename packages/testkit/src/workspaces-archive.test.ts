@@ -83,7 +83,7 @@ beforeEach(async () => {
     now: () => clock,
   });
   const errors = createErrorReporter(store);
-  const cache = createPrCache({ store, repos, prs, onChange: (_ref, state) => state.state === "merged" && cleaner?.request(), now: () => clock });
+  const cache = createPrCache({ store, repos, packs, prs, onChange: (_ref, state) => state.state === "merged" && cleaner?.request(), now: () => clock });
   watch = createWatch({ store, connections, repos, cache, remote, waitKeys: () => [], events: { flush: () => Promise.resolve() }, errors, now: () => clock });
 });
 

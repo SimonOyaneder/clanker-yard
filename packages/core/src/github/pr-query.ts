@@ -75,6 +75,14 @@ export type RawContext =
 /** Un PR con todo lo que `buildPrState` lee, ya con todas las páginas de threads y de checks. */
 export interface PrNode {
   number: number;
+  title: string;
+  url: string;
+  /** ISO 8601 */
+  updatedAt: string;
+  additions: number;
+  deletions: number;
+  /** Total de comentarios de la conversación; `comments` trae solo los últimos 100. */
+  commentCount: number;
   repo: { name: string; defaultBranch: string | null };
   state: "OPEN" | "CLOSED" | "MERGED";
   isDraft: boolean;
@@ -119,7 +127,7 @@ query PrDetail($owner: String!, $name: String!, $number: Int!) {
     name
     defaultBranchRef { name }
     pullRequest(number: $number) {
-      id number state isDraft headRefName headRefOid baseRefName reviewDecision mergeable mergeStateStatus
+      id number title url updatedAt additions deletions state isDraft headRefName headRefOid baseRefName reviewDecision mergeable mergeStateStatus
       mergeCommit { oid }
       author { ${ACTOR} }
       labels(first: ${PAGE_SIZE}) { nodes { name color description } }
@@ -129,7 +137,7 @@ query PrDetail($owner: String!, $name: String!, $number: Int!) {
       reviews(last: ${PAGE_SIZE}) {
         nodes { fullDatabaseId state body submittedAt commit { oid } author { ${ACTOR} } }
       }
-      comments(last: ${PAGE_SIZE}) { nodes { body createdAt author { ${ACTOR} } } }
+      comments(last: ${PAGE_SIZE}) { totalCount nodes { body createdAt author { ${ACTOR} } } }
       reviewThreads(first: ${PAGE_SIZE}) { ${PAGE_INFO} nodes { ${THREAD} } }
       commits(last: 1) {
         nodes { commit { oid statusCheckRollup { contexts(first: ${PAGE_SIZE}) { ${PAGE_INFO} nodes { ${CONTEXT} } } } } }
@@ -157,6 +165,11 @@ query PrContexts($id: ID!, $number: Int!, $after: String!) {
 interface RawPr {
   id: string;
   number: number;
+  title: string;
+  url: string;
+  updatedAt: string;
+  additions: number;
+  deletions: number;
   state: PrNode["state"];
   isDraft: boolean;
   headRefName: string;
@@ -170,7 +183,7 @@ interface RawPr {
   labels: { nodes: PrNode["labels"] };
   reviewRequests: { nodes: { requestedReviewer: (Pick<Actor, "__typename"> & Partial<Actor>) | null }[] };
   reviews: { nodes: RawReview[] };
-  comments: { nodes: RawComment[] };
+  comments: { totalCount: number; nodes: RawComment[] };
   reviewThreads: Page<RawThread>;
   commits: { nodes: { commit: { oid: string; statusCheckRollup: { contexts: Page<RawContext> } | null } }[] };
 }
@@ -208,6 +221,12 @@ export async function fetchPr(client: GitHubClient, repo: { owner: string; name:
 
   return {
     number: pr.number,
+    title: pr.title,
+    url: pr.url,
+    updatedAt: pr.updatedAt,
+    additions: pr.additions,
+    deletions: pr.deletions,
+    commentCount: pr.comments.totalCount,
     repo: { name: data.repository.name, defaultBranch: data.repository.defaultBranchRef?.name ?? null },
     state: pr.state,
     isDraft: pr.isDraft,

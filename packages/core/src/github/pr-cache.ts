@@ -2,7 +2,8 @@ import type { CachedPr, PrFilter, PrRef, PrState } from "@clanker/api";
 import { and, asc, eq } from "drizzle-orm";
 import * as z from "zod";
 import { newId } from "../store/conventions";
-import { pullRequests } from "../store/schema";
+import type { Packs } from "../packs/packs";
+import { prParents, pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Repos } from "../workspaces/repos";
 import type { Prs } from "./prs";
@@ -54,6 +55,8 @@ export interface PrCache {
 export interface PrCacheDeps {
   store: Store;
   repos: Pick<Repos, "get" | "byRemote" | "config">;
+  /** De ahí salen las señales de cada PR (`CachedPr.signals`): las del pack de la org de su repo. */
+  packs: Pick<Packs, "packFor">;
   prs: Pick<Prs, "get">;
   /** Con el estado nuevo de un PR, y su fila ya al día, cuando lo leído difiere de lo guardado (a los waits: `signalPr`; a los eventos de Watch). */
   onChange?: (ref: PrRef, state: PrState, row: PrRow) => void;
@@ -63,7 +66,7 @@ export interface PrCacheDeps {
 /** `state` de la fila para un PR leído por REST: GitHub no distingue mergeado de cerrado, `merged` sí. */
 const restState = ({ state, merged }: RestPull): PrRow["state"] => (merged ? "merged" : state);
 
-export function createPrCache({ store, repos, prs, onChange, now = Date.now }: PrCacheDeps): PrCache {
+export function createPrCache({ store, repos, packs, prs, onChange, now = Date.now }: PrCacheDeps): PrCache {
   const find = (repoId: string, number: number) =>
     store.db
       .select()
@@ -73,9 +76,13 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
 
   /** Guarda el `PrState` leído de GraphQL. Devuelve el anterior (`null` si nunca se había leído) y la fila ya al día, o `undefined` si el PR no está. */
   function saveDetail(repoId: string, number: number, state: PrState): { previous: PrState | null; row: PrRow } | undefined {
-    return store.tx(({ db }) => {
+    return store.tx(({ db, emit }) => {
       const current = find(repoId, number);
       if (!current) return undefined;
+      // Lo que la UI sigue en vivo: cualquier cambio de lo que `prs.list` sirve.
+      if (JSON.stringify(current.detail) !== JSON.stringify(state)) {
+        emit({ type: "pr.changed", origin: "core", subject: { type: "pr", id: current.id }, payload: { key: state.key } });
+      }
       db.update(pullRequests)
         .set({
           detail: state,
@@ -111,10 +118,15 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
         .where(and(owned === undefined ? undefined : eq(pullRequests.owned, owned), state === undefined ? undefined : eq(pullRequests.state, state)))
         .orderBy(asc(pullRequests.repoId), asc(pullRequests.number))
         .all();
+      const parents = new Map<string, string[]>();
+      for (const { childId, parentId } of store.db.select().from(prParents).orderBy(asc(prParents.parentId)).all()) {
+        parents.set(childId, [...(parents.get(childId) ?? []), parentId]);
+      }
       return rows.flatMap((row) => {
         const found = repos.get(row.repoId);
         const remote = found && repos.config(row.repoId).remote;
         if (!remote || (repo !== undefined && remote.repo !== repo)) return [];
+        const pack = packs.packFor({ githubOrg: remote.repo.split("/")[0]! });
         return [
           {
             id: row.id,
@@ -122,6 +134,9 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
             owned: row.owned,
             issueId: row.issueId,
             runId: row.runId,
+            parents: parents.get(row.id) ?? [],
+            signals: pack.signals.map(({ id, match, flags, empty, levels }) => ({ id, match, ...(flags !== undefined && { flags }), ...(empty !== undefined && { empty }), levels })),
+            reviewBot: pack.reviewBot !== undefined,
             state: row.detail,
             readAt: row.detailAt,
           },

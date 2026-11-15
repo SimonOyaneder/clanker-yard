@@ -104,6 +104,8 @@ export { createMergeScope } from "./github/merge-scope";
 export type { MergeScope } from "./github/merge-scope";
 export { startMergeReactions, approveOption, BUTTON_OPTION, WAIT_OPTION } from "./watch/merge-reactions";
 export type { MergeReactions } from "./watch/merge-reactions";
+export { createPrCommands, PrCommandError } from "./github/pr-commands";
+export type { PrCommands } from "./github/pr-commands";
 export { createPrCache } from "./github/pr-cache";
 export type { PrCache } from "./github/pr-cache";
 export { createWatch, WATCH_TICK_MS } from "./watch/watch";

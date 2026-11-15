@@ -1,8 +1,8 @@
 import { DecisionId, type Event, type MergeStrategy, type PrRef, type PrState } from "@clanker/api";
-import { RequestError } from "@octokit/request-error";
 import { and, eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
 import { closeDecision, openDecision } from "../decisions/decisions";
+import { commentOnPr } from "../github/comment";
 import type { PrRow } from "../github/pr-cache";
 import type { Prs } from "../github/prs";
 import type { Packs } from "../packs/packs";
@@ -62,16 +62,6 @@ export function startMergeReactions({ store, repos, packs, prs, connections, err
 
   const strategyOf = (ref: PrRef) => packs.packFor({ githubOrg: ref.repo.split("/")[0]! }).mergeStrategy;
 
-  async function comment(ref: PrRef, body: string): Promise<void> {
-    const [owner, repo] = ref.repo.split("/") as [string, string];
-    try {
-      await connections.githubClient(ref.account).request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", { owner, repo, issue_number: ref.number, body });
-    } catch (error) {
-      if (error instanceof RequestError && error.status === 401) connections.markRevoked("github", ref.account, "core");
-      throw error;
-    }
-  }
-
   const offersOf = (tx: Tx, prId: string) =>
     tx.db
       .select({ decisionId: mergeOffers.decisionId, headSha: mergeOffers.headSha })
@@ -125,7 +115,7 @@ export function startMergeReactions({ store, repos, packs, prs, connections, err
     const reaction = strategy ? (state.merge.auto ? strategy.onAuto : strategy.onOffer) : "gate";
     if (reaction === "none") return;
     if (reaction === "act" && strategy) {
-      if (state.merge.queue === null) await comment(ref, strategy.command);
+      if (state.merge.queue === null) await commentOnPr(connections, ref, strategy.command);
       return;
     }
     offer(row, ref, state, strategy);
@@ -149,7 +139,7 @@ export function startMergeReactions({ store, repos, packs, prs, connections, err
     const state = await prs.get(ref);
     const still = state.headSha === row.headSha && state.merge.offer && state.merge.via === "comment" && state.merge.queue === null;
     if (still) {
-      await comment(ref, command);
+      await commentOnPr(connections, ref, command);
       return;
     }
     // La aprobación vale para ese contenido: si cambió, se pide de nuevo (un `pr.mergeReady` nuevo la reabre).

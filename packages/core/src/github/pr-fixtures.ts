@@ -13,6 +13,12 @@ export const bot = (login: string): Actor => ({ __typename: "Bot", login, avatar
 export function prNode(overrides: Partial<PrNode> = {}): PrNode {
   return {
     number: 4251,
+    title: "Add the thing",
+    url: "https://github.com/acme/api/pull/4251",
+    updatedAt: "2026-11-10T12:00:00Z",
+    additions: 12,
+    deletions: 3,
+    commentCount: overrides.comments?.length ?? 0,
     repo: { name: "api", defaultBranch: "main" },
     state: "OPEN",
     isDraft: false,

@@ -5,6 +5,7 @@ import type { ComponentProps } from "react"
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
 import { CommandPalette } from "@/components/command-palette"
+import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { RunCommandsProvider } from "@/components/project/run-commands"
 import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { HostProvider, type Host } from "@/host"
@@ -39,6 +40,7 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
       <RunCommandsProvider>
         <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
           <AppActionsContext.Provider value={actions as unknown as AppActions}>
+            <PrCommandsProvider prs={[]} projects={[project!]} onOpenRun={() => {}}>
             <CommandPalette
               open
               onOpenChange={() => {}}
@@ -50,6 +52,7 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
               onToggleSidebar={() => {}}
               onOpenShortcuts={() => {}}
               prs={[]}
+              prsActive={false}
               onGoPrs={() => {}}
               onGoInbox={() => {}}
               pendingDecisions={[]}
@@ -62,6 +65,7 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
               runCaps={null}
               onStep={null}
             />
+            </PrCommandsProvider>
           </AppActionsContext.Provider>
         </HostProvider>
       </RunCommandsProvider>

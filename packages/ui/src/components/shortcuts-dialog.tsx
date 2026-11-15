@@ -73,6 +73,17 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
     ],
   },
   {
+    title: "Stacks de PR (con un PR enfocado)",
+    items: [
+      ["Mergear según la estrategia del pack (confirma)", "M"],
+      ["Pedir review del bot", "B"],
+      ["Rebasear", "R"],
+      ["Marcar o quitar hold (no mergear nunca)", "H"],
+      ["Ver la corrida que abrió el PR", "V"],
+      ["Abrir el PR en GitHub", "⏎"],
+    ],
+  },
+  {
     title: "Conexiones",
     items: [
       ["Conectar con Linear", "⇧⌘L"],

@@ -73,6 +73,18 @@ export function createCoreAppData(client: CoreClient): AppData {
     lanes: () => client.system.lanes(),
     breakers: () => client.system.breakers(),
     openPrs: () => client.prs.list({ state: "open" }),
+    refreshPrs: async (refs) => {
+      // El core lee de a una request: en serie y sin cortar en el primer fallo, que se reporta al final.
+      const failures: string[] = []
+      for (const ref of refs) {
+        await client.prs.refresh(ref).catch((e: unknown) => failures.push(`${ref.repo}#${ref.number}: ${e instanceof Error ? e.message : String(e)}`))
+      }
+      if (failures.length) throw new Error(`No pude actualizar ${failures.length === 1 ? "un PR" : `${failures.length} PRs`}: ${failures.join("; ")}`)
+    },
+    setPrHold: async (ref, hold) => void (await client.prs.setHold({ ref, hold })),
+    mergePr: async (ref) => void (await client.prs.merge(ref)),
+    requestPrReview: async (ref) => void (await client.prs.requestReview(ref)),
+    rebasePr: async (ref) => void (await client.prs.rebase(ref)),
     issues: (projectId) => client.issues.list({ projectId }),
     queue: (projectId) => client.projects.queue({ id: projectId }),
     projectMetrics: async (projectId, range) => {
@@ -103,10 +115,8 @@ export function createCoreAppData(client: CoreClient): AppData {
     pauseProject: (id) => client.projects.pause({ id }),
     resumeProject: (id) => client.projects.resume({ id }),
     events: (after, signal) => client.events.stream({ after, filter: { types: [...LIVE_EVENTS] } }, { signal }),
-    // El core todavía no sirve PRs (el caché de PRs con sus eventos es de una fase posterior).
     decisions: (filter) => client.decisions.list(filter),
     resolveDecision: (id, option) => client.decisions.resolve({ id, option }),
-    prs: () => Promise.reject(new Error("El core todavía no sirve PRs: llegan con el caché de PRs.")),
     connections: () => client.connections.list(),
     githubPatForm: () => client.connections.githubPatForm(),
     setGithubPat: (token) => client.connections.setPat({ token }),

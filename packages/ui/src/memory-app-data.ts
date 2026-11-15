@@ -1,7 +1,7 @@
-import { type Breaker, type CachedIssue, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type IssueId, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type IssueId, type PrRef, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
-import { buildPrs } from "@/seed-prs"
+import { buildOpenPrs } from "@/seed-prs"
 import { aggregate, seedClosedRuns } from "@/seed-metrics"
 import { seedStep, transcriptPage, type StepSeed } from "@/seed-steps"
 
@@ -292,6 +292,12 @@ export function createMemoryAppData(now = Date.now()): AppData {
   const skipped = new Set<IssueId>()
   const boosted: IssueId[] = []
   const breakers: Breaker[] = []
+  const prs: CachedPr[] = buildOpenPrs(now)
+  const prOf = (ref: PrRef): CachedPr => {
+    const found = prs.find((p) => p.ref.repo === ref.repo && p.ref.number === ref.number)
+    if (!found?.state) throw new Error(`El core no conoce el PR ${ref.repo}#${ref.number}`)
+    return found
+  }
   const projectOf = (projectId: ProjectId) => projects.find((p) => p.id === projectId)
   const detailOf = (runId: string) => {
     const found = runs.find((r) => r.id === runId)
@@ -363,7 +369,20 @@ export function createMemoryAppData(now = Date.now()): AppData {
       return { dev: { active: holding("dev"), capacity: 4 }, maintenance: { active: holding("maintenance"), capacity: 2 } }
     },
     breakers: async () => breakers.map((b) => ({ ...b })),
-    openPrs: async () => [],
+    openPrs: async () => prs.map((p) => ({ ...p })),
+    refreshPrs: async () => {},
+    setPrHold: async (ref, hold) => {
+      const found = prOf(ref)
+      // Como el core: el hold apaga la oferta y el merge automático.
+      found.state = { ...found.state!, hold, merge: { ...found.state!.merge, offer: hold ? false : found.state!.merge.ready, auto: false } }
+    },
+    mergePr: async (ref) => {
+      const found = prOf(ref)
+      if (!found.state!.merge.ready || found.state!.hold) throw new Error(`${found.state!.key} no está listo para mergear`)
+      found.state = { ...found.state!, merge: { ...found.state!.merge, queue: "queued" } }
+    },
+    requestPrReview: async (ref) => void prOf(ref),
+    rebasePr: async (ref) => void prOf(ref),
     // Solo el primer proyecto tiene corridas cerradas de ejemplo; el otro trae su Resumen vacío.
     projectMetrics: async (projectId, range) =>
       aggregate(projectId === projects[0]!.id ? seedClosedRuns(issues.slice(0, 4).map((i) => i.id)) : [], range, now),
@@ -474,7 +493,6 @@ export function createMemoryAppData(now = Date.now()): AppData {
       if (parked && (found.kind === "gate" || found.kind === "needs_human")) Object.assign(parked, option === "cancel" ? { status: "canceled", parkReason: null } : { status: "running", parkReason: null })
       return { ...found }
     },
-    prs: async () => buildPrs(now),
     connections: async () => connections.map((c) => ({ ...c })),
     githubPatForm: async () => ({
       url: "https://github.com/settings/personal-access-tokens/new?name=Clanker+Yard",

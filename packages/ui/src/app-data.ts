@@ -20,6 +20,7 @@ import type {
   Lanes,
   ModelMetrics,
   NewProject,
+  PrRef,
   ProjectId,
   ProjectPatch,
   ProjectSummary,
@@ -39,7 +40,6 @@ import type {
   TranscriptPage,
 } from "@clanker/api"
 import { createContext, useContext } from "react"
-import type { PRsResult } from "@/types"
 
 /** Un repo registrado con lo que hay de su receta y cómo salió su última prueba (`null` si nunca se probó). */
 export interface RepoRow {
@@ -82,8 +82,18 @@ export interface AppData {
   lanes(): Promise<Lanes>
   /** Los circuit breakers abiertos: qué está en pausa y cuándo se vuelve a probar. */
   breakers(): Promise<Breaker[]>
-  /** Los PRs abiertos que Watch conoce (los que abrió el sistema y los de tu búsqueda). */
+  /** Los PRs abiertos que Watch conoce (los que abrió el sistema y los de tu búsqueda), con su estado ya leído y las señales de su pack. */
   openPrs(): Promise<CachedPr[]>
+  /** Relee cada PR de GitHub y deja el estado en el caché: los cambios llegan después por `events` como `pr.changed`. */
+  refreshPrs(refs: PrRef[]): Promise<void>
+  /** Marca o desmarca "no mergear nunca". */
+  setPrHold(ref: PrRef, hold: boolean): Promise<void>
+  /** Mergea según la estrategia del pack (comenta su comando); el core rechaza si el PR ya no está listo. */
+  mergePr(ref: PrRef): Promise<void>
+  /** Le pide review al bot del pack. */
+  requestPrReview(ref: PrRef): Promise<void>
+  /** Arranca el rebase del PR en el carril de mantenimiento; la corrida aparece en el proyecto que lo abrió. */
+  rebasePr(ref: PrRef): Promise<void>
   /** Las issues del caché del proyecto. */
   issues(projectId: ProjectId): Promise<CachedIssue[]>
   /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */
@@ -129,7 +139,6 @@ export interface AppData {
    * `needs_human` la corrida estacionada vuelve a la cola de su carril.
    */
   resolveDecision(id: DecisionId, option: string): Promise<Decision>
-  prs(force: boolean): Promise<PRsResult>
   /** Las cuentas conectadas, sin tokens. */
   connections(): Promise<Connection[]>
   /** El link prellenado del formulario del PAT y la lista de permisos que necesita. */

@@ -511,7 +511,7 @@ describe("merge", () => {
   const fin = (body = "/merge", at = "2026-11-10T12:00:00Z") => comment(user(VIEWER), body, at);
 
   test("con la estrategia del pack: ready, offer y auto de un PR limpio", () => {
-    expect(build(ready()).merge).toEqual({ via: "comment", ready: true, blockers: [], queue: null, offer: true, auto: true });
+    expect(build(ready()).merge).toEqual({ via: "comment", command: "/merge", ready: true, blockers: [], queue: null, offer: true, auto: true });
   });
 
   test("un /merge de la cuenta conectada lo pone en cola, y merge-queue en FAILURE o ERROR lo da por fallado", () => {
@@ -564,6 +564,6 @@ describe("merge", () => {
   });
 
   test("un PR mergeado o cerrado no tiene merge", () => {
-    expect(build(ready({ state: "MERGED" })).merge).toEqual({ via: "comment", ready: false, blockers: [], queue: null, offer: false, auto: false });
+    expect(build(ready({ state: "MERGED" })).merge).toEqual({ via: "comment", command: "/merge", ready: false, blockers: [], queue: null, offer: false, auto: false });
   });
 });

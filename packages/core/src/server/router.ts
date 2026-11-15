@@ -1,8 +1,10 @@
-import { API_MAJOR, type ClientOrigin, contract, type PrRef, type PrState, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
+import { API_MAJOR, type ClientOrigin, contract, type PrRef, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubPatError, githubPatForm } from "../github/pat";
 import { PrNotFoundError } from "../github/pr-query";
+import { createMergeScope } from "../github/merge-scope";
 import { createPrCache, type PrCacheDeps } from "../github/pr-cache";
+import { createPrCommands, PrCommandError } from "../github/pr-commands";
 import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
@@ -86,8 +88,9 @@ export function createRouter(deps: RouterDeps) {
   const defWriter = createDefWriter({ defs: deps.defs, flows: deps.flows });
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
-  const prs = createPrs({ connections: deps.connections, packs: deps.packs });
-  const prCache = createPrCache({ store, repos, prs, onChange: deps.onPrChange });
+  const prs = createPrs({ connections: deps.connections, packs: deps.packs, merge: createMergeScope({ store, repos, connections: deps.connections }) });
+  const prCache = createPrCache({ store, repos, packs: deps.packs, prs, onChange: deps.onPrChange });
+  const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
     if (!project) throw new ORPCError("NOT_FOUND", { message: `No existe el proyecto ${id}.` });
@@ -102,8 +105,8 @@ export function createRouter(deps: RouterDeps) {
   /** `runs.retryStep|steerStep|forceOutcome`: el comando y la corrida del paso como quedó. */
   const commandStep = (stepId: StepRunId, cmd: Parameters<Engine["stepCommand"]>[1], by: ClientOrigin) =>
     asApiError(() => flows.getRun(flows.stepCommand(stepId, cmd, by)));
-  /** Lee un PR de GitHub (`prs.get`, `prs.refresh`) y traduce sus errores a los de la API. */
-  const readPr = async (ref: PrRef, read: (ref: PrRef) => Promise<PrState>): Promise<PrState> => {
+  /** Lo que `prs.*` hace con un PR de GitHub (leerlo, mergearlo...): traduce sus errores a los de la API. */
+  const readPr = async <T>(ref: PrRef, read: (ref: PrRef) => Promise<T>): Promise<T> => {
     if (!deps.connections.list().some((c) => c.provider === "github" && c.account === ref.account)) {
       throw new ORPCError("BAD_REQUEST", {
         message: `No hay una cuenta github conectada como "${ref.account}": conéctala primero.`,
@@ -261,6 +264,20 @@ export function createRouter(deps: RouterDeps) {
       get: os.prs.get.handler(({ input }) => readPr(input, prs.get)),
       list: os.prs.list.handler(({ input }) => prCache.list(input)),
       refresh: os.prs.refresh.handler(({ input }) => readPr(input, prCache.refresh)),
+      setHold: os.prs.setHold.handler(({ input }) => asApiErrorAsync(() => readPr(input.ref, (ref) => prCommands.setHold(ref, input.hold)))),
+      merge: os.prs.merge.handler(({ input, context }) => {
+        // Mergear lo decide una persona: un agente que use el CLI o el MCP no comenta el comando de merge por su cuenta.
+        if (context.origin !== "ui") {
+          throw new ORPCError("FORBIDDEN", { message: "Mergear lo pide una persona desde la app: un agente no lo hace por su cuenta." });
+        }
+        return asApiErrorAsync(() => readPr(input, prCommands.merge));
+      }),
+      requestReview: os.prs.requestReview.handler(({ input }) =>
+        asApiErrorAsync(() => readPr(input, prCommands.requestReview)),
+      ),
+      rebase: os.prs.rebase.handler(({ input, context }) =>
+        asApiErrorAsync(() => readPr(input, (ref) => prCommands.rebase(ref, context.origin))),
+      ),
     },
     repos: {
       list: os.repos.list.handler(() => repos.list()),
@@ -386,6 +403,7 @@ function toApiError(error: unknown): unknown {
     error instanceof DecisionResolveError ||
     error instanceof InvalidRepoError ||
     error instanceof NotAGitRepoError ||
+    error instanceof PrCommandError ||
     error instanceof RecipeTestError ||
     error instanceof RecipeSyntaxError ||
     error instanceof DefValidationError ||

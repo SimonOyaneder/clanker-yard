@@ -1,4 +1,5 @@
 import { expect, test } from "vitest"
+import { openPrsOf } from "@/lib/prs"
 import { buildStackForest, listStackGroups } from "@/lib/stack"
 import { createMemoryAppData } from "@/memory-app-data"
 
@@ -24,12 +25,29 @@ test("un proyecto pausado rechaza lanzar corridas diciendo cuál es", async () =
   await expect(data.startRun({ projectId: paused.id, issueId: issue!.id })).rejects.toThrow(/SOPORTE no está activo/)
 })
 
-test("los PRs de ejemplo arman un stack de 4 con su raíz y el resto sueltos", async () => {
-  const { prs } = await createMemoryAppData(NOW).prs(false)
+test("los PRs de ejemplo arman un stack de 4, uno con una base combinada de dos padres, y el resto sueltos", async () => {
+  const prs = openPrsOf(await createMemoryAppData(NOW).openPrs())
 
-  const groups = listStackGroups(buildStackForest(prs))
-  expect(groups[0]?.prIds).toHaveLength(4)
-  expect(groups.filter((g) => g.prIds.length === 1)).toHaveLength(prs.length - 4)
+  const forest = buildStackForest(prs)
+  const groups = listStackGroups(forest)
+  expect(groups.map((g) => g.prIds.length)).toEqual([4, 3, 1, 1, 1, 1, 1])
+  // El PR de la base combinada cuelga de los dos y dice cuáles son.
+  const [combined] = forest.combined
+  expect(forest.byId.get(combined![0])?.state.key).toBe("payments-api#395")
+  expect(combined![1]).toEqual(["payments-api#391", "payments-api#388"])
+})
+
+test("marcar hold apaga la oferta de merge y quitarlo la devuelve; mergear un PR en hold se rechaza", async () => {
+  const data = createMemoryAppData(NOW)
+  const ready = openPrsOf(await data.openPrs()).find((p) => p.state.key === "ledger#421")!
+
+  await data.setPrHold(ready.ref, true)
+  const held = openPrsOf(await data.openPrs()).find((p) => p.id === ready.id)!
+  expect(held.state).toMatchObject({ hold: true, merge: { offer: false } })
+  await expect(data.mergePr(ready.ref)).rejects.toThrow(/no está listo/)
+
+  await data.setPrHold(ready.ref, false)
+  expect(openPrsOf(await data.openPrs()).find((p) => p.id === ready.id)!.state.merge.offer).toBe(true)
 })
 
 test("las conexiones de ejemplo traen GitHub en regla, Linear vencida y Claude sin configurar", async () => {

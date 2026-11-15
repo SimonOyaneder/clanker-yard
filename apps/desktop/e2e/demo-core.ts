@@ -5,10 +5,10 @@ import { join } from "node:path";
 const testkitDir = join(import.meta.dirname, "../../../packages/testkit");
 
 /**
- * `lanes` siembra el proyecto de la vista de Operación y `summary` el del Resumen, con lo importado del clanker-loop
- * y corridas de Yard (`DEMO_SCENARIO` de `packages/testkit/scripts/demo-core.ts`).
+ * `lanes` siembra el proyecto de la vista de Operación, `summary` el del Resumen (lo importado del clanker-loop y corridas de Yard)
+ * y `prs` los PRs de Stacks de PR, con el pack de ejemplo (`DEMO_SCENARIO` de `packages/testkit/scripts/demo-core.ts`).
  */
-export type DemoScenario = "default" | "lanes" | "summary";
+export type DemoScenario = "default" | "lanes" | "summary" | "prs";
 
 export interface DemoCore {
   stop(): Promise<void>;
@@ -23,7 +23,7 @@ export async function startDemoCore(home: string, scenario: DemoScenario = "defa
   let log = "";
   const child = spawn(process.execPath, ["--import", "tsx", "scripts/demo-core.ts"], {
     cwd: testkitDir,
-    // La bandeja de prueba (`DEMO_INBOX`) solo va en el escenario por defecto: en `lanes` sumaría corridas a los carriles.
+    // La bandeja de prueba (`DEMO_INBOX`) solo va en el escenario por defecto: en los demás sumaría corridas y decisiones.
     env: { ...process.env, CLANKER_HOME: home, CORE_RUNTIME: "fake", DEMO_SCENARIO: scenario, ...(scenario === "default" ? { DEMO_INBOX: "1" } : {}) },
   });
   const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));

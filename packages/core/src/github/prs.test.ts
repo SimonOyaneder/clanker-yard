@@ -191,7 +191,7 @@ describe("prs.get", () => {
 });
 
 describe("API", () => {
-  async function clientFor(connections: Connections, repos?: Repos) {
+  async function clientFor(connections: Connections, repos?: Repos, origin: "ui" | "cli" | "mcp" = "ui") {
     const router = createRouter({
       store,
       connections,
@@ -205,7 +205,7 @@ describe("API", () => {
       dataDir: dir,
       onShutdown: () => {},
     });
-    return createRouterClient(router, { context: { origin: "ui" } });
+    return createRouterClient(router, { context: { origin } });
   }
 
   test("prs.get devuelve el PrState", async () => {
@@ -227,7 +227,9 @@ describe("API", () => {
     );
     const client = await clientFor(connections, repos);
 
-    expect(await client.prs.list({})).toEqual([{ id: expect.any(String), ref: REPO, owned: true, issueId: null, runId: null, state: null, readAt: null }]);
+    expect(await client.prs.list({})).toEqual([
+      { id: expect.any(String), ref: REPO, owned: true, issueId: null, runId: null, parents: [], signals: [], reviewBot: false, state: null, readAt: null },
+    ]);
     expect(graphqlRequests()).toEqual([]);
 
     expect(await client.prs.refresh(REPO)).toMatchObject({ state: "draft" });
@@ -236,6 +238,24 @@ describe("API", () => {
     expect(cached).toMatchObject({ ref: REPO, state: { state: "draft", key: "api#4251" } });
     expect(cached?.readAt).toBeGreaterThan(0);
     expect(await client.prs.list({ state: "merged" })).toEqual([]);
+  });
+
+  test("mergear solo lo pide una persona desde la app: el CLI y el MCP reciben FORBIDDEN sin tocar GitHub", async () => {
+    const connections = await connect(prGraphql(prNode()));
+
+    for (const origin of ["cli", "mcp"] as const) {
+      const client = await clientFor(connections, undefined, origin);
+      await expect(client.prs.merge(REPO)).rejects.toSatisfy((e) => e instanceof ORPCError && e.code === "FORBIDDEN");
+    }
+    expect(graphqlRequests()).toEqual([]);
+  });
+
+  test("marcar hold un PR que el core no conoce es BAD_REQUEST con el motivo", async () => {
+    const client = await clientFor(await connect(prGraphql(prNode())));
+
+    await expect(client.prs.setHold({ ref: REPO, hold: true })).rejects.toSatisfy(
+      (e) => e instanceof ORPCError && e.code === "BAD_REQUEST" && /registra el repo y espera a que Watch lo vea/.test(e.message),
+    );
   });
 
   test("un PR que no existe es NOT_FOUND y una cuenta no conectada es BAD_REQUEST", async () => {

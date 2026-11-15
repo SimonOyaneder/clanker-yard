@@ -1,6 +1,6 @@
 import { PackSettings, type PrRef, type PrState } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { pullRequests } from "../store/schema";
+import { prParents, pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createRepos, type Repos } from "../workspaces/repos";
 import { createPrCache, type PrCache, type PrCacheDeps, type RestPull } from "./pr-cache";
@@ -17,7 +17,10 @@ let cache: PrCache;
 let state: PrState;
 const onChange = vi.fn<NonNullable<PrCacheDeps["onChange"]>>();
 
-const stateOf = (overrides: Parameters<typeof prNode>[0] = {}) => buildPrState(prNode({ number: 7, ...overrides }), { pack: { id: null, ...PackSettings.parse({}) }, viewer: ACCOUNT });
+const NO_PACK = { id: null, ...PackSettings.parse({}) };
+const packs = { packFor: () => NO_PACK };
+
+const stateOf = (overrides: Parameters<typeof prNode>[0] = {}) => buildPrState(prNode({ number: 7, ...overrides }), { pack: NO_PACK, viewer: ACCOUNT });
 const ref = (number: number, repo = "acme/api"): PrRef => ({ account: ACCOUNT, repo, number });
 const pull = (overrides: Partial<RestPull> = {}): RestPull => ({
   number: 7,
@@ -35,7 +38,7 @@ beforeEach(() => {
   repos = createRepos(store, { remote: (repo) => ({ url: `https://example.invalid/${repo}.git`, repo, account: ACCOUNT }) });
   repoId = repos.add({ name: "api", path: "/tmp/api", remote: "acme/api" });
   state = stateOf();
-  cache = createPrCache({ store, repos, prs: { get: () => Promise.resolve(state) }, onChange, now: () => NOW });
+  cache = createPrCache({ store, repos, packs, prs: { get: () => Promise.resolve(state) }, onChange, now: () => NOW });
   onChange.mockReset();
 });
 
@@ -85,6 +88,19 @@ describe("refresh", () => {
     expect(cache.row(repoId, 7)).toMatchObject({ isDraft: true, headSha: "d".repeat(40), headChangedAt: NOW });
   });
 
+  test("emite pr.changed sobre el PR cuando lo que prs.list sirve cambió, y solo entonces", async () => {
+    const row = cache.saveRest(repoId, pull(), NOW);
+    const changed = () => store.events.since(0, { types: ["pr.changed"] });
+
+    await cache.refresh(ref(7));
+    await cache.refresh(ref(7));
+    expect(changed()).toMatchObject([{ origin: "core", subject: { type: "pr", id: row.id }, payload: { key: "api#7" } }]);
+
+    state = stateOf({ labels: [{ name: "risk:high", color: "d73a4a", description: null }] });
+    await cache.refresh(ref(7));
+    expect(changed()).toHaveLength(2);
+  });
+
   test("un PR que el caché no conoce se lee igual pero no entra ni avisa", async () => {
     expect(await cache.refresh(ref(7))).toEqual(state);
     expect(await cache.refresh(ref(7, "otra/cosa"))).toEqual(state);
@@ -117,6 +133,41 @@ describe("list", () => {
   });
 });
 
+describe("list: lo del core y del pack que el estado de GitHub no trae", () => {
+  const pack = (settings: Record<string, unknown>) => ({ packFor: () => ({ id: "demo", ...PackSettings.parse(settings) }) });
+  const risk = { id: "risk", source: "label", match: "^risk:(high|low)$", levels: { high: { label: "Alto", tone: "bad", hint: "h" }, low: { label: "Bajo", tone: "ok", hint: "l" } }, empty: "Sin riesgo" };
+
+  test("las señales y el bot de review son los del pack de la org del repo, y sin pack no hay ninguno", () => {
+    cache.saveRest(repoId, pull(), NOW);
+    expect(cache.list()[0]).toMatchObject({ signals: [], reviewBot: false });
+
+    const withPack = createPrCache({
+      store,
+      repos,
+      packs: pack({ signals: [risk], reviewBot: { logins: ["bot"], request: { type: "comment", body: "review" }, lgtm: { reviewState: "APPROVED" } } }),
+      prs: { get: () => Promise.resolve(state) },
+    });
+    expect(withPack.list()[0]).toMatchObject({ reviewBot: true, signals: [{ id: "risk", match: "^risk:(high|low)$", empty: "Sin riesgo", levels: { high: { label: "Alto", tone: "bad" } } }] });
+  });
+
+  test("parents trae los PRs de que cuelga, de pr_parents: dos o más son una base combinada", () => {
+    const base = cache.saveRest(repoId, pull({ number: 1 }), NOW);
+    const other = cache.saveRest(repoId, pull({ number: 2 }), NOW);
+    const child = cache.saveRest(repoId, pull({ number: 3 }), NOW);
+    store.tx((tx) => {
+      tx.db.insert(prParents).values([
+        { childId: child.id, parentId: other.id },
+        { childId: child.id, parentId: base.id },
+      ]).run();
+    });
+
+    const [first, second, third] = cache.list();
+    expect(first?.parents).toEqual([]);
+    expect(second?.parents).toEqual([]);
+    expect(third?.parents).toEqual([base.id, other.id].sort());
+  });
+});
+
 describe("setHold", () => {
   test("marca el PR, lo relee con el hold ya puesto y avisa del cambio; quitarlo también", async () => {
     cache.saveRest(repoId, pull(), NOW);
@@ -126,6 +177,7 @@ describe("setHold", () => {
     cache = createPrCache({
       store,
       repos,
+      packs,
       prs: { get: () => Promise.resolve(stateOfHold(cache.row(repoId, 7)!.hold)) },
       onChange,
       now: () => NOW,
@@ -149,4 +201,4 @@ describe("setHold", () => {
 });
 
 const stateOfHold = (hold: boolean) =>
-  buildPrState(prNode({ number: 7 }), { pack: { id: null, ...PackSettings.parse({}) }, viewer: ACCOUNT, hold });
+  buildPrState(prNode({ number: 7 }), { pack: NO_PACK, viewer: ACCOUNT, hold });

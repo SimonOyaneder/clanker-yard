@@ -197,7 +197,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     prEvents.observe(ref, state, row);
     if (state.state === "merged" || state.state === "closed") cleanup.request();
   };
-  const prCache = createPrCache({ store, repos, prs, onChange: onPrChange });
+  const prCache = createPrCache({ store, repos, packs, prs, onChange: onPrChange });
   const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtime) ? runtime : undefined });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceAttachAction(workspaces));

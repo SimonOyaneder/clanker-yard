@@ -121,6 +121,8 @@ export interface SimPr {
   /** Un solo check requerido (`ci`) en verde, rojo o en curso sobre el head actual. */
   ci(outcome: "green" | "red" | "pending", opts?: { name?: string }): void;
   requestReview(login: string): void;
+  /** Un label del PR, como los que pone un bot o una persona (`risk:high`). */
+  label(name: string, opts?: { color?: string; description?: string }): void;
   setDraft(draft: boolean): void;
   /**
    * Mergea el PR: queda cerrado y mergeado. El commit del merge es `sha` (un squash que otro dejó en la
@@ -211,6 +213,7 @@ interface PrData {
   /** Checks por commit: un commit nuevo empieza sin ninguno. */
   contexts: Map<string, RawContext[]>;
   requested: Actor[];
+  labels: PrNode["labels"];
   /** Cuántas lecturas de detalle por GraphQL siguen viendo la mergeabilidad en `UNKNOWN`. */
   unknownReads: number;
 }
@@ -291,6 +294,14 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   }
   const branchSha = (branch: string) => rev(`refs/heads/${branch}`);
   const headSha = (pr: PrData): string => (pr.lastSha = branchSha(pr.head) ?? pr.lastSha);
+  /** Las líneas que el head agrega y borra contra su base, como `additions` y `deletions` de GraphQL. */
+  function changedLines(pr: PrData): { additions: number; deletions: number } {
+    const base = branchSha(pr.base);
+    if (base === undefined) return { additions: 0, deletions: 0 };
+    const rows = git("diff", "--numstat", base, headSha(pr)).split("\n").filter(Boolean);
+    const sum = (column: number) => rows.reduce((total, row) => total + (Number(row.split("\t")[column]) || 0), 0);
+    return { additions: sum(0), deletions: sum(1) };
+  }
   const commitsAhead = (base: string, head: string) => Number(git("rev-list", "--count", `${base}..${head}`));
   /** Si fusionar head en base choca; `git merge-tree` sale con 1 cuando hay conflictos. */
   function conflicts(pr: PrData): boolean {
@@ -355,6 +366,11 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     const sha = headSha(pr);
     return {
       number: pr.number,
+      title: pr.title,
+      url: `https://github.com/${repo}/pull/${pr.number}`,
+      updatedAt: pr.updatedAt,
+      ...changedLines(pr),
+      commentCount: pr.issueComments.length,
       repo: { name, defaultBranch },
       state: pr.merged ? "MERGED" : pr.state === "open" ? "OPEN" : "CLOSED",
       isDraft: pr.draft,
@@ -365,7 +381,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       ...mergeability(pr),
       mergeCommit: pr.merged ? { oid: pr.merged.sha } : null,
       author: withAvatar(pr.author),
-      labels: [],
+      labels: pr.labels,
       requestedReviewers: pr.requested.map(withAvatar),
       reviews: pr.reviews.map(
         (r): RawReview => ({
@@ -465,6 +481,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       threads: [],
       contexts: new Map(),
       requested: [],
+      labels: [],
       unknownReads: 0,
     };
     prs.push(pr);
@@ -554,6 +571,9 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         check(checkName, conclusion[outcome], { required: true });
       },
       requestReview: (login) => void pr.requested.push(actor(login)),
+      label(labelName, { color = "ededed", description = null } = {}) {
+        pr.labels.push({ name: labelName, color, description });
+      },
       setDraft(draft) {
         pr.draft = draft;
       },

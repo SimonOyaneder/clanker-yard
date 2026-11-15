@@ -117,6 +117,18 @@ const router = os.router({
     refresh: os.prs.refresh.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    setHold: os.prs.setHold.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    merge: os.prs.merge.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    requestReview: os.prs.requestReview.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    rebase: os.prs.rebase.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
   },
   repos: {
     list: os.repos.list.handler(() => []),

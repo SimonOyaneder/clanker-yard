@@ -99,7 +99,7 @@ beforeEach(async () => {
   });
   const errors = createErrorReporter(store);
   const events = createPrEvents({ store, repos, workspaces: { fetch: async () => "ok" }, errors, now: () => clock });
-  cache = createPrCache({ store, repos, prs, onChange: (pr, state, row) => events.observe(pr, state, row), now: () => clock });
+  cache = createPrCache({ store, repos, packs, prs, onChange: (pr, state, row) => events.observe(pr, state, row), now: () => clock });
   reactions = startMergeReactions({ store, repos, packs, prs, connections, errors });
   watch = createWatch({
     store,

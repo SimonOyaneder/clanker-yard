@@ -1,7 +1,11 @@
 import type { CachedIssue, ClankerProject, Decision, DecisionId, QueueEntry, Run, RunId } from "@clanker/api"
-import { BarChart3, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitPullRequest, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, ScrollText, Square, Table2, Undo2, X } from "lucide-react"
-import type { PullRequest } from "@/types"
+import { BarChart3, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, ScrollText, Square, Table2, Undo2, X } from "lucide-react"
 import type { ProjectTab } from "@/components/project/project-view"
+import type { OpenPr } from "@/lib/prs"
+import { repoNameOf } from "@/lib/prs"
+import { whyNotMerge } from "@/lib/pr-commands"
+import { usePrCommands } from "@/components/prs/pr-commands"
+import { PR_KEYS } from "@/components/prs/pr-menu"
 import type { RunTab } from "@/components/project/run-view"
 import type { StepTab } from "@/components/project/step-panel"
 import { KindIcon } from "@/components/inbox/decision-parts"
@@ -40,7 +44,9 @@ interface Props {
   queue: QueueEntry[] | null
   onToggleSidebar: () => void
   onOpenShortcuts: () => void
-  prs: PullRequest[]
+  prs: OpenPr[]
+  /** Solo en Stacks de PR: las acciones del PR enfocado son acciones de la paleta. */
+  prsActive: boolean
   onGoPrs: () => void
   onGoInbox: () => void
   /** Las decisiones pendientes: ⏎ en una la abre en la bandeja. */
@@ -63,9 +69,12 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, projectTab, summary, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, prsActive, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, projectTab, summary, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
+  const prCommands = usePrCommands()
+  const selectedPr = prsActive ? prCommands.selected : null
+  const prCaps = selectedPr ? prCommands.caps(selectedPr) : null
   const host = useHost()
   // Una acción con parámetro abre una sub-página dentro de la paleta (patrón de páginas de cmdk).
   const [parallelPage, setParallelPage] = useState(false)
@@ -105,6 +114,43 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
               <CommandItem value="decisión responder con texto libre" onSelect={run(onDecision.onRespond)}>
                 <Reply /> Responder…
                 <CommandShortcut>R</CommandShortcut>
+              </CommandItem>
+            ) : null}
+          </CommandGroup>
+        ) : null}
+
+        {selectedPr && prCaps ? (
+          <CommandGroup heading={`Este PR · ${selectedPr.state.key}`}>
+            {prCaps.merge ? (
+              <CommandItem value="pr mergear según la estrategia" onSelect={run(() => prCommands.merge(selectedPr))}>
+                <GitMerge /> {prCaps.merge === "button" ? "Mergear en GitHub" : "Mergear…"}
+                <CommandShortcut>{PR_KEYS.merge}</CommandShortcut>
+              </CommandItem>
+            ) : (
+              <CommandItem value="pr mergear no disponible" disabled>
+                <GitMerge /> Mergear: {whyNotMerge(selectedPr)}
+              </CommandItem>
+            )}
+            {prCaps.requestReview ? (
+              <CommandItem value="pr pedir review del bot" onSelect={run(() => prCommands.requestReview(selectedPr))}>
+                <Bot /> Pedir review del bot
+                <CommandShortcut>{PR_KEYS.requestReview}</CommandShortcut>
+              </CommandItem>
+            ) : null}
+            {prCaps.rebase ? (
+              <CommandItem value="pr rebasear" onSelect={run(() => prCommands.rebase(selectedPr))}>
+                <GitPullRequestArrow /> Rebasear
+                <CommandShortcut>{PR_KEYS.rebase}</CommandShortcut>
+              </CommandItem>
+            ) : null}
+            <CommandItem value="pr hold no mergear nunca" onSelect={run(() => prCommands.toggleHold(selectedPr))}>
+              <PauseCircle /> {selectedPr.state.hold ? "Quitar hold" : "Marcar hold (no mergear nunca)"}
+              <CommandShortcut>{PR_KEYS.hold}</CommandShortcut>
+            </CommandItem>
+            {prCaps.run ? (
+              <CommandItem value="pr ver corrida" onSelect={run(() => prCommands.openRun(selectedPr))}>
+                <ScrollText /> Ver la corrida que lo abrió
+                <CommandShortcut>{PR_KEYS.run}</CommandShortcut>
               </CommandItem>
             ) : null}
           </CommandGroup>
@@ -309,12 +355,12 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <CommandSeparator />
             <CommandGroup heading="PRs abiertos">
               {prs.map((p) => (
-                <CommandItem key={p.id} value={`pr ${p.repoName} ${p.number} ${p.title} ${p.headRef}`} onSelect={run(() => host.openExternal(p.url))}>
+                <CommandItem key={p.id} value={`pr ${repoNameOf(p)} ${p.ref.number} ${p.state.title} ${p.state.headRef}`} onSelect={run(() => host.openExternal(p.state.url))}>
                   <GitPullRequest />
                   <span className="w-[92px] flex-none truncate font-mono text-[11.5px] text-muted-foreground">
-                    {p.repoName}#{p.number}
+                    {repoNameOf(p)}#{p.ref.number}
                   </span>
-                  <span className="truncate">{p.title}</span>
+                  <span className="truncate">{p.state.title}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

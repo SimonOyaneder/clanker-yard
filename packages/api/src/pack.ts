@@ -27,7 +27,9 @@ const Actors = z.strictObject({
   silentReviewBody: Pattern.optional(),
 });
 
-const Tone = z.enum(["ok", "warn", "bad"]);
+/** Cómo se pinta un nivel de señal: `ok` verde, `warn` ámbar, `bad` rojo. */
+export const SignalTone = z.enum(["ok", "warn", "bad"]);
+const Tone = SignalTone;
 
 /** Un dato de un PR que el pack saca de sus labels y la UI muestra como chip, por ejemplo el riesgo del bot de review. */
 const Signal = z

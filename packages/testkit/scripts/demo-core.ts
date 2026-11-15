@@ -1,10 +1,10 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startCore, startFakeLinear } from "@clanker/core";
-import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, seedLanes, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
+import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
 // y tres repos git temporales (sin receta, con una válida y con una inválida). Publica `core.json` en
@@ -23,6 +23,9 @@ import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, seedLanes
 // esperar, escribe `<CLANKER_HOME>/demo-control.json` con `{ "clockDays": 40, "claude": "login_expired" }`: el
 // reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario.
 //
+// Con `DEMO_SCENARIO=prs` siembra los PRs de la vista de Stacks de PR (`prs-scenario.ts`) con el pack de ejemplo activado para
+// la org del simulador: un stack, riesgo alto, uno en cola, uno con la cola caída, uno en hold y una base combinada.
+//
 // Con `DEMO_SCENARIO=lanes` además siembra el proyecto de la vista de Operación (`lanes-scenario.ts`): dev lleno,
 // una corrida estacionada, un rebase en mantenimiento y un breaker abierto.
 //
@@ -36,7 +39,8 @@ if (!home) {
 
 const fixtures = fileURLToPath(new URL("../fixtures/runs/juguete-lento", import.meta.url));
 const store = openStore({ path: join(home, "clanker.db") });
-const repo = tempGitRepo({ remote: true });
+const prsScenario = process.env.DEMO_SCENARIO === "prs";
+const repo = tempGitRepo({ remote: true, ...(prsScenario && { branches: PR_BRANCHES }) });
 const withRecipe = tempGitRepo({
   commits: [
     {
@@ -53,7 +57,14 @@ const withRecipe = tempGitRepo({
 });
 const withBrokenRecipe = tempGitRepo({ commits: [{ message: "chore: add a broken recipe", files: { ".clanker/recipe.json": JSON.stringify({ version: 1, checks: ["no-existe"] }) } }] });
 
-const github = await startGitHubSim({ origin: repo, token: "github_pat_demo" });
+const github = await startGitHubSim({ origin: repo, token: "github_pat_demo", ...(prsScenario && { repo: "octocat/demo" }) });
+if (prsScenario) {
+  // El pack de ejemplo tal cual, activado para la org del simulador y sin sus flujos ni roles (el escenario no los corre).
+  const packDir = join(home, "packs", "acme");
+  mkdirSync(packDir, { recursive: true });
+  const acme = JSON.parse(readFileSync(fileURLToPath(new URL("../../../packs/acme/pack.json", import.meta.url)), "utf8")) as Record<string, unknown>;
+  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [] }));
+}
 const linear = await startFakeLinear({ clientId: "demo-client" });
 const control = (): { clockDays?: number; claude?: FakeClaudeScenario; closeAlert?: boolean } => {
   try {
@@ -88,8 +99,8 @@ const core = await startCore({
 const client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
 const repos = createRepos(store);
 const lanes = process.env.DEMO_SCENARIO === "lanes";
-// En el escenario de carriles el repo tiene remoto, para que `prs.list` conozca los PRs que deja sembrados.
-const repoId = repos.add({ name: "demo", path: repo.dir, remote: lanes ? "octocat/demo" : null });
+// En los escenarios con PRs el repo tiene remoto, para que `prs.list` conozca los que deja sembrados.
+const repoId = repos.add({ name: "demo", path: repo.dir, remote: lanes || prsScenario ? "octocat/demo" : null });
 repos.add({ name: "demo-receta", path: withRecipe.dir });
 repos.add({ name: "demo-rota", path: withBrokenRecipe.dir });
 const project = await client.projects.create({
@@ -101,8 +112,9 @@ const project = await client.projects.create({
   parallel: 2,
   flowParams: { repo: repoId },
 });
+const demoIssues = [];
 for (const title of ["Saluda al mundo", "Saluda a la luna", "Saluda al sol"]) {
-  await client.issues.createLocal({ projectId: project.id, title });
+  demoIssues.push(await client.issues.createLocal({ projectId: project.id, title }));
 }
 
 // Con DEMO_INBOX=1, la bandeja: flujos de juguete que dejan una decisión de cada tipo. Se guardan directo en
@@ -175,6 +187,14 @@ if (lanes) {
 }
 
 if (process.env.DEMO_SCENARIO === "summary") await seedSummary({ client, store });
+
+if (prsScenario) {
+  // Sin una cuenta de GitHub conectada, `prs.list` no conoce el remoto del repo y los PRs sembrados no salen.
+  await client.connections.setPat({ token: "github_pat_demo" });
+  // El PR de la base del stack lo "abrió" esta corrida: es la que abre "Ver corrida".
+  const run = await client.runs.start({ projectId: project.id, issueId: demoIssues[0]!.id, params: { repo: repoId } });
+  await seedPrs({ client, store, sim: github, repoId, origin: { issueId: demoIssues[0]!.id, runId: run.id } });
+}
 
 writeCoreJson(home, {
   pid: process.pid,

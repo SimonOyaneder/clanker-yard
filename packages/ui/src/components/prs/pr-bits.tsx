@@ -1,37 +1,41 @@
-import { Bot, Check, CheckCircle2, Circle, CircleDot, Clock, GitMerge, GitPullRequest, GitPullRequestDraft, MessageSquare, MessagesSquare, Shield, ShieldAlert, ShieldCheck, X, XCircle } from "lucide-react"
-import type { CIStatus, PRRisk, PullRequest, ReviewerState } from "@/types"
+import type { PrSignal, PrState, ReviewerState } from "@clanker/api"
+import { useState } from "react"
+import { Bot, Check, CheckCircle2, Circle, CircleAlert, CircleCheck, CircleDot, Clock, GitMerge, GitPullRequest, GitPullRequestDraft, Layers, MessageSquare, MessagesSquare, PauseCircle, TriangleAlert, X, XCircle } from "lucide-react"
 import { tone } from "@/lib/format"
-import { type ReviewStatus, reviewTone } from "@/lib/pr-status"
+import { mergeMark, type ReviewStatus, reviewTone } from "@/lib/pr-status"
+import { isDraft, type OpenPr } from "@/lib/prs"
 import { cn } from "@/lib/utils"
 import { Hint, Pill } from "../common"
 
 // Piezas compartidas entre la tarjeta del grafo y la fila de la lista.
 
-export function PRStateIcon({ pr, className }: { pr: PullRequest; className?: string }) {
-  const Icon = pr.isDraft ? GitPullRequestDraft : GitPullRequest
+export function PRStateIcon({ pr, className }: { pr: OpenPr; className?: string }) {
+  const draft = isDraft(pr)
+  const Icon = draft ? GitPullRequestDraft : GitPullRequest
   return (
-    <Hint label={pr.isDraft ? "Draft: todavía no está listo para review" : "Abierto y listo para review"}>
+    <Hint label={draft ? "Draft: todavía no está listo para review" : "Abierto y listo para review"}>
       <Icon
-        aria-label={pr.isDraft ? "Draft" : "Abierto"}
-        className={cn("size-3.5 flex-none", pr.isDraft ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400", className)}
+        aria-label={draft ? "Draft" : "Abierto"}
+        className={cn("size-3.5 flex-none", draft ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400", className)}
       />
     </Hint>
   )
 }
 
-const CI: Record<CIStatus, { Icon: typeof Circle; className: string; label: string; hint: string }> = {
-  success: { Icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400", label: "CI verde", hint: "Todos los checks del último commit pasaron" },
-  failure: { Icon: XCircle, className: "text-red-600 dark:text-red-400", label: "CI rojo", hint: "Algún check del último commit falló (puede ser merge-queue)" },
+type CiState = PrState["ci"]["state"]
+
+const CI: Record<CiState, { Icon: typeof Circle; className: string; label: string; hint: string }> = {
+  green: { Icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400", label: "CI verde", hint: "Todos los checks que cuentan del último commit pasaron" },
+  red: { Icon: XCircle, className: "text-red-600 dark:text-red-400", label: "CI rojo", hint: "Algún check que cuenta del último commit falló" },
   pending: { Icon: CircleDot, className: "cc-blink text-amber-600 dark:text-amber-400", label: "CI corriendo", hint: "Hay checks del último commit corriendo o por partir" },
-  neutral: { Icon: Circle, className: "text-muted-foreground", label: "CI neutro", hint: "Los checks terminaron en neutral: ni pasaron ni fallaron" },
-  skipped: { Icon: Circle, className: "text-muted-foreground", label: "CI saltado", hint: "Los checks se saltaron para este commit" },
-  unknown: { Icon: Circle, className: "text-muted-foreground/60", label: "Sin checks", hint: "El último commit no tiene checks" },
+  none: { Icon: Circle, className: "text-muted-foreground/60", label: "Sin checks", hint: "El último commit no tiene checks que cuenten" },
 }
 
-export function CIBadge({ status, compact = false }: { status: CIStatus; compact?: boolean }) {
-  const c = CI[status]
+export function CIBadge({ ci, compact = false }: { ci: PrState["ci"]; compact?: boolean }) {
+  const c = CI[ci.state]
+  const failing = ci.state === "red" && ci.failing.length ? `. En rojo: ${ci.failing.join(", ")}${ci.flaky.length ? ` (flaky conocidos: ${ci.flaky.join(", ")})` : ""}` : ""
   return (
-    <Hint label={`${c.label}: ${c.hint}`}>
+    <Hint label={`${c.label}: ${c.hint}${failing}`}>
       <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
         <c.Icon aria-label={c.label} className={cn("size-3.5", c.className)} />
         {compact ? null : c.label}
@@ -47,102 +51,119 @@ const REVIEWER: Record<ReviewerState["state"], { Icon: typeof Check; className: 
   pending: { Icon: Clock, className: "bg-amber-500 text-white", label: "tiene la review pendiente: se la pidieron y todavía no la hace" },
 }
 
-// Avatar del revisor con su estado en una esquina, como en GitHub.
+// Avatar del revisor con su estado en una esquina, como en GitHub. Sin imagen (o si no carga) van sus iniciales.
 export function Reviewer({ r, size = 18 }: { r: ReviewerState; size?: number }) {
   const s = REVIEWER[r.state]
+  const [broken, setBroken] = useState(false)
   return (
     <Hint label={`${r.login} ${s.label}`}>
-    <span className="relative inline-flex flex-none" style={{ width: size, height: size }}>
-      {r.avatarUrl ? (
-        <img src={`${r.avatarUrl}${r.avatarUrl.includes("?") ? "&" : "?"}s=48`} alt={r.login} className="size-full rounded-full bg-muted" loading="lazy" />
-      ) : (
-        <span className="grid size-full place-items-center rounded-full bg-muted text-[9px] font-semibold uppercase">{r.login.slice(0, 2)}</span>
-      )}
-      <span className={cn("absolute -right-1 -bottom-1 grid size-3 place-items-center rounded-full ring-2 ring-card", s.className)}>
-        <s.Icon className="size-2" strokeWidth={3} />
+      <span className="relative inline-flex flex-none" style={{ width: size, height: size }}>
+        {r.avatarUrl && !broken ? (
+          <img
+            src={`${r.avatarUrl}${r.avatarUrl.includes("?") ? "&" : "?"}s=48`}
+            alt={r.login}
+            className="size-full rounded-full bg-muted"
+            loading="lazy"
+            onError={() => setBroken(true)}
+          />
+        ) : (
+          <span className="grid size-full place-items-center rounded-full bg-muted text-[9px] font-semibold uppercase">{r.login.slice(0, 2)}</span>
+        )}
+        <span className={cn("absolute -right-1 -bottom-1 grid size-3 place-items-center rounded-full ring-2 ring-card", s.className)}>
+          <s.Icon className="size-2" strokeWidth={3} />
+        </span>
       </span>
-    </span>
     </Hint>
   )
 }
 
-export function ReviewSignals({ pr }: { pr: PullRequest }) {
+export function ReviewSignals({ pr }: { pr: OpenPr }) {
+  const { bot, threads, comments } = pr.state
   return (
     <span className="flex flex-wrap items-center gap-1">
-      {pr.botReview === "approved" ? (
-        <Pill className={tone.green} hint="review-bot[bot] aprobó el PR: su review automática no dejó nada bloqueante">
+      {bot.state === "lgtm" ? (
+        <Pill className={tone.green} hint="El bot de review aprobó el head actual del PR: su review automática no dejó nada bloqueante">
           <Bot className="size-3" /> LGTM
         </Pill>
-      ) : pr.botReview ? (
-        <Pill className={tone.sky} hint="review-bot[bot] revisó y dejó comentarios, sin aprobar. Revisa sus threads">
+      ) : bot.state === "findings" ? (
+        <Pill className={tone.sky} hint={`El bot de review revisó y dejó ${bot.findings.length === 1 ? "1 hallazgo" : `${bot.findings.length} hallazgos`}, sin aprobar. Revisa sus threads`}>
           <Bot className="size-3" /> bot
         </Pill>
       ) : null}
-      {pr.unresolvedThreads ? (
+      {threads.unresolved ? (
         <Pill
           className={tone.red}
-          hint={`${pr.unresolvedThreads === 1 ? "1 hilo" : `${pr.unresolvedThreads} hilos`} de review sin resolver (de humanos o del bot). Los de humanos bloquean el merge`}
+          hint={`${threads.unresolved === 1 ? "1 hilo" : `${threads.unresolved} hilos`} de review sin resolver (de humanos, del bot o del council). Los de humanos bloquean el merge`}
         >
-          <MessagesSquare className="size-3" /> {pr.unresolvedThreads}
+          <MessagesSquare className="size-3" /> {threads.unresolved}
         </Pill>
       ) : null}
-      {pr.comments ? (
-        <Pill className={tone.neutral} hint={`${pr.comments === 1 ? "1 comentario" : `${pr.comments} comentarios`} en la conversación del PR (sin contar los hilos de review)`}>
-          <MessageSquare className="size-3" /> {pr.comments}
+      {comments ? (
+        <Pill className={tone.neutral} hint={`${comments === 1 ? "1 comentario" : `${comments} comentarios`} en la conversación del PR (sin contar los hilos de review)`}>
+          <MessageSquare className="size-3" /> {comments}
         </Pill>
       ) : null}
     </span>
   )
 }
 
-export const RISK: Record<PRRisk, { label: string; short: string; hint: string; Icon: typeof Shield; className: string; dot: string }> = {
-  high: {
-    label: "Riesgo alto",
-    hint: "Label risk:high que pone el bot de review. Es un cambio delicado: revísalo con calma antes de mergear",
-    short: "Alto",
-    Icon: ShieldAlert,
+// Cómo se pinta el nivel de una señal del pack: tono, ícono y color. Qué dice cada nivel lo decide el pack.
+export const SIGNAL_TONE: Record<"ok" | "warn" | "bad", { Icon: typeof Circle; className: string; dot: string }> = {
+  bad: {
+    Icon: TriangleAlert,
     className: "bg-red-500/15 text-red-700 ring-1 ring-red-500/30 dark:bg-red-400/15 dark:text-red-300",
     dot: "bg-red-500",
   },
-  mid: {
-    label: "Riesgo medio",
-    hint: "Label risk:mid que pone el bot de review. Merece una revisada normal",
-    short: "Medio",
-    Icon: Shield,
+  warn: {
+    Icon: CircleAlert,
     className: "bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/30 dark:bg-amber-400/15 dark:text-amber-300",
     dot: "bg-amber-500",
   },
-  low: {
-    label: "Riesgo bajo",
-    hint: "Label risk:low que pone el bot de review. Cambio acotado y de bajo impacto",
-    short: "Bajo",
-    Icon: ShieldCheck,
+  ok: {
+    Icon: CircleCheck,
     className: "bg-emerald-500/12 text-emerald-700 ring-1 ring-emerald-500/25 dark:bg-emerald-400/12 dark:text-emerald-300",
     dot: "bg-emerald-500",
   },
 }
 
-// El risk del bot de review va siempre visible y con su color: es lo primero que se mira de un PR.
-export function RiskBadge({ risk, className }: { risk: PRRisk | null; className?: string }) {
-  if (!risk) {
+/**
+ * Una señal que el pack define (por ejemplo un nivel de riesgo): el chip del nivel que tiene el PR, con su color,
+ * ícono y tooltip. Sin la señal muestra `empty` del pack, o nada si el pack no lo define.
+ */
+export function SignalChip({ signal, level, className }: { signal: PrSignal; level: string | undefined; className?: string }) {
+  const found = level === undefined ? undefined : signal.levels[level]
+  if (!found) {
+    if (!signal.empty) return null
     return (
-      <Pill className={cn("text-muted-foreground ring-1 ring-border", className)} hint="Sin label risk: el bot de review la pone cuando el PR pasa por /review">
-        <Shield className="size-3" /> Sin riesgo
+      <Pill className={cn("text-muted-foreground ring-1 ring-border", className)} hint={`El PR no tiene la señal "${signal.id}" que define el pack`}>
+        <CircleAlert className="size-3" /> {signal.empty}
       </Pill>
     )
   }
-  const r = RISK[risk]
+  const t = SIGNAL_TONE[found.tone]
   return (
-    <Pill className={cn("font-semibold", r.className, className)} hint={r.hint}>
-      <r.Icon className="size-3" /> {r.label}
+    <Pill className={cn("font-semibold", t.className, className)} hint={found.hint}>
+      <t.Icon className="size-3" /> {found.label}
     </Pill>
   )
 }
 
-const isRiskLabel = (name: string) => /^risk[:/ _-]?(high|mid|medium|low)$/i.test(name.trim())
+/** Todas las señales del pack del PR, cada una con su nivel. */
+export function Signals({ pr, className }: { pr: OpenPr; className?: string }) {
+  if (!pr.signals.length) return null
+  return (
+    <>
+      {pr.signals.map((signal) => (
+        <SignalChip key={signal.id} signal={signal} level={pr.state.signals[signal.id]} className={className} />
+      ))}
+    </>
+  )
+}
 
-export function Labels({ pr, max = 3 }: { pr: PullRequest; max?: number }) {
-  const labels = pr.labels.filter((l) => !isRiskLabel(l.name))
+/** Los labels que no son una señal del pack: esos ya se ven como chip. */
+export function Labels({ pr, max = 3 }: { pr: OpenPr; max?: number }) {
+  const matchers = pr.signals.map((s) => new RegExp(s.match, s.flags))
+  const labels = pr.state.labels.filter((l) => !matchers.some((m) => m.test(l.name.trim())))
   if (!labels.length) return null
   const shown = labels.slice(0, max)
   const rest = labels.length - shown.length
@@ -167,42 +188,78 @@ export function Labels({ pr, max = 3 }: { pr: PullRequest; max?: number }) {
 
 export { copy } from "@/lib/clipboard"
 
-// Merge: verde = puedes comentar `/merge` y pasa; violeta = ya está en merge-queue; rojo = merge-queue falló.
-export function mergeRing(pr: PullRequest): string | null {
-  if (pr.merge.finMerge === "failed") return "ring-2 ring-red-500"
-  if (pr.merge.finMerge === "queued") return "ring-2 ring-violet-500/70"
-  if (pr.merge.ready) return "ring-2 ring-emerald-500"
-  return null
+// Merge: verde = listo según la estrategia del pack; violeta = ya está en la cola; rojo = falló en la cola; ámbar = hold.
+export function mergeRing(pr: OpenPr): string | null {
+  switch (mergeMark(pr)) {
+    case "failed":
+      return "ring-2 ring-red-500"
+    case "queued":
+      return "ring-2 ring-violet-500/70"
+    case "hold":
+      return "ring-2 ring-amber-500/70"
+    case "ready":
+      return "ring-2 ring-emerald-500"
+    case null:
+      return null
+  }
 }
 
-export function MergePill({ pr }: { pr: PullRequest }) {
-  if (pr.merge.finMerge === "failed")
-    return (
-      <Pill className={tone.red} hint="Comentaste /merge pero el check de merge-queue falló. Revisa por qué en GitHub y vuelve a comentar /merge">
-        merge-queue falló
-      </Pill>
-    )
-  if (pr.merge.finMerge === "queued")
-    return (
-      <Pill className={tone.violet} hint="Ya comentaste /merge: merge-queue está corriendo el CI final para mergearlo">
-        <span className="cc-blink size-1.5 rounded-full bg-current" /> En merge-queue
-      </Pill>
-    )
-  if (pr.merge.ready)
-    return (
-      <Pill
-        className={tone.green}
-        hint="Aprobado, CI verde (sin contar merge-queue), sin hilos de humanos sin resolver, sin conflictos y sobre la branch principal. Comenta /merge y merge-queue lo mergea"
-      >
-        <GitMerge className="size-3" /> Listo para merge
-      </Pill>
-    )
-  return null
+/** El estado de la estrategia de merge del pack (`PrState.merge` y `hold`): lo que falta va en el tooltip del review. */
+export function MergePill({ pr }: { pr: OpenPr }) {
+  const { merge } = pr.state
+  switch (mergeMark(pr)) {
+    case "failed":
+      return (
+        <Pill className={tone.red} hint="Se pidió el merge pero el check de la cola falló. Revisa por qué en GitHub y vuelve a pedirlo">
+          Cola falló
+        </Pill>
+      )
+    case "queued":
+      return (
+        <Pill className={tone.violet} hint="Ya se pidió el merge: la cola está corriendo el CI final para mergearlo">
+          <span className="cc-blink size-1.5 rounded-full bg-current" /> En cola
+        </Pill>
+      )
+    case "hold":
+      return (
+        <Pill className={tone.amber} hint="Marcaste este PR como no mergear nunca: el core no lo ofrece ni lo mergea solo, y mergear desde acá lo rechaza hasta que quites el hold">
+          <PauseCircle className="size-3" /> Hold
+        </Pill>
+      )
+    case "ready":
+      return (
+        <Pill
+          className={tone.green}
+          hint={
+            merge.via === "comment"
+              ? "Cumple la estrategia de merge del pack: aprobado, CI verde, sin hilos de humanos sin resolver, sin conflictos y sobre la branch principal. Se mergea comentando el comando de merge"
+              : "Aprobado, CI verde, sin hilos de humanos sin resolver y sin conflictos: se mergea con el botón de GitHub"
+          }
+        >
+          <GitMerge className="size-3" /> Listo para merge
+        </Pill>
+      )
+    case null:
+      return null
+  }
 }
 
-export function mergeHint(pr: PullRequest): string | undefined {
-  if (pr.merge.ready || pr.merge.finMerge || !pr.merge.blockers.length) return undefined
-  return `Para mergear falta: ${pr.merge.blockers.join(", ")}`
+/** El PR sale de una base combinada: la rama sintética que junta a varios PRs padre. */
+export function CombinedBaseChip({ parents }: { parents: readonly string[] }) {
+  return (
+    <Pill
+      className={tone.sky}
+      hint={`Base combinada: este PR sale de una rama sintética que junta a ${parents.join(" y ")}. Su diff incluye los commits de todos sus padres y puede inflar el riesgo`}
+    >
+      <Layers className="size-3" /> Base combinada
+    </Pill>
+  )
+}
+
+export function mergeHint(pr: OpenPr): string | undefined {
+  const { merge, hold } = pr.state
+  if (merge.ready || hold || merge.queue || !merge.blockers.length) return undefined
+  return `Para mergear falta: ${merge.blockers.join(", ")}`
 }
 
 const REVIEW_HINT: Record<ReviewStatus, string> = {
@@ -213,7 +270,7 @@ const REVIEW_HINT: Record<ReviewStatus, string> = {
 }
 
 // Estado de review del PR, con lo que falta para mergear en el tooltip.
-export function ReviewPill({ pr, review }: { pr: PullRequest; review: ReviewStatus }) {
+export function ReviewPill({ pr, review }: { pr: OpenPr; review: ReviewStatus }) {
   const t = reviewTone[review]
   const blockers = mergeHint(pr)
   return (

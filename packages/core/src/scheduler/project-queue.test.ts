@@ -73,6 +73,12 @@ function openPr(issueId: string, repoId: string, number: number, headRef: string
 
 const prState = (state: PrState["state"], ci: PrState["ci"]["state"]): PrState => ({
   key: "demo#1",
+  title: "PR de prueba",
+  url: "https://github.com/acme/demo/pull/1",
+  updatedAt: "2026-11-10T12:00:00Z",
+  additions: 0,
+  deletions: 0,
+  comments: 0,
   state,
   headRef: "x",
   headSha: "abc",

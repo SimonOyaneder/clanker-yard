@@ -14,6 +14,7 @@ import { ProjectSummaryTab } from "@/components/project/summary-view"
 import { RunCommandsProvider, useRunCommands } from "@/components/project/run-commands"
 import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
 import { RunView, type RunTab } from "@/components/project/run-view"
+import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { PrsView } from "@/components/prs/prs-view"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
 import { StatusBanner } from "@/components/status-banner"
@@ -34,6 +35,7 @@ import { useCoreState } from "@/lib/core-status"
 import { parksRun } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
 import { reviewStatus } from "@/lib/pr-status"
+import { openPrsOf } from "@/lib/prs"
 import { runCaps } from "@/lib/run-commands"
 import { shapeOf } from "@/lib/run-graph"
 import { readPref, writePref } from "@/lib/prefs"
@@ -55,6 +57,8 @@ const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox"]
 const NOTIFY_KINDS = new Set(["gate", "needs_human", "alert"])
 
 const MAX_HISTORY = 50
+
+const NO_ISSUE_KEYS: ReadonlyMap<string, string> = new Map()
 
 const LIVE_STATUSES: RunStatus[] = ["queued", "running", "waiting", "parked", "paused"]
 
@@ -158,22 +162,21 @@ function Shell() {
     return { runs, issues, queue, decisions, lanes, breakers, prs }
   })
 
-  const forcePrs = useRef(false)
-  const prs = useLiveQuery(
-    "prs",
-    () => {
-      const force = forcePrs.current
-      forcePrs.current = false
-      return appData.prs(force)
-    },
-    { live: false },
-  )
-  const reloadPrs = prs.reload
+  // Los PRs vienen del caché del core (`prs.list`) y se releen con cada `pr.changed`: nada de polling en la UI.
+  const prsQuery = useLiveQuery("prs", () => appData.openPrs())
+  const reloadPrs = prsQuery.reload
   useEffect(() => {
     if (module === "prs") reloadPrs()
   }, [module, reloadPrs])
-  const prsNeedingAction = (prs.data?.prs ?? []).filter((p) => reviewStatus(p) === "changes").length
-  const prsReady = (prs.data?.prs ?? []).filter((p) => p.merge.ready).length
+  const openPrs = useMemo(() => openPrsOf(prsQuery.data ?? []), [prsQuery.data])
+  const unreadPrs = (prsQuery.data?.length ?? 0) - openPrs.length
+  const prsNeedingAction = openPrs.filter((p) => reviewStatus(p) === "changes").length
+  const prsReady = openPrs.filter((p) => p.state.merge.ready && !p.state.hold).length
+  // La clave de la issue que originó cada PR del sistema: se pide de todos los proyectos, no del abierto.
+  const issueKeysQuery = useLiveQuery(`pr-issue-keys:${projects.map((p) => p.id).join(",")}`, async () => {
+    const lists = await Promise.all(projects.map((p) => appData.issues(p.id)))
+    return new Map(lists.flat().map((issue) => [issue.id, issueKey(issue)]))
+  })
 
   const setModule = useCallback((m: Module) => {
     setModuleState(m)
@@ -364,12 +367,15 @@ function Shell() {
 
   const refresh = useCallback(() => {
     if (module === "prs") {
-      forcePrs.current = true
-      reloadPrs()
+      // Relee cada PR de GitHub; los cambios llegan solos como `pr.changed`.
+      appData.refreshPrs(openPrs.map((p) => p.ref)).then(reloadPrs, (e: unknown) => {
+        toast.error(messageOf(e))
+        reloadPrs()
+      })
     } else {
       live.refresh()
     }
-  }, [module, reloadPrs, live])
+  }, [module, reloadPrs, live, appData, openPrs])
 
   const actions = useMemo<AppActions>(
     () => ({
@@ -522,6 +528,7 @@ function Shell() {
 
   return (
     <AppActionsContext.Provider value={actions}>
+      <PrCommandsProvider prs={openPrs} projects={projects} onOpenRun={actions.openRun}>
       <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} className="h-full min-h-0">
         <AppSidebar
           projects={projects}
@@ -535,7 +542,7 @@ function Shell() {
           connectionsAlert={connectionsAlert}
           onSelectConnections={goConnections}
           plan={claudePlan}
-          prsBadge={prs.data ? (prsNeedingAction ? { count: prsNeedingAction, tone: "red" } : prsReady ? { count: prsReady, tone: "green" } : { count: prs.data.prs.length, tone: "muted" }) : null}
+          prsBadge={prsQuery.data ? (prsNeedingAction ? { count: prsNeedingAction, tone: "red" } : prsReady ? { count: prsReady, tone: "green" } : { count: openPrs.length, tone: "muted" }) : null}
           onSelectPrs={() => go({ module: "prs" })}
           connected={live.connected}
           error={projectsQuery.error}
@@ -608,7 +615,7 @@ function Shell() {
             </main>
           ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              <PrsView data={prs.data ?? null} error={prs.error} onRefresh={refresh} />
+              <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined} error={prsQuery.error} onRefresh={refresh} />
             </main>
           ) : module === "connections" ? (
             <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>
@@ -672,7 +679,8 @@ function Shell() {
         queue={module === "projects" && !runId ? (detail?.queue ?? []) : null}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        prs={prs.data?.prs ?? []}
+        prs={openPrs}
+        prsActive={module === "prs"}
         onGoPrs={() => go({ module: "prs" })}
         onGoInbox={goInbox}
         pendingDecisions={inbox.pending}
@@ -696,6 +704,7 @@ function Shell() {
         }}
       />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      </PrCommandsProvider>
     </AppActionsContext.Provider>
   )
 }

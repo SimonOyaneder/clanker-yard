@@ -271,6 +271,30 @@ const prs = {
    * esperan este PR: sirve para no esperar al polling. Los mismos errores que `get`.
    */
   refresh: base.input(PrRef).output(PrState),
+  /**
+   * Marca o desmarca "no mergear nunca" (`hold`) y devuelve el PR releído: apaga `merge.offer` y `merge.auto`, y
+   * `merge` de abajo lo rechaza. `BAD_REQUEST` si el core no conoce el PR (solo los que Watch o `pr.publish`
+   * registraron) o la cuenta no está conectada.
+   */
+  setHold: base.input(z.object({ ref: PrRef, hold: z.boolean() })).output(PrState),
+  /**
+   * Mergea el PR según la estrategia del pack: comenta su comando desde la cuenta del PR y lo devuelve releído
+   * (con `merge.queue: "queued"`). Solo lo pide una persona desde la app (`origin: "ui"`). `BAD_REQUEST` si el
+   * repo se mergea con el botón de GitHub, si el PR no está `merge.ready` (el mensaje dice qué falta), si tiene
+   * `hold` o si ya está en cola.
+   */
+  merge: base.input(PrRef).output(PrState),
+  /**
+   * Le pide review al bot del pack (`reviewBot.request`) comentando su comando. `BAD_REQUEST` si el pack de la
+   * org no define un bot o el PR ya está mergeado o cerrado.
+   */
+  requestReview: base.input(PrRef),
+  /**
+   * Rebasea el PR sobre su base con el flujo del pack que atiende `pr.conflict` (en la plantilla,
+   * `rebase-conflicto`, carril de mantenimiento): la corrida aparece en el proyecto que abrió el PR. `BAD_REQUEST`
+   * si el PR no lo abrió el sistema, ya se cerró o tiene threads de council (nunca se fuerza su historia).
+   */
+  rebase: base.input(PrRef),
 };
 
 const repos = {

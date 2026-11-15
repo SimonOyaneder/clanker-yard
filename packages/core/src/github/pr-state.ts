@@ -27,6 +27,12 @@ export function buildPrState(node: PrNode, { pack, viewer, hold = false, mergeAp
 
   const state: Omit<PrState, "merge"> = {
     key: `${node.repo.name}#${node.number}`,
+    title: node.title,
+    url: node.url,
+    updatedAt: node.updatedAt,
+    additions: node.additions,
+    deletions: node.deletions,
+    comments: node.commentCount,
     state: node.state === "MERGED" ? "merged" : node.state === "CLOSED" ? "closed" : node.isDraft ? "draft" : "open",
     headRef: node.headRefName,
     headSha: node.headRefOid,
@@ -52,7 +58,7 @@ export function buildPrState(node: PrNode, { pack, viewer, hold = false, mergeAp
     { ...state, defaultBranch: node.repo.defaultBranch ?? "main", queue: queueOf(node, strategy, viewer) },
     strategy ?? GITHUB_BUTTON,
   );
-  return { ...state, merge: { via: strategy ? "comment" : "button", ...merge } };
+  return { ...state, merge: { via: strategy ? "comment" : "button", ...(strategy && { command: strategy.command }), ...merge } };
 }
 
 function mergeableOf(node: PrNode): PrState["mergeable"] {

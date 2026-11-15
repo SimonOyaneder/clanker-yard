@@ -127,6 +127,7 @@ beforeEach(async () => {
   cache = createPrCache({
     store,
     repos,
+    packs,
     prs,
     onChange: (pr, state, row) => {
       signalPr(flows.signal, pr, state);

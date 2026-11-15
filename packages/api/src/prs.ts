@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { RunId } from "./domain";
+import { SignalTone } from "./pack";
 
 // El estado normalizado de un PR (`docs/design.html#d-ops`, interface PrState). Es genérico: lo que
 // depende de la organización (quién es el bot de review, qué checks cuentan, qué labels son señales)
@@ -60,6 +61,8 @@ export type BotFinding = z.infer<typeof BotFinding>;
  */
 export const PrMerge = z.object({
   via: z.enum(["comment", "button"]),
+  /** El comando que se comenta para mergear (`via: "comment"`); `button` no lo tiene. */
+  command: z.string().optional(),
   ready: z.boolean(),
   blockers: z.array(z.string()),
   queue: z.enum(["queued", "failed"]).nullable(),
@@ -71,6 +74,15 @@ export type PrMerge = z.infer<typeof PrMerge>;
 export const PrState = z.object({
   /** `repo#número`, por ejemplo `api#4251`. */
   key: z.string(),
+  title: z.string(),
+  /** El link del PR en GitHub. */
+  url: z.string(),
+  /** ISO 8601: la última vez que GitHub lo tocó. */
+  updatedAt: z.string(),
+  additions: z.int().nonnegative(),
+  deletions: z.int().nonnegative(),
+  /** Comentarios de la conversación (sin contar los threads de review). */
+  comments: z.int().nonnegative(),
   state: z.enum(["draft", "open", "merged", "closed"]),
   headRef: z.string(),
   headSha: z.string(),
@@ -149,6 +161,20 @@ export function reviewStatusOf(pr: PrState): ReviewStatus {
   return "none";
 }
 
+/**
+ * Cómo la UI pinta una señal del pack (`PackSettings.signals`) sin conocerla: el nombre de cada nivel, su tono y qué
+ * dice el tooltip. `empty` es lo que se muestra cuando el PR no la tiene. `match` y `flags` son el patrón de sus
+ * labels: la UI esconde esos labels porque ya se ven como el chip de la señal.
+ */
+export const PrSignal = z.object({
+  id: z.string(),
+  match: z.string(),
+  flags: z.string().optional(),
+  empty: z.string().optional(),
+  levels: z.record(z.string(), z.object({ label: z.string(), tone: SignalTone, hint: z.string() })),
+});
+export type PrSignal = z.infer<typeof PrSignal>;
+
 /** Un PR del caché de Watch (`pull_requests`): lo último que se leyó de él, sin ir a GitHub. */
 export const CachedPr = z.object({
   /** El id del PR en el core: el `subject.id` de las corridas que lo toman como sujeto. */
@@ -159,6 +185,15 @@ export const CachedPr = z.object({
   /** El sujeto de la corrida que lo abrió. */
   issueId: z.string().nullable(),
   runId: RunId.nullable(),
+  /**
+   * De qué PRs cuelga (`pr_parents`, el `id` de cada uno, ordenados por id). Con dos o más su base es
+   * una base combinada: la rama sintética que junta a todos.
+   */
+  parents: z.array(z.string()),
+  /** Las señales del pack de la org del repo: lo que `state.signals` (id → nivel) significa. */
+  signals: z.array(PrSignal),
+  /** El pack de la org del repo define un bot de review: sin él, `prs.requestReview` no tiene a quién pedírselo. */
+  reviewBot: z.boolean(),
   /** `null` mientras Watch no lo haya leído ni una vez. */
   state: PrState.nullable(),
   /** ms epoch de la última lectura de `state`. */
