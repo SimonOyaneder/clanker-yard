@@ -1,5 +1,3 @@
-export const name = "@clanker/core";
-
 export { startServer } from "./server/server";
 export type { CoreServer, StartServerOptions } from "./server/server";
 export { microsToUsd, newId, usdToMicros } from "./store/conventions";

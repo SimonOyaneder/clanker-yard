@@ -82,7 +82,7 @@ Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Sec
 - Filas y tarjetas tienen menú contextual.
 - Cada tag lleva un tooltip que explica qué significa.
 - Los estados vacíos dicen qué hacer, no solo que no hay nada.
-- Antes de dar una vista por lista: screenshot en claro y en oscuro, y míralos.
+- Antes de dar una vista por lista: screenshot en claro y en oscuro, y míralos. No los commitees (`screenshots/` está ignorado).
 
 ## Git
 

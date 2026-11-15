@@ -8,3 +8,5 @@ coverage
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+# capturas de UI: se miran, no se versionan
+screenshots/
