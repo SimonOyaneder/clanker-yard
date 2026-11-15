@@ -207,7 +207,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       }
     };
 
-    // Solo un fallo del runtime rechaza `result` (el proceso murió sin avisar, no se pudo escribir el transcript).
+    // Solo un fallo del runtime rechaza `result` (el proceso murió sin `result` ni aviso, no se pudo escribir el transcript).
     const finished = (async (): Promise<RunResult> => {
       let crash: unknown;
       try {
@@ -223,9 +223,9 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       flushTurn();
       await transcript.flush();
 
-      if (stopReason === undefined && crash !== undefined && !signals.loginFailed && !signals.quota) {
-        throw crash;
-      }
+      // Tras un `result` con error el SDK lanza "Claude Code returned an error result": el estado sale del `result`.
+      const explained = final !== undefined || signals.loginFailed || signals.quota !== undefined;
+      if (stopReason === undefined && crash !== undefined && !explained) throw crash;
       if (sessionId === undefined) throw new Error("Claude terminó sin iniciar la sesión.");
 
       if (stopReason !== undefined) {

@@ -77,14 +77,23 @@ interface Call {
   options: Options;
 }
 
-/** Un `query` falso: reproduce los mensajes y se detiene (con el error de abort real) si lo abortan. */
+/**
+ * Un `query` falso: reproduce los mensajes y, como el SDK, lanza después de un `result` con `is_error`.
+ * Con una función como guion, ella decide (por ejemplo, detenerse con el error de abort real).
+ */
 function fakeQuery(script: SDKMessage[] | ((call: Call) => AsyncIterable<SDKMessage>)) {
   const calls: Call[] = [];
   const query: QueryFn = (call) => {
     calls.push(call);
     if (typeof script === "function") return script(call);
     return (async function* () {
-      yield* script;
+      for (const m of script) {
+        yield m;
+        if (m.type === "result" && m.is_error) {
+          const text = m.subtype === "success" ? m.result : m.errors.join(", ");
+          throw new Error(`Claude Code returned an error result: ${text}`);
+        }
+      }
     })();
   };
   return { query, calls };
