@@ -142,12 +142,12 @@ function stubRuntime(steps: Step[]) {
   return { runtime, calls };
 }
 
-function setup(steps: Step[], now?: () => number) {
+function setup(steps: Step[], now?: () => number, prefixWaitMs?: number) {
   const store = openStore({ path: ":memory:" });
   open.push(store);
   const defs = createDefs(store);
   const stub = stubRuntime(steps);
-  const agents: Agents = createAgents({ store, defs, runtime: stub.runtime, now });
+  const agents: Agents = createAgents({ store, defs, runtime: stub.runtime, now, prefixWaitMs });
   defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });
   defs.save({ kind: "profile", slug: "default", scope: "user", body: profile, source: "ui" });
   return { store, defs, agents, ...stub };
@@ -689,6 +689,19 @@ describe("prefijo compartido", () => {
     await Promise.all([agents.run(request()), agents.run(request())]);
 
     expect(log).toEqual(["parte A", "parte B", "primer token B"]);
+  });
+
+  test("si la primera no responde en prefixWaitMs, las demás parten igual", async () => {
+    const log: string[] = [];
+    const firstToken = deferred();
+    const { agents } = setup([stepOf("A", log, firstToken.promise), stepOf("B", log)], undefined, 50);
+
+    const a = agents.run(request());
+    const b = agents.run(request());
+
+    await vi.waitFor(() => expect(log).toEqual(["parte A", "parte B", "primer token B"]));
+    firstToken.resolve();
+    await Promise.all([a, b]);
   });
 
   test("otro modelo es otro prefijo: no espera", async () => {

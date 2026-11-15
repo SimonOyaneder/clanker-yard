@@ -37,6 +37,12 @@ export const WARM_MAX_CONTEXT_TOKENS = 80_000;
  */
 export const WARM_WINDOW_MS = { "5m": 4 * 60_000, "1h": 59 * 60_000 } as const;
 
+/**
+ * Lo más que una sesión espera el primer token de otra con su mismo prefijo. Pasado esto parte igual: una
+ * sesión colgada antes de responder no puede frenar a todas las del mismo rol.
+ */
+export const PREFIX_WAIT_MS = 60_000;
+
 /** El handoff de una sesión nueva en vez de retomar pesa unos 15k tokens (≈4 caracteres por token). */
 export const HANDOFF_MAX_CHARS = 60_000;
 
@@ -114,12 +120,14 @@ export interface AgentsOptions {
   remoteOf?: (repoId: string) => string | null | undefined;
   /** Dónde se buscan `skill:` y `rule:`; por defecto el `~/.claude` del usuario. */
   userDir?: string;
+  /** Por defecto `PREFIX_WAIT_MS`; los tests lo acortan. */
+  prefixWaitMs?: number;
 }
 
 /** El mismo esquema que valida el reporte, hecho JSON Schema; el outcome y el payload los pone el modo. */
 const reportEnvelope = z.toJSONSchema(Report) as JsonSchema & { properties: Record<string, unknown> };
 
-export function createAgents({ store, defs, runtime, now = Date.now, packs, remoteOf, userDir }: AgentsOptions): Agents {
+export function createAgents({ store, defs, runtime, now = Date.now, packs, remoteOf, userDir, prefixWaitMs = PREFIX_WAIT_MS }: AgentsOptions): Agents {
   defs.register("role", Role);
   defs.register("profile", Profile);
   const context: ContextResolver = createContextResolver({ defs, packs, remoteOf, userDir });
@@ -260,8 +268,8 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
 
   /**
    * Un prefijo (herramientas y prompt del rol, con el modelo) que alguna sesión está escribiendo a la caché.
-   * Quien llega con el mismo prefijo espera su primer token y recién ahí lanza, para leerlo en vez de
-   * escribirlo otra vez (las ramas de un parallel con el mismo rol, o runs de issues distintas).
+   * Quien llega con el mismo prefijo espera su primer token (hasta `prefixWaitMs`) y recién ahí lanza, para
+   * leerlo en vez de escribirlo otra vez (las ramas de un parallel con el mismo rol, o runs de issues distintas).
    */
   const writingPrefix = new Map<string, Promise<void>>();
 
@@ -272,7 +280,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       .digest("hex");
     const writing = writingPrefix.get(key);
     if (writing) {
-      await untilOrAborted(writing, signal);
+      await untilOrAborted(writing, signal, prefixWaitMs);
       return () => {};
     }
     let warmed!: () => void;
@@ -749,16 +757,17 @@ function interruptOnAbort(signal: AbortSignal | undefined, agentRun: AgentRun): 
   else signal.addEventListener("abort", interrupt, { once: true });
 }
 
-/** Espera a `promise`, o a que `signal` aborte: un paso cancelado no se queda esperando a otra sesión. */
-function untilOrAborted(promise: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
-  if (!signal) return promise;
+/** Espera a `promise`, a que `signal` aborte (un paso cancelado no se queda esperando a otra sesión) o `maxMs`. */
+function untilOrAborted(promise: Promise<void>, signal: AbortSignal | undefined, maxMs: number): Promise<void> {
   return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => done(), maxMs);
     const done = () => {
-      signal.removeEventListener("abort", done);
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
       resolve();
     };
-    if (signal.aborted) return done();
-    signal.addEventListener("abort", done, { once: true });
+    if (signal?.aborted) return done();
+    signal?.addEventListener("abort", done, { once: true });
     void promise.then(done);
   });
 }
