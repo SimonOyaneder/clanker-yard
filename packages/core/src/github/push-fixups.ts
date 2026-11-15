@@ -92,6 +92,10 @@ export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof Pus
     if (!pull || !row.remoteSha) {
       throw new PermanentActionError(`${ws.branch} no tiene un PR abierto pusheado: no hay a qué pushear fixups.`);
     }
+    // Watch también deja en `pull_requests` los PRs tuyos que el sistema no abrió: a esos no se les pushea.
+    if (!pull.owned) {
+      throw new PermanentActionError(`El PR #${pull.number} de ${remote.repo} no lo abrió Clanker Yard: no se le pushean fixups.`);
+    }
     const base = workspaces.baseSha(ws);
     const knownSha = row.remoteSha;
 

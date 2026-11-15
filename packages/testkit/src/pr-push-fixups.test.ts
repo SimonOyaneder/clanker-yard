@@ -381,6 +381,15 @@ describe("pr.pushFixups", () => {
     expect(remote("show", "--format=", `refs/heads/${BRANCH}:c.txt`)).toBe(fixed().trimEnd());
   });
 
+  test("a un PR que el sistema no abrió (lo descubrió Watch) no se le pushea", async () => {
+    store.db.$client.prepare("UPDATE pull_requests SET owned = 0").run();
+    const before = remoteSha();
+    write("c.txt", fixed());
+
+    await expect(pushFixups.run(args({ items: [{ id: "b1", path: "c.txt", line: 2 }] }), durableCtx())).rejects.toThrow(/no lo abrió Clanker Yard/);
+    expect(remoteSha()).toBe(before);
+  });
+
   test("sin un PR abierto de la branch falla sin reintentos", async () => {
     store.db.$client.prepare("UPDATE pull_requests SET state = 'closed'").run();
 
