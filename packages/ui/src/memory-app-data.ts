@@ -1,5 +1,6 @@
 import { type CachedIssue, type ClankerProject, type ProjectId, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData } from "@/app-data"
+import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildPrs } from "@/seed-prs"
 
 // Datos de ejemplo en memoria para desarrollar la UI sin core. Nada llega por `events`: lo que se ve es
@@ -81,46 +82,91 @@ export function createMemoryAppData(now = Date.now()): AppData {
     error: null,
     notBefore: null,
     costMicros: 0,
+    startedAt: null,
+    endedAt: null,
     ...extra,
   })
+  // Un paso que corrió entre `from` y `to` minutos atrás (`to` omitido: sigue corriendo).
+  const ran = (from: number, to?: number): Pick<Step, "startedAt" | "endedAt"> => ({ startedAt: min(from), endedAt: to === undefined ? null : min(to) })
 
-  const run = (n: number, issueN: number, status: Run["status"], startedMinAgo: number, steps: Step[], extra: Partial<Run> = {}): RunDetail => ({
-    id: id("run", n),
-    projectId: issues[issueN - 1]!.projectId,
-    flow: { slug: projects[0]!.id === issues[issueN - 1]!.projectId ? "techlead-clasico" : "juguete", version: 1 },
-    subject: { type: "issue", id: issues[issueN - 1]!.id },
-    lane: "dev",
-    status,
-    parkReason: null,
-    outcome: status === "done" ? "done" : null,
-    params: {},
-    rounds: {},
-    costMicros: steps.reduce((sum, s) => sum + s.costMicros, 0),
-    startedAt: min(startedMinAgo),
-    endedAt: status === "done" || status === "failed" ? min(startedMinAgo - 12) : null,
-    steps,
-    ...extra,
-  })
+  const run = (n: number, issueN: number, status: Run["status"], startedMinAgo: number, steps: Step[], extra: Partial<RunDetail> = {}): RunDetail => {
+    const toy = projects[0]!.id !== issues[issueN - 1]!.projectId
+    const flowDef = toy ? SEED_TOY : SEED_TECHLEAD
+    return {
+      id: id("run", n),
+      projectId: issues[issueN - 1]!.projectId,
+      flow: { slug: flowDef.id, version: 1 },
+      subject: { type: "issue", id: issues[issueN - 1]!.id },
+      lane: "dev",
+      status,
+      parkReason: null,
+      outcome: status === "done" ? "done" : null,
+      params: toy ? {} : { base: "main", reviewRounds: 3, checkRounds: 3 },
+      rounds: {},
+      costMicros: steps.reduce((sum, s) => sum + s.costMicros, 0),
+      startedAt: min(startedMinAgo),
+      endedAt: status === "done" || status === "failed" ? min(startedMinAgo - 12) : null,
+      steps,
+      flowDef,
+      workspace: toy ? null : { repo: "api", branch: `ba-${issueN}`, base: "main" },
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      ...extra,
+    }
+  }
 
   const runs: RunDetail[] = [
+    // En curso: una vuelta de review ya tomada y las reviews de la segunda pasada corriendo.
     run(
       1,
       1,
       "running",
       24,
       [
-        step(1, "worktree", "done"),
-        step(2, "plan", "done", { costMicros: 400_000 }),
-        step(3, "implementar", "done", { costMicros: 1_200_000 }),
-        step(4, "tests", "done", { outcome: "changes" }),
-        step(5, "implementar", "done", { visit: 2, round: 1, costMicros: 640_000 }),
-        step(6, "reviews", "running", { round: 1, costMicros: 310_000 }),
+        step(1, "ws", "done", ran(24, 23.5)),
+        step(2, "plan", "done", { costMicros: 400_000, ...ran(23.5, 20) }),
+        step(3, "implement", "done", { costMicros: 1_200_000, ...ran(20, 12) }),
+        step(4, "checks", "done", { ...ran(12, 10.5) }),
+        step(5, "reviews", "done", { outcome: "changes", ...ran(10.5, 7) }),
+        step(6, "rv-bugs", "done", { outcome: "changes", costMicros: 260_000, ...ran(10.5, 7.5) }),
+        step(7, "rv-tests", "done", { costMicros: 120_000, ...ran(10.5, 8) }),
+        step(8, "rv-patterns", "done", { costMicros: 100_000, ...ran(10.5, 8.5) }),
+        step(9, "rv-lore", "done", { costMicros: 90_000, ...ran(10.5, 9) }),
+        step(10, "fix", "done", { round: 1, costMicros: 640_000, ...ran(7, 3) }),
+        step(11, "checks", "done", { visit: 2, ...ran(3, 2) }),
+        step(12, "reviews", "waiting", { visit: 2, ...ran(2) }),
+        step(13, "rv-bugs", "running", { visit: 2, costMicros: 310_000, ...ran(2) }),
+        step(14, "rv-tests", "done", { visit: 2, costMicros: 120_000, ...ran(2, 0.6) }),
+        step(15, "rv-patterns", "done", { visit: 2, costMicros: 100_000, ...ran(2, 0.8) }),
+        step(16, "rv-lore", "done", { visit: 2, costMicros: 90_000, ...ran(2, 1) }),
       ],
-      { rounds: { reviews: 1 } },
+      { rounds: { review: 1 }, usage: { input: 410_000, output: 380_000, cacheRead: 4_900_000, cacheWrite: 520_000 } },
     ),
-    run(2, 2, "done", 180, [step(7, "worktree", "done"), step(8, "implementar", "done", { costMicros: 2_100_000 }), step(9, "reviews", "done", { costMicros: 520_000 })]),
-    run(3, 3, "parked", 50, [step(10, "worktree", "done"), step(11, "implementar", "failed", { error: "tope de gasto excedido", costMicros: 3_000_000 })], {
+    // Terminada: sin vueltas, hasta el PR y el feedback externo.
+    run(
+      2,
+      2,
+      "done",
+      180,
+      [
+        step(17, "ws", "done", ran(180, 179.5)),
+        step(18, "plan", "done", { costMicros: 300_000, ...ran(179.5, 176) }),
+        step(19, "implement", "done", { costMicros: 2_100_000, ...ran(176, 160) }),
+        step(20, "checks", "done", ran(160, 158)),
+        step(21, "reviews", "done", ran(158, 154)),
+        step(22, "rv-bugs", "done", { costMicros: 210_000, ...ran(158, 155) }),
+        step(23, "rv-tests", "done", { costMicros: 120_000, ...ran(158, 156) }),
+        step(24, "rv-patterns", "done", { costMicros: 100_000, ...ran(158, 156.5) }),
+        step(25, "rv-lore", "done", { costMicros: 90_000, ...ran(158, 157) }),
+        step(26, "sync", "done", { outcome: "same", ...ran(154, 153.5) }),
+        step(27, "commit", "done", { costMicros: 150_000, ...ran(153.5, 151) }),
+        step(28, "publish", "done", ran(151, 150)),
+        step(29, "feedback", "done", { outcome: "done", ...ran(150, 168) }),
+      ],
+      { usage: { input: 220_000, output: 260_000, cacheRead: 2_300_000, cacheWrite: 310_000 } },
+    ),
+    run(3, 3, "parked", 50, [step(30, "ws", "done", ran(50, 49.5)), step(31, "plan", "done", { costMicros: 350_000, ...ran(49.5, 46) }), step(32, "implement", "failed", { error: "tope de gasto excedido", costMicros: 3_000_000, ...ran(46, 38) })], {
       parkReason: "needs_human",
+      usage: { input: 120_000, output: 90_000, cacheRead: 1_100_000, cacheWrite: 90_000 },
     }),
   ]
   const projectOf = (projectId: ProjectId) => projects.find((p) => p.id === projectId)
@@ -167,7 +213,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       if (project.status !== "active") throw new Error(`El proyecto ${project.name} no está activo`)
       const index = issues.findIndex((i) => i.id === issueId)
       if (index < 0) throw new Error(`No existe la issue ${issueId}`)
-      const started = run(nextId++, index + 1, "running", 0, [step(nextId++, "worktree", "running")])
+      const started = run(nextId++, index + 1, "running", 0, [step(nextId++, "ws", "running", ran(0))])
       runs.unshift(started)
       return started
     },

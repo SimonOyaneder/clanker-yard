@@ -23,6 +23,13 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
     ],
   },
   {
+    title: "Corrida",
+    items: [
+      ["Ver el grafo del flujo", "G"],
+      ["Ver la línea de tiempo", "L"],
+    ],
+  },
+  {
     title: "Ventana",
     items: [
       ["Acercar / alejar", "⌘+"],

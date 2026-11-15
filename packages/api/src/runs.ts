@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { ArtifactHash, IssueId, ProjectId, RunId, StepRunId, SubjectRef } from "./domain";
+import { FlowDef } from "./flow";
 
 export const RunStatus = z.enum([
   "queued",
@@ -36,6 +37,10 @@ export const Step = z.object({
   /** ms epoch: con backoff pendiente, no se despacha antes. */
   notBefore: z.int().nonnegative().nullable(),
   costMicros: z.int().nonnegative(),
+  /** ms epoch en que el paso arrancó (o empezó a esperar a sus ramas o a un evento); `null` si todavía no. */
+  startedAt: z.int().nonnegative().nullable(),
+  /** ms epoch en que cerró; `null` mientras sigue vivo. */
+  endedAt: z.int().nonnegative().nullable(),
 });
 export type Step = z.infer<typeof Step>;
 
@@ -60,8 +65,30 @@ export const Run = z.object({
 });
 export type Run = z.infer<typeof Run>;
 
-/** La corrida con sus pasos, en el orden en que se crearon. */
-export const RunDetail = Run.extend({ steps: z.array(Step) });
+/** El worktree en que corre (o corrió) la corrida. */
+export const RunWorkspace = z.object({ repo: z.string(), branch: z.string(), base: z.string() });
+export type RunWorkspace = z.infer<typeof RunWorkspace>;
+
+/** Tokens de todas las sesiones de agente de la corrida. */
+export const RunUsage = z.object({
+  input: z.int().nonnegative(),
+  output: z.int().nonnegative(),
+  cacheRead: z.int().nonnegative(),
+  cacheWrite: z.int().nonnegative(),
+});
+export type RunUsage = z.infer<typeof RunUsage>;
+
+/**
+ * La corrida con sus pasos, en el orden en que se crearon, y lo que hace falta para dibujarla: el
+ * flujo tal como lo fijó la corrida (su versión, no la vigente) y el worktree que tomó (`null` si
+ * todavía no tomó ninguno).
+ */
+export const RunDetail = Run.extend({
+  steps: z.array(Step),
+  flowDef: FlowDef,
+  workspace: RunWorkspace.nullable(),
+  usage: RunUsage,
+});
 export type RunDetail = z.infer<typeof RunDetail>;
 
 export const RunFilter = z.object({

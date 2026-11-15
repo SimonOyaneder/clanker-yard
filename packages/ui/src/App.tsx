@@ -8,7 +8,7 @@ import { CommandPalette } from "@/components/command-palette"
 import { Shortcut } from "@/components/common"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { ProjectView, issuesById } from "@/components/project/project-view"
-import { RunView } from "@/components/project/run-view"
+import { RunView, type RunTab } from "@/components/project/run-view"
 import { PrsView } from "@/components/prs/prs-view"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
 import { StatusBanner } from "@/components/status-banner"
@@ -79,6 +79,7 @@ function Shell() {
   const [slug, setSlug] = useState<string | null>(() => readPref<string | null>("slug", null))
   const [runId, setRunId] = useState<RunId | null>(null)
   const [module, setModuleState] = useState<Module>(() => (readPref<string>("module", "projects") === "prs" ? "prs" : "projects"))
+  const [runTab, setRunTabState] = useState<RunTab>(() => (readPref<string>("runTab", "graph") === "timeline" ? "timeline" : "graph"))
   const [sidebarOpen, setSidebarOpenState] = useState(() => readPref("sidebar", true))
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
@@ -112,6 +113,10 @@ function Shell() {
   const setModule = useCallback((m: Module) => {
     setModuleState(m)
     writePref("module", m)
+  }, [])
+  const setRunTab = useCallback((tab: RunTab) => {
+    setRunTabState(tab)
+    writePref("runTab", tab)
   }, [])
   const setSidebarOpen = useCallback((open: boolean) => {
     setSidebarOpenState(open)
@@ -273,6 +278,19 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey)
   }, [runId, module, go])
 
+  // G y L cambian entre el grafo y la línea de tiempo de la corrida abierta, como las teclas de Linear.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!runId || module !== "projects" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      const tab = e.key === "g" ? "graph" : e.key === "l" ? "timeline" : null
+      if (!tab || (e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return
+      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
+      setRunTab(tab)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [runId, module, setRunTab])
+
   const detail = projectData.data
   const openRun = runId && detail ? detail.runs.find((r) => r.id === runId) : undefined
   const openRunIssue = openRun && detail ? issuesById(detail.issues).get(openRun.subject.id) : undefined
@@ -350,7 +368,7 @@ function Shell() {
                     <Loading />
                   )
                 ) : runId ? (
-                  <RunPane key={runId} runId={runId} issue={openRunIssue} onBack={() => go({ runId: null })} />
+                  <RunPane key={runId} runId={runId} issue={openRunIssue} tab={runTab} onTab={setRunTab} onBack={() => go({ runId: null })} />
                 ) : (
                   <ProjectView project={project} runs={detail.runs} issues={detail.issues} />
                 )}
@@ -371,6 +389,7 @@ function Shell() {
         onOpenShortcuts={() => setShortcutsOpen(true)}
         prs={prs.data?.prs ?? []}
         onGoPrs={() => go({ module: "prs" })}
+        onRunTab={runId && module === "projects" ? setRunTab : null}
       />
       <NewProjectDialog
         open={newProjectOpen}
@@ -387,10 +406,10 @@ function Shell() {
   )
 }
 
-function RunPane({ runId, issue, onBack }: { runId: RunId; issue: CachedIssue | undefined; onBack: () => void }) {
+function RunPane({ runId, issue, tab, onTab, onBack }: { runId: RunId; issue: CachedIssue | undefined; tab: RunTab; onTab: (tab: RunTab) => void; onBack: () => void }) {
   const appData = useAppData()
   const run = useLiveQuery(`run:${runId}`, () => appData.run(runId))
-  if (run.data) return <RunView run={run.data} issue={issue} />
+  if (run.data) return <RunView run={run.data} issue={issue} tab={tab} onTabChange={onTab} />
   if (run.error) {
     return (
       <Problem

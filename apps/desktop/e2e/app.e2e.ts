@@ -91,6 +91,28 @@ test("corre la plantilla de juguete hasta que la corrida queda lista", async ({ 
   await expect(finishedRun(page).getByText("lista", { exact: true })).toBeVisible({ timeout: 30_000 });
 });
 
+const graph = (page: Page) => page.getByRole("group", { name: /Grafo del flujo juguete/ });
+const node = (page: Page, id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
+
+test("una corrida en curso se ve como el grafo de su flujo, con el paso actual pulsando", async ({ window: page }) => {
+  await sidebar(page).getByRole("button", { name: "Demo" }).click();
+  await page.getByRole("listitem").filter({ hasText: "Saluda a la luna" }).getByRole("button", { name: "Correr" }).click();
+  await page.getByRole("button", { name: "Ver", exact: true }).click();
+
+  await expect(graph(page)).toBeVisible();
+  await expect(page.getByText("juguete@1")).toBeVisible();
+  // El agente del juguete trabaja unos 7 s: el nodo actual late y los que faltan siguen pendientes.
+  await expect(node(page, "saludar").locator('[data-current="true"]')).toBeVisible();
+  await expect(node(page, "release").locator('[data-state="pending"]')).toBeVisible();
+  // Los tokens del agente llegan a los 2,5 s: la captura muestra una corrida con algo que contar.
+  await expect(page.getByLabel("Métricas")).toContainText("150");
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme);
+    await snap(page, "corrida-en-curso", theme);
+  }
+  await page.keyboard.press("Escape");
+});
+
 test("screenshots de cada vista en claro y oscuro", async ({ window: page }) => {
   for (const theme of ["light", "dark"] as const) {
     await setTheme(page, theme);
@@ -100,9 +122,17 @@ test("screenshots de cada vista en claro y oscuro", async ({ window: page }) => 
     await snap(page, "proyecto", theme);
 
     await finishedRun(page).getByRole("button").click();
-    await expect(page.getByText("Línea de tiempo")).toBeVisible();
+    await expect(graph(page)).toBeVisible();
     await expect(page.getByText("terminó el flujo")).toBeVisible();
+    await expect(node(page, "release").locator('[data-state="done"]')).toBeVisible();
     await snap(page, "corrida", theme);
+
+    // L abre la línea de tiempo con los pasos y G vuelve al grafo.
+    await page.keyboard.press("l");
+    await expect(page.getByRole("heading", { name: /Línea de tiempo/ })).toBeVisible();
+    await snap(page, "corrida-linea-de-tiempo", theme);
+    await page.keyboard.press("g");
+    await expect(graph(page)).toBeVisible();
 
     await sidebar(page).getByRole("button", { name: "Proyecto E2E" }).click();
     await expect(page.getByText("Todavía no hay corridas")).toBeVisible();

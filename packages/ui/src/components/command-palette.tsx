@@ -1,6 +1,7 @@
 import type { CachedIssue, ClankerProject, Run } from "@clanker/api"
-import { GitPullRequest, Keyboard, PanelLeft, Play, Plus, RefreshCw } from "lucide-react"
+import { GitPullRequest, Keyboard, ListTree, Network, PanelLeft, Play, Plus, RefreshCw } from "lucide-react"
 import type { PullRequest } from "@/types"
+import type { RunTab } from "@/components/project/run-view"
 import { RunStatusIcon, isLive } from "@/components/project/status"
 import {
   CommandDialog,
@@ -29,10 +30,12 @@ interface Props {
   onOpenShortcuts: () => void
   prs: PullRequest[]
   onGoPrs: () => void
+  /** Solo con una corrida abierta: cambia entre su grafo y su línea de tiempo. */
+  onRunTab: ((tab: RunTab) => void) | null
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onRunTab }: Props) {
   const actions = useAppActions()
   const host = useHost()
   const run = (fn: () => void) => () => {
@@ -50,6 +53,19 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
       <CommandInput placeholder="Busca un proyecto, una corrida o una acción…" />
       <CommandList className="max-h-[420px]">
         <CommandEmpty>Sin resultados.</CommandEmpty>
+
+        {onRunTab ? (
+          <CommandGroup heading="Esta corrida">
+            <CommandItem onSelect={run(() => onRunTab("graph"))}>
+              <Network /> Ver el grafo del flujo
+              <CommandShortcut>G</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={run(() => onRunTab("timeline"))}>
+              <ListTree /> Ver la línea de tiempo
+              <CommandShortcut>L</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
 
         {current && runnable.length ? (
           <CommandGroup heading={`Correr en ${current.name}`}>

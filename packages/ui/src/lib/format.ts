@@ -11,6 +11,14 @@ export function costUsd(micros: number): string {
   return `$${dollars.toFixed(4).replace(/0{1,2}$/, "")}`
 }
 
+// Tokens en cifras que caben en una tarjeta: "820", "48,2 k", "6,2 M".
+export function compactCount(n: number): string {
+  const short = (value: number, unit: string) => `${value.toFixed(value >= 100 ? 0 : 1).replace(".", ",").replace(/,0$/, "")} ${unit}`
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return short(n / 1000, "k")
+  return short(n / 1_000_000, "M")
+}
+
 export function ago(when: When | null | undefined, now = Date.now()): string {
   if (when === null || when === undefined) return ""
   const s = Math.max(0, Math.round((now - toMs(when)) / 1000))

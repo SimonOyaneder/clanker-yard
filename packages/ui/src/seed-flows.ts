@@ -1,0 +1,55 @@
+import type { FlowDef } from "@clanker/api"
+
+// Flujos de ejemplo para `createMemoryAppData`: un flujo con rondas y un parallel, y el de juguete.
+
+export const SEED_TECHLEAD: FlowDef = {
+  schema: 1,
+  id: "techlead-clasico",
+  name: "Techlead clásico",
+  trigger: { type: "issue.queued" },
+  lane: "dev",
+  params: { repo: "RepoRef", base: "string", reviewRounds: { type: "number", default: 3 }, checkRounds: { type: "number", default: 3 } },
+  start: "ws",
+  nodes: {
+    ws: { type: "action", action: "workspace.acquire", args: {}, on: { ok: "plan" } },
+    plan: { type: "agent", role: "dev", mode: "plan", brief: {}, on: { ok: "implement" } },
+    implement: { type: "agent", role: "dev", mode: "implement", brief: {}, on: { ok: "checks" } },
+    checks: {
+      type: "action",
+      action: "recipe.check",
+      args: {},
+      on: { ok: "reviews", fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "reviews", note: "Tests o lint siguen rojos" } } },
+    },
+    fix: { type: "agent", role: "dev", mode: "fix", brief: {}, on: { ok: "checks" } },
+    reviews: {
+      type: "parallel",
+      branches: ["rv-bugs", "rv-tests", "rv-patterns", "rv-lore"],
+      join: { fn: "items.merge" },
+      on: {
+        ok: "sync",
+        changes: { to: "fix", counter: "review", maxRounds: "$run.params.reviewRounds", exhausted: { to: "sync", note: "Quedan 🔴/🟡 tras las rondas de review" } },
+      },
+    },
+    "rv-bugs": { type: "agent", role: "review-bugs", mode: "review", brief: {} },
+    "rv-tests": { type: "agent", role: "review-tests", mode: "review", brief: {} },
+    "rv-patterns": { type: "agent", role: "review-patterns", mode: "review", brief: {} },
+    "rv-lore": { type: "agent", role: "review-lore", mode: "review", brief: {} },
+    sync: { type: "action", action: "workspace.syncBase", args: {}, on: { same: "commit", rebased: { to: "checks", maxRounds: 3, exhausted: "commit" } } },
+    commit: { type: "agent", role: "committer", mode: "plan", brief: {}, on: { ok: "publish" } },
+    publish: { type: "action", action: "pr.publish", args: {}, on: { ok: "feedback" } },
+    feedback: { type: "flow", flow: "pr-feedback", params: {}, on: { done: "@done", blocked: "@blocked", failed: "@failed" } },
+  },
+}
+
+export const SEED_TOY: FlowDef = {
+  schema: 1,
+  id: "juguete",
+  name: "Juguete",
+  trigger: { type: "manual" },
+  start: "acquire",
+  nodes: {
+    acquire: { type: "action", action: "workspace.acquire", args: {}, on: { ok: "saludar" } },
+    saludar: { type: "agent", role: "juguete", mode: "saludar", brief: {}, on: { ok: "release" } },
+    release: { type: "action", action: "workspace.release", args: {}, on: { ok: "@done" } },
+  },
+}

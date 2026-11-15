@@ -122,6 +122,13 @@ describe("runs sobre el runtime fake", () => {
 
     const lease = store.events.since(0, { runId: id, types: ["lease.acquired", "lease.released"] });
     expect(lease.map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
+
+    // Lo que la UI necesita para dibujar la corrida: su flujo, el worktree que tomó y lo que consumió.
+    expect(run.flowDef).toMatchObject({ id: "juguete", start: "acquire" });
+    expect(run.workspace).toEqual({ repo: "demo", branch: issue.id, base: "main" });
+    expect(run.usage).toMatchObject({ input: expect.any(Number), output: expect.any(Number) });
+    expect(run.usage.input + run.usage.output).toBeGreaterThan(0);
+    expect(run.steps.every((s) => s.startedAt !== null && s.endedAt !== null)).toBe(true);
   });
 
   test("sin repos en el proyecto ni en sus flowParams, runs.start es BAD_REQUEST, no crea la corrida y no reclama la issue", async () => {

@@ -2,7 +2,6 @@ import { Graph, layout } from "@dagrejs/dagre"
 import {
   Background,
   BackgroundVariant,
-  type ColorMode,
   Controls,
   type Edge,
   MarkerType,
@@ -12,8 +11,9 @@ import {
   useReactFlow,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
 import type { PullRequest } from "@/types"
+import { useColorMode } from "@/hooks/use-color-mode"
 import { useHost } from "@/host"
 import { buildStackForest, listStackGroups } from "@/lib/stack"
 import { NODE_HEIGHT, NODE_WIDTH, PRNode, type PRNodeData } from "./pr-node"
@@ -72,16 +72,6 @@ function layoutStacks(prs: PullRequest[], dimmed: Set<number>): { nodes: Node<PR
     markerEnd: { type: MarkerType.ArrowClosed, color: "var(--primary)", width: 16, height: 16 },
   }))
   return { nodes, edges }
-}
-
-function useColorMode(): ColorMode {
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"))
-  useEffect(() => {
-    const obs = new MutationObserver(() => setDark(document.documentElement.classList.contains("dark")))
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => obs.disconnect()
-  }, [])
-  return dark ? "dark" : "light"
 }
 
 function GraphInner({ prs, dimmed, layoutKey }: { prs: PullRequest[]; dimmed: Set<number>; layoutKey: string }) {

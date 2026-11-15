@@ -50,9 +50,12 @@ const run: RunDetail = {
   costMicros: 1_234_000,
   startedAt: Date.UTC(2026, 10, 15, 12, 0, 0),
   endedAt: null,
+  flowDef: { schema: 1, id: "juguete", name: "Juguete", trigger: { type: "manual" }, start: "dev", nodes: { dev: { type: "agent", role: "dev", mode: "plan", brief: {}, on: { ok: "@done" } } } },
+  workspace: null,
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   steps: [
-    { id: "stp_00000000000000000000000001", nodeId: "dev", visit: 1, round: 0, attempt: 0, status: "done", outcome: "ok", outputHash: null, error: null, notBefore: null, costMicros: 1_000_000 },
-    { id: "stp_00000000000000000000000002", nodeId: "review", visit: 1, round: 0, attempt: 1, status: "failed", outcome: null, outputHash: null, error: "se cayó el runtime", notBefore: null, costMicros: 234_000 },
+    { id: "stp_00000000000000000000000001", nodeId: "dev", visit: 1, round: 0, attempt: 0, status: "done", outcome: "ok", outputHash: null, error: null, notBefore: null, costMicros: 1_000_000, startedAt: null, endedAt: null },
+    { id: "stp_00000000000000000000000002", nodeId: "review", visit: 1, round: 0, attempt: 1, status: "failed", outcome: null, outputHash: null, error: "se cayó el runtime", notBefore: null, costMicros: 234_000, startedAt: null, endedAt: null },
   ],
 };
 

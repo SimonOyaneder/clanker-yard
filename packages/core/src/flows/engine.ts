@@ -5,6 +5,8 @@ import {
   type Node,
   type ProjectId,
   type RunId,
+  type RunUsage,
+  type RunWorkspace,
   type StepRunId,
   type SubjectRef,
 } from "@clanker/api";
@@ -28,6 +30,7 @@ import {
   stepNode,
   type ParallelNode,
 } from "./parallel";
+import { readRunDetail } from "./run-detail";
 import { isTruthy, navigate, refPath, resolveRefs } from "./refs";
 import { calledFlows, LANE_BY_TRIGGER } from "./validate";
 
@@ -87,6 +90,8 @@ export interface StepView {
   /** Un wait con `timeoutSec`: desde cuándo vence con outcome `timeout`. */
   deadline: number | null;
   costMicros: number;
+  startedAt: number | null;
+  endedAt: number | null;
 }
 
 export interface RunView {
@@ -109,7 +114,14 @@ export interface RunView {
   endedAt: number | null;
   /** En el orden en que se crearon. */
   steps: StepView[];
+  /** El flujo en la versión que fijó la corrida. */
+  flowDef: FlowDef;
+  workspace: RunWorkspace | null;
+  usage: RunUsage;
 }
+
+/** La corrida sin lo que solo trae `getRun`. */
+export type RunSummary = Omit<RunView, "steps" | "flowDef" | "workspace" | "usage">;
 
 export interface EngineDeps {
   store: Store;
@@ -156,7 +168,7 @@ export interface Engine {
   /** Lanza `RunNotFoundError` si no existe. */
   getRun(runId: RunId): RunView;
   /** Las corridas más recientes primero, sin sus pasos. */
-  listRuns(filter?: { projectId?: ProjectId; status?: readonly RunRow["status"][] }): Omit<RunView, "steps">[];
+  listRuns(filter?: { projectId?: ProjectId; status?: readonly RunRow["status"][] }): RunSummary[];
   /**
    * Al bootear, antes de aceptar trabajo y con los módulos que registran acciones y waits ya cargados:
    * reabre los pasos que un corte dejó `leased` o `running` (los lease de otro boot, sea cual sea su
@@ -1662,7 +1674,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   // --- lectura ---------------------------------------------------------------------------------
 
-  function viewOf(run: RunRow): Omit<RunView, "steps"> {
+  function viewOf(run: RunRow): RunSummary {
     const flow = defs.get("flow", run.flowDefId, run.flowVersion);
     return {
       id: run.id,
@@ -1686,11 +1698,17 @@ export function createEngine(deps: EngineDeps): Engine {
     const run = store.db.select().from(runs).where(eq(runs.id, runId)).get();
     if (!run) throw new RunNotFoundError(runId);
     const steps = store.db.select().from(stepRuns).where(eq(stepRuns.runId, runId)).orderBy(asc(stepRuns.id)).all();
+    const { times, usage, workspace } = readRunDetail(store, runId, steps.map((s) => s.id));
     return {
       ...viewOf(run),
       steps: steps.map(({ id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, waitKey, deadline, costMicros }) => ({
         id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, waitKey, deadline, costMicros,
+        startedAt: times.get(id)?.startedAt ?? null,
+        endedAt: times.get(id)?.endedAt ?? null,
       })),
+      flowDef: flowOf(run),
+      workspace,
+      usage,
     };
   }
 
