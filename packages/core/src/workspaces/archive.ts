@@ -66,19 +66,26 @@ export function createArchive({ store, repos, now, withRepoLock }: ArchiveDeps) 
     });
   }
 
-  /** Por qué no se puede borrar el worktree sin perder trabajo; `undefined` si todo está en el remoto. */
-  async function unpushedWork(row: Row, cfg: RepoConfig): Promise<string | undefined> {
-    const run = (...args: string[]) => git(row.path, args);
-    if (await rebaseInProgress(run)) return "tiene un rebase en curso";
-    if ((await run("status", "--porcelain")) !== "") return "tiene cambios sin commitear";
-    const head = await run("rev-parse", "HEAD");
+  /**
+   * Por qué no se puede borrar el worktree sin perder trabajo; `undefined` si todo está en el remoto. Sin la
+   * carpeta (la borraron a mano) lo que queda es la branch local, que `branch -D` se llevaría: se revisa su punta.
+   */
+  async function unpushedWork(row: Row, cfg: RepoConfig, present: boolean): Promise<string | undefined> {
     const tip = await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/heads/${row.branch}`]);
-    if (tip !== undefined && tip !== head) return "su HEAD no es la punta de la branch";
+    let head = tip;
+    if (present) {
+      const run = (...args: string[]) => git(row.path, args);
+      if (await rebaseInProgress(run)) return "tiene un rebase en curso";
+      if ((await run("status", "--porcelain")) !== "") return "tiene cambios sin commitear";
+      head = await run("rev-parse", "HEAD");
+      if (tip !== undefined && tip !== head) return "su HEAD no es la punta de la branch";
+    }
+    if (head === undefined) return undefined;
     // Lo que GitHub ya tiene: lo último que pusheó el core, la punta de su PR (con squash la branch remota puede
     // haberse borrado) y `origin/<branch>`. Que HEAD sea ancestro de cualquiera basta; un commit de más, no.
     const remoteTip = await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE}/${row.branch}`]);
     const pushed = [row.remoteSha, remoteTip, ...pullsOf(store.db, row).map((p) => p.headSha)];
-    for (const sha of pushed) if (sha && (await isAncestor(row.path, head, sha))) return undefined;
+    for (const sha of pushed) if (sha && (await isAncestor(cfg.path, head, sha))) return undefined;
     return "tiene commits sin pushear";
   }
 
@@ -91,7 +98,7 @@ export function createArchive({ store, repos, now, withRepoLock }: ArchiveDeps) 
     const cfg = repos(row.repoId);
     return withRepoLock(row.repoId, async () => {
       const present = existsSync(row.path);
-      if (present && (await unpushedWork(row, cfg)) !== undefined) return "kept";
+      if ((await unpushedWork(row, cfg, present)) !== undefined) return "kept";
       const claimed = store.tx(({ db }) => {
         if (hasOpenPull(pullsOf(db, row))) return undefined;
         const mine = and(

@@ -254,6 +254,24 @@ describe("no perder trabajo", () => {
     expect(existsSync(lease.path)).toBe(true);
   });
 
+  test("sin la carpeta, la branch local con commits sin pushear tampoco se borra", async () => {
+    const { lease, pr } = await idleWorktreeWithPr("one", async (held) => {
+      writeFileSync(join(held.path, "extra.txt"), "x\n");
+      await workspaces.git(held, "add", "extra.txt");
+      await workspaces.git(held, "commit", "--message", "feat: extra");
+    });
+    await expired(pr);
+    rmSync(lease.path, { recursive: true });
+
+    expect(await workspaces.cleanup()).toMatchObject({ removed: 0, kept: 1 });
+    expect(origin.git("branch", "--list", "one")).toContain("one");
+
+    origin.git("push", "origin", "one");
+    expect(await workspaces.cleanup()).toMatchObject({ removed: 1, kept: 0 });
+    expect(origin.git("branch", "--list", "one")).toBe("");
+    expect(row("one")).toBeUndefined();
+  });
+
   test("un archivado que alguien vuelve a tomar no se borra, y sale de archived", async () => {
     const { lease, pr } = await idleWorktreeWithPr("one");
     await expired(pr);
