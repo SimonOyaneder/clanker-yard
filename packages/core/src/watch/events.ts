@@ -74,10 +74,10 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
       if (state.state === "open") facts.push(...approvalFacts(state, approvalEpoch(tx, row.id, isApproved(state), at)));
       for (const fact of facts) {
         const input = { ...fact, payload: (fresh: string[]) => ({ repo: ref.repo, number: ref.number, ...fact.payload(fresh) }) };
-        // La primera vez que se ve un PR solo se siembra: lo que ya estaba ahí no es un cambio.
+        // Un humano que habla en un draft no avisa, ni siquiera en la primera lectura: sus marcas esperan a que salga de draft y entonces se suelta todo lo dicho (el vigilante no avanza su `seen` en un draft).
+        if (state.state === "draft" && fact.type === "pr.human") continue;
+        // La primera vez que se ve un PR se siembra lo que el vigilante calla en su primer run (`$first`: solo los comentarios); el resto se emite como él.
         if (known === undefined && !fact.emitOnFirstRead) recordMarks(tx, row.id, fact.type, fact.keys, at);
-        // Un humano que habla en un draft no avisa: sus marcas esperan a que salga de draft (el vigilante calla los comentarios de un draft y los suelta después).
-        else if (state.state === "draft" && fact.type === "pr.human") continue;
         else emitOnce(tx, row, input, at);
       }
       markHead(tx, row.id, state.headSha, at);
@@ -128,10 +128,10 @@ function factsOf(state: PrState): PrEventInput[] {
     facts.push({ type: "pr.ci", keys: [`${ci.sha}:${ci.state}`], payload: () => ({ state: ci.state, sha: ci.sha, failing: ci.failing }) });
   }
   if (state.mergeable === "conflict") {
-    facts.push({ type: "pr.conflict", keys: [state.headSha], payload: () => ({ sha: state.headSha, base: state.baseRef }) });
+    facts.push({ type: "pr.conflict", keys: [state.headSha], emitOnFirstRead: true, payload: () => ({ sha: state.headSha, base: state.baseRef }) });
   }
   if (threads.councilOpen.length > 0) {
-    facts.push({ type: "pr.comment", keys: threads.councilOpen.map(String), payload: (fresh) => ({ threadIds: fresh.map(Number), base: state.baseRef }) });
+    facts.push({ type: "pr.comment", keys: threads.councilOpen.map(String), emitOnFirstRead: true, payload: (fresh) => ({ threadIds: fresh.map(Number), base: state.baseRef }) });
   }
   const talkKey = ({ author, at }: PrState["talk"][number]) => `${author}@${at}`;
   if (talk.length > 0) {

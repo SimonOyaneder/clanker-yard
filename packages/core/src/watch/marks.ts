@@ -68,7 +68,11 @@ export interface PrEventInput {
   payload(fresh: string[]): Record<string, unknown>;
   /** La corrida que lo provoca, si la hay (el restack). */
   runId?: RunId;
-  /** Emite también en la primera lectura del PR, que por defecto solo siembra las marcas: lo que ya estaba listo se anuncia. */
+  /**
+   * Emite también en la primera lectura del PR, que por defecto solo siembra las marcas. Es lo que el
+   * vigilante anuncia en su primer run (conflicto, council, merge, aprobado con comentarios); él solo calla
+   * los comentarios de humanos (`pr.human`) y lo ya mergeado.
+   */
   emitOnFirstRead?: boolean;
 }
 

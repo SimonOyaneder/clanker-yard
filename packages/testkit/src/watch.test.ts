@@ -428,7 +428,9 @@ function push(branch: string, message: string, files: Record<string, string> = {
 }
 
 describe("eventos", () => {
-  test("la primera vez que se ve un PR no emite nada, tenga lo que tenga", async () => {
+  test("la primera vez que se ve un PR emite lo que el vigilante anuncia y siembra el resto", async () => {
+    push("one", "feat: one edits a", { "a.txt": "one\n" });
+    push("main", "feat: main edits a", { "a.txt": "main\n" });
     const pr = sim.openPr({ head: "one" });
     pr.botFindings(["falta un test"]);
     pr.ci("red");
@@ -437,15 +439,16 @@ describe("eventos", () => {
 
     await wake();
     const state = cache.list()[0]?.state;
-    expect(state).toMatchObject({ bot: { state: "findings" }, ci: { state: "red" }, threads: { councilOpen: [expect.any(Number)] } });
+    expect(state).toMatchObject({ bot: { state: "findings" }, ci: { state: "red" }, mergeable: "conflict", threads: { councilOpen: [expect.any(Number)] } });
     expect(state?.talk).toHaveLength(1);
-    expect(emitted()).toEqual([]);
+    // El `$first` del vigilante solo calla los comentarios; el conflicto y el council que ya había se anuncian. El bot y el CI no son eventos del vigilante.
+    expect(emittedTypes()).toEqual(["pr.conflict", "pr.comment"]);
 
     // Lo que ya estaba tampoco sale en las lecturas siguientes.
     pr.setDraft(true);
     await wake(31 * SECOND);
     expect(cache.list()[0]?.state?.state).toBe("draft");
-    expect(emitted()).toEqual([]);
+    expect(emittedTypes()).toEqual(["pr.conflict", "pr.comment"]);
   });
 
   test("cada evento sale una sola vez por su clave, aunque el PR se relea", async () => {
@@ -615,6 +618,20 @@ describe("dispara flujos", () => {
 
     expect(emittedTypes()).toEqual(["pr.comment"]);
     expect(flows.listRuns()).toEqual([]);
+  });
+
+  test("lo que ya había en la primera lectura de un PR que el sistema no abrió emite el evento pero no arranca flujos", async () => {
+    push("one", "feat: one edits a", { "a.txt": "one\n" });
+    push("main", "feat: main edits a", { "a.txt": "main\n" });
+    const pr = sim.openPr({ head: "one" });
+    pr.councilThread("revisa esto");
+
+    await wake();
+    expect(emittedTypes()).toEqual(["pr.conflict", "pr.comment"]);
+    expect(flows.listRuns()).toEqual([]);
+    // Las lecturas siguientes no repiten nada.
+    await wake(31 * SECOND);
+    expect(emitted()).toHaveLength(2);
   });
 
   test("mergear un PR del sistema arranca restack con el PR mergeado", async () => {
