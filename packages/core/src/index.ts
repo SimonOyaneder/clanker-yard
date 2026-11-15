@@ -11,3 +11,6 @@ export type {
   StoredEvent,
   Tx,
 } from "./store/store";
+
+export { createDefs, DefValidationError } from "./defs/defs";
+export type { Def, DefIssue, DefKind, DefScope, DefVersion, Defs, SaveDef } from "./defs/defs";
