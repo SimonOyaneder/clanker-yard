@@ -8,6 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "verify:legacy-summary": "tsx test/legacy/verify-summary.ts",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
     "build": "node scripts/build.ts"

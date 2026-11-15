@@ -15,11 +15,12 @@ import {
   Profile,
   parseLegacyMetrics,
 } from "@clanker/api";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import * as z from "zod";
 import { type Artifacts, hashOf } from "../artifacts/artifacts";
 import type { Defs } from "../defs/defs";
 import { proposeLearning } from "../learnings/learnings";
+import { createMetrics } from "../metrics/metrics";
 import { newId, usdToMicros } from "../store/conventions";
 import {
   artifactRefs,
@@ -105,8 +106,17 @@ interface Plan {
   profiles: { slug: string; body: Profile }[];
   modelPrices: (typeof modelPrices.$inferInsert)[];
   unresolvedRepos: Set<string>;
-  /** Por proyecto, lo que `run_metrics` debe sumar al terminar (también lo de importaciones anteriores). */
-  expected: Map<string, { runs: number; costMicros: number }>;
+  /** Por proyecto, lo que `projects.summary` debe dar al terminar (también con lo de importaciones anteriores). */
+  expected: Map<string, ExpectedTotals>;
+}
+
+/** Lo que Clanker Control suma de un proyecto: corridas, costo, costo por rol y rondas por contador. */
+interface ExpectedTotals {
+  projectId: ProjectId;
+  runs: number;
+  costMicros: number;
+  roleMicros: Map<string, number>;
+  rounds: Map<string, number>;
 }
 
 /** Un artefacto por escribir con su dueño: el contenido va a `artifacts.put` y el dueño a `artifact_refs`. */
@@ -325,7 +335,7 @@ function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metric
       const prev = lastRunOf.get(row.issue);
       if (!prev || (row.ts ?? "") >= (prev.ts ?? "")) lastRunOf.set(row.issue, row);
     }
-    const expected = { runs: 0, costMicros: 0 };
+    const expected: ExpectedTotals = { projectId, runs: 0, costMicros: 0, roleMicros: new Map(), rounds: new Map() };
     plan.expected.set(slug, expected);
     const seen = new Set<string>();
     for (const row of rows) {
@@ -348,6 +358,8 @@ function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metric
       issueRuns.push({ id, endedAt, ...(pr ? { pr: { repo: pr[1]!, number: Number(pr[2]) } } : {}) });
       expected.runs++;
       expected.costMicros += costMicros;
+      for (const [role, cost] of roleCosts) expected.roleMicros.set(role, (expected.roleMicros.get(role) ?? 0) + usdToMicros(cost.usd ?? 0));
+      for (const [counter, n] of Object.entries(counters(row))) expected.rounds.set(counter, (expected.rounds.get(counter) ?? 0) + n);
       if (known) continue;
       knownRuns.set(sourceKey, id);
 
@@ -653,6 +665,12 @@ function legacyFlow(defs: Pick<Defs, "save" | "list" | "archive">): { id: string
   return { id, version };
 }
 
+const diff = (what: string, actual: number, expected: number) => (actual === expected ? [] : [`${what} ${actual} frente a ${expected}`]);
+
+function diffMaps(what: string, actual: Map<string, number>, expected: Map<string, number>): string[] {
+  return [...new Set([...actual.keys(), ...expected.keys()])].sort().flatMap((key) => diff(`${what} ${key}`, actual.get(key) ?? 0, expected.get(key) ?? 0));
+}
+
 /**
  * Inserta el plan en una sola tx. Si los totales de algún proyecto no cuadran con `metrics.jsonl`, la tx se deshace.
  * Lo que abre su propia tx (el flujo histórico, el contenido de los artefactos y las defs de perfil) va fuera: el flujo
@@ -686,18 +704,20 @@ function apply(
       db.insert(artifactRefs).values({ hash, ownerType: owner.type, ownerId: owner.id, role: owner.role }).run();
     }
 
-    // Paridad (`docs/design.html#d-data`): lo que quedó en la base suma lo mismo que el archivo de origen.
+    // Paridad (`docs/design.html#d-data`): `projects.summary`, lo que muestra la app, suma lo mismo que el archivo de origen
+    // (corridas, costo, costo por rol y rondas, las cifras del LoopSummary de Control).
+    const summaries = createMetrics(tx);
     for (const [slug, expected] of plan.expected) {
-      const prefix = `legacy:metrics:${slug}:`;
-      const actual = db
-        .select({ runs: sql<number>`count(*)`.mapWith(Number), costMicros: sql<number>`coalesce(sum(${runMetrics.costMicros}), 0)`.mapWith(Number) })
-        .from(runMetrics)
-        .innerJoin(runs, eq(runs.id, runMetrics.runId))
-        .where(and(isNotNull(runs.sourceKey), sql`substr(${runs.sourceKey}, 1, ${prefix.length}) = ${prefix}`))
-        .get()!;
-      if (actual.runs !== expected.runs || actual.costMicros !== expected.costMicros) {
+      const actual = summaries.summary(expected.projectId, { imported: true });
+      const differences = [
+        ...diff("corridas", actual.runs, expected.runs),
+        ...diff("micros de costo", actual.costMicros, expected.costMicros),
+        ...diffMaps("micros del rol", new Map(actual.byRole.map((r) => [r.role, r.costMicros])), expected.roleMicros),
+        ...diffMaps("rondas", new Map(actual.rounds.map((r) => [r.counter, r.total])), expected.rounds),
+      ];
+      if (differences.length > 0) {
         throw new LegacyImportError(
-          `La importación de "${slug}" no cuadra con metrics.jsonl: ${actual.runs} corridas y ${actual.costMicros} micros en la base, ${expected.runs} y ${expected.costMicros} en el archivo. No se escribió nada.`,
+          `La importación de "${slug}" no cuadra con metrics.jsonl (base frente a archivo): ${differences.join("; ")}. No se escribió nada.`,
         );
       }
     }

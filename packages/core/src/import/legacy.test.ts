@@ -490,6 +490,19 @@ describe("clanker import legacy", () => {
       expect(() => importer.run({ from: home, dryRun: true })).toThrow(/X-1.*ts válido/);
     });
 
+    test("si lo que hay en la base ya no cuadra con el archivo, falla y dice la cifra, sin escribir nada", () => {
+      const { store, importer, rowCounts } = setup();
+      importer.run({ from: FIXTURES, dryRun: false });
+      // Un costo por rol alterado a mano: el total de la corrida y sus rondas siguen bien.
+      store.tx((tx) => {
+        tx.db.update(runRoleCosts).set({ costMicros: 1 }).where(eq(runRoleCosts.role, "docs")).run();
+      });
+      const before = rowCounts();
+
+      expect(() => importer.run({ from: FIXTURES, dryRun: false })).toThrow(/"demo-sin-linear" no cuadra con metrics\.jsonl.*micros del rol docs 1 frente a 250000/);
+      expect(rowCounts()).toEqual(before);
+    });
+
     test("la misma línea repetida en el archivo es una sola corrida", () => {
       const { importer } = setup();
       const line = '{"issue":"X-1","project":"p","result":"listo","ts":"2026-11-01T00:00:00Z","usd":2,"minutes":1}\n';
