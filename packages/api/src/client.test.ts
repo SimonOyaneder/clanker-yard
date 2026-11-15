@@ -133,6 +133,9 @@ const router = os.router({
     get: os.decisions.get.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    resolve: os.decisions.resolve.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
   },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),

@@ -319,14 +319,17 @@ describe("start", () => {
       id: "with-gate",
       name: "Con gate",
       trigger: { type: "manual" },
-      start: "ask",
-      nodes: { ask: { type: "gate", question: "¿Sigo?", timeoutSec: 60, options: [{ id: "yes", label: "Sí" }], on: { yes: "@done" } } },
+      start: "both",
+      nodes: {
+        both: { type: "parallel", branches: ["ask"], on: { ok: "@done", changes: "@blocked", fail: "@failed" } },
+        ask: { type: "gate", question: "¿Sigo?", timeoutSec: 60, options: [{ id: "yes", label: "Sí" }] },
+      },
     });
 
     expect(() => h.start("single")).toThrow(/Falta el param "base"/);
     expect(() => h.start("single", undefined, { base: "main", extra: 1 })).toThrow(/extra/);
     expect(() => h.start("nope")).toThrow(/No existe el flujo/);
-    expect(() => h.start("with-gate")).toThrow(/todavía no ejecuta: ask \(gate\)/);
+    expect(() => h.start("with-gate")).toThrow(/gate como rama de un parallel: ask/);
     expect(h.store.events.since(0, { types: ["run.started"] })).toEqual([]);
   });
 

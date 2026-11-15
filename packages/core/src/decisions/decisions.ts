@@ -30,41 +30,75 @@ export function createDecisions(store: Store): Decisions {
   };
 }
 
-/** Lo que se necesita para abrir una decisión que no bloquea: `review_note` o `note`. */
-export type NewNote = Pick<Decision, "kind" | "title" | "body"> &
-  Partial<Pick<Decision, "projectId" | "runId" | "stepRunId" | "subject">>;
+/** Lo que se necesita para abrir una decisión. Sin `options` no hay nada que elegir: una nota. */
+export type NewDecision = Pick<Decision, "kind" | "title" | "body"> &
+  Partial<Pick<Decision, "projectId" | "runId" | "stepRunId" | "subject" | "options">>;
 
 /**
  * Deja una decisión `pending` en la bandeja y emite `decision.opened`, en la transacción de quien la
- * abre: nace junto con lo que la causó o no nace. No toca la corrida: una nota no estaciona nada.
+ * abre: nace junto con lo que la causó o no nace. No toca la corrida: quien abre un `gate` o un
+ * `needs_human` es quien la estaciona.
  */
-export function openNote(tx: Tx, note: NewNote): Decision {
-  const { kind, title, body } = note;
+export function openDecision(tx: Tx, decision: NewDecision): Decision {
+  const { kind, title, body } = decision;
   const id = newId("dec");
   const opened = tx.emit({
     type: "decision.opened",
     origin: "core",
-    projectId: note.projectId ?? undefined,
-    runId: note.runId ?? undefined,
-    stepRunId: note.stepRunId ?? undefined,
-    subject: note.subject ?? undefined,
+    projectId: decision.projectId ?? undefined,
+    runId: decision.runId ?? undefined,
+    stepRunId: decision.stepRunId ?? undefined,
+    subject: decision.subject ?? undefined,
     payload: { decisionId: id, kind, title },
   });
   return tx.db
     .insert(decisions)
     .values({
       id,
-      projectId: note.projectId ?? null,
-      runId: note.runId ?? null,
-      stepRunId: note.stepRunId ?? null,
-      subject: note.subject ?? null,
+      projectId: decision.projectId ?? null,
+      runId: decision.runId ?? null,
+      stepRunId: decision.stepRunId ?? null,
+      subject: decision.subject ?? null,
       kind,
       title,
       body,
-      options: [],
+      options: decision.options ?? [],
       status: "pending",
       createdAt: opened.ts,
     })
+    .returning()
+    .get();
+}
+
+/**
+ * Cierra una decisión `pending` y emite `decision.resolved`: `answered` con la opción elegida,
+ * `expired` si siguió sola por su default y `superseded` si ya no hay nada que decidir (la corrida
+ * se canceló). `undefined` si ya estaba cerrada.
+ */
+export function closeDecision(
+  tx: Tx,
+  id: DecisionId,
+  closing: { status: "answered" | "expired" | "superseded"; resolution?: unknown; by: string },
+): Decision | undefined {
+  const open = tx.db
+    .select()
+    .from(decisions)
+    .where(and(eq(decisions.id, id), eq(decisions.status, "pending")))
+    .get();
+  if (!open) return undefined;
+  const resolved = tx.emit({
+    type: "decision.resolved",
+    origin: "core",
+    projectId: open.projectId ?? undefined,
+    runId: open.runId ?? undefined,
+    stepRunId: open.stepRunId ?? undefined,
+    subject: open.subject ?? undefined,
+    payload: { decisionId: id, status: closing.status },
+  });
+  return tx.db
+    .update(decisions)
+    .set({ status: closing.status, resolution: closing.resolution ?? null, resolvedBy: closing.by, resolvedAt: resolved.ts })
+    .where(eq(decisions.id, id))
     .returning()
     .get();
 }

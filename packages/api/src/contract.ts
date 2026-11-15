@@ -265,6 +265,14 @@ const decisions = {
     .meta({ mcp: { tool: "get", kind: "decision" } })
     .input(z.object({ id: DecisionId }))
     .output(Decision),
+  /**
+   * Resuelve la decisión que tiene estacionada una corrida y la devuelve ya cerrada. La opción es una
+   * de `options`: en un gate, el outcome con que sigue el flujo; en un `needs_human`, `retry`,
+   * `force:<outcome>` o `cancel`; en el tope de una corrida, `continue` o `cancel`. La corrida vuelve a
+   * la cola de su carril. `NOT_FOUND` si no existe; `BAD_REQUEST` si ya se resolvió, no tiene una
+   * corrida esperándola o la opción no es suya.
+   */
+  resolve: base.input(z.object({ id: DecisionId, option: z.string().min(1) })).output(Decision),
 };
 
 /** Flujos, roles, perfiles, recetas y packs: lo versionado en `defs`, leído por kind. */

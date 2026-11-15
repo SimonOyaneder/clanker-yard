@@ -50,6 +50,7 @@ export const TECHLEAD_CLASICO: FlowDef = {
       mode: "implement",
       resumeFrom: "plan",
       brief: { plan: "$plan", notes: "$plan-check" },
+      escalate: { counter: "review", from: 2, profileRole: "dev-escala" },
       on: { ok: "checks" },
     },
     checks: {

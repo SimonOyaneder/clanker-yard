@@ -27,7 +27,7 @@ describe("contrato", () => {
     expect(Object.keys(contract.prs)).toEqual(["get"]);
     expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "testRecipe"]);
     expect(Object.keys(contract.runs).sort()).toEqual(["get", "list", "start", "step", "transcript"]);
-    expect(Object.keys(contract.decisions).sort()).toEqual(["get", "list"]);
+    expect(Object.keys(contract.decisions).sort()).toEqual(["get", "list", "resolve"]);
     expect(Object.keys(contract.defs).sort()).toEqual(["get", "list"]);
     expect(Object.keys(contract.metrics).sort()).toEqual(["byDay", "byModel", "byRole"]);
     for (const procedure of [

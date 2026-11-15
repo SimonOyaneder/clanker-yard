@@ -3,7 +3,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { API_MAJOR, type Event, Role, contract, createClient } from "@clanker/api";
+import { API_MAJOR, type Event, FlowDef, Role, contract, createClient } from "@clanker/api";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { createDefs } from "../defs/defs";
 import { createFileSecrets } from "../secrets/encrypted-file";
-import { openNote } from "../decisions/decisions";
+import { openDecision } from "../decisions/decisions";
 import { createArtifacts, INLINE_MAX_BYTES } from "../artifacts/artifacts";
 import { readSchemaVersion } from "../store/migrate";
 import { agentSessions } from "../store/schema";
@@ -45,12 +45,12 @@ afterEach(async () => {
   dataDir = "/tmp/clanker";
 });
 
-async function start(allowedOrigins?: string[]): Promise<CoreServer> {
+async function start(allowedOrigins?: string[], deps = apiDeps(store, dataDir)): Promise<CoreServer> {
   server = await startServer({
     store,
     connections,
     issues: createIssues(store),
-    ...apiDeps(store, dataDir),
+    ...deps,
     coreVersion: "1.2.3",
     dataDir,
     onShutdown,
@@ -354,8 +354,8 @@ describe("decisions", () => {
     const core = await start();
     const client = createClient({ url: core.url, token: core.token, origin: "ui" });
     const [review, note] = store.tx((tx) => [
-      openNote(tx, { kind: "review_note", title: "Quedan 🟡", body: "tras 3 rondas" }),
-      openNote(tx, { kind: "note", title: "Desvío ya hecho", body: "x" }),
+      openDecision(tx, { kind: "review_note", title: "Quedan 🟡", body: "tras 3 rondas" }),
+      openDecision(tx, { kind: "note", title: "Desvío ya hecho", body: "x" }),
     ]);
     if (!review || !note) throw new Error("no se abrieron las notas");
 
@@ -370,6 +370,47 @@ describe("decisions", () => {
       resolution: null,
     });
     await expect(client.decisions.get({ id: "dec_01J0000000000000000000000A" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  test("resolve cierra el gate que estaciona una corrida y devuelve la decisión resuelta", async () => {
+    const deps = apiDeps(store, dataDir);
+    deps.flows.save(
+      FlowDef.parse({
+        schema: 1,
+        id: "ask",
+        name: "Pregunta",
+        trigger: { type: "manual" },
+        start: "ask",
+        nodes: {
+          ask: { type: "gate", question: "¿Sigo?", timeoutSec: 600, options: [{ id: "go", label: "Seguir" }], on: { go: "@done" } },
+        },
+      }),
+    );
+    const core = await start(undefined, deps);
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+
+    const runId = deps.flows.start("ask", { type: "issue", id: "CLA-1" });
+    const [gate] = await client.decisions.list({ runId, kind: ["gate"] });
+    if (!gate) throw new Error("el gate no abrió su decisión");
+    expect(await client.runs.get({ id: runId })).toMatchObject({ status: "parked", parkReason: "gate" });
+
+    await expect(client.decisions.resolve({ id: gate.id, option: "nope" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await client.decisions.resolve({ id: gate.id, option: "go" })).toMatchObject({
+      status: "answered",
+      resolution: { option: "go" },
+      resolvedBy: "ui",
+    });
+    expect(await client.runs.get({ id: runId })).toMatchObject({ status: "done", outcome: "done" });
+    await expect(client.decisions.resolve({ id: gate.id, option: "go" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  test("resolve de una nota, o de una decisión que no existe, es BAD_REQUEST o NOT_FOUND", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const note = store.tx((tx) => openDecision(tx, { kind: "note", title: "Desvío", body: "x" }));
+
+    await expect(client.decisions.resolve({ id: note.id, option: "ok" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(client.decisions.resolve({ id: "dec_01J0000000000000000000000A", option: "ok" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 

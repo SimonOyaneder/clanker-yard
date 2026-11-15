@@ -9,7 +9,7 @@ import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
-import { RunNotFoundError, RunStartError } from "../flows/engine";
+import { DecisionNotFoundError, DecisionResolveError, RunNotFoundError, RunStartError } from "../flows/engine";
 import { createStepDetails, StepNotFoundError } from "../flows/step-detail";
 import { createMetrics } from "../metrics/metrics";
 import type { Packs } from "../packs/packs";
@@ -234,6 +234,14 @@ export function createRouter(deps: RouterDeps) {
         if (!decision) throw new ORPCError("NOT_FOUND", { message: `No existe la decisión ${input.id}.` });
         return decision;
       }),
+      resolve: os.decisions.resolve.handler(({ input, context }) =>
+        asApiError(() => {
+          deps.flows.resolveGate(input.id, input.option, context.origin);
+          const decision = deps.decisions.get(input.id);
+          if (!decision) throw new DecisionNotFoundError(input.id);
+          return decision;
+        }),
+      ),
     },
     defs: {
       list: os.defs.list.handler(({ input }) => deps.defs.list(input.kind, { includeArchived: input.includeArchived })),
@@ -287,6 +295,7 @@ function toApiError(error: unknown): unknown {
   if (
     error instanceof ProjectNotFoundError ||
     error instanceof RunNotFoundError ||
+    error instanceof DecisionNotFoundError ||
     error instanceof StepNotFoundError ||
     error instanceof SessionNotFoundError ||
     error instanceof RepoNotFoundError ||
@@ -297,6 +306,7 @@ function toApiError(error: unknown): unknown {
   if (
     error instanceof InvalidProjectError ||
     error instanceof RunStartError ||
+    error instanceof DecisionResolveError ||
     error instanceof InvalidRepoError ||
     error instanceof NotAGitRepoError ||
     error instanceof RecipeTestError ||

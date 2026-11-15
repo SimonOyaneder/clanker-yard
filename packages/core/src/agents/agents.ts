@@ -45,6 +45,8 @@ export interface RunRequest extends Placement {
   role: string;
   /** La versión del rol que fijó la corrida; sin ella rige la vigente. */
   roleDef?: DefPin;
+  /** La entrada del perfil que pone modelo, effort y topes; por defecto la del rol (un flujo puede pedir otra, la de escalada). */
+  profileRole?: string;
   mode: string;
   brief: Brief;
   /** El directorio donde corre el agente. */
@@ -164,7 +166,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     if (req.resumeFrom !== undefined && mode.session !== "new") {
       return resume({ ...req, sessionId: req.resumeFrom });
     }
-    const profileRole = resolveProfileRole(req, req.role);
+    const profileRole = resolveProfileRole(req, req.profileRole ?? req.role);
     const budget = budgetOf(mode, profileRole.budget);
 
     const spec: RunSpec = {

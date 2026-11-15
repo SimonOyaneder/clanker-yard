@@ -2,7 +2,9 @@ import {
   FlowDef,
   type ArtifactHash,
   type Brief,
+  type DecisionId,
   type Node,
+  type ParkReason,
   type ProjectId,
   type RunId,
   type RunUsage,
@@ -10,17 +12,17 @@ import {
   type StepRunId,
   type SubjectRef,
 } from "@clanker/api";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
-import { openNote } from "../decisions/decisions";
+import { closeDecision, openDecision } from "../decisions/decisions";
 import type { Defs } from "../defs/defs";
 import { recordRunMetrics } from "../metrics/record";
-import { newId } from "../store/conventions";
-import { actionEffects, agentSessions, runs, stepRuns, stepUsage, type DefPin } from "../store/schema";
+import { microsToUsd, newId, usdToMicros } from "../store/conventions";
+import { actionEffects, agentSessions, decisions, projects, runs, stepRuns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ConsolidatorDef, type ExternalEvent, type RetryPolicy, type WaitDef, type WaitResult } from "./catalog";
-import { edgeFor, edgesOf, maxRoundsOf, takeEdge } from "./edges";
+import { edgeFor, edgesOf, maxRoundsOf, takeEdge, type Taken } from "./edges";
 import {
   agentRolesOf,
   branchIds,
@@ -46,6 +48,12 @@ const RESUMED_AFTER_CUT = "La app se cerró con este paso en curso; se retoma.";
 const SESSION_CUT = "La app se cerró con la sesión en curso.";
 const CUT_NOTICE =
   "La app se reinició mientras trabajabas en esta tarea. Revisa el worktree: puede tener cambios a medias de antes del corte. Termina tu tarea.";
+/** El `error` con que se reintenta un paso de agente que se pasó de su tope: así `performAgent` sabe que ya escaló y la segunda vez no reintenta. */
+const ESCALATED = "El agente se pasó de su tope de gasto o de turnos; se reintenta con el perfil escalado y un handoff.";
+const HANDOFF_NOTICE =
+  "La sesión anterior de esta tarea se pasó de su tope de gasto o de turnos y se cerró. Revisa el worktree (git status y git diff --stat): puede tener cambios a medias. Termina tu tarea.";
+/** Prefijo de la opción de un `needs_human` que sigue el edge de un outcome sin ejecutar el paso: `force:ok`. */
+const FORCE = "force:";
 export const TICK_MS = 5000;
 export const DEFAULT_MAX_AGENTS = 4;
 /** Cada cuánto se sondea un wait mientras no exista Watch que avise con `signal`. */
@@ -64,6 +72,7 @@ const LIVE_RUN_STATUSES = ["queued", "running", "waiting", "parked", "paused"] a
 type RunRow = typeof runs.$inferSelect;
 type StepRow = typeof stepRuns.$inferSelect;
 type FlowNode = Extract<Node, { type: "flow" }>;
+type GateNode = Extract<Node, { type: "gate" }>;
 
 export interface StartOptions {
   projectId?: ProjectId;
@@ -168,7 +177,7 @@ export interface Engine {
    * Lanza `flow` (slug) sobre `subject`. Idempotente: si ya hay una corrida viva de ese flujo sobre
    * ese sujeto devuelve su id sin mirar `params`. La corrida fija la versión del flujo, de sus roles
    * y del perfil, y también los de los subflujos que llama (nodo `flow`). Falla, sin crear nada, si faltan
-   * params, los maxRounds apuntan a un valor inválido o el flujo (o un subflujo) usa nodos que el motor no ejecuta.
+   * params, los maxRounds apuntan a un valor inválido o el flujo (o un subflujo) tiene un gate como rama de un parallel.
    */
   start(flow: string, subject: SubjectRef, params?: Record<string, unknown>, opts?: StartOptions): RunId;
   /**
@@ -177,8 +186,18 @@ export interface Engine {
    */
   signal(event: ExternalEvent): void;
   /**
-   * Cancela la corrida y todas sus corridas hijas: los pasos pending, running y waiting quedan
-   * `canceled`, los agentes en curso se interrumpen y las acciones reciben el abort de su `signal`.
+   * Resuelve la decisión que tiene estacionada a una corrida. Un gate se cierra con la opción como
+   * outcome del paso. En un `needs_human` la opción es `retry` (el nodo vuelve a correr como una visita
+   * nueva), `force:<outcome>` (sigue el edge de ese outcome sin ejecutar el paso) o `cancel`; en un
+   * tope de la corrida, `continue` (el tope se suma otra vez) o `cancel`. La corrida vuelve a la cola
+   * de su carril, antes que las corridas nuevas, y emite `run.requeued`. Lanza `DecisionNotFoundError`
+   * si no existe y `DecisionResolveError` si ya se resolvió o la opción no es una de las suyas.
+   */
+  resolveGate(decisionId: DecisionId, option: string, by: string): void;
+  /**
+   * Cancela la corrida y todas sus corridas hijas: los pasos pending, running, waiting y las
+   * decisiones que las estacionan quedan `canceled` o `superseded`, los agentes en curso se
+   * interrumpen y las acciones reciben el abort de su `signal`.
    * Cada corrida emite `run.finished` con outcome `canceled`. No hace nada con una corrida que ya
    * terminó. Lanza `RunNotFoundError` si no existe. No libera el worktree.
    */
@@ -193,7 +212,7 @@ export interface Engine {
    * vencimiento: este core tiene el lock y el anterior ya murió), da error al que lleva
    * `MAX_CUTS` cortes y despierta al dispatcher. Los waits quedan esperando y el primer tick los
    * sondea (el calendario de sondeos vive en memoria), así que lo que pasó con la app cerrada no se
-   * pierde. Un gate no necesita nada: su corrida sigue parked. Devuelve cuántos pasos tocó.
+   * pierde. Un gate no necesita nada: su corrida sigue parked con la decisión abierta, y su plazo lo vence el tick. Devuelve cuántos pasos tocó.
    */
   recover(): number;
   /** Deja de despachar y espera a los pasos en curso. */
@@ -202,6 +221,16 @@ export interface Engine {
 
 /** `start` rechazó el pedido (flujo o perfil que no existen, params inválidos): no se creó nada y el mensaje dice qué cambiar. */
 export class RunStartError extends Error {}
+
+/** La decisión pedida no existe. */
+export class DecisionNotFoundError extends Error {
+  constructor(id: DecisionId) {
+    super(`No existe la decisión ${id}.`);
+  }
+}
+
+/** La decisión no se puede resolver así (ya se resolvió, no estaciona a nadie o la opción no es suya): no cambió nada. */
+export class DecisionResolveError extends Error {}
 
 /** La corrida pedida no existe. */
 export class RunNotFoundError extends Error {
@@ -226,6 +255,8 @@ type Settled =
   | { kind: "outcome"; outcome: string; output?: unknown; error?: string; notes?: Note[] }
   /** Una excepción: se reintenta según `retry`. */
   | { kind: "failed"; error: string }
+  /** El agente se pasó de su tope: un reintento con el perfil escalado y un handoff, sin gastar el `retry` del nodo. */
+  | { kind: "escalate" }
   /** Falló el entorno, no el paso: vuelve a pending sin gastar intento. */
   | { kind: "deferred"; error: string; notBefore: number }
   /** Un parallel que abrió sus ramas: el padre espera y lo cierra la transacción de la última rama. */
@@ -326,16 +357,19 @@ export function createEngine(deps: EngineDeps): Engine {
 
       const flow = FlowDef.parse(def.body);
       const { flows, subflows } = pinCalls(flow, opts.repoId);
-      const unsupported = flows.flatMap((f) =>
+      // Un gate estaciona la corrida entera: una rama de un parallel no podría esperar sola.
+      const gateBranches = flows.flatMap((f) =>
         Object.entries(f.nodes).flatMap(([nodeId, n]) => {
-          const types: [string, string][] = [[nodeId, n.type]];
-          if (n.type === "parallel" && !Array.isArray(n.branches)) types.push([`${nodeId}.branch`, n.branches.branch.type]);
-          return types.filter(([, type]) => type === "gate").map(([id, type]) => `${f === flow ? "" : `${f.id}.`}${id} (${type})`);
+          if (n.type !== "parallel") return [];
+          const branches: [string, Node | undefined][] = Array.isArray(n.branches)
+            ? n.branches.map((id) => [id, f.nodes[id]])
+            : [[`${nodeId}.branch`, n.branches.branch]];
+          return branches.filter(([, branch]) => branch?.type === "gate").map(([id]) => `${f === flow ? "" : `${f.id}.`}${id}`);
         }),
       );
-      if (unsupported.length > 0) {
+      if (gateBranches.length > 0) {
         throw new RunStartError(
-          `El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${unsupported.join(", ")}. Solo agent, action, wait, parallel y flow.`,
+          `El flujo "${flowSlug}" usa un gate como rama de un parallel: ${gateBranches.join(", ")}. Un gate estaciona su corrida entera; ponlo como nodo suelto.`,
         );
       }
       const params = paramsFor(flow, given);
@@ -529,6 +563,7 @@ export function createEngine(deps: EngineDeps): Engine {
       lastWakeAt = t;
       // Antes de despachar: un wait que vence o se resuelve deja su paso siguiente listo en esta misma vuelta.
       sweepWaits();
+      sweepGates();
       sweepChildren();
       dispatch();
     } catch (error) {
@@ -567,6 +602,7 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const { step, run } of ready) {
       const planned = loadJob(run, step);
       if (!planned) continue;
+      if (parkOverLimit(planned)) continue;
       const isAgent = planned.node.type === "agent";
       if (isAgent && activeAgents >= maxAgents) continue;
       const leased = lease(step);
@@ -598,12 +634,96 @@ export function createEngine(deps: EngineDeps): Engine {
           ...scopeOf(run, step.id),
           payload: { ...stepPayload(step), outcome: "error", outputHash: null, costMicros: 0, error },
         });
-        tx.db.update(runs).set({ status: "parked", parkReason: "needs_human" }).where(eq(runs.id, run.id)).run();
-        tx.emit({ type: "run.parked", origin: "core", ...scopeOf(run, step.id), payload: { reason: "needs_human" } });
+        parkForHuman(tx, run, step, undefined, error);
       });
     } catch (cause) {
       console.error(`No se pudo estacionar la corrida ${run.id}, que no se puede cargar (${error}):`, cause);
     }
+  }
+
+  // --- estacionar ------------------------------------------------------------------------------
+
+  /**
+   * Estaciona la corrida y abre la decisión que la espera, en la transacción de quien la estaciona. Un
+   * paso a la vez avanza una corrida, así que no hay otra decisión bloqueante abierta sobre ella.
+   */
+  function park(
+    tx: Tx,
+    run: RunRow,
+    step: StepRow,
+    parking: { reason: ParkReason; kind: "gate" | "needs_human"; title: string; body: string; options: string[] },
+  ): void {
+    tx.db.update(runs).set({ status: "parked", parkReason: parking.reason }).where(eq(runs.id, run.id)).run();
+    const { reason, ...decision } = parking;
+    const opened = openDecision(tx, { ...scopeOf(run, step.id), ...decision });
+    tx.emit({ type: "run.parked", origin: "core", ...scopeOf(run, step.id), payload: { reason, decisionId: opened.id } });
+  }
+
+  /** El paso `step` terminó sin un edge que lo lleve a ningún lado: la corrida espera a una persona. Sin `node` (no se pudo cargar) solo se puede reintentar o cancelar. */
+  function parkForHuman(tx: Tx, run: RunRow, step: StepRow, node: Node | undefined, message: string): void {
+    const forced = Object.keys(node?.on ?? {}).map((outcome) => `${FORCE}${outcome}`);
+    park(tx, run, step, {
+      reason: "needs_human",
+      kind: "needs_human",
+      title: `El paso "${step.nodeId}" no puede seguir`,
+      body: message,
+      options: ["retry", ...forced, "cancel"],
+    });
+  }
+
+  /**
+   * Si la corrida ya llegó a su tope de gasto o de pasos, la estaciona (`limit`) y el paso listo queda
+   * pending: al resolverse la decisión corre ese paso. Es solo esa corrida: el resto sigue.
+   */
+  function parkOverLimit({ run, step, flow }: Job): boolean {
+    const exceeded = limitExceeded(run, step, flow);
+    if (exceeded === undefined) return false;
+    try {
+      store.tx((tx) => {
+        const current = tx.db.select().from(runs).where(eq(runs.id, run.id)).get();
+        // Dos pasos listos de la misma corrida en una vuelta del dispatcher: solo el primero la estaciona.
+        if (current?.status !== "running") return;
+        park(tx, current, step, {
+          reason: "limit",
+          kind: "needs_human",
+          title: "La corrida llegó a su tope",
+          body: `${exceeded} Continuar le suma otra vez el tope; cancelar la termina.`,
+          options: ["continue", "cancel"],
+        });
+      });
+    } catch (error) {
+      console.error(`No se pudo estacionar la corrida ${run.id}, que llegó a su tope:`, error);
+    }
+    return true;
+  }
+
+  /**
+   * Qué tope de la corrida se pasó, o `undefined`. El tope de gasto del proyecto manda sobre el del
+   * flujo. Cada `continue` ya resuelto suma otra vez el tope entero. `step` no cuenta en `maxSteps`: es el que va a correr.
+   */
+  function limitExceeded(run: RunRow, step: StepRow, flow: FlowDef): string | undefined {
+    const project = run.projectId === null ? undefined : store.db.select({ cap: projects.maxCostUsd }).from(projects).where(eq(projects.id, run.projectId)).get();
+    const maxCostUsd = project?.cap ?? flow.limits?.maxCostUsd ?? null;
+    const maxSteps = flow.limits?.maxSteps;
+    if (maxCostUsd === null && maxSteps === undefined) return undefined;
+    const steps =
+      maxSteps === undefined
+        ? 0
+        : store.db.select({ n: count() }).from(stepRuns).where(and(eq(stepRuns.runId, run.id), ne(stepRuns.id, step.id))).get()?.n ?? 0;
+    const over = (times: number) => {
+      if (maxCostUsd !== null && run.costMicros > usdToMicros(maxCostUsd * times)) {
+        return `Lleva gastados USD ${microsToUsd(run.costMicros).toFixed(2)} y su tope es USD ${maxCostUsd * times}.`;
+      }
+      if (maxSteps !== undefined && steps >= maxSteps * times) return `Lleva ${steps} pasos y su tope es ${maxSteps * times}.`;
+    };
+    if (over(1) === undefined) return undefined;
+    const continued =
+      store.db
+        .select({ n: count() })
+        .from(decisions)
+        .where(and(eq(decisions.runId, run.id), eq(decisions.kind, "needs_human"), sql`json_extract(${decisions.resolution}, '$.option') = 'continue'`))
+        .get()?.n ?? 0;
+    return over(1 + continued);
   }
 
   function lease(step: StepRow): StepRow | undefined {
@@ -753,12 +873,16 @@ export function createEngine(deps: EngineDeps): Engine {
     const input =
       job.parallel?.role === "join"
         ? branchOutputs(run.id, job.parallel.parent, job.flow)
-        : resolveRefs(node.type === "agent" ? node.brief : node.type === "action" || node.type === "wait" ? node.args : null, resolve);
+        : resolveRefs(
+            node.type === "agent" ? node.brief : node.type === "action" || node.type === "wait" ? node.args : node.type === "gate" ? node.question : null,
+            resolve,
+          );
     const inputHash = artifacts.put(JSON.stringify(input), "brief", { mime: "application/json" });
     artifacts.ref(inputHash, { type: "step_run", id: step.id, role: "input" });
     markRunning(job, inputHash);
     // En un wait `timeoutSec` es el plazo de la espera (`deadline`), no un límite a esta ejecución.
     if (node.type === "wait") return enterWait(job, node.event, input);
+    if (node.type === "gate") return openGate(job, node, input);
 
     const timeoutSec = node.timeoutSec ?? (node.type === "action" ? actions.get(node.action)?.timeoutSec : undefined);
     const timer =
@@ -831,29 +955,35 @@ export function createEngine(deps: EngineDeps): Engine {
     const brief: Brief = briefFor
       ? await briefFor({ run: briefRun, nodeId: step.nodeId, visit: step.visit, mode: node.mode, payload, lineage: lineage(run) })
       : { run: briefRun, worktree: workspace.path, base: workspace.base, mode: node.mode, artifacts: {}, payload };
+    // Tras pasarse del tope el paso reintenta con el perfil escalado y una sesión nueva con handoff.
+    const escalated = step.error === ESCALATED;
+    const cut = step.error === RESUMED_AFTER_CUT;
     const placement = {
       profile: profile.slug,
       profileDef,
       stepRunId: step.id,
       projectId: run.projectId ?? undefined,
       signal,
-      notice: step.error === RESUMED_AFTER_CUT ? CUT_NOTICE : undefined,
+      notice: escalated ? HANDOFF_NOTICE : cut ? CUT_NOTICE : undefined,
     };
     // Una sesión que el corte dejó `running` se retoma; sin ella (el corte llegó antes de que el runtime
     // le diera id) empieza una nueva con el mismo brief.
-    const cutSession = placement.notice === undefined ? undefined : unfinishedSession(step.id);
+    const cutSession = cut ? unfinishedSession(step.id) : undefined;
     const result = cutSession
       ? await agents.resume({ ...placement, sessionId: cutSession, mode: node.mode, brief })
       : await agents.run({
           ...placement,
           role: node.role,
+          profileRole: escalated ? node.escalate?.profileRole : undefined,
           roleDef,
           mode: node.mode,
           brief,
           workspace: workspace.path,
-          resumeFrom: node.resumeFrom === undefined ? undefined : priorSession(run, node.resumeFrom),
+          resumeFrom: node.resumeFrom === undefined || escalated ? undefined : priorSession(run, node.resumeFrom),
         });
     if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
+    const overspent = result.status === "error_max_turns" || result.status === "error_max_budget_usd";
+    if (overspent && node.escalate && !escalated) return { kind: "escalate" };
     return fromAgentResult(result);
   }
 
@@ -1039,6 +1169,8 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       case "deferred":
         return requeue(job, settled.error, settled.notBefore, true);
+      case "escalate":
+        return requeue(job, ESCALATED, now(), false);
     }
   }
 
@@ -1139,12 +1271,12 @@ export function createEngine(deps: EngineDeps): Engine {
       notes,
     });
 
-    if (!taken) {
-      tx.db.update(runs).set({ status: "parked", parkReason: "needs_human" }).where(eq(runs.id, run.id)).run();
-      tx.emit({ type: "run.parked", origin: "core", ...scopeOf(run, step.id), payload: { reason: "needs_human" } });
-      return;
-    }
+    if (!taken) return parkForHuman(tx, run, step, node, message ?? "");
+    follow(tx, run, step, taken, cost);
+  }
 
+  /** Lleva la corrida adonde va el edge tomado: a su fin, o a un paso nuevo en pending. `cost` es el del paso que se acaba de cerrar. */
+  function follow(tx: Tx, run: RunRow, step: StepRow, taken: Taken, cost: number): void {
     const rounds = taken.counter ? { ...run.rounds, [taken.counter.key]: taken.counter.count } : run.rounds;
     // `stopBefore`: llegar al nodo donde el padre pidió cortar termina la corrida hija como `done`.
     const result = taken.to.startsWith("@") ? taken.to.slice(1) : taken.to === run.stopBefore ? "done" : undefined;
@@ -1219,15 +1351,18 @@ export function createEngine(deps: EngineDeps): Engine {
     });
     // Notas que no bloquean: la corrida sigue por su edge, el humano las ve en la bandeja.
     const scope = scopeOf(run, step.id);
-    if (closing.note !== undefined) {
-      const body = `Al cerrar el paso "${step.nodeId}" con el outcome "${closing.outcome}".`;
-      openNote(tx, { ...scope, kind: "review_note", title: closing.note, body });
-    }
-    for (const note of closing.notes ?? []) openNote(tx, { ...scope, kind: "review_note", ...note });
+    if (closing.note !== undefined) openEdgeNote(tx, run, step, closing.outcome, closing.note);
+    for (const note of closing.notes ?? []) openDecision(tx, { ...scope, kind: "review_note", ...note });
     if (cost > 0) {
       tx.db.update(runs).set({ costMicros: sql`${runs.costMicros} + ${cost}` }).where(eq(runs.id, run.id)).run();
     }
     return cost;
+  }
+
+  /** La decisión no bloqueante que deja el edge tomado al cerrar `step` con `outcome`. */
+  function openEdgeNote(tx: Tx, run: RunRow, step: StepRow, outcome: string, note: string): void {
+    const body = `Al cerrar el paso "${step.nodeId}" con el outcome "${outcome}".`;
+    openDecision(tx, { ...scopeOf(run, step.id), kind: "review_note", title: note, body });
   }
 
   function nextVisit(tx: Tx, runId: RunId, nodeId: string): number {
@@ -1390,6 +1525,158 @@ export function createEngine(deps: EngineDeps): Engine {
     } catch (cause) {
       console.error(`No se pudo anotar el error del sondeo de ${job.step.id}:`, cause);
     }
+  }
+
+  // --- gate ------------------------------------------------------------------------------------
+
+  /**
+   * Entra a un gate: el paso queda `waiting` (con su plazo si hay `timeoutSec`), se abre la decisión
+   * `gate` y la corrida queda parked, todo en una transacción. Solo esta corrida espera: no retiene
+   * slot ni cupo, y el worktree sigue suyo. Lo cierra `resolveGate` o el vencimiento del plazo.
+   */
+  function openGate(job: Job, node: GateNode, question: unknown): Settled {
+    const { run, step } = job;
+    const deadline = node.timeoutSec === undefined ? null : now() + node.timeoutSec * 1000;
+    store.tx((tx) => {
+      const waiting = tx.db
+        .update(stepRuns)
+        .set({ status: "waiting", owner: null, leaseUntil: null, deadline })
+        .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), eq(stepRuns.status, "running")))
+        .returning({ id: stepRuns.id })
+        .get();
+      if (!waiting) throw new StaleStepError(step.id);
+      tx.emit({ type: "step.waiting", origin: "core", ...scopeOf(run, step.id), payload: { ...stepPayload(step), waitKey: null, deadline } });
+      park(tx, run, step, {
+        reason: "gate",
+        kind: "gate",
+        title: typeof question === "string" ? question : JSON.stringify(question),
+        body: node.options.map((option) => `${option.id}: ${option.label}`).join("\n"),
+        options: node.options.map((option) => option.id),
+      });
+    });
+    return { kind: "waiting" };
+  }
+
+  /** El tick: los gates con `timeoutSec` cuyo plazo pasó siguen solos, con su `default` o con outcome `timeout`. */
+  function sweepGates(): void {
+    const due = store.db
+      .select({ step: stepRuns, run: runs })
+      .from(stepRuns)
+      .innerJoin(runs, eq(stepRuns.runId, runs.id))
+      .where(
+        and(
+          eq(stepRuns.status, "waiting"),
+          isNull(stepRuns.waitKey),
+          isNotNull(stepRuns.deadline),
+          lte(stepRuns.deadline, now()),
+          eq(runs.status, "parked"),
+          eq(runs.parkReason, "gate"),
+        ),
+      )
+      .orderBy(asc(stepRuns.id))
+      .all();
+    for (const { step, run } of due) {
+      const job = loadJob(run, step);
+      if (job?.node.type !== "gate") continue;
+      const { node } = job;
+      try {
+        store.tx((tx) => {
+          const decision = pendingDecisionOf(tx, step.id);
+          if (!decision) return;
+          const fallback = node.default;
+          closeDecision(tx, decision.id, {
+            status: "expired",
+            resolution: fallback === undefined ? { option: null } : { option: fallback },
+            by: "timeout",
+          });
+          leaveParking(tx, run, decision.id, (current) =>
+            advance(
+              tx,
+              current,
+              step,
+              node,
+              fallback ?? "timeout",
+              undefined,
+              fallback === undefined ? new StepTimeout(node.timeoutSec ?? 0, "El gate").message : undefined,
+            ),
+          );
+        });
+      } catch (error) {
+        if (error instanceof StaleStepError) continue;
+        console.error(`No se pudo vencer el gate ${step.id} (${step.nodeId}):`, error);
+      }
+    }
+  }
+
+  /** La decisión bloqueante que sigue abierta sobre `stepId`. */
+  function pendingDecisionOf(tx: Tx, stepId: StepRunId) {
+    return tx.db
+      .select()
+      .from(decisions)
+      .where(and(eq(decisions.stepRunId, stepId), eq(decisions.status, "pending"), inArray(decisions.kind, ["gate", "needs_human"])))
+      .get();
+  }
+
+  /**
+   * La corrida deja de estar estacionada: `leave` la lleva adonde corresponda (el edge de un gate, un
+   * paso nuevo, nada) y, si sigue viva, vuelve a la cola de su carril. Va antes que las corridas nuevas
+   * porque el dispatcher toma primero las más antiguas.
+   */
+  function leaveParking(tx: Tx, run: RunRow, decisionId: DecisionId, leave: (current: RunRow) => void): void {
+    const resumed: RunRow = { ...run, status: "running", parkReason: null };
+    tx.db.update(runs).set({ status: "running", parkReason: null }).where(eq(runs.id, run.id)).run();
+    leave(resumed);
+    const after = tx.db.select().from(runs).where(eq(runs.id, run.id)).get();
+    if (after?.status === "running") {
+      tx.emit({ type: "run.requeued", origin: "core", ...scopeOf(run), payload: { decisionId, reason: run.parkReason } });
+    }
+  }
+
+  function resolveGate(decisionId: DecisionId, option: string, by: string): void {
+    const canceled = store.tx((tx): { runId: RunId; stepIds: StepRunId[] } | undefined => {
+      const decision = tx.db.select().from(decisions).where(eq(decisions.id, decisionId)).get();
+      if (!decision) throw new DecisionNotFoundError(decisionId);
+      if (decision.status !== "pending") {
+        throw new DecisionResolveError(`La decisión ${decisionId} ya está ${decision.status}: no hay nada que resolver.`);
+      }
+      const run = decision.runId === null ? undefined : tx.db.select().from(runs).where(eq(runs.id, decision.runId)).get();
+      const step = decision.stepRunId === null ? undefined : tx.db.select().from(stepRuns).where(eq(stepRuns.id, decision.stepRunId)).get();
+      if (!run || run.status !== "parked" || !step || (decision.kind !== "gate" && decision.kind !== "needs_human")) {
+        throw new DecisionResolveError(`La decisión ${decisionId} no tiene a ninguna corrida estacionada esperándola.`);
+      }
+      if (!decision.options.includes(option)) {
+        throw new DecisionResolveError(`"${option}" no es una opción de la decisión ${decisionId}: ${decision.options.join(", ")}.`);
+      }
+      closeDecision(tx, decisionId, { status: "answered", resolution: { option }, by });
+
+      if (run.parkReason === "gate") {
+        const { node } = jobOf(run, step);
+        if (node.type !== "gate") throw new DecisionResolveError(`El paso ${step.id} no es un gate.`);
+        leaveParking(tx, run, decisionId, (current) => advance(tx, current, step, node, option, undefined, undefined));
+      } else if (option === "cancel") {
+        return { runId: run.id, stepIds: cancelFamily(tx, run.id) };
+      } else if (option === "continue") {
+        // El paso listo sigue pending: al volver la corrida a running, el dispatcher lo toma.
+        leaveParking(tx, run, decisionId, () => {});
+      } else if (option === "retry") {
+        leaveParking(tx, run, decisionId, (current) =>
+          insertStep(tx, current, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined }),
+        );
+      } else {
+        const outcome = option.slice(FORCE.length);
+        const { node } = jobOf(run, step);
+        leaveParking(tx, run, decisionId, (current) => {
+          const edge = edgeFor(node, outcome);
+          if (edge === undefined) throw new DecisionResolveError(`El nodo "${step.nodeId}" no tiene edge para el outcome "${outcome}".`);
+          const taken = takeEdge(edge, `${step.nodeId}.${outcome}`, current.rounds, current.params);
+          if (taken.note !== undefined) openEdgeNote(tx, current, step, outcome, taken.note);
+          follow(tx, current, step, taken, 0);
+        });
+      }
+      return undefined;
+    });
+    if (canceled) abortInFlight(canceled.stepIds, canceled.runId);
+    wake();
   }
 
   // --- parallel --------------------------------------------------------------------------------
@@ -1647,43 +1934,56 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  /**
-   * En una sola transacción cancela la corrida y sus descendientes vivos, y después aborta lo que
-   * este proceso tiene en vuelo: un cierre de esos pasos ya no calza con su attempt y se descarta.
-   */
   function cancel(runId: RunId): void {
-    const stepIds = store.tx((tx) => {
-      if (!tx.db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).get()) throw new RunNotFoundError(runId);
-      const family = [runId];
-      for (const id of family) {
-        family.push(...tx.db.select({ id: runs.id }).from(runs).where(eq(runs.parentRunId, id)).all().map((r) => r.id));
-      }
-      const canceled: StepRunId[] = [];
-      for (const run of tx.db.select().from(runs).where(and(inArray(runs.id, family), inArray(runs.status, LIVE_RUN_STATUSES))).all()) {
-        const steps = tx.db
-          .update(stepRuns)
-          .set({ status: "canceled", error: `La corrida ${runId} se canceló.`, owner: null, leaseUntil: null, notBefore: null })
-          .where(and(eq(stepRuns.runId, run.id), inArray(stepRuns.status, ["pending", "leased", "running", "waiting"])))
-          .returning({ id: stepRuns.id })
-          .all();
-        canceled.push(...steps.map((s) => s.id));
-        const endedAt = now();
-        tx.db.update(runs).set({ status: "canceled", parkReason: null, endedAt }).where(eq(runs.id, run.id)).run();
-        recordRunMetrics(tx, run.id);
-        tx.emit({
-          type: "run.finished",
-          origin: "core",
-          ...scopeOf(run),
-          payload: { outcome: "canceled", costMicros: run.costMicros, minutes: (endedAt - run.startedAt) / 60_000 },
-        });
-      }
-      return canceled;
-    });
+    abortInFlight(store.tx((tx) => cancelFamily(tx, runId)), runId);
+    wake();
+  }
+
+  /**
+   * Cancela, en la transacción de quien llama, la corrida y sus descendientes vivos: sus pasos quedan
+   * `canceled` y las decisiones que las estacionaban `superseded`. Devuelve los pasos cancelados, que
+   * `abortInFlight` interrumpe después.
+   */
+  function cancelFamily(tx: Tx, runId: RunId): StepRunId[] {
+    if (!tx.db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).get()) throw new RunNotFoundError(runId);
+    const family = [runId];
+    for (const id of family) {
+      family.push(...tx.db.select({ id: runs.id }).from(runs).where(eq(runs.parentRunId, id)).all().map((r) => r.id));
+    }
+    const canceled: StepRunId[] = [];
+    for (const run of tx.db.select().from(runs).where(and(inArray(runs.id, family), inArray(runs.status, LIVE_RUN_STATUSES))).all()) {
+      const steps = tx.db
+        .update(stepRuns)
+        .set({ status: "canceled", error: `La corrida ${runId} se canceló.`, owner: null, leaseUntil: null, notBefore: null })
+        .where(and(eq(stepRuns.runId, run.id), inArray(stepRuns.status, ["pending", "leased", "running", "waiting"])))
+        .returning({ id: stepRuns.id })
+        .all();
+      canceled.push(...steps.map((s) => s.id));
+      const blocking = tx.db
+        .select({ id: decisions.id })
+        .from(decisions)
+        .where(and(eq(decisions.runId, run.id), eq(decisions.status, "pending"), inArray(decisions.kind, ["gate", "needs_human"])))
+        .all();
+      for (const { id } of blocking) closeDecision(tx, id, { status: "superseded", by: "core" });
+      const endedAt = now();
+      tx.db.update(runs).set({ status: "canceled", parkReason: null, endedAt }).where(eq(runs.id, run.id)).run();
+      recordRunMetrics(tx, run.id);
+      tx.emit({
+        type: "run.finished",
+        origin: "core",
+        ...scopeOf(run),
+        payload: { outcome: "canceled", costMicros: run.costMicros, minutes: (endedAt - run.startedAt) / 60_000 },
+      });
+    }
+    return canceled;
+  }
+
+  /** Lo que este proceso tiene en vuelo de esos pasos se interrumpe: su cierre ya no calza con su attempt y se descarta. */
+  function abortInFlight(stepIds: StepRunId[], runId: RunId): void {
     for (const id of stepIds) {
       nextProbeAt.delete(id);
       controllers.get(id)?.abort(new RunCanceled(runId));
     }
-    wake();
   }
 
   // --- lectura ---------------------------------------------------------------------------------
@@ -1747,7 +2047,7 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(inFlight);
   }
 
-  return { start, signal, cancel, getRun, listRuns, recover, close };
+  return { start, signal, resolveGate, cancel, getRun, listRuns, recover, close };
 }
 
 class StepTimeout extends Error {

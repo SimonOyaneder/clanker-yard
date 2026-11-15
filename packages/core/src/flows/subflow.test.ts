@@ -253,7 +253,7 @@ describe("el nodo flow", () => {
 });
 
 describe("start con subflujos", () => {
-  test("rechaza un subflujo que no existe y un gate dentro del subflujo", async () => {
+  test("rechaza un subflujo que no existe y un gate como rama de un parallel dentro del subflujo", async () => {
     const h = harness();
     h.work();
     h.save(child());
@@ -263,13 +263,15 @@ describe("start con subflujos", () => {
     const gated = harness();
     gated.save(
       child({
+        start: "both",
         nodes: {
-          work: { type: "gate", question: "?", options: [{ id: "go", label: "Seguir" }], timeoutSec: 60, on: { go: "@done" } },
+          both: { type: "parallel", branches: ["work"], on: { ok: "@done", changes: "@blocked", fail: "@failed" } },
+          work: { type: "gate", question: "?", options: [{ id: "go", label: "Seguir" }], timeoutSec: 60 },
         },
       }),
     );
     gated.save(parent());
-    expect(() => gated.start("parent")).toThrow(/child\.work \(gate\)/);
+    expect(() => gated.start("parent")).toThrow(/child\.work/);
   });
 
   test("la corrida fija la versión del subflujo: cambiarlo después no afecta a la que ya empezó", async () => {
