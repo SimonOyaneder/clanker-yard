@@ -34,7 +34,7 @@ const acme: ResolvedPack = {
       lgtm: { reviewState: "APPROVED", bodyMatch: "LGTM", sameSha: true },
     },
     ciRules: { ignoreChecks: ["merge-queue"], okStates: ["SUCCESS", "SKIPPED", "NEUTRAL"] },
-    conventions: { councilPrefix: "[clanker-council] " },
+    conventions: { commentPrefix: "[clanker] ", councilPrefix: "[clanker-council] " },
   }),
 };
 const noPack: ResolvedPack = { id: null, ...PackSettings.parse({}) };
@@ -170,6 +170,14 @@ describe("threads", () => {
       councilOpen: [Number(open.comments.nodes[0]!.fullDatabaseId)],
       councilEver: true,
     });
+  });
+
+  test("council respondido con el prefijo del pack: ya no está abierto aunque nadie lo resuelva", () => {
+    const answered = thread(user(VIEWER), "[clanker-council] 🟡 falta un test", { replies: [[user(VIEWER), "[clanker] aplicado en abc123"]] });
+    const unanswered = thread(user(VIEWER), "[clanker-council] 🟡 otro", { replies: [[user("ana"), "+1"], [user(VIEWER), "lo veo"]] });
+    const state = build(prNode({ reviewThreads: [answered, unanswered] }));
+
+    expect(state.threads).toMatchObject({ councilOpen: [Number(unanswered.comments.nodes[0]!.fullDatabaseId)], councilEver: true });
   });
 
   test("council resuelto: ya no está abierto pero queda councilEver", () => {

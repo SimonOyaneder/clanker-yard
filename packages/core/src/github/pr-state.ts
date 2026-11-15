@@ -1,5 +1,5 @@
 import type { PrState, ReviewerState, ResolvedPack } from "@clanker/api";
-import type { Actor, PrNode, RawContext, RawReview } from "./pr-query";
+import type { Actor, PrNode, RawContext, RawReview, RawThread } from "./pr-query";
 
 export interface PrStateContext {
   /** Lo que el pack decide (`packs.packFor`); sin pack son los defaults neutros. */
@@ -140,7 +140,9 @@ function ciOf(node: PrNode, { ciRules }: ResolvedPack): PrState["ci"] {
 
 /**
  * Cada thread es de quien escribe su primer comentario: council si lleva el prefijo del pack, bot si es
- * el bot de review, humano si no es ni un bot ni la cuenta conectada. Lo demás no se cuenta.
+ * el bot de review, humano si no es ni un bot ni la cuenta conectada. Lo demás no se cuenta. Un thread de
+ * council está abierto hasta que se resuelve o lo responde un comentario con el `commentPrefix` del
+ * pack: el agente lo responde pero no lo resuelve (como `clanker-loop watch`).
  */
 function threadsOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: string): PrState["threads"] {
   const prefix = pack.conventions.councilPrefix;
@@ -151,7 +153,9 @@ function threadsOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: s
     const login = first.author?.login;
     if (prefix && first.body.startsWith(prefix)) {
       threads.councilEver = true;
-      if (!thread.isResolved) threads.councilOpen.push(Number(first.fullDatabaseId));
+      if (!thread.isResolved && !answered(thread, pack.conventions.commentPrefix)) {
+        threads.councilOpen.push(Number(first.fullDatabaseId));
+      }
     } else if (login && pack.reviewBot?.logins.includes(login)) {
       if (!thread.isResolved) threads.botOpen++;
     } else if (isHuman(first.author) && login !== viewer) {
@@ -160,6 +164,10 @@ function threadsOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: s
     }
   }
   return threads;
+}
+
+function answered(thread: RawThread, prefix: string | undefined): boolean {
+  return prefix !== undefined && thread.comments.nodes.slice(1).some((reply) => reply.body.startsWith(prefix));
 }
 
 /**

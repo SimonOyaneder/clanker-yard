@@ -53,10 +53,11 @@ export function comment(by: Actor | null, body: string, at = "2026-11-10T10:00:0
   return { body, createdAt: at, author: by };
 }
 
-export function thread(by: Actor | null, body: string, opts: { resolved?: boolean } = {}): RawThread {
+export function thread(by: Actor | null, body: string, opts: { resolved?: boolean; replies?: [Actor, string][] } = {}): RawThread {
+  const comments = [[by, body] as const, ...(opts.replies ?? [])];
   return {
     isResolved: opts.resolved ?? false,
-    comments: { nodes: [{ fullDatabaseId: String(nextId++), body, author: by }] },
+    comments: { nodes: comments.map(([author, text]) => ({ fullDatabaseId: String(nextId++), body: text, author })) },
   };
 }
 

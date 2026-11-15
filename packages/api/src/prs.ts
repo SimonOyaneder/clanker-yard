@@ -74,7 +74,7 @@ export const PrState = z.object({
     humanOpen: z.int().nonnegative(),
     humanResolved: z.int().nonnegative(),
     botOpen: z.int().nonnegative(),
-    /** Id del primer comentario de cada thread de council abierto. */
+    /** Id del primer comentario de cada thread de council sin resolver y sin respuesta con el `commentPrefix` del pack. */
     councilOpen: z.array(z.int()),
     /** Hubo algún thread de council, aunque ya esté resuelto. */
     councilEver: z.boolean(),
