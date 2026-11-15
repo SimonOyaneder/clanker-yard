@@ -13,7 +13,7 @@ const QUESTION = "¿De qué repo es ";
 
 /**
  * Los repos que el usuario eligió para sus issues ambiguas: la última respuesta de cada issue a la decisión
- * de `askWhichRepo`. La opción es el nombre del repo (o su id). Si la última respuesta ya no es de un repo
+ * de `askWhichRepo`. La opción es la de `repoOption` (o el id del repo). Si la última respuesta ya no es de un repo
  * del proyecto, la issue sigue ambigua en vez de usar una respuesta anterior.
  */
 export function chosenRepos(store: Store, repos: Repos, project: ProjectRepos): Map<IssueId, string> {
@@ -29,7 +29,7 @@ export function chosenRepos(store: Store, repos: Repos, project: ProjectRepos): 
     if (row.subject?.type !== "issue" || !row.title.startsWith(QUESTION) || seen.has(row.subject.id)) continue;
     seen.add(row.subject.id);
     const option = (row.resolution as { option?: unknown } | null)?.option;
-    const bound = project.repos.find(({ repoId }) => repoId === option || repos.get(repoId)?.name === option);
+    const bound = project.repos.find(({ repoId }) => repoId === option || repoOption(repos, project, repoId) === option);
     if (bound) chosen.set(row.subject.id as IssueId, bound.repoId);
   }
   return chosen;
@@ -55,9 +55,20 @@ export function askWhichRepo(store: Store, repos: Repos, project: ProjectRepos &
       subject,
       title: `${QUESTION}${issue.ref.key}?`,
       body: `Ningún label de ${issue.ref.key} calza con un repo del proyecto ${project.slug}. Elige el repo donde corre; si toca varios, agrega sus labels a \`repos\` con projects.update.`,
-      options: project.repos.map(({ repoId }) => repos.get(repoId)?.name ?? repoId),
+      options: project.repos.map(({ repoId }) => repoOption(repos, project, repoId)),
     });
   });
+}
+
+/**
+ * La opción de un repo en la pregunta: su nombre, o el nombre con el id si otro repo del proyecto se llama igual
+ * (dos checkouts del mismo repo): con el nombre solo, elegir uno correría la issue en el otro.
+ */
+function repoOption(repos: Repos, project: ProjectRepos, repoId: string): string {
+  const name = repos.get(repoId)?.name;
+  if (name === undefined) return repoId;
+  const twins = project.repos.filter((bound) => repos.get(bound.repoId)?.name === name).length;
+  return twins > 1 ? `${name} (${repoId})` : name;
 }
 
 /** El plan de una issue con sus corridas dev y su elección, leídos del store. */

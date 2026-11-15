@@ -174,10 +174,11 @@ describe("el repo de la issue", () => {
   afterEach(() => other.cleanup());
 
   /** Un proyecto con dos repos, `front` y `back`, cada uno con su label; el flujo por defecto es `juguete`. */
-  async function twoRepoProject(client: Client) {
+  async function twoRepoProject(client: Client, opts: { names?: [string, string]; flowParams?: (front: string) => Record<string, unknown> } = {}) {
     const repos = createRepos(store);
-    const front = repos.add({ name: "front", path: repo.dir });
-    const back = repos.add({ name: "back", path: other.dir });
+    const [frontName, backName] = opts.names ?? ["front", "back"];
+    const front = repos.add({ name: frontName, path: repo.dir });
+    const back = repos.add({ name: backName, path: other.dir });
     const project = await client.projects.create({
       slug: "demo",
       name: "Demo",
@@ -185,6 +186,7 @@ describe("el repo de la issue", () => {
       defaultFlowId: "juguete",
       defaultProfileId: "juguete",
       repos: [{ repoId: front, labels: ["frontend"] }, { repoId: back, labels: ["backend"] }],
+      flowParams: opts.flowParams?.(front) ?? {},
     });
     return { project, front, back };
   }
@@ -226,6 +228,40 @@ describe("el repo de la issue", () => {
     expect((await client.decisions.list({ projectId: project.id })).map((d) => d.subject?.id).sort()).toEqual([issue.id, next.id].sort());
 
     await client.decisions.resolve({ id: question!.id, option: "back" });
+
+    await until(async () => {
+      expect((await client.runs.list({ projectId: project.id })).map((r) => [r.subject.id, r.params.repo, r.status])).toEqual([[issue.id, back, "done"]]);
+    });
+  });
+
+  test("un repo fijado en los flowParams del proyecto no saca a la issue de los repos de sus labels", async () => {
+    const client = await boot();
+    const { project, front, back } = await twoRepoProject(client, { flowParams: (front) => ({ repo: front }) });
+
+    const both = await client.issues.createLocal({ projectId: project.id, title: "Cruza", labels: ["backend", "frontend"] });
+
+    // Si el flowParam pisara al repo de la cadena, cada corrida caería en front y la issue volvería a la cola sin fin.
+    await until(async () => {
+      expect(await client.projects.queue({ id: project.id })).toEqual([]);
+      expect((await client.runs.list({ projectId: project.id })).map((r) => r.status)).toEqual(["done", "done"]);
+    });
+    const runs = (await client.runs.list({ projectId: project.id })).sort((a, b) => a.startedAt - b.startedAt);
+    expect(runs.map((r) => [r.subject.id, r.params.repo])).toEqual([[both.id, front], [both.id, back]]);
+  });
+
+  test("con dos repos del mismo nombre la pregunta los distingue y la issue corre en el elegido", async () => {
+    const client = await boot();
+    const { project, front, back } = await twoRepoProject(client, { names: ["app", "app"] });
+
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "No se sabe", labels: ["otro"] });
+
+    const [question] = await vi.waitFor(async () => {
+      const pending = await client.decisions.list({ projectId: project.id, status: ["pending"] });
+      expect(pending).toHaveLength(1);
+      return pending;
+    });
+    expect(question!.options).toEqual([`app (${front})`, `app (${back})`]);
+    await client.decisions.resolve({ id: question!.id, option: `app (${back})` });
 
     await until(async () => {
       expect((await client.runs.list({ projectId: project.id })).map((r) => [r.subject.id, r.params.repo, r.status])).toEqual([[issue.id, back, "done"]]);

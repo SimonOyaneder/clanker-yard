@@ -28,7 +28,7 @@ export interface RunStarter {
   /**
    * Reclama la issue en su tracker y lanza el flujo del proyecto (o `flow`) sobre ella. El flujo recibe
    * `repo` y `base` (su branch por defecto) si los declara; `flowParams` del proyecto (solo con su flujo por
-   * defecto) y `params` los pisan, en ese orden (`dependsOn` se ignora si el flujo no lo declara).
+   * defecto; su `repo` solo en un proyecto sin repos) y `params` los pisan, en ese orden (`dependsOn` se ignora si el flujo no lo declara).
    *
    * El repo es el que le toca a la issue (`planIssue`): el siguiente de su cadena si sus labels calzan con
    * varios repos (el flujo debe declarar `repo`), el único del proyecto o el que se eligió. Una issue
@@ -83,8 +83,11 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
         ...(repoId !== undefined && "repo" in declared ? { repo: repoId } : {}),
         ...(repoId !== undefined && "base" in declared ? { base: repos.config(repoId).defaultBranch } : {}),
         // Los flowParams del proyecto son del flujo por defecto, y solo los que declara: los demás son de los
-        // flujos que arrancan los triggers (una política como `rebaseNonDraft`) y aquí no cuentan.
-        ...(flow === project.defaultFlowId ? Object.fromEntries(Object.entries(project.flowParams).filter(([name]) => name in declared)) : {}),
+        // flujos que arrancan los triggers (una política como `rebaseNonDraft`) y aquí no cuentan. Su `repo` solo
+        // vale en un proyecto sin repos: con repos, el de la corrida es el de la issue (pisarlo la correría en otro).
+        ...(flow === project.defaultFlowId
+          ? Object.fromEntries(Object.entries(project.flowParams).filter(([name]) => name in declared && !(name === "repo" && project.repos.length > 0)))
+          : {}),
         // `dependsOn` lo pone el Scheduler desde la cola: un flujo que no publica PRs no lo declara ni lo necesita.
         ...Object.fromEntries(Object.entries(input.params ?? {}).filter(([name]) => name !== "dependsOn" || name in declared)),
       };
