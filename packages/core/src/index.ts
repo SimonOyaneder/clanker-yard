@@ -49,6 +49,17 @@ export type {
   GitHubClient,
   GitHubTokenSource,
 } from "./github/client";
+export { createAskpass, TICKET_MAX_READS, TICKET_TTL_MS } from "./git/askpass";
+export type { Askpass, AskpassOptions, AskpassSession, GitCredentials } from "./git/askpass";
+export { createGitRemote } from "./git/remote";
+export type {
+  FetchOutcome,
+  GitRemote,
+  GitRemoteOptions,
+  PushOutcome,
+  PushRequest,
+  RemoteTarget,
+} from "./git/remote";
 export { createFileSecrets } from "./secrets/encrypted-file";
 export { createKeychainSecrets } from "./secrets/keychain";
 export type { KeychainSecretsOptions } from "./secrets/keychain";

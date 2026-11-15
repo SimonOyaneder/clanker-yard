@@ -1,5 +1,5 @@
 import type { Connection, ConnectionProvider, Origin } from "@clanker/api";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { createGitHubClient, type GitHubApiOptions, type GitHubClient } from "../github/client";
 import { validatePat } from "../github/pat";
 import type { Secrets } from "../secrets/secrets";
@@ -48,6 +48,11 @@ export interface Connections {
    * vencen en `EXPIRY_WARNING_DAYS`.
    */
   list(): Connection[];
+  /**
+   * Marca la cuenta como `revoked` (GitHub rechazó su token con un 401) y emite `connection.changed`.
+   * Reconectarla con `connect` la deja `active`. No hace nada si no está conectada o ya estaba revocada.
+   */
+  markRevoked(provider: ConnectionProvider, account: string, origin: Origin): void;
   /** El token de una cuenta, solo para el core. Lanza si la cuenta no está conectada. */
   token(provider: ConnectionProvider, account: string): Promise<string>;
   /** Borra el token y la cuenta y emite `connection.changed`. No hace nada si no estaba conectada. */
@@ -131,6 +136,30 @@ export function createConnections(
         .orderBy(asc(connections.provider), asc(connections.account))
         .all()
         .map((row) => toConnection(row, at));
+    },
+
+    markRevoked(provider, account, origin) {
+      store.tx((tx) => {
+        const revoked = tx.db
+          .update(connections)
+          .set({ status: "revoked" })
+          .where(
+            and(
+              eq(connections.provider, provider),
+              eq(connections.account, account),
+              ne(connections.status, "revoked"),
+            ),
+          )
+          .returning({ account: connections.account })
+          .get();
+        if (revoked) {
+          tx.emit({
+            type: "connection.changed",
+            origin,
+            payload: { provider, account, status: "revoked" },
+          });
+        }
+      });
     },
 
     async token(provider, account) {

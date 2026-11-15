@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { RunId } from "@clanker/api";
 import { and, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
+import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { newId } from "../store/conventions";
 import { workspaces } from "../store/schema";
 import type { Store } from "../store/store";
@@ -26,6 +27,13 @@ export interface RepoConfig {
   protectedBranches?: string[];
   /** Raíz de los worktrees en lugar de `<dataDir>/worktrees`; relativa se resuelve contra `dataDir`. */
   worktreeDir?: string;
+  /** Adónde y como quién se pushea; sin esto el repo no tiene `push` ni `fetch`. */
+  remote?: {
+    /** `https://github.com/<owner>/<repo>.git`: explícita, aunque `origin` sea SSH. */
+    url: string;
+    /** La cuenta de GitHub conectada cuyo token autentica. */
+    account: string;
+  };
 }
 
 export interface WorkspacesOptions {
@@ -35,6 +43,8 @@ export interface WorkspacesOptions {
   repos: (repoId: string) => RepoConfig;
   /** Autor y committer de todo lo que corre `git` en un worktree. */
   identity: { name: string; email: string };
+  /** Quien pushea y fetchea; sin él `push` y `fetch` lanzan. */
+  remote?: GitRemote;
   leaseTtlMs?: number;
   now?: () => number;
 }
@@ -72,6 +82,15 @@ export interface Workspaces {
   release(lease: WorkspaceLease): void;
   /** Lanza `StaleLeaseError` si `lease` ya no es el lease vigente del worktree. */
   validate(lease: WorkspaceLease): void;
+  /**
+   * Pushea `HEAD` a `refs/heads/<branch>` con `--force-with-lease` contra el `remote_sha` guardado, tras
+   * validar el lease. Con `ok` el nuevo `remote_sha` queda guardado (también si el remoto ya tenía
+   * ese commit). `lease-rejected` (otro pusheó) no se reintenta; `unauthorized` (401) deja la conexión
+   * revocada.
+   */
+  push(lease: WorkspaceLease): Promise<PushOutcome>;
+  /** Trae las branches del remoto a `refs/remotes/origin/*` con el mismo mecanismo que `push`. */
+  fetch(repo: string): Promise<FetchOutcome>;
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
   git(lease: WorkspaceLease, ...args: string[]): Promise<string>;
 }
@@ -86,7 +105,7 @@ export class StaleLeaseError extends Error {}
 export class BranchNotAllowedError extends Error {}
 
 export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
-  const { store, dataDir, repos, identity, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
+  const { store, dataDir, repos, identity, remote, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
   const heartbeats = new Map<string, NodeJS.Timeout>();
   const repoLocks = new Map<string, Promise<unknown>>();
 
@@ -260,11 +279,14 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     // El lease se renueva desde ya: el fetch y el worktree add pueden tardar más que el ttl.
     const lost = startHeartbeat(row.id, runId, row.fencingToken);
     let baseSha: string;
+    let remoteSha: string | undefined;
     let head: string;
     try {
-      baseSha = !claim.isNew && existsSync(row.path)
-        ?(row.baseSha ?? (await resolveBase(cfg, row.baseRef)))
-        : await withRepoLock(repo, () => createWorktree(cfg, row, claim.isNew));
+      if (!claim.isNew && existsSync(row.path)) {
+        baseSha = row.baseSha ?? (await resolveBase(cfg, row.baseRef));
+      } else {
+        ({ baseSha, remoteSha } = await withRepoLock(repo, () => createWorktree(cfg, row, claim.isNew)));
+      }
       head = await git(row.path, ["rev-parse", "HEAD"]);
     } catch (error) {
       stopHeartbeat(row.id, row.fencingToken);
@@ -274,7 +296,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     store.tx(({ db }) => {
       const updated = db
         .update(workspaces)
-        .set({ state: "leased", baseSha, headSha: head })
+        .set({ state: "leased", baseSha, headSha: head, ...(remoteSha && { remoteSha }) })
         .where(
           and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, row.fencingToken)),
         )
@@ -299,12 +321,15 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     };
   }
 
-  /** Fetch, resuelve la base y agrega el worktree. Va bajo el lock del repo. */
+  /**
+   * Fetch, resuelve la base y agrega el worktree. Va bajo el lock del repo. Si la branch ya existe en el
+   * remoto, su punta es el `remoteSha` inicial: sin él, el primer push con lease sería rechazado.
+   */
   async function createWorktree(
     cfg: RepoConfig,
     row: typeof workspaces.$inferSelect,
     isNew: boolean,
-  ): Promise<string> {
+  ): Promise<{ baseSha: string; remoteSha?: string }> {
     // Una fila nueva cuya carpeta ya existe apunta al worktree de otra branch: en macOS `CLA-1` y
     // `cla-1` son la misma carpeta, y reusarla dejaría dos corridas escribiendo en el mismo worktree.
     if (isNew && existsSync(row.path)) {
@@ -334,7 +359,10 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       const start = remoteExists ? `refs/remotes/${REMOTE}/${row.branch}` : baseSha;
       await git(cfg.path, [...add, "-b", row.branch, row.path, start]);
     }
-    return baseSha;
+    return {
+      baseSha,
+      ...(remoteExists && { remoteSha: await git(cfg.path, ["rev-parse", `refs/remotes/${REMOTE}/${row.branch}`]) }),
+    };
   }
 
   /**
@@ -395,8 +423,51 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     );
   }
 
+  function remoteOf(repoId: string) {
+    const target = repos(repoId).remote;
+    if (!remote || !target) {
+      throw new Error(`El repo ${repoId} no tiene remoto configurado (repos().remote y la opción remote): no se puede pushear ni fetchear.`);
+    }
+    return { remote, ...target };
+  }
+
+  async function push(lease: WorkspaceLease): Promise<PushOutcome> {
+    validate(lease);
+    const row = store.db.select().from(workspaces).where(eq(workspaces.id, lease.workspaceId)).get()!;
+    const { remote, url, account } = remoteOf(row.repoId);
+    const sha = await git(lease.path, ["rev-parse", "HEAD"]);
+    const outcome = await remote.push({
+      cwd: lease.path,
+      url,
+      account,
+      branch: lease.branch,
+      sha,
+      expectedRemoteSha: row.remoteSha,
+    });
+    if (outcome !== "ok") return outcome;
+    const saved = store.tx(({ db }) =>
+      db
+        .update(workspaces)
+        .set({ headSha: sha, remoteSha: sha })
+        .where(and(eq(workspaces.id, lease.workspaceId), eq(workspaces.fencingToken, lease.fencingToken)))
+        .returning({ id: workspaces.id })
+        .get(),
+    );
+    if (!saved) {
+      throw new StaleLeaseError(
+        `El lease de ${lease.branch} se perdió durante el push: el remoto ya tiene ${sha} pero otra corrida tomó el workspace.`,
+      );
+    }
+    return "ok";
+  }
+
   return {
     acquire,
+    push,
+    async fetch(repo) {
+      const { remote, url, account } = remoteOf(repo);
+      return withRepoLock(repo, () => remote.fetch({ cwd: repos(repo).path, url, account }));
+    },
     release(lease) {
       stopHeartbeat(lease.workspaceId, lease.fencingToken);
       store.tx(({ db, emit }) => {

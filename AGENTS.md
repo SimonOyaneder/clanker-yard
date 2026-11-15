@@ -71,6 +71,10 @@ Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Sec
 
 `Tracker` (`packages/core/src/tracker/tracker.ts`) es lo único que el scheduler y los flujos ven de un tracker; las formas normalizadas (`Issue`, `IssueRef`, `StatusCategory`, `IssueFilter`, `TrackerCapabilities`) son de `@clanker/api`. `createLocalTracker(store)` es el adapter `local`: sus issues, comentarios y relaciones viven en `local_issues`, `local_comments` y `local_relations`, y `rev` es el cursor de `changesSince`. `createIssues(store)` es el caché `issues`: `sync(tracker, { projectId, project })` vuelca `listIssues` (la primera vez) o `changesSince` (después, con el cursor en `sync_cursors`, clave `issues:<tracker>:<proyecto>`) y emite `issue.synced`; `issues.list`, `issues.get` y `issues.createLocal` de la API leen y escriben ahí. Un adapter nuevo implementa `Tracker` y declara sus `capabilities`.
 
+## Git remoto (push y fetch)
+
+Solo el core habla con el remoto, y el token nunca llega al entorno de git ni de los hooks del repo. `createGitRemote({ askpass, connections })` (`packages/core/src/git/`) corre `git -c credential.helper= push|fetch <url explícita>` con `GIT_TERMINAL_PROMPT=0` y `GIT_ASKPASS` apuntando a un script que `createAskpass` escribe en un directorio 0700: el script cambia un ticket (60 s, 2 lecturas) por el usuario y la contraseña por un socket unix del core. Se usa a través de `workspaces.push(lease)` (`--force-with-lease` contra `remote_sha`; outcomes `ok`, `lease-rejected` sin reintento y `unauthorized`, que deja la conexión `revoked` con `connections.markRevoked`) y `workspaces.fetch(repo)`; `RepoConfig.remote` trae la URL y la cuenta. Los tests (`packages/testkit/src/git-remote.test.ts`) levantan un servidor git HTTP local con Basic auth sobre un bare temporal: nunca GitHub ni tokens reales.
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:

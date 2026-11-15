@@ -117,6 +117,33 @@ describe("disconnect", () => {
   });
 });
 
+describe("markRevoked", () => {
+  test("deja la cuenta revocada y emite connection.changed una sola vez", async () => {
+    await connections.connect({ ...github, token: TOKEN }, "ui");
+
+    connections.markRevoked("github", "simon", "core");
+    connections.markRevoked("github", "simon", "core");
+
+    expect(connections.list()[0]?.status).toBe("revoked");
+    expect(store.events.since(0).filter((e) => e.payload.status === "revoked")).toHaveLength(1);
+  });
+
+  test("conectar de nuevo la deja activa", async () => {
+    await connections.connect({ ...github, token: TOKEN }, "ui");
+    connections.markRevoked("github", "simon", "core");
+
+    await connections.connect({ ...github, token: `${TOKEN}-nuevo` }, "ui");
+
+    expect(connections.list()[0]?.status).toBe("active");
+  });
+
+  test("una cuenta que no existe no hace nada", () => {
+    connections.markRevoked("github", "nadie", "core");
+
+    expect(store.events.since(0)).toEqual([]);
+  });
+});
+
 describe("token", () => {
   test("si la cuenta existe pero falta su secreto, dice cómo repararlo", async () => {
     await connections.connect({ ...github, token: TOKEN }, "ui");
