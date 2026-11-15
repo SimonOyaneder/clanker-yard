@@ -5,9 +5,15 @@ import { z } from "zod";
 /** Variable de entorno que pisa `githubApp.clientId` del archivo; sirve en dev y en tests. */
 export const GITHUB_APP_CLIENT_ID_ENV = "CLANKER_GITHUB_APP_CLIENT_ID";
 
+/** Variable de entorno que pisa `linear.clientId` del archivo. */
+export const LINEAR_CLIENT_ID_ENV = "CLANKER_LINEAR_CLIENT_ID";
+
+const ClientId = z.object({ clientId: z.string().trim().min(1) }).strict();
+
 const ConfigFile = z
   .object({
-    githubApp: z.object({ clientId: z.string().trim().min(1) }).strict().optional(),
+    githubApp: ClientId.optional(),
+    linear: ClientId.optional(),
   })
   .strict();
 
@@ -15,6 +21,8 @@ const ConfigFile = z
 export interface CoreConfig {
   /** El client_id de la GitHub App; sin él no se puede iniciar el device flow. */
   githubApp?: { clientId: string };
+  /** El client_id de la OAuth app de Linear; sin él `connections.linearAuth` falla con el paso a seguir. */
+  linear?: { clientId: string };
 }
 
 /**
@@ -25,8 +33,12 @@ export interface CoreConfig {
  */
 export function readCoreConfig(dataDir: string, env: Record<string, string | undefined> = process.env): CoreConfig {
   const config = readConfigFile(join(dataDir, "config.json"));
-  const clientId = env[GITHUB_APP_CLIENT_ID_ENV]?.trim() || config.githubApp?.clientId;
-  return clientId ? { githubApp: { clientId } } : {};
+  const githubApp = env[GITHUB_APP_CLIENT_ID_ENV]?.trim() || config.githubApp?.clientId;
+  const linear = env[LINEAR_CLIENT_ID_ENV]?.trim() || config.linear?.clientId;
+  return {
+    ...(githubApp ? { githubApp: { clientId: githubApp } } : {}),
+    ...(linear ? { linear: { clientId: linear } } : {}),
+  };
 }
 
 function readConfigFile(path: string): z.infer<typeof ConfigFile> {
@@ -45,7 +57,7 @@ function readConfigFile(path: string): z.infer<typeof ConfigFile> {
   }
   const parsed = ConfigFile.safeParse(json);
   if (!parsed.success) {
-    throw new Error(`${path} no tiene el formato esperado ({ "githubApp": { "clientId": "..." } }): ${z.prettifyError(parsed.error)}`);
+    throw new Error(`${path} no tiene el formato esperado ({ "githubApp": { "clientId": "..." }, "linear": { "clientId": "..." } }): ${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
 }

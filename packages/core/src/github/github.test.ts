@@ -57,7 +57,7 @@ describe("setPat", () => {
     expect(connection).toEqual({
       provider: "github",
       account: "octocat",
-      scopes: ["contents", "pull_requests", "issues", "checks"],
+      scopes: ["contents", "pull_requests", "issues", "checks", "statuses"],
       status: "active",
       expiresAt: EXPIRES_AT,
     });
@@ -73,7 +73,7 @@ describe("setPat", () => {
     await connections.setPat(TOKEN, "ui");
 
     const probed = github!.requests.map((r) => r.path).filter((p) => p.startsWith("/repos/"));
-    expect(probed).toHaveLength(4);
+    expect(probed).toHaveLength(5);
     expect(probed.every((p) => p.startsWith("/repos/octocat/secret-project/"))).toBe(true);
   });
 
@@ -82,13 +82,14 @@ describe("setPat", () => {
       healthyGitHub({
         "GET /repos/octocat/secret-project/issues": recorded("probe.forbidden"),
         "GET /repos/octocat/secret-project/commits/trunk/check-runs": recorded("probe.forbidden"),
+        "GET /repos/octocat/secret-project/commits/trunk/status": recorded("probe.forbidden"),
       }),
     );
 
     const error = await connections.setPat(TOKEN, "ui").catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(GitHubPatError);
-    expect((error as Error).message).toContain("Issues (write), Checks (read)");
+    expect((error as Error).message).toContain("Issues (write), Checks (read), Commit statuses (read)");
     expect((error as Error).message).not.toContain("Contents");
     expect((error as Error).message).toContain(githubPatForm().url);
     expect(connections.list()).toEqual([]);
@@ -171,12 +172,14 @@ describe("githubPatForm", () => {
       pull_requests: "write",
       issues: "write",
       checks: "read",
+      statuses: "read",
     });
     expect(form.permissions.map((p) => `${p.name}:${p.access}`)).toEqual([
       "contents:write",
       "pull_requests:write",
       "issues:write",
       "checks:read",
+      "statuses:read",
     ]);
   });
 });

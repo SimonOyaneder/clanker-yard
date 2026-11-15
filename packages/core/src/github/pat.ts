@@ -10,13 +10,15 @@ export class GitHubPatError extends Error {
 /**
  * Lo que Clanker Yard necesita de un fine-grained PAT (`docs/design.html#integraciones`). `write` en
  * contents (push), pull requests (abrir y editar PRs) e issues (los comentarios de un PR son
- * comentarios de issue); checks solo se lee. `probe` es el endpoint de lectura con el que se verifica.
+ * comentarios de issue); checks y commit statuses solo se leen (el CI de un PR mezcla check runs y
+ * status contexts como el de merge-queue). `probe` es el endpoint de lectura con el que se verifica.
  */
 const PERMISSIONS = [
   { name: "contents", label: "Contents", access: "write", probe: "GET /repos/{owner}/{repo}/commits" },
   { name: "pull_requests", label: "Pull requests", access: "write", probe: "GET /repos/{owner}/{repo}/pulls" },
   { name: "issues", label: "Issues", access: "write", probe: "GET /repos/{owner}/{repo}/issues" },
   { name: "checks", label: "Checks", access: "read", probe: "GET /repos/{owner}/{repo}/commits/{ref}/check-runs" },
+  { name: "statuses", label: "Commit statuses", access: "read", probe: "GET /repos/{owner}/{repo}/commits/{ref}/status" },
 ] as const;
 
 /**

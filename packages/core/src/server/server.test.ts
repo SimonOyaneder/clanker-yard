@@ -226,7 +226,7 @@ describe("connections", () => {
 
     await expect(client.connections.linearAuth()).rejects.toMatchObject({
       code: "BAD_REQUEST",
-      message: expect.stringContaining("client_id"),
+      message: expect.stringMatching(/config\.json.*CLANKER_LINEAR_CLIENT_ID/),
     });
   });
 

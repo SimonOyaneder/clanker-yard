@@ -90,6 +90,7 @@ export function healthyGitHub(
     "GET /repos/octocat/secret-project/pulls": recorded("probe.ok"),
     "GET /repos/octocat/secret-project/issues": recorded("probe.ok"),
     "GET /repos/octocat/secret-project/commits/trunk/check-runs": recorded("probe.ok"),
+    "GET /repos/octocat/secret-project/commits/trunk/status": recorded("probe.ok"),
   };
   return (request) => {
     const key = `${request.method} ${request.path}`;

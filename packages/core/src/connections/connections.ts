@@ -256,7 +256,7 @@ export function createConnections(
   function linearConfig() {
     if (!linear.clientId) {
       throw new LinearAuthError(
-        "Falta el client_id de la OAuth app de Linear: regístrala en Linear y configúralo en el core (docs en AGENTS.md, Secretos y conexiones).",
+        `Falta el client_id de la OAuth app de Linear. Regístrala (AGENTS.md, "Paso manual pendiente") y ponlo en config.json de la carpeta de datos de Clanker Yard (en macOS, ~/Library/Application Support/Clanker Yard) como { "linear": { "clientId": "..." } }, o en la variable CLANKER_LINEAR_CLIENT_ID; luego reinicia el core.`,
       );
     }
     return { endpoints, clientId: linear.clientId };

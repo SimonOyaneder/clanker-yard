@@ -12,6 +12,7 @@ Registrarla es un paso manual en github.com: nadie la crea por ti. El manifiesto
 | Pull requests | Read and write | Abrir y editar PRs, reviews y threads. |
 | Issues | Read and write | Los comentarios de un PR son comentarios de issue. |
 | Checks | Read-only | El estado de CI de un PR. |
+| Commit statuses | Read-only | Los estados de CI que no son check runs (merge-queue, por ejemplo). |
 | Metadata | Read-only | GitHub lo agrega siempre. |
 | Device flow | Habilitado | Es como el usuario conecta GitHub desde la app. |
 | Webhooks | Inactivos | Sin relay, el core hace polling con ETags. |
@@ -50,7 +51,7 @@ Settings, Developer settings, GitHub Apps, **New GitHub App** (https://github.co
 - GitHub App name: `Clanker Yard`. Homepage URL: `https://github.com/SimonOyaneder/clanker-yard`.
 - Callback URL: vacío. Request user authorization (OAuth) during installation: desmarcado.
 - Webhook: desmarca **Active**.
-- Permissions, Repository permissions: Checks Read-only; Contents, Issues y Pull requests Read and write. Ninguno más.
+- Permissions, Repository permissions: Checks y Commit statuses Read-only; Contents, Issues y Pull requests Read and write. Ninguno más.
 - Where can this GitHub App be installed: **Only on this account**.
 
 ## 2. Ajustes que el manifiesto no puede poner
@@ -80,6 +81,8 @@ El core lee el `client_id` al arrancar, de dos lugares (el entorno gana):
   { "githubApp": { "clientId": "Iv23liXXXXXXXXXXXXXX" } }
   ```
 
+  El mismo archivo guarda el `client_id` de la OAuth app de Linear (`"linear": { "clientId": "..." }`, variable `CLANKER_LINEAR_CLIENT_ID`).
+
   `dataDir` es `~/Library/Application Support/Clanker Yard` en macOS, `~/.local/share/clanker-yard` en Linux y `%APPDATA%\Clanker Yard` en Windows; con `CLANKER_HOME`, esa carpeta. Es el lugar para la app de escritorio, que lanzada desde el Dock no hereda variables de la terminal.
 - La variable `CLANKER_GITHUB_APP_CLIENT_ID`, para dev y tests.
 
@@ -92,7 +95,7 @@ Un `config.json` que no es JSON, trae claves desconocidas o un `clientId` vacío
 
 ## Si el CI sale vacío
 
-El core lee el CI de un PR por GraphQL (`checks` y commit statuses). Los commit statuses (los que publica `merge-queue`, por ejemplo) requieren el permiso **Commit statuses: Read-only**, que esta App no pide porque el PAT tampoco lo pide. Si en un repo el CI aparece vacío o sin los estados de merge-queue, agrega ese permiso y que el owner lo acepte. **[sin verificar]** contra un repo real.
+El core lee el CI de un PR por GraphQL (`checks` y commit statuses). Los commit statuses (los que publica `merge-queue`, por ejemplo) requieren el permiso **Commit statuses: Read-only**, que la App y el PAT piden. Si en un repo el CI aparece vacío o sin los estados de merge-queue, revisa que el owner haya aceptado ese permiso. **[sin verificar]** contra un repo real.
 
 ## Referencias
 

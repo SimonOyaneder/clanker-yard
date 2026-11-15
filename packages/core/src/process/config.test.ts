@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { GITHUB_APP_CLIENT_ID_ENV, readCoreConfig } from "./config";
+import { GITHUB_APP_CLIENT_ID_ENV, LINEAR_CLIENT_ID_ENV, readCoreConfig } from "./config";
 
 let dirs: string[] = [];
 
@@ -40,6 +40,17 @@ describe("readCoreConfig", () => {
     expect(readCoreConfig(dir, { [GITHUB_APP_CLIENT_ID_ENV]: "  " })).toEqual({});
   });
 
+  test("el client_id de Linear sale de config.json, el entorno lo pisa y cada uno es independiente del de GitHub", () => {
+    const dir = dataDir(JSON.stringify({ githubApp: { clientId: "Iv23liFromFile" }, linear: { clientId: "lin-file" } }));
+    expect(readCoreConfig(dir, {})).toEqual({ githubApp: { clientId: "Iv23liFromFile" }, linear: { clientId: "lin-file" } });
+    expect(readCoreConfig(dir, { [LINEAR_CLIENT_ID_ENV]: " lin-env " })).toEqual({
+      githubApp: { clientId: "Iv23liFromFile" },
+      linear: { clientId: "lin-env" },
+    });
+    expect(readCoreConfig(dataDir(), { [LINEAR_CLIENT_ID_ENV]: "lin-env" })).toEqual({ linear: { clientId: "lin-env" } });
+    expect(readCoreConfig(dataDir(), { [LINEAR_CLIENT_ID_ENV]: " " })).toEqual({});
+  });
+
   test("un archivo sin githubApp es una config vacía", () => {
     expect(readCoreConfig(dataDir("{}"), {})).toEqual({});
   });
@@ -49,6 +60,8 @@ describe("readCoreConfig", () => {
     ["trae una clave desconocida (un typo no se ignora)", '{ "githubapp": {} }', /formato esperado/],
     ["tiene el clientId vacío", '{ "githubApp": { "clientId": " " } }', /formato esperado/],
     ["tiene un clientId que no es texto", '{ "githubApp": { "clientId": 7 } }', /formato esperado/],
+    ["tiene el clientId de Linear vacío", '{ "linear": { "clientId": "" } }', /formato esperado/],
+    ["trae una clave desconocida dentro de linear", '{ "linear": { "client_id": "x" } }', /formato esperado/],
   ])("un config.json que %s lanza con la ruta", (_name, content, message) => {
     const dir = dataDir(content);
     expect(() => readCoreConfig(dir, {})).toThrow(message);

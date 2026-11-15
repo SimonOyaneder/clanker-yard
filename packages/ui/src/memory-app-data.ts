@@ -189,7 +189,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
   // Conexiones de ejemplo: GitHub en regla, Linear vencida y Claude sin configurar.
   const day = 86_400_000
   const connections: Connection[] = [
-    { provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks"], status: "active", expiresAt: now + 60 * day, expiresSoon: false },
+    { provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 60 * day, expiresSoon: false },
     { provider: "linear", account: "clanker-yard", scopes: ["read", "write"], status: "expired", expiresAt: now - 2 * day },
   ]
   const connect = (c: Connection) => {
@@ -295,11 +295,12 @@ export function createMemoryAppData(now = Date.now()): AppData {
         { name: "pull_requests", label: "Pull requests", access: "write" },
         { name: "issues", label: "Issues", access: "write" },
         { name: "checks", label: "Checks", access: "read" },
+        { name: "statuses", label: "Commit statuses", access: "read" },
       ],
     }),
     setGithubPat: async (token) => {
       if (token.startsWith("bad")) throw new Error("GitHub rechazó el token: es inválido, está vencido o fue revocado. Crea uno nuevo y vuelve a pegarlo.")
-      return connect({ provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks"], status: "active", expiresAt: now + 90 * day, expiresSoon: false })
+      return connect({ provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 90 * day, expiresSoon: false })
     },
     // No hay navegador ni redirect: la cuenta queda conectada de una vez.
     linearAuth: async () => {

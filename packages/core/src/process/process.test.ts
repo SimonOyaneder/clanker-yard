@@ -306,6 +306,34 @@ describe("core", () => {
     expect(JSON.parse(log.split("\n")[0]!)).toMatchObject({ level: "info" });
   });
 
+  test("sin client_id de Linear, linearAuth dice dónde configurarlo", async () => {
+    const core = await ensure(tempHome());
+
+    await expect(core.client.connections.linearAuth()).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("CLANKER_LINEAR_CLIENT_ID"),
+    });
+  });
+
+  test.each([
+    ["config.json", (home: string) => writeFileSync(join(home, "config.json"), JSON.stringify({ linear: { clientId: "lin-from-file" } })), {}],
+    ["la variable de entorno", () => {}, { CLANKER_LINEAR_CLIENT_ID: "lin-from-file" }],
+  ])("el client_id de Linear de %s llega a linearAuth", async (_name, setup, env) => {
+    const home = tempHome();
+    mkdirSync(home, { recursive: true });
+    setup(home);
+    const child = spawn(process.execPath, [entry, "--data-dir", home, "--log-dir", join(home, "logs")], {
+      env: { ...process.env, ...env },
+    });
+    await vi.waitFor(() => expect(readCoreJson(home)?.pid).toBe(child.pid), { timeout: 10_000 });
+    const core = await connectToCore(home, "cli");
+
+    // El redirect de Linear usa un puerto fijo (48721): si otro proceso lo tiene, falla por el puerto, no por el client_id.
+    const login = await core!.client.connections.linearAuth().catch((error: Error) => error);
+    if (login instanceof Error) expect(login.message).not.toContain("client_id");
+    else expect(new URL(login.url).searchParams.get("client_id")).toBe("lin-from-file");
+  });
+
   test("sin --data-dir ni CLANKER_HOME sale con error accionable", async () => {
     const env = { ...process.env };
     delete env.CLANKER_HOME;
