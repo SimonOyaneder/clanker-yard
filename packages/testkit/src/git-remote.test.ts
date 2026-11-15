@@ -203,6 +203,28 @@ describe("push", () => {
     expect(savedRemoteSha()).toBe(next);
   });
 
+  test("con council pushea los fixup! encima de lo que hay, pero un historial reescrito no se fuerza", async () => {
+    await setup();
+    const lease = await acquire();
+    const first = await commit(lease, "feat: one");
+    expect(await workspaces.push(lease)).toBe("ok");
+
+    const fixup = await commit(lease, "fixup! feat: one");
+    expect(await workspaces.push(lease, { council: true })).toBe("ok");
+    expect(remoteSha()).toBe(fixup);
+
+    // Un squash local reescribe lo ya pusheado: sin council sería un force push con lease, con council no sale.
+    await workspaces.git(lease, "reset", "--hard", first);
+    await workspaces.git(lease, "commit", "--amend", "--allow-empty", "--message", "feat: one, amended");
+    const amended = await workspaces.git(lease, "rev-parse", "HEAD");
+    await expect(workspaces.push(lease, { council: true })).rejects.toThrow(/council.*force push/);
+    expect(remoteSha()).toBe(fixup);
+    expect(savedRemoteSha()).toBe(fixup);
+
+    expect(await workspaces.push(lease)).toBe("ok");
+    expect(remoteSha()).toBe(amended);
+  });
+
   test("una branch que ya existe en el remoto parte con su punta como remote_sha", async () => {
     await setup(TOKEN, { branches: { [BRANCH]: [{ message: "work" }] } });
     // Solo queda la branch remota: el caso de retomar un PR que no tiene worktree local.

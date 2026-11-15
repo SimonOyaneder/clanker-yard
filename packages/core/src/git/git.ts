@@ -73,3 +73,8 @@ export async function tryGit(cwd: string, args: string[]): Promise<string | unde
     return undefined;
   }
 }
+
+/** `merge-base --is-ancestor`. Que `ancestor` no exista en el repo también es "no". */
+export async function isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {
+  return (await tryGit(cwd, ["merge-base", "--is-ancestor", ancestor, descendant])) !== undefined;
+}

@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import type { RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
-import { git, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
+import { git, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { execLogged, type ExecResult } from "./exec";
 import { newId } from "../store/conventions";
@@ -119,9 +119,10 @@ export interface Workspaces {
    * Pushea `HEAD` a `refs/heads/<branch>` con `--force-with-lease` contra el `remote_sha` guardado, tras
    * validar el lease. Con `ok` el nuevo `remote_sha` queda guardado (también si el remoto ya tenía
    * ese commit). `lease-rejected` (otro pusheó) no se reintenta; `unauthorized` (401) deja la conexión
-   * revocada.
+   * revocada. Con `council` (el PR tuvo threads `[clanker-council]`) el push nunca fuerza: si el
+   * `remote_sha` no es ancestro de `HEAD` lanza sin pushear.
    */
-  push(lease: WorkspaceLease): Promise<PushOutcome>;
+  push(lease: WorkspaceLease, opts?: { council?: boolean }): Promise<PushOutcome>;
   /** Trae las branches del remoto a `refs/remotes/origin/*` con el mismo mecanismo que `push`. */
   fetch(repo: string): Promise<FetchOutcome>;
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
@@ -489,11 +490,17 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return { remote, ...target };
   }
 
-  async function push(lease: WorkspaceLease): Promise<PushOutcome> {
+  async function push(lease: WorkspaceLease, { council = false } = {}): Promise<PushOutcome> {
     validate(lease);
     const row = store.db.select().from(workspaces).where(eq(workspaces.id, lease.workspaceId)).get()!;
     const { remote, url, account } = remoteOf(row.repoId);
     const sha = await git(lease.path, ["rev-parse", "HEAD"]);
+    if (council && row.remoteSha && !(await isAncestor(lease.path, row.remoteSha, sha))) {
+      throw new Error(
+        `${lease.branch} tiene council y su HEAD ${sha.slice(0, 9)} no desciende de lo que hay en el remoto ` +
+          `(${row.remoteSha.slice(0, 9)}): pushearlo sería un force push, que un PR con council no admite.`,
+      );
+    }
     const outcome = await remote.push({
       cwd: lease.path,
       url,

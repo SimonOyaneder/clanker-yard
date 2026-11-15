@@ -154,3 +154,5 @@ export { createRecipeTester, RecipeTestError } from "./recipe/recipe-test";
 export type { RecipeTester, RecipeTesterOptions } from "./recipe/recipe-test";
 
 export { commitsApplyAction } from "./commits/apply";
+export { preparePush } from "./commits/prepare-push";
+export type { PreparePushOptions, PreparePushResult } from "./commits/prepare-push";
