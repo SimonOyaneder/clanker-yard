@@ -23,6 +23,25 @@ function setup(): { store: Store; defs: Defs } {
 const flow = { kind: "flow", slug: "dev", scope: "user", source: "ui" } as const;
 const body = { name: "dev", steps: [{ id: "plan" }] };
 
+describe("validate", () => {
+  test("devuelve el body parseado y no guarda nada", () => {
+    const { store, defs } = setup();
+
+    expect(defs.validate("flow", "dev", body)).toEqual(body);
+
+    expect(defs.list("flow")).toEqual([]);
+    expect(store.events.since(0)).toEqual([]);
+  });
+
+  test("un body inválido lanza con la ruta del error", () => {
+    const { defs } = setup();
+
+    expect(() => defs.validate("flow", "dev", { name: "dev", steps: [{ id: 7 }] })).toThrow(
+      /steps\.0\.id/,
+    );
+  });
+});
+
 describe("save", () => {
   test("guardar dos veces el mismo body no crea una versión nueva ni un evento", () => {
     const { store, defs } = setup();

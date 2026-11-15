@@ -68,6 +68,11 @@ export interface Defs {
   /** Cada módulo enchufa el validador de los kinds que posee. Registrar un kind dos veces es un bug. */
   register(kind: DefKind, schema: ZodType): void;
   /**
+   * Valida el body con el validador de su kind sin guardar nada. Lanza `DefValidationError`
+   * con la ruta de cada problema. Devuelve el body ya parseado (con sus defaults).
+   */
+  validate(kind: DefKind, slug: string, body: unknown): unknown;
+  /**
    * Valida el body con el validador de su kind y lo guarda. Crea la def (versión 1) o, si ya
    * existe, una versión nueva, pero solo cuando el body validado cambia: el mismo contenido
    * dos veces no suma versiones ni emite eventos. Devuelve el id de la def y su versión vigente.
@@ -149,11 +154,31 @@ export function createDefs(store: Store, now: () => number = Date.now): Defs {
     });
   }
 
+  function validate(kind: DefKind, slug: string, body: unknown): unknown {
+    const schema = schemas.get(kind);
+    if (!schema) {
+      throw new Error(
+        `No hay validador registrado para el kind "${kind}": el módulo que lo posee debe llamar a defs.register antes de guardar.`,
+      );
+    }
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      throw new DefValidationError(
+        kind,
+        slug,
+        parsed.error.issues.map(({ path, message }) => ({ path, message })),
+      );
+    }
+    return parsed.data;
+  }
+
   return {
     register(kind, schema) {
       if (schemas.has(kind)) throw new Error(`Ya hay un validador registrado para el kind "${kind}".`);
       schemas.set(kind, schema);
     },
+
+    validate,
 
     save({ kind, slug, scope, repoId, body, source }) {
       if ((scope === "repo") !== (repoId !== undefined)) {
@@ -161,21 +186,8 @@ export function createDefs(store: Store, now: () => number = Date.now): Defs {
           `La def ${kind} "${slug}" (${scope}): repoId es obligatorio con scope "repo" y no se admite en los demás.`,
         );
       }
-      const schema = schemas.get(kind);
-      if (!schema) {
-        throw new Error(
-          `No hay validador registrado para el kind "${kind}": el módulo que lo posee debe llamar a defs.register antes de guardar.`,
-        );
-      }
-      const parsed = schema.safeParse(body);
-      if (!parsed.success) {
-        throw new DefValidationError(
-          kind,
-          slug,
-          parsed.error.issues.map(({ path, message }) => ({ path, message })),
-        );
-      }
-      const bodyHash = hashBody(parsed.data);
+      const parsed = validate(kind, slug, body);
+      const bodyHash = hashBody(parsed);
 
       return store.tx((tx) => {
         const existing = tx.db
@@ -222,7 +234,7 @@ export function createDefs(store: Store, now: () => number = Date.now): Defs {
         }
         tx.db
           .insert(defVersions)
-          .values({ defId: id, version, body: parsed.data, bodyHash, source, createdAt: now() })
+          .values({ defId: id, version, body: parsed, bodyHash, source, createdAt: now() })
           .run();
         tx.emit({
           type: "def.versioned",

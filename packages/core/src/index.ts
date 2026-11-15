@@ -13,6 +13,9 @@ export type { Artifact, ArtifactOwner, Artifacts, ArtifactsOptions } from "./art
 export { createDefs, DefValidationError } from "./defs/defs";
 export type { Def, DefIssue, DefScope, DefVersion, Defs, SaveDef } from "./defs/defs";
 
+export { createPacks, PackLoadError } from "./packs/packs";
+export type { Packs } from "./packs/packs";
+
 export { ACTIVITY_INTERVAL_MS, createAgents } from "./agents/agents";
 export type {
   AgentResult,
