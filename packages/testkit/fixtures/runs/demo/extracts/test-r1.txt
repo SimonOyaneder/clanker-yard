@@ -1,0 +1,2 @@
+FAIL hello.test.ts
+  esperaba "hola mundo" y llegó "hola"

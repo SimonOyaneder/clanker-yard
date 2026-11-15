@@ -4,3 +4,6 @@ export { loadFixture, seedDb, writeFixture } from "./home";
 export type { TestHome } from "./home";
 export { scenarios } from "./scenarios";
 export type { Scenario } from "./scenarios";
+export { createFakeRuntime } from "./fake-runtime";
+export type { FakeRuntime, FakeRuntimeOptions } from "./fake-runtime";
+export type { RecipeResult } from "./fake-script";

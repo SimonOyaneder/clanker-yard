@@ -1,0 +1,15 @@
+# Un review de bugs en la ronda 1 sobre cualquier issue.
+match: { mode: review, issue: "*" }
+speed: 20
+events:
+  - { at: 0, text: "Reviso diff.patch contra origin/main" }
+  - { at: 900, tool: Read, input: { file_path: app/models/transfer.rb } }
+  - { at: 2100, usage: { model: opus, in: 6, cacheWrite: 21000, cacheRead: 0, out: 900, costUsd: 0.12 } }
+result:
+  status: success
+  structured:
+    outcome: changes
+    summary: "1 hallazgo amarillo"
+    payload:
+      findings:
+        - { id: f1, severity: yellow, path: app/models/transfer.rb, line: 42, claim: "Falta validar el monto", fix: "Agregar la validación" }

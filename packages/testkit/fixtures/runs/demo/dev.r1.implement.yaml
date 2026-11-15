@@ -1,0 +1,18 @@
+# El dev implementa dejando un patch en el worktree; los checks fallan una vez y luego pasan.
+match: { mode: implement }
+speed: 20
+events:
+  - { at: 0, text: "Implemento el saludo" }
+  - { at: 1500, tool: Edit, input: { file_path: hello.txt } }
+effects:
+  - apply: patches/hello.patch
+run:
+  test:
+    - { ok: false, extract: extracts/test-r1.txt }
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: done
+    summary: "saludo implementado"
+    payload: { files: [hello.txt] }
