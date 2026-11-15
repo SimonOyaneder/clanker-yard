@@ -1,13 +1,15 @@
+import type { RunId } from "@clanker/api";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import type { ExternalEvent, WaitResult } from "./catalog";
-import { agentSessions, stepRuns } from "../store/schema";
+import { agentSessions, runs, stepRuns } from "../store/schema";
 import { harness as createHarness, okReport } from "./harness";
 
 // Un corte es cerrar la app con pasos a medias y abrir otra sobre la misma base con otro boot id:
 // el primer `harness` queda abandonado (su dispatcher detenido, lo que tenía en vuelo colgado, como
-// un proceso muerto) y el segundo, con `reopen`, hace `recover()`. Un gate o un nodo flow todavía no
-// se ejecutan (`start` los rechaza), así que no hay un paso suyo que cortar.
+// un proceso muerto) y el segundo, con `reopen`, hace `recover()`. Un gate todavía no
+// se ejecuta (`start` lo rechaza), así que no hay un paso suyo que cortar.
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -452,6 +454,97 @@ describe("fencing del attempt", () => {
     const row = b.store.db.select().from(stepRuns).all().find((s) => s.nodeId === "work");
     expect(row).toMatchObject({ status: "done", outcome: "b", attempt: 2 });
     expect(b.flows.getRun(runId)).toMatchObject({ status: "done", outcome: "done" });
+  });
+});
+
+describe("recover: flow", () => {
+  const subflow = {
+    schema: 1,
+    id: "pr-feedback",
+    name: "feedback",
+    trigger: { type: "subflow" },
+    start: "work",
+    nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
+  };
+  const caller = {
+    schema: 1,
+    id: "techlead",
+    name: "techlead",
+    trigger: { type: "manual" },
+    start: "feedback",
+    nodes: { feedback: { type: "flow", flow: "pr-feedback", params: {}, on: { done: "@done", blocked: "@blocked", failed: "@failed" } } },
+  };
+  const childOf = (h: ReturnType<typeof boot>, runId: string) => h.flows.listRuns().find((r) => r.parentRunId === runId);
+
+  test("recupera el paso cortado de la hija y el padre sigue cuando ella termina", async () => {
+    vi.useFakeTimers();
+    const a = boot({ persist: true, bootId: "boot_A" });
+    a.action("work", ["ok"], forever);
+    a.save(subflow);
+    a.save(caller);
+    const runId = a.start("techlead");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stepOf(a, runId, "feedback")).toMatchObject({ status: "waiting" });
+    void cut(a);
+
+    const b = restart(a, "boot_B");
+    b.action("work", ["ok"]);
+    expect(b.flows.recover()).toBe(1);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const child = childOf(b, runId);
+    expect(b.flows.getRun(child?.id as RunId)).toMatchObject({ status: "done", outcome: "done" });
+    expect(b.flows.getRun(child?.id as RunId).steps[0]).toMatchObject({ attempt: 2 });
+    expect(b.flows.getRun(runId)).toMatchObject({ status: "done", outcome: "done" });
+    expect(stepOf(b, runId, "feedback")).toMatchObject({ status: "done", outcome: "done" });
+  });
+
+  test("si el corte llegó entre el fin de la hija y el cierre del padre, recover cierra el paso", async () => {
+    vi.useFakeTimers();
+    const a = boot({ persist: true, bootId: "boot_A" });
+    a.action("work", ["ok"], forever);
+    a.save(subflow);
+    a.save(caller);
+    const runId = a.start("techlead");
+    await vi.advanceTimersByTimeAsync(0);
+    void cut(a);
+
+    const b = restart(a, "boot_B");
+    b.action("work", ["ok"]);
+    const child = childOf(b, runId);
+    // La hija terminó @blocked y la app murió antes de cerrar el paso del padre.
+    b.store.tx((tx) => {
+      tx.db.update(stepRuns).set({ status: "done", outcome: "ok" }).where(eq(stepRuns.runId, child?.id as RunId)).run();
+      tx.db.update(runs).set({ status: "failed", outcome: "blocked", endedAt: Date.now() }).where(eq(runs.id, child?.id as RunId)).run();
+    });
+    expect(stepOf(b, runId, "feedback")).toMatchObject({ status: "waiting" });
+    b.flows.recover();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(stepOf(b, runId, "feedback")).toMatchObject({ status: "done", outcome: "blocked" });
+    expect(b.flows.getRun(runId)).toMatchObject({ status: "failed", outcome: "blocked" });
+  });
+
+  test("una hija estacionada por agotar sus cortes deja al padre esperando", async () => {
+    vi.useFakeTimers();
+    let h = boot({ persist: true, bootId: "boot_0" });
+    h.action("work", ["ok"], forever);
+    h.save(subflow);
+    h.save(caller);
+    const runId = h.start("techlead");
+    await vi.advanceTimersByTimeAsync(0);
+    for (const bootId of ["boot_1", "boot_2", "boot_3"]) {
+      void cut(h);
+      h = restart(h, bootId);
+      h.action("work", ["ok"], forever);
+      h.flows.recover();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    const child = childOf(h, runId);
+    expect(h.flows.getRun(child?.id as RunId)).toMatchObject({ status: "parked", parkReason: "needs_human" });
+    expect(h.flows.getRun(runId).status).toBe("running");
+    expect(stepOf(h, runId, "feedback")).toMatchObject({ status: "waiting" });
   });
 });
 

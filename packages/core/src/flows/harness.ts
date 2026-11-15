@@ -73,6 +73,8 @@ export function harness(
     persist?: boolean;
     reopen?: HarnessHome;
     onClockJump?: () => void;
+    /** El worktree que tiene tomado cada corrida; por defecto todas tienen el mismo. */
+    workspaceOf?: (runId: RunId) => { path: string; base: string } | undefined;
   } = {},
 ) {
   const dir = options.reopen?.dir ?? mkdtempSync(join(tmpdir(), "clanker-flows-"));
@@ -121,7 +123,7 @@ export function harness(
       const role = Role.parse(def.body);
       return { modes: Object.fromEntries(Object.entries(role.modes).map(([name, m]) => [name, { outcomes: m.outcomes }])) };
     },
-    workspaceOf: () => ({ path: "/work/tree", base: "main" }),
+    workspaceOf: options.workspaceOf ?? (() => ({ path: "/work/tree", base: "main" })),
     maxAgents: options.maxAgents,
     probeEverySec: options.probeEverySec,
     bootId: options.bootId,

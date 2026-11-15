@@ -380,7 +380,8 @@ export const LANE_BY_TRIGGER: Partial<Record<FlowDef["trigger"]["type"], "dev" |
   "pr.base_rewritten": "maintenance",
 };
 
-function calledFlows(flow: FlowDef): string[] {
+/** Los ids de los flujos que `flow` llama con un nodo `flow` (también como rama de un forEach). */
+export function calledFlows(flow: FlowDef): string[] {
   const called: string[] = [];
   for (const node of Object.values(flow.nodes)) {
     if (node.type === "flow") called.push(node.flow);

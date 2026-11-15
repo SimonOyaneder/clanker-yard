@@ -28,7 +28,7 @@ import {
   type ParallelNode,
 } from "./parallel";
 import { isTruthy, navigate, refPath, resolveRefs } from "./refs";
-import { LANE_BY_TRIGGER } from "./validate";
+import { calledFlows, LANE_BY_TRIGGER } from "./validate";
 
 /** El lease de un paso: el core dueño lo renueva cada tercio mientras el paso vive. */
 const STEP_LEASE_TTL_MS = 120_000;
@@ -59,6 +59,7 @@ const LIVE_RUN_STATUSES = ["queued", "running", "waiting", "parked", "paused"] a
 
 type RunRow = typeof runs.$inferSelect;
 type StepRow = typeof stepRuns.$inferSelect;
+type FlowNode = Extract<Node, { type: "flow" }>;
 
 export interface StartOptions {
   projectId?: ProjectId;
@@ -90,12 +91,14 @@ export interface StepView {
 export interface RunView {
   id: RunId;
   projectId: ProjectId | null;
+  /** La corrida que la lanzó con un nodo `flow`; `null` en una corrida raíz. */
+  parentRunId: RunId | null;
   flow: { slug: string; version: number };
   subject: SubjectRef;
   lane: RunRow["lane"];
   status: RunRow["status"];
   parkReason: RunRow["parkReason"];
-  /** `done`, `blocked` o `failed` cuando la corrida terminó. */
+  /** `done`, `blocked` o `failed` cuando la corrida terminó; `null` si se canceló. */
   outcome: string | null;
   params: Record<string, unknown>;
   /** Contador → veces que se tomó. */
@@ -133,7 +136,8 @@ export interface Engine {
   /**
    * Lanza `flow` (slug) sobre `subject`. Idempotente: si ya hay una corrida viva de ese flujo sobre
    * ese sujeto devuelve su id sin mirar `params`. La corrida fija la versión del flujo, de sus roles
-   * y del perfil. Falla, sin crear nada, si faltan params o los maxRounds apuntan a un valor inválido.
+   * y del perfil, y también los de los subflujos que llama (nodo `flow`). Falla, sin crear nada, si faltan
+   * params, los maxRounds apuntan a un valor inválido o el flujo (o un subflujo) usa nodos que el motor no ejecuta.
    */
   start(flow: string, subject: SubjectRef, params?: Record<string, unknown>, opts?: StartOptions): RunId;
   /**
@@ -141,6 +145,13 @@ export interface Engine {
    * el outcome que devuelve. Los waits que no calzan siguen esperando.
    */
   signal(event: ExternalEvent): void;
+  /**
+   * Cancela la corrida y todas sus corridas hijas: los pasos pending, running y waiting quedan
+   * `canceled`, los agentes en curso se interrumpen y las acciones reciben el abort de su `signal`.
+   * Cada corrida emite `run.finished` con outcome `canceled`. No hace nada con una corrida que ya
+   * terminó. Lanza `RunNotFoundError` si no existe. No libera el worktree.
+   */
+  cancel(runId: RunId): void;
   /** Lanza `RunNotFoundError` si no existe. */
   getRun(runId: RunId): RunView;
   /** Las corridas más recientes primero, sin sus pasos. */
@@ -165,6 +176,13 @@ export class RunStartError extends Error {}
 export class RunNotFoundError extends Error {
   constructor(runId: RunId) {
     super(`No existe la corrida ${runId}.`);
+  }
+}
+
+/** El `reason` del abort de los pasos de una corrida cancelada. */
+class RunCanceled extends Error {
+  constructor(runId: RunId) {
+    super(`La corrida ${runId} se canceló.`);
   }
 }
 
@@ -227,6 +245,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const inFlight = new Set<Promise<void>>();
   /** Cuándo toca el próximo sondeo de cada wait de este proceso. Sin entrada (tras un reinicio), toca ya. */
   const nextProbeAt = new Map<StepRunId, number>();
+  /** El abort de cada paso que este proceso ejecuta, para que `cancel` lo interrumpa. */
+  const controllers = new Map<StepRunId, AbortController>();
   const probing = new Set<StepRunId>();
   let activeAgents = 0;
   let lastWakeAt = now();
@@ -266,6 +286,7 @@ export function createEngine(deps: EngineDeps): Engine {
             eq(runs.flowDefId, def.id),
             eq(runs.subjectType, subject.type),
             eq(runs.subjectId, subject.id),
+            isNull(runs.parentRunId),
             inArray(runs.status, LIVE_RUN_STATUSES),
           ),
         )
@@ -273,26 +294,23 @@ export function createEngine(deps: EngineDeps): Engine {
       if (live) return live.id;
 
       const flow = FlowDef.parse(def.body);
-      const unsupported = Object.entries(flow.nodes).flatMap(([nodeId, n]) => {
-        const types: [string, string][] = [[nodeId, n.type]];
-        if (n.type === "parallel" && !Array.isArray(n.branches)) types.push([`${nodeId}.branch`, n.branches.branch.type]);
-        return types.filter(([, type]) => !["agent", "action", "wait", "parallel"].includes(type));
-      });
+      const { flows, subflows } = pinCalls(flow, opts.repoId);
+      const unsupported = flows.flatMap((f) =>
+        Object.entries(f.nodes).flatMap(([nodeId, n]) => {
+          const types: [string, string][] = [[nodeId, n.type]];
+          if (n.type === "parallel" && !Array.isArray(n.branches)) types.push([`${nodeId}.branch`, n.branches.branch.type]);
+          return types.filter(([, type]) => type === "gate").map(([id, type]) => `${f === flow ? "" : `${f.id}.`}${id} (${type})`);
+        }),
+      );
       if (unsupported.length > 0) {
-        const list = unsupported.map(([nodeId, type]) => `${nodeId} (${type})`).join(", ");
-        throw new RunStartError(`El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${list}. Solo agent, action, wait y parallel.`);
+        throw new RunStartError(
+          `El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${unsupported.join(", ")}. Solo agent, action, wait, parallel y flow.`,
+        );
       }
-      const params = effectiveParams(flow, given);
-      try {
-        for (const node of Object.values(flow.nodes)) {
-          for (const edge of edgesOf(node)) maxRoundsOf(edge, params);
-        }
-      } catch (error) {
-        throw new RunStartError(describe(error), { cause: error });
-      }
+      const params = paramsFor(flow, given);
 
       const roles: Record<string, DefPin> = {};
-      for (const slug of agentRolesOf(flow)) {
+      for (const slug of flows.flatMap(agentRolesOf)) {
         if (roles[slug]) continue;
         const role = defs.resolve("role", slug, { repoId: opts.repoId });
         if (!role) throw new RunStartError(`El flujo "${flowSlug}" usa el rol "${slug}", que no existe.`);
@@ -307,35 +325,18 @@ export function createEngine(deps: EngineDeps): Engine {
         throw new RunStartError(`El flujo "${flowSlug}" tiene pasos agent: pasa el perfil con que corre.`);
       }
 
-      const run = tx.db
-        .insert(runs)
-        .values({
-          id: newId("run"),
-          projectId: opts.projectId,
-          subjectType: subject.type,
-          subjectId: subject.id,
-          flowDefId: def.id,
-          flowVersion: def.version,
-          profileDefId: profile?.id,
-          profileVersion: profile?.version,
-          roles,
-          lane: flow.lane ?? LANE_BY_TRIGGER[flow.trigger.type] ?? "dev",
-          status: "running",
-          writes: flow.effects !== "local",
-          params,
-          rounds: {},
-          startedAt: now(),
-        })
-        .returning()
-        .get();
-      insertStep(tx, run, flow.start, { visit: 1, round: 0 });
-      tx.emit({
-        type: "run.started",
-        origin: "core",
-        ...scopeOf(run),
-        payload: { runId: run.id, flow: `${def.slug}@${def.version}`, subject, lane: run.lane },
-      });
-      return run.id;
+      return insertRun(tx, {
+        projectId: opts.projectId,
+        subject,
+        def,
+        flow,
+        params,
+        roles,
+        subflows,
+        profile,
+        lane: flow.lane ?? LANE_BY_TRIGGER[flow.trigger.type] ?? "dev",
+        writes: flow.effects !== "local",
+      }).id;
     });
     wake();
     return id;
@@ -355,6 +356,96 @@ export function createEngine(deps: EngineDeps): Engine {
       else throw new RunStartError(`Falta el param "${name}" del flujo "${flow.id}".`);
     }
     return params;
+  }
+
+  /** `effectiveParams` y, además, que cada `maxRounds` que apunta a un param valga un entero positivo. */
+  function paramsFor(flow: FlowDef, given: Record<string, unknown>): Record<string, unknown> {
+    const params = effectiveParams(flow, given);
+    try {
+      for (const node of Object.values(flow.nodes)) {
+        for (const edge of edgesOf(node)) maxRoundsOf(edge, params);
+      }
+    } catch (error) {
+      throw new RunStartError(describe(error), { cause: error });
+    }
+    return params;
+  }
+
+  /**
+   * El flujo y los subflujos que llama, también los de sus subflujos: lo que la corrida fija al
+   * empezar. Así una corrida hija parte de las versiones del padre aunque el flujo cambie después.
+   */
+  function pinCalls(root: FlowDef, repoId: string | undefined): { flows: FlowDef[]; subflows: Record<string, DefPin> } {
+    const flows = [root];
+    const subflows: Record<string, DefPin> = {};
+    for (const flow of flows) {
+      for (const slug of calledFlows(flow)) {
+        if (subflows[slug]) continue;
+        const def = defs.resolve("flow", slug, { repoId });
+        if (!def) throw new RunStartError(`El flujo "${flow.id}" llama al subflujo "${slug}", que no existe.`);
+        subflows[slug] = { id: def.id, version: def.version };
+        flows.push(FlowDef.parse(def.body));
+      }
+    }
+    return { flows, subflows };
+  }
+
+  /** Crea la corrida con su primer paso en pending y emite `run.started`. */
+  function insertRun(
+    tx: Tx,
+    n: {
+      projectId: ProjectId | null | undefined;
+      subject: SubjectRef;
+      def: { id: string; slug: string; version: number };
+      flow: FlowDef;
+      params: Record<string, unknown>;
+      roles: Record<string, DefPin>;
+      subflows: Record<string, DefPin>;
+      profile: DefPin | undefined;
+      lane: RunRow["lane"];
+      writes: boolean;
+      parent?: { runId: RunId; stepRunId: StepRunId; stopBefore: string | undefined };
+    },
+  ): RunRow {
+    const run = tx.db
+      .insert(runs)
+      .values({
+        id: newId("run"),
+        projectId: n.projectId,
+        subjectType: n.subject.type,
+        subjectId: n.subject.id,
+        flowDefId: n.def.id,
+        flowVersion: n.def.version,
+        profileDefId: n.profile?.id,
+        profileVersion: n.profile?.version,
+        roles: n.roles,
+        subflows: n.subflows,
+        parentRunId: n.parent?.runId,
+        parentStepRunId: n.parent?.stepRunId,
+        stopBefore: n.parent?.stopBefore,
+        lane: n.lane,
+        status: "running",
+        writes: n.writes,
+        params: n.params,
+        rounds: {},
+        startedAt: now(),
+      })
+      .returning()
+      .get();
+    insertStep(tx, run, n.flow.start, { visit: 1, round: 0 });
+    tx.emit({
+      type: "run.started",
+      origin: "core",
+      ...scopeOf(run),
+      payload: {
+        runId: run.id,
+        flow: `${n.def.slug}@${n.def.version}`,
+        subject: n.subject,
+        lane: run.lane,
+        ...(n.parent && { parentRunId: n.parent.runId }),
+      },
+    });
+    return run;
   }
 
   function insertStep(
@@ -407,6 +498,7 @@ export function createEngine(deps: EngineDeps): Engine {
       lastWakeAt = t;
       // Antes de despachar: un wait que vence o se resuelve deja su paso siguiente listo en esta misma vuelta.
       sweepWaits();
+      sweepChildren();
       dispatch();
     } catch (error) {
       // Un wake que lanza tumbaría a quien lo llamó (un `start`, el cierre de otro paso, un timer).
@@ -501,6 +593,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   async function execute(job: Job): Promise<void> {
     const controller = new AbortController();
+    controllers.set(job.step.id, controller);
     // Un timer no lanza: si el latido falla o el lease ya es de otro attempt, se interrumpe el paso en
     // vez de dejarlo corriendo sin lease (un agente de un intento anterior no puede seguir escribiendo).
     const renew = setInterval(() => {
@@ -533,6 +626,7 @@ export function createEngine(deps: EngineDeps): Engine {
       parkAfterFailure(job, describe(error));
     } finally {
       clearInterval(renew);
+      controllers.delete(job.step.id);
     }
   }
 
@@ -623,6 +717,7 @@ export function createEngine(deps: EngineDeps): Engine {
       return { kind: "outcome", outcome: "skipped" };
     }
     if (node.type === "parallel") return openBranches(job, node);
+    if (node.type === "flow") return openChild(job, node);
     // Lo que las ramas dejaron no pasa por `resolveRefs`: un texto que parezca un ref no se toca.
     const input =
       job.parallel?.role === "join"
@@ -694,7 +789,7 @@ export function createEngine(deps: EngineDeps): Engine {
   async function performAgent(job: Job, payload: unknown, signal: AbortSignal): Promise<Settled> {
     const { run, step, node } = job;
     if (node.type !== "agent") throw new Error("performAgent recibió un nodo que no es un agente.");
-    const workspace = workspaceOf?.(run.id);
+    const workspace = workspaceFor(run);
     if (!workspace) return permanent(`El paso "${step.nodeId}" es un agente y la corrida no tiene un workspace tomado.`);
     const roleDef = run.roles[node.role];
     const profileDef = run.profileDefId !== null && run.profileVersion !== null ? { id: run.profileDefId, version: run.profileVersion } : undefined;
@@ -729,7 +824,7 @@ export function createEngine(deps: EngineDeps): Engine {
           mode: node.mode,
           brief,
           workspace: workspace.path,
-          resumeFrom: node.resumeFrom === undefined ? undefined : priorSession(run.id, node.resumeFrom),
+          resumeFrom: node.resumeFrom === undefined ? undefined : priorSession(run, node.resumeFrom),
         });
     if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
     return fromAgentResult(result);
@@ -762,16 +857,47 @@ export function createEngine(deps: EngineDeps): Engine {
       .get()?.id;
   }
 
-  /** La última sesión de un paso terminado de ese nodo, para que `resumeFrom` parta de ella. */
-  function priorSession(runId: RunId, nodeId: string): string | undefined {
-    return store.db
-      .select({ id: agentSessions.id })
-      .from(agentSessions)
-      .innerJoin(stepRuns, eq(agentSessions.stepRunId, stepRuns.id))
-      .where(and(eq(stepRuns.runId, runId), eq(stepRuns.nodeId, nodeId), eq(stepRuns.status, "done")))
-      .orderBy(desc(agentSessions.id))
-      .limit(1)
-      .get()?.id;
+  /** La última sesión de un paso terminado de ese nodo, en la corrida o en sus padres, para que `resumeFrom` parta de ella. */
+  function priorSession(run: RunRow, nodeId: string): string | undefined {
+    for (const runId of lineage(run)) {
+      const found = store.db
+        .select({ id: agentSessions.id })
+        .from(agentSessions)
+        .innerJoin(stepRuns, eq(agentSessions.stepRunId, stepRuns.id))
+        .where(and(eq(stepRuns.runId, runId), eq(stepRuns.nodeId, nodeId), eq(stepRuns.status, "done")))
+        .orderBy(desc(agentSessions.id))
+        .limit(1)
+        .get()?.id;
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** El worktree que tiene tomada la corrida o, si es un subflujo, el de quien la llamó. */
+  function workspaceFor(run: RunRow): { path: string; base: string } | undefined {
+    for (const id of lineage(run)) {
+      const held = workspaceOf?.(id);
+      if (held) return held;
+    }
+    return undefined;
+  }
+
+  function lastDoneInLineage(run: RunRow, nodeId: string): StepRow | undefined {
+    for (const id of lineage(run)) {
+      const found = lastDone(id, nodeId);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** La corrida y sus padres hasta la raíz: lo que un subflujo comparte con quien lo llamó (workspace, nodos, sesiones). */
+  function lineage(run: RunRow): RunId[] {
+    const ids = [run.id];
+    for (let parent = run.parentRunId; parent !== null; ) {
+      ids.push(parent);
+      parent = store.db.select({ parent: runs.parentRunId }).from(runs).where(eq(runs.id, parent)).get()?.parent ?? null;
+    }
+    return ids;
   }
 
   async function once<T>(key: string, stage: string, fn: () => Promise<T>): Promise<T> {
@@ -813,7 +939,8 @@ export function createEngine(deps: EngineDeps): Engine {
         root = outputOf(lastDone(run.id, step.nodeId, step.visit));
         break;
       default:
-        root = outputOf(lastDone(run.id, head));
+        // "En la corrida o en sus padres": un subflujo ve los nodos de quien lo llamó.
+        root = outputOf(lastDoneInLineage(run, head));
     }
     return shrink(step, navigate(root, path));
   }
@@ -992,9 +1119,10 @@ export function createEngine(deps: EngineDeps): Engine {
     }
 
     const rounds = taken.counter ? { ...run.rounds, [taken.counter.key]: taken.counter.count } : run.rounds;
-    if (taken.to.startsWith("@")) {
+    // `stopBefore`: llegar al nodo donde el padre pidió cortar termina la corrida hija como `done`.
+    const result = taken.to.startsWith("@") ? taken.to.slice(1) : taken.to === run.stopBefore ? "done" : undefined;
+    if (result !== undefined) {
       const endedAt = now();
-      const result = taken.to.slice(1);
       tx.db
         .update(runs)
         .set({ rounds, status: result === "done" ? "done" : "failed", outcome: result, endedAt })
@@ -1131,16 +1259,16 @@ export function createEngine(deps: EngineDeps): Engine {
   function signal(event: ExternalEvent): void {
     for (const waiting of waitingSteps()) {
       const input = waitInput(waiting);
-      if (!input.ok) finishWait(waiting, permanent(input.error));
+      if (!input.ok) closeWaiting(waiting, permanent(input.error));
       else {
         let found: WaitResult | undefined;
         try {
           found = input.wait.match(event, input.args);
         } catch (error) {
-          finishWait(waiting, permanent(`El match de "${input.wait.name}" falló: ${describe(error)}`));
+          closeWaiting(waiting, permanent(`El match de "${input.wait.name}" falló: ${describe(error)}`));
           continue;
         }
-        if (found) finishWait(waiting, fromWaitResult(input.wait, found));
+        if (found) closeWaiting(waiting, fromWaitResult(input.wait, found));
       }
     }
     wake();
@@ -1175,7 +1303,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** Cierra un wait desde fuera de su ejecución. Si otro camino lo cerró antes, no hace nada. */
-  function finishWait(job: Job, settled: Settled): void {
+  function closeWaiting(job: Job, settled: Settled): void {
     try {
       settle(job, settled);
       nextProbeAt.delete(job.step.id);
@@ -1192,7 +1320,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const { step, node } = job;
       if (step.deadline !== null && step.deadline <= now()) {
         const timeout = new StepTimeout(node.timeoutSec ?? 0, "El wait");
-        finishWait(job, timedOut(timeout));
+        closeWaiting(job, timedOut(timeout));
       } else if (!probing.has(step.id) && (nextProbeAt.get(step.id) ?? 0) <= now()) {
         probeWait(job);
       }
@@ -1201,14 +1329,14 @@ export function createEngine(deps: EngineDeps): Engine {
 
   function probeWait(job: Job): void {
     const input = waitInput(job);
-    if (!input.ok) return finishWait(job, permanent(input.error));
+    if (!input.ok) return closeWaiting(job, permanent(input.error));
     const { id } = job.step;
     probing.add(id);
     nextProbeAt.set(id, now() + probeEveryMs);
     const probe = (async () => {
       try {
         const found = await input.wait.probe(input.args);
-        if (found) finishWait(job, fromWaitResult(input.wait, found));
+        if (found) closeWaiting(job, fromWaitResult(input.wait, found));
         else noteProbeError(job, null);
       } catch (error) {
         noteProbeError(job, describe(error));
@@ -1390,6 +1518,145 @@ export function createEngine(deps: EngineDeps): Engine {
       .get();
   }
 
+  // --- flow ------------------------------------------------------------------------------------
+
+  /**
+   * El nodo `flow` crea una corrida hija del subflujo que la corrida fijó al empezar y queda
+   * waiting, como un parallel. Paso y corrida hija nacen en la misma transacción, así que un paso
+   * `flow` reabierto tras un corte (leased o running) nunca tiene hija. La hija hereda sujeto, carril,
+   * roles y, salvo que el nodo diga otro, el perfil; un padre `effects: "local"` no deja publicar a la hija.
+   * Cuando la hija termina, `sweepChildren` cierra este paso con su outcome.
+   */
+  function openChild(job: Job, node: FlowNode): Settled {
+    const { run, step } = job;
+    const resolve = (ref: string) => resolveRef(run, step, ref);
+    const params = resolveRefs(node.params, resolve);
+    const profile = resolveRefs(node.profile ?? null, resolve);
+    const inputHash = artifacts.put(JSON.stringify({ params, profile }), "brief", { mime: "application/json" });
+    artifacts.ref(inputHash, { type: "step_run", id: step.id, role: "input" });
+    markRunning(job, inputHash);
+
+    const pin = run.subflows[node.flow];
+    const def = pin && defs.get("flow", pin.id, pin.version);
+    if (!def) return permanent(`La corrida no fijó el subflujo "${node.flow}".`);
+    const flow = FlowDef.parse(def.body);
+    if (node.stopBefore === flow.start) {
+      return permanent(`stopBefore "${node.stopBefore}" es el nodo inicial de "${flow.id}": la corrida hija no tendría nada que ejecutar.`);
+    }
+    if (!isRecord(params)) {
+      return permanent(`Los params del nodo "${step.nodeId}" no resolvieron a un objeto: ${JSON.stringify(params)}.`);
+    }
+    let childParams: Record<string, unknown>;
+    try {
+      childParams = paramsFor(flow, params);
+    } catch (error) {
+      return permanent(describe(error));
+    }
+
+    let profilePin: DefPin | undefined =
+      run.profileDefId !== null && run.profileVersion !== null ? { id: run.profileDefId, version: run.profileVersion } : undefined;
+    if (profile !== null) {
+      const found = typeof profile === "string" ? defs.resolve("profile", profile) : undefined;
+      if (!found) return permanent(`El perfil ${JSON.stringify(profile)} del nodo "${step.nodeId}" no existe.`);
+      profilePin = { id: found.id, version: found.version };
+    }
+
+    store.tx((tx) => {
+      const waiting = tx.db
+        .update(stepRuns)
+        .set({ status: "waiting", owner: null, leaseUntil: null })
+        .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), eq(stepRuns.status, "running")))
+        .returning({ id: stepRuns.id })
+        .get();
+      if (!waiting) throw new StaleStepError(step.id);
+      insertRun(tx, {
+        projectId: run.projectId,
+        subject: { type: run.subjectType, id: run.subjectId },
+        def: { id: def.id, slug: def.slug, version: def.version },
+        flow,
+        params: childParams,
+        roles: run.roles,
+        subflows: run.subflows,
+        profile: profilePin,
+        lane: run.lane,
+        writes: run.writes && flow.effects !== "local",
+        parent: { runId: run.id, stepRunId: step.id, stopBefore: node.stopBefore },
+      });
+    });
+    return { kind: "waiting" };
+  }
+
+  /**
+   * Cierra los pasos `flow` cuya corrida hija ya terminó: el outcome del paso es el `@end` de la
+   * hija (`done`, `blocked` o `failed`; una hija cancelada cuenta como `failed`). Corre en cada
+   * despertar del dispatcher, y por eso `recover()` cierra también lo que un corte dejó entre el
+   * fin de la hija y el cierre del padre.
+   */
+  function sweepChildren(): void {
+    const finished = store.db
+      .select()
+      .from(runs)
+      .where(
+        and(
+          inArray(runs.status, ["done", "failed", "canceled"]),
+          inArray(runs.parentStepRunId, store.db.select({ id: stepRuns.id }).from(stepRuns).where(eq(stepRuns.status, "waiting"))),
+        ),
+      )
+      .orderBy(asc(runs.id))
+      .all();
+    for (const child of finished) {
+      const step = child.parentStepRunId === null ? undefined : selectStep(child.parentStepRunId);
+      const parent = child.parentRunId === null ? undefined : store.db.select().from(runs).where(eq(runs.id, child.parentRunId)).get();
+      if (!step || !parent || parent.status !== "running") continue;
+      const job = loadJob(parent, step);
+      if (!job) continue;
+      closeWaiting(
+        job,
+        child.status === "canceled"
+          ? { kind: "outcome", outcome: "failed", error: `La corrida hija ${child.id} se canceló.` }
+          : { kind: "outcome", outcome: child.outcome ?? "failed" },
+      );
+    }
+  }
+
+  /**
+   * En una sola transacción cancela la corrida y sus descendientes vivos, y después aborta lo que
+   * este proceso tiene en vuelo: un cierre de esos pasos ya no calza con su attempt y se descarta.
+   */
+  function cancel(runId: RunId): void {
+    const stepIds = store.tx((tx) => {
+      if (!tx.db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId)).get()) throw new RunNotFoundError(runId);
+      const family = [runId];
+      for (const id of family) {
+        family.push(...tx.db.select({ id: runs.id }).from(runs).where(eq(runs.parentRunId, id)).all().map((r) => r.id));
+      }
+      const canceled: StepRunId[] = [];
+      for (const run of tx.db.select().from(runs).where(and(inArray(runs.id, family), inArray(runs.status, LIVE_RUN_STATUSES))).all()) {
+        const steps = tx.db
+          .update(stepRuns)
+          .set({ status: "canceled", error: `La corrida ${runId} se canceló.`, owner: null, leaseUntil: null, notBefore: null })
+          .where(and(eq(stepRuns.runId, run.id), inArray(stepRuns.status, ["pending", "leased", "running", "waiting"])))
+          .returning({ id: stepRuns.id })
+          .all();
+        canceled.push(...steps.map((s) => s.id));
+        const endedAt = now();
+        tx.db.update(runs).set({ status: "canceled", parkReason: null, endedAt }).where(eq(runs.id, run.id)).run();
+        tx.emit({
+          type: "run.finished",
+          origin: "core",
+          ...scopeOf(run),
+          payload: { outcome: "canceled", costMicros: run.costMicros, minutes: (endedAt - run.startedAt) / 60_000 },
+        });
+      }
+      return canceled;
+    });
+    for (const id of stepIds) {
+      nextProbeAt.delete(id);
+      controllers.get(id)?.abort(new RunCanceled(runId));
+    }
+    wake();
+  }
+
   // --- lectura ---------------------------------------------------------------------------------
 
   function viewOf(run: RunRow): Omit<RunView, "steps"> {
@@ -1397,6 +1664,7 @@ export function createEngine(deps: EngineDeps): Engine {
     return {
       id: run.id,
       projectId: run.projectId,
+      parentRunId: run.parentRunId,
       flow: { slug: flow?.slug ?? run.flowDefId, version: run.flowVersion },
       subject: { type: run.subjectType, id: run.subjectId },
       lane: run.lane,
@@ -1444,7 +1712,7 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(inFlight);
   }
 
-  return { start, signal, getRun, listRuns, recover, close };
+  return { start, signal, cancel, getRun, listRuns, recover, close };
 }
 
 class StepTimeout extends Error {
@@ -1476,6 +1744,9 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
   return Promise.race([work, aborted]);
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -520,6 +520,14 @@ export const runs = sqliteTable(
     profileVersion: integer("profile_version"),
     /** Rol del flujo (slug) → versión fijada. */
     roles: text({ mode: "json" }).$type<Record<string, DefPin>>().notNull(),
+    /** Subflujo (slug) → versión fijada, con los de los subflujos de sus subflujos. Las corridas hijas parten de aquí. */
+    subflows: text({ mode: "json" }).$type<Record<string, DefPin>>().notNull().default({}),
+    /** La corrida que lanzó esta como subflujo (nodo `flow`); `null` en una corrida raíz. */
+    parentRunId: text("parent_run_id").$type<RunId>(),
+    /** El paso `flow` del padre que espera a esta corrida. */
+    parentStepRunId: text("parent_step_run_id").$type<StepRunId>(),
+    /** El nodo del flujo antes del cual la corrida termina con `done` sin ejecutarlo (`stopBefore` del nodo `flow`). */
+    stopBefore: text("stop_before"),
     lane: text({ enum: LANES }).notNull(),
     status: text({ enum: RUN_STATUSES }).notNull(),
     parkReason: text("park_reason", { enum: PARK_REASONS }),
@@ -541,10 +549,15 @@ export const runs = sqliteTable(
       columns: [t.profileDefId, t.profileVersion],
       foreignColumns: [defVersions.defId, defVersions.version],
     }),
-    // Un flujo no se lanza dos veces sobre el mismo sujeto mientras la corrida siga viva.
+    // Un flujo no se lanza dos veces sobre el mismo sujeto mientras la corrida siga viva. Las
+    // corridas hijas quedan fuera: heredan el sujeto del padre (el bench corre el mismo flujo varias veces).
     uniqueIndex("runs_active_flow_subject")
       .on(t.flowDefId, t.subjectType, t.subjectId)
-      .where(sql`${t.status} IN ('queued', 'running', 'waiting', 'parked', 'paused')`),
+      .where(sql`${t.parentRunId} IS NULL AND ${t.status} IN ('queued', 'running', 'waiting', 'parked', 'paused')`),
+    foreignKey({ columns: [t.parentRunId], foreignColumns: [t.id] }),
+    // Un paso `flow` abre una sola corrida hija, aunque el paso se reabra tras un corte.
+    uniqueIndex("runs_parent_step").on(t.parentStepRunId),
+    index("runs_parent_run").on(t.parentRunId),
     check("runs_roles_json", sql`json_valid(${t.roles})`),
     check("runs_params_json", sql`json_valid(${t.params})`),
     check("runs_rounds_json", sql`json_valid(${t.rounds})`),
