@@ -1,16 +1,53 @@
-import type { FlowDef } from "@clanker/api";
-import type { ZodType } from "zod";
+import type { FlowDef, RunId } from "@clanker/api";
+import type { infer as Infer, ZodType } from "zod";
 
-// Lo que la validación de un flujo necesita saber de lo que registran otros módulos
-// (Workspaces, CodeHost, Tracker, packs, Agents). El motor que ejecuta flujos agrega aquí lo suyo
-// (`run`, `key`, `match`, `probe`, timeouts y reintentos) sin tocar a quien valida.
+// Lo que otros módulos (Workspaces, CodeHost, Tracker, packs, Agents) registran en Flows: la
+// validación lee los nombres y outcomes, el motor ejecuta. `WaitDef` y `ConsolidatorDef` agregan
+// `key`, `match`, `probe` y la función del join cuando existan los nodos wait y parallel.
 
-export interface ActionDef {
+/** Cuántas veces se re-ejecuta tras una excepción y cuánto se espera: `backoffSec[n-1]` antes del reintento n, el último se repite. */
+export interface RetryPolicy {
+  max: number;
+  backoffSec: number[];
+}
+
+export interface ActionCtx {
+  runId: RunId;
+  /** `run:nodo:visita`. Los reintentos de una visita la comparten; una ronda nueva trae otra. */
+  key: string;
+  /** Se aborta al vencer `timeoutSec`. */
+  signal: AbortSignal;
+  /**
+   * Corre `fn` una vez por (`key`, `stage`): si la acción se re-ejecuta, la etapa ya hecha devuelve
+   * su resultado guardado sin volver a correr. `fn` debe devolver JSON. Si el proceso muere entre
+   * `fn` y el guardado, `fn` vuelve a correr, así que sus efectos externos deben ser idempotentes.
+   */
+  once<T>(stage: string, fn: () => Promise<T>): Promise<T>;
+}
+
+export interface ActionResult {
+  /** Uno de `ActionDef.outcomes`. Un outcome de negocio (tests rojos) es un resultado, no una excepción. */
+  outcome: string;
+  /** Lo que los demás nodos leen como `$nodo`. */
+  output?: unknown;
+}
+
+export interface ActionDef<A extends ZodType = ZodType> {
   name: string;
-  args: ZodType;
+  args: A;
+  /** Si se da, el motor valida el output antes de guardarlo. */
+  output?: ZodType;
   outcomes: string[];
   /** `remote`: publica (push, PR, comentarios, tracker). `effects: "local"` en un flujo la rechaza. */
   effects: "local" | "remote";
+  /** Sin esto, la acción corre sin límite de tiempo. El nodo puede pisarlo. */
+  timeoutSec?: number;
+  /** Por defecto 3 reintentos con 10 s, 60 s y 5 min. El nodo puede pisarlo. */
+  retry?: RetryPolicy;
+  /**
+   * Solo las excepciones se reintentan. `args` ya llegó validado por `args`.
+   */
+  run(args: Infer<A>, ctx: ActionCtx): Promise<ActionResult>;
 }
 
 export interface WaitDef {

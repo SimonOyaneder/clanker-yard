@@ -368,7 +368,7 @@ export function validateFlow(def: FlowDef, catalog: Catalog): Validation {
   return { errors, warnings };
 }
 
-const LANE_BY_TRIGGER: Partial<Record<FlowDef["trigger"]["type"], "dev" | "maintenance">> = {
+export const LANE_BY_TRIGGER: Partial<Record<FlowDef["trigger"]["type"], "dev" | "maintenance">> = {
   "issue.queued": "dev",
   manual: "dev",
   "pr.comment": "maintenance",

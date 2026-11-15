@@ -1,9 +1,12 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { RunId } from "@clanker/api";
 import {
   BranchNotAllowedError,
+  createAgents,
+  createArtifacts,
   createDefs,
   createFlows,
   createWorkspaces,
@@ -18,10 +21,13 @@ import {
   type Workspaces,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo, type TempGitRepoOptions } from "./git";
 
 // Workspaces se prueba aquí y no en el core: testkit puede importar el core, y el core no puede
 // importar testkit (AGENTS.md, límites entre paquetes).
+
+const demoFixtures = fileURLToPath(new URL("../fixtures/runs/demo", import.meta.url));
 
 const runA = newId("run");
 const runB = newId("run");
@@ -290,7 +296,14 @@ describe("heartbeat", () => {
 
 describe("workspace.acquire", () => {
   test("el motor de flujos acepta la acción registrada", () => {
-    const flows = createFlows({ defs: createDefs(store), roles: () => undefined });
+    const defs = createDefs(store);
+    const flows = createFlows({
+      store,
+      defs,
+      agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures: demoFixtures }) }),
+      artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }),
+      roles: () => undefined,
+    });
 
     expect(() => flows.registerAction(workspaceAcquireAction(workspaces))).not.toThrow();
     expect(() => flows.registerAction(workspaceAcquireAction(workspaces))).toThrow(/workspace\.acquire/);

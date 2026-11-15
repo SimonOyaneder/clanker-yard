@@ -1,6 +1,11 @@
 import { FlowDef, type FlowIssue, type Validation } from "@clanker/api";
+import type { ZodType } from "zod";
+import type { Agents } from "../agents/agents";
+import type { Artifacts } from "../artifacts/artifacts";
 import type { DefScope, Defs } from "../defs/defs";
+import type { Store } from "../store/store";
 import type { ActionDef, Catalog, ConsolidatorDef, RoleInfo, WaitDef } from "./catalog";
+import { createEngine, type Engine, type EngineDeps } from "./engine";
 import { validateFlow } from "./validate";
 
 /** El flujo se guarda sin `version`: la asigna `save` y vive en la versión de la def. */
@@ -35,9 +40,9 @@ export interface SaveFlowOptions {
   source?: string;
 }
 
-export interface Flows {
+export interface Flows extends Engine {
   /** Cada módulo registra lo que aporta; registrar dos veces el mismo nombre es un bug. */
-  registerAction(def: ActionDef): void;
+  registerAction<A extends ZodType>(def: ActionDef<A>): void;
   registerWait(def: WaitDef): void;
   registerConsolidator(def: ConsolidatorDef): void;
   /**
@@ -52,14 +57,19 @@ export interface Flows {
   save(def: FlowDef, opts?: SaveFlowOptions): FlowVersion;
 }
 
-export interface FlowsDeps {
+export interface FlowsDeps extends Omit<EngineDeps, "actions"> {
+  store: Store;
   defs: Defs;
+  agents: Agents;
+  artifacts: Artifacts;
   /** Los roles viven en Agents: aquí solo se consultan para validar agentes y consolidadores por rol. */
   roles: (id: string) => RoleInfo | undefined;
 }
 
-export function createFlows({ defs, roles }: FlowsDeps): Flows {
+export function createFlows({ roles, ...deps }: FlowsDeps): Flows {
+  const { defs } = deps;
   const actions = new Map<string, ActionDef>();
+  const engine = createEngine({ ...deps, actions });
   const waits = new Map<string, WaitDef>();
   const consolidators = new Map<string, ConsolidatorDef>();
   defs.register("flow", FlowBody);
@@ -92,6 +102,7 @@ export function createFlows({ defs, roles }: FlowsDeps): Flows {
   }
 
   return {
+    ...engine,
     registerAction: (def) => register("una acción", actions, def),
     registerWait: (def) => register("un wait", waits, def),
     registerConsolidator: (def) => register("un consolidador", consolidators, def),

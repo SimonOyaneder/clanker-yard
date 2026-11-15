@@ -86,6 +86,8 @@ interface Step {
   /** Id de sesión que devuelve el runtime; por defecto uno nuevo por cada start o resume. */
   sessionId?: string;
   events?: () => AsyncIterable<AgentEvent>;
+  /** Se llama cuando alguien interrumpe la sesión. */
+  onInterrupt?: () => void;
   result: Partial<RunResult>;
 }
 
@@ -103,7 +105,7 @@ function stubRuntime(steps: Step[]) {
     return {
       ref: { runtime: "fake", sessionId: step.sessionId ?? `stub-${++n}`, cwd },
       events: events(),
-      interrupt: async () => {},
+      interrupt: async () => step.onInterrupt?.(),
       result: Promise.resolve({ status: "success", text: "", usage, ...step.result }),
     };
   };
@@ -388,6 +390,70 @@ describe("resume", () => {
     await expect(
       agents.resume({ sessionId: "ses_nope", profile: "default", mode: "audit", brief: brief("audit") }),
     ).rejects.toThrow("No existe la sesión ses_nope");
+  });
+});
+
+describe("sesión previa y versiones fijadas", () => {
+  test("resumeFrom retoma la sesión solo si el modo no es `new`", async () => {
+    const { agents, calls } = setup([
+      { result: { structured: validReport } },
+      { result: { structured: { outcome: "done", summary: "listo", payload: { done: true } } } },
+      { result: { structured: validReport } },
+    ]);
+    const first = await agents.run(request());
+
+    const resumed = await agents.run({ ...request("followup"), resumeFrom: first.sessionId });
+    const fresh = await agents.run({ ...request("audit"), resumeFrom: first.sessionId });
+
+    expect(resumed).toMatchObject({ status: "success", report: { outcome: "done" } });
+    expect(fresh.status).toBe("success");
+    expect(calls.resumes.map((r) => r.ref.sessionId)).toEqual(["stub-1"]);
+    expect(calls.starts).toHaveLength(2);
+  });
+
+  test("roleDef y profileDef fijan la versión aunque se guarde otra", async () => {
+    const { defs, agents, calls } = setup([{ result: { structured: validReport } }]);
+    const roleDef = defs.resolve("role", "analyst");
+    const profileDef = defs.resolve("profile", "default");
+    if (!roleDef || !profileDef) throw new Error("falta el rol o el perfil de prueba");
+    defs.save({ kind: "role", slug: "analyst", scope: "user", body: { ...role, prompt: "Eres otro." }, source: "ui" });
+    defs.save({
+      kind: "profile",
+      slug: "default",
+      scope: "user",
+      body: { roles: { analyst: { model: "opus" } } },
+      source: "ui",
+    });
+
+    await agents.run({
+      ...request(),
+      roleDef: { id: roleDef.id, version: roleDef.version },
+      profileDef: { id: profileDef.id, version: profileDef.version },
+    });
+
+    expect(calls.starts[0]).toMatchObject({ systemPrompt: "Eres un analista.", model: "sonnet" });
+  });
+});
+
+describe("signal", () => {
+  test("abortar la señal interrumpe la sesión, esté ya abortada o se aborte con el agente corriendo", async () => {
+    const interrupts: string[] = [];
+    const during = new AbortController();
+    const { agents } = setup([
+      { result: { structured: validReport }, onInterrupt: () => interrupts.push("antes") },
+      {
+        result: { structured: validReport },
+        onInterrupt: () => interrupts.push("durante"),
+        events: async function* () {
+          during.abort();
+        },
+      },
+    ]);
+
+    await agents.run({ ...request(), signal: AbortSignal.abort() });
+    await agents.run({ ...request(), signal: during.signal });
+
+    expect(interrupts).toEqual(["antes", "durante"]);
   });
 });
 

@@ -42,7 +42,17 @@ export type {
 
 export { createFlows, FlowValidationError } from "./flows/flows";
 export type { FlowVersion, Flows, FlowsDeps, SaveFlowOptions } from "./flows/flows";
-export type { ActionDef, ConsolidatorDef, RoleInfo, WaitDef } from "./flows/catalog";
+export type {
+  ActionCtx,
+  ActionDef,
+  ActionResult,
+  ConsolidatorDef,
+  RetryPolicy,
+  RoleInfo,
+  WaitDef,
+} from "./flows/catalog";
+export { DEFAULT_MAX_AGENTS, OUTPUT_INLINE_MAX_BYTES, TICK_MS } from "./flows/engine";
+export type { RunView, StartOptions, StepView } from "./flows/engine";
 export { createConnections, EXPIRY_WARNING_DAYS } from "./connections/connections";
 export type { ConnectInput, Connections, ConnectionsOptions } from "./connections/connections";
 export { GitHubPatError } from "./github/pat";

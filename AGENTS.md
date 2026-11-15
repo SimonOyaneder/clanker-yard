@@ -98,6 +98,16 @@ El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packa
 - `createFakeRuntime({ fixtures })`: el runtime `fake` (`CORE_RUNTIME=fake`), un `AgentRuntime` que reproduce guiones YAML `<rol>.r<n>.yaml` (con etiqueta opcional, `dev.r1.plan.yaml`) en vez de llamar a un modelo. Ejemplo en `packages/testkit/fixtures/runs/demo`. El guion se elige por el rol de la sesión y por el modo, la ronda y la issue del brief (gana el que fija más campos de `match`; un empate es un error). Sin guion, o con un reporte que no cumple el esquema del modo, `start`/`resume` rechazan: nunca inventa un reporte. `speed` divide los tiempos de `events` (la opción `speed: Infinity` los salta), `effects` aplica patches con `git apply` en el worktree y `run` se consume con `nextRecipeResult(sessionId, comando)`.
 - Los tests de un paquete que necesiten la base usan `seedDb` (o `openStore({ path: ":memory:" })` si no hace falta un archivo); `loadFixture` es para apuntar la UI, el CLI o un E2E a un `.sqlite` generado.
 
+## Motor de flujos
+
+`createFlows({ store, defs, agents, artifacts, roles, workspaceOf })` (`packages/core/src/flows/`) valida, guarda y ejecuta flujos (`docs/design.html#d-flows`). Hoy ejecuta nodos `agent` y `action`; `start` rechaza un flujo con parallel, gate, wait o flow antes de crear nada.
+
+- `flows.start(flujo, sujeto, params, { profile, projectId })` es idempotente por (flujo, sujeto) mientras la corrida siga viva (índice parcial de `runs`). La corrida fija la versión del flujo, de sus roles y del perfil; Agents recibe esas versiones en `roleDef` y `profileDef`.
+- Una acción se registra con `registerAction({ name, args, outcomes, effects, run })`. `run(args, ctx)` devuelve `{ outcome, output }`: un outcome de negocio es un resultado y nunca se reintenta; solo una excepción reintenta, según `retry` (default 3 con 10 s, 60 s y 5 min). `ctx.key` es `run:nodo:visita`, igual en todos los reintentos, y `ctx.once(etapa, fn)` guarda cada etapa en `action_effects`.
+- Un paso agent necesita un worktree: `workspaceOf(runId)` lo entrega (hoy el que la corrida tiene tomado en Workspaces).
+- Los reintentos son la misma fila de `step_runs` con `attempt` mayor (el token de fencing). Un error del entorno del agente (login vencido, cuota agotada) devuelve el paso a pending con `not_before` sin gastar intento.
+- Los tests de flujos usan un `AgentRuntime` stub (`engine.test.ts`) y esperan `run.finished` o `run.parked` en los eventos, nunca sleeps; el backoff y los timeouts se prueban con `vi.useFakeTimers()`.
+
 ## Runtime de Claude
 
 `createClaudeRuntime({ credentials, home })` (`packages/core/src/agents/claude/`) es el runtime `claude-sdk`: lanza Claude Code con `@anthropic-ai/claude-agent-sdk` (versión fija, súbela a propósito). `credentials` sale de `subscriptionCredentials()` (default: el `claude` del `PATH`, sin leer ni guardar el login) o `apiKeyCredentials(key)`.

@@ -13,7 +13,7 @@ import { and, eq } from "drizzle-orm";
 import * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
-import { agentSessions } from "../store/schema";
+import { agentSessions, type DefPin } from "../store/schema";
 import type { Store } from "../store/store";
 import type { AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
 
@@ -24,19 +24,30 @@ export const ACTIVITY_INTERVAL_MS = 2000;
 interface Placement {
   /** Slug de la def `profile` que pone modelo, effort y topes. */
   profile: string;
+  /** La versión del perfil que fijó la corrida; sin ella rige la vigente. */
+  profileDef?: DefPin;
   /** Para resolver defs con scope `repo`. */
   repoId?: string;
   stepRunId?: StepRunId;
   projectId?: ProjectId;
+  /** Al abortarse, la sesión se interrumpe y el resultado llega como el de un runtime que terminó mal. */
+  signal?: AbortSignal;
 }
 
 export interface RunRequest extends Placement {
   /** Slug de la def `role`. */
   role: string;
+  /** La versión del rol que fijó la corrida; sin ella rige la vigente. */
+  roleDef?: DefPin;
   mode: string;
   brief: Brief;
   /** El directorio donde corre el agente. */
   workspace: string;
+  /**
+   * Una sesión anterior de la que partir. Que se retome o no lo decide el modo: con `session: "new"`
+   * se ignora y la sesión es nueva.
+   */
+  resumeFrom?: string;
 }
 
 export interface ResumeRequest extends Placement {
@@ -97,7 +108,9 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
   }
 
   function resolveProfileRole(placement: Placement, roleSlug: string) {
-    const def = defs.resolve("profile", placement.profile, { repoId: placement.repoId });
+    const def = placement.profileDef
+      ? defs.get("profile", placement.profileDef.id, placement.profileDef.version)
+      : defs.resolve("profile", placement.profile, { repoId: placement.repoId });
     if (!def) throw new Error(`No existe el perfil "${placement.profile}".`);
     const profileRole = Profile.parse(def.body).roles[roleSlug];
     if (!profileRole) {
@@ -136,10 +149,15 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
   }
 
   async function run(req: RunRequest): Promise<AgentResult> {
-    const roleDef = defs.resolve("role", req.role, { repoId: req.repoId });
+    const roleDef = req.roleDef
+      ? defs.get("role", req.roleDef.id, req.roleDef.version)
+      : defs.resolve("role", req.role, { repoId: req.repoId });
     if (!roleDef) throw new Error(`No existe el rol "${req.role}".`);
     const role = Role.parse(roleDef.body);
     const mode = pickMode(role, req.role, req.mode, req.brief);
+    if (req.resumeFrom !== undefined && mode.session !== "new") {
+      return resume({ ...req, sessionId: req.resumeFrom });
+    }
     const profileRole = resolveProfileRole(req, req.role);
     const budget = budgetOf(mode, profileRole.budget);
 
@@ -158,6 +176,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
       ...budget,
     };
     const agentRun = await runtime.start(spec);
+    interruptOnAbort(req.signal, agentRun);
     return converse(
       {
         roleDefId: roleDef.id,
@@ -199,6 +218,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
       promptFor(mode, req.brief),
       { outputSchema: outputSchemaFor(mode), ...budget },
     );
+    interruptOnAbort(req.signal, agentRun);
     return converse(
       {
         roleDefId: session.roleDefId,
@@ -396,6 +416,17 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
   }
 
   return { run, resume };
+}
+
+/** Interrumpir es la forma de cancelar: el runtime resuelve `result` con lo que alcanzó a hacer. */
+function interruptOnAbort(signal: AbortSignal | undefined, agentRun: AgentRun): void {
+  if (!signal) return;
+  const interrupt = () =>
+    agentRun.interrupt().catch((error: unknown) => {
+      console.error(`No se pudo interrumpir la sesión ${agentRun.ref.sessionId}:`, error);
+    });
+  if (signal.aborted) interrupt();
+  else signal.addEventListener("abort", interrupt, { once: true });
 }
 
 const ZERO_USAGE: Usage = {

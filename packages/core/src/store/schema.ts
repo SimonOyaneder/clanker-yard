@@ -121,7 +121,7 @@ export const agentSessions = sqliteTable(
   "agent_sessions",
   {
     id: text().primaryKey(),
-    /** Sin FK hasta que exista `step_runs`. */
+    /** Sin FK: Agents también corre sesiones sueltas, fuera de un paso (pruebas de un rol). */
     stepRunId: text("step_run_id"),
     roleDefId: text("role_def_id").notNull(),
     roleVersion: integer("role_version").notNull(),
@@ -357,5 +357,131 @@ export const localComments = sqliteTable(
     index("local_comments_issue").on(t.issueId, t.createdAt),
     foreignKey({ columns: [t.issueId], foreignColumns: [localIssues.id] }),
     check("local_comments_author_json", sql`json_valid(${t.author})`),
+  ],
+);
+
+export const RUN_STATUSES = [
+  "queued",
+  "running",
+  "waiting",
+  "parked",
+  "paused",
+  "done",
+  "failed",
+  "canceled",
+] as const;
+export const PARK_REASONS = ["gate", "needs_human", "limit"] as const;
+export const LANES = ["dev", "maintenance"] as const;
+
+/** Una versión fijada de una def: lo que la corrida usa aunque después se guarde otra. */
+export interface DefPin {
+  id: string;
+  version: number;
+}
+
+/**
+ * Una corrida de un flujo sobre un sujeto. Fija la versión del flujo, de sus roles y del perfil al
+ * empezar. `projects` aún no existe, así que `project_id` no tiene FK.
+ */
+export const runs = sqliteTable(
+  "runs",
+  {
+    id: text().$type<RunId>().primaryKey(),
+    projectId: text("project_id").$type<ProjectId>(),
+    subjectType: text("subject_type").$type<SubjectRef["type"]>().notNull(),
+    subjectId: text("subject_id").notNull(),
+    flowDefId: text("flow_def_id").notNull(),
+    flowVersion: integer("flow_version").notNull(),
+    profileDefId: text("profile_def_id"),
+    profileVersion: integer("profile_version"),
+    /** Rol del flujo (slug) → versión fijada. */
+    roles: text({ mode: "json" }).$type<Record<string, DefPin>>().notNull(),
+    lane: text({ enum: LANES }).notNull(),
+    status: text({ enum: RUN_STATUSES }).notNull(),
+    parkReason: text("park_reason", { enum: PARK_REASONS }),
+    /** `done`, `blocked` o `failed`: el `@fin` con que terminó el flujo. */
+    outcome: text(),
+    /** 0 si el flujo es `effects: "local"`. */
+    writes: integer({ mode: "boolean" }).notNull(),
+    /** Los params efectivos: defaults del flujo pisados por los de `start`. */
+    params: text({ mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    /** Contador → veces que se tomó. Son de la corrida y no se reinician. */
+    rounds: text({ mode: "json" }).$type<Record<string, number>>().notNull(),
+    costMicros: integer("cost_micros").notNull().default(0),
+    startedAt: integer("started_at").notNull(),
+    endedAt: integer("ended_at"),
+  },
+  (t) => [
+    foreignKey({ columns: [t.flowDefId, t.flowVersion], foreignColumns: [defVersions.defId, defVersions.version] }),
+    foreignKey({
+      columns: [t.profileDefId, t.profileVersion],
+      foreignColumns: [defVersions.defId, defVersions.version],
+    }),
+    // Un flujo no se lanza dos veces sobre el mismo sujeto mientras la corrida siga viva.
+    uniqueIndex("runs_active_flow_subject")
+      .on(t.flowDefId, t.subjectType, t.subjectId)
+      .where(sql`${t.status} IN ('queued', 'running', 'waiting', 'parked', 'paused')`),
+    check("runs_roles_json", sql`json_valid(${t.roles})`),
+    check("runs_params_json", sql`json_valid(${t.params})`),
+    check("runs_rounds_json", sql`json_valid(${t.rounds})`),
+  ],
+);
+
+export const STEP_STATUSES = ["pending", "leased", "running", "waiting", "done", "failed", "canceled"] as const;
+
+/**
+ * Una visita de un nodo. Los reintentos son la misma fila con `attempt` mayor: `attempt` es el
+ * token de fencing, y un cierre con un attempt que ya no es el vigente se rechaza.
+ */
+export const stepRuns = sqliteTable(
+  "step_runs",
+  {
+    id: text().$type<StepRunId>().primaryKey(),
+    runId: text("run_id")
+      .$type<RunId>()
+      .notNull()
+      .references(() => runs.id),
+    nodeId: text("node_id").notNull(),
+    /** Cuántas veces se entró a este nodo en la corrida, desde 1. */
+    visit: integer().notNull(),
+    /** Vueltas que llevaba el edge que trajo hasta aquí; 0 si no cuenta rondas. */
+    round: integer().notNull(),
+    /** Ejecuciones empezadas; sube en cada lease. */
+    attempt: integer().notNull().default(0),
+    status: text({ enum: STEP_STATUSES }).notNull(),
+    /** Lo que declara el nodo, más `error`, `timeout` y `skipped`. */
+    outcome: text(),
+    /** Boot id del core dueño del lease. */
+    owner: text(),
+    /** Espera de backoff: no se despacha antes. */
+    notBefore: integer("not_before"),
+    /** El input ya resuelto (artefacto `brief`). */
+    inputHash: text("input_hash").$type<ArtifactHash>(),
+    outputHash: text("output_hash").$type<ArtifactHash>(),
+    leaseUntil: integer("lease_until"),
+    error: text(),
+    /** El paso cuyo edge trajo hasta aquí: lo que resuelve `$prev`. */
+    prevStepRunId: text("prev_step_run_id").$type<StepRunId>(),
+    costMicros: integer("cost_micros").notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex("step_runs_run_node_visit_attempt").on(t.runId, t.nodeId, t.visit, t.attempt),
+    index("step_runs_status_lease").on(t.status, t.leaseUntil),
+  ],
+);
+
+/** Lo que `ctx.once` ya hizo por etapa: una acción re-ejecutada con la misma clave salta esas etapas. */
+export const actionEffects = sqliteTable(
+  "action_effects",
+  {
+    /** `run:nodo:visita`. */
+    idemKey: text("idem_key").notNull(),
+    stage: text().notNull(),
+    result: text({ mode: "json" }).notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.idemKey, t.stage] }),
+    check("action_effects_result_json", sql`json_valid(${t.result})`),
   ],
 );

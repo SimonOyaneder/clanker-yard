@@ -1,6 +1,9 @@
 import { FlowDef } from "@clanker/api";
 import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
+import { createAgents } from "../agents/agents";
+import type { AgentRuntime } from "../agents/runtime";
+import { createArtifacts } from "../artifacts/artifacts";
 import { createDefs, type Defs } from "../defs/defs";
 import { openStore, type Store } from "../store/store";
 import type { RoleInfo } from "./catalog";
@@ -10,6 +13,14 @@ const open: Store[] = [];
 afterEach(() => {
   for (const store of open.splice(0)) store.close();
 });
+
+/** Estas pruebas solo validan y guardan: ningún paso corre, así que el runtime nunca se usa. */
+const unusedRuntime: AgentRuntime = {
+  id: "fake",
+  capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+  start: () => Promise.reject(new Error("no se usa")),
+  resume: () => Promise.reject(new Error("no se usa")),
+};
 
 const anyArgs = z.record(z.string(), z.unknown());
 const okOnly = ["ok"];
@@ -34,9 +45,15 @@ function setup(): { defs: Defs; flows: Flows } {
     committer: { modes: { plan: modes(okOnly), route: modes(okOnly) } },
     triage: { modes: { bot: modes(["fix", "reply"]), ci: modes(["fix", "foreign"]) } },
   };
-  const flows = createFlows({ defs, roles: (id) => roles[id] });
+  const flows = createFlows({
+    store,
+    defs,
+    agents: createAgents({ store, defs, runtime: unusedRuntime }),
+    artifacts: createArtifacts({ store, dir: "sin-uso" }),
+    roles: (id) => roles[id],
+  });
   const action = (name: string, outcomes: string[], effects: "local" | "remote", args: z.ZodType = anyArgs) =>
-    flows.registerAction({ name, outcomes, effects, args });
+    flows.registerAction({ name, outcomes, effects, args, run: () => Promise.reject(new Error("no se usa")) });
   action("workspace.acquire", okOnly, "local");
   action("workspace.syncBase", ["same", "rebased", "conflict"], "local");
   action("recipe.check", ["ok", "fail"], "local", z.object({ ws: z.unknown(), scope: z.enum(["changed", "all"]) }));
@@ -548,7 +565,13 @@ describe("avisos", () => {
 test("registrar dos veces la misma acción es un bug", () => {
   const { flows } = setup();
 
-  expect(() => flows.registerAction({ name: "recipe.check", outcomes: [], effects: "local", args: anyArgs })).toThrow(
-    /recipe\.check/,
-  );
+  expect(() =>
+    flows.registerAction({
+      name: "recipe.check",
+      outcomes: [],
+      effects: "local",
+      args: anyArgs,
+      run: () => Promise.resolve({ outcome: "ok" }),
+    }),
+  ).toThrow(/recipe\.check/);
 });
