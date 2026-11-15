@@ -374,6 +374,46 @@ describe("recover: límite de cortes", () => {
     expect(stepOf(h, runId, "work")).toMatchObject({ status: "failed", outcome: "error", error: expect.stringContaining("3 veces") });
     expect(h.flows.getRun(runId)).toMatchObject({ status: "parked", parkReason: "needs_human" });
   });
+
+  test("si cerrar el paso al tercer corte falla, su corrida queda parked y el resto se recupera igual", async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    cleanups.push(() => log.mockRestore());
+    let h = boot({ persist: true, bootId: "boot_0" });
+    h.action("work", ["ok"], forever);
+    h.save({
+      ...action("broken"),
+      params: { rounds: { type: "number", default: 2 } },
+      nodes: {
+        work: { type: "action", action: "work", args: {}, on: { ok: "@done", error: { to: "work", maxRounds: "$run.params.rounds", exhausted: "@failed" } } },
+      },
+    });
+    h.save(action("pr"));
+    const broken = h.start("broken", { type: "issue", id: "ENG-1" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    for (const bootId of ["boot_1", "boot_2"]) {
+      void cut(h);
+      h = restart(h, bootId);
+      h.action("work", ["ok"], forever);
+      h.flows.recover();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    const healthy = h.start("pr", { type: "issue", id: "ENG-2" });
+    await vi.advanceTimersByTimeAsync(0);
+    // Un param roto: el edge `error` ya no puede resolver su maxRounds.
+    h.store.db.$client.exec(`UPDATE runs SET params = '{"rounds":0}' WHERE id = '${broken}'`);
+    void cut(h);
+    h = restart(h, "boot_3");
+    h.action("work", ["ok"]);
+
+    expect(h.flows.recover()).toBe(2);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(stepOf(h, broken, "work")).toMatchObject({ status: "failed", outcome: "error", error: expect.stringContaining("rounds") });
+    expect(h.flows.getRun(broken)).toMatchObject({ status: "parked", parkReason: "needs_human" });
+    expect(h.flows.getRun(healthy)).toMatchObject({ status: "done", outcome: "done" });
+  });
 });
 
 describe("fencing del attempt", () => {

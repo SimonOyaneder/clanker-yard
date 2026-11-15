@@ -560,34 +560,45 @@ export function createEngine(deps: EngineDeps): Engine {
       .orderBy(asc(stepRuns.id))
       .all();
     for (const { step, run } of orphans) {
-      const cuts = step.recoveries + 1;
-      if (cuts >= MAX_CUTS) {
-        store.tx((tx) => closeCutSessions(tx, run, step));
-        const job = loadJob(run, step);
-        if (job) {
-          transition(job, "error", undefined, `La app se cortó ${cuts} veces con este paso en curso: se da por fallado para no entrar en un loop de crash.`);
-        }
-        continue;
+      // Como en el dispatcher, un paso que no se puede recuperar estaciona solo su corrida: si lanzara,
+      // el arranque fallaría y cada arranque siguiente tropezaría con el mismo paso.
+      try {
+        recoverStep(run, step);
+      } catch (error) {
+        console.error(`No se pudo recuperar el paso ${step.id} (${step.nodeId}):`, error);
+        parkUnloadable(run, step, describe(error));
       }
-      store.tx((tx) => {
-        const reopened = tx.db
-          .update(stepRuns)
-          .set({ status: "pending", owner: null, leaseUntil: null, notBefore: null, recoveries: cuts, error: RESUMED_AFTER_CUT })
-          .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), inArray(stepRuns.status, ["leased", "running"])))
-          .returning({ id: stepRuns.id })
-          .get();
-        if (!reopened) throw new StaleStepError(step.id);
-        closeCutSessions(tx, run, step);
-        tx.emit({
-          type: "step.retrying",
-          origin: "core",
-          ...scopeOf(run, step.id),
-          payload: { ...stepPayload(step), recoveries: cuts, error: RESUMED_AFTER_CUT },
-        });
-      });
     }
     wake();
     return orphans.length;
+  }
+
+  function recoverStep(run: RunRow, step: StepRow): void {
+    const cuts = step.recoveries + 1;
+    if (cuts >= MAX_CUTS) {
+      store.tx((tx) => closeCutSessions(tx, run, step));
+      const job = loadJob(run, step);
+      if (job) {
+        transition(job, "error", undefined, `La app se cortó ${cuts} veces con este paso en curso: se da por fallado para no entrar en un loop de crash.`);
+      }
+      return;
+    }
+    store.tx((tx) => {
+      const reopened = tx.db
+        .update(stepRuns)
+        .set({ status: "pending", owner: null, leaseUntil: null, notBefore: null, recoveries: cuts, error: RESUMED_AFTER_CUT })
+        .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), inArray(stepRuns.status, ["leased", "running"])))
+        .returning({ id: stepRuns.id })
+        .get();
+      if (!reopened) throw new StaleStepError(step.id);
+      closeCutSessions(tx, run, step);
+      tx.emit({
+        type: "step.retrying",
+        origin: "core",
+        ...scopeOf(run, step.id),
+        payload: { ...stepPayload(step), recoveries: cuts, error: RESUMED_AFTER_CUT },
+      });
+    });
   }
 
   /** Las sesiones del paso que seguían `running` no tienen a quién esperar: quedan cerradas con error. */
