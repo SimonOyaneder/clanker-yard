@@ -280,6 +280,8 @@ export const workspaces = sqliteTable(
     leaseUntil: integer("lease_until"),
     /** Sube en 1 en cada toma del lease; las operaciones con efecto lo validan antes de actuar. */
     fencingToken: integer("fencing_token").notNull().default(0),
+    /** Desde cuándo está `archived` (su PR se mergeó o cerró); a los 7 días se borra. NULL en los demás estados. */
+    archivedAt: integer("archived_at"),
   },
   (t) => [
     uniqueIndex("workspaces_path").on(t.path),

@@ -55,6 +55,7 @@ import { createErrorReporter } from "./watch/report";
 import { createTrackerChanges } from "./watch/tracker-changes";
 import { startTriggers } from "./watch/triggers";
 import { createWatch } from "./watch/watch";
+import { startCleanup } from "./workspaces/cleanup";
 import { createRepos } from "./workspaces/repos";
 import {
   createWorkspaces,
@@ -194,6 +195,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const onPrChange = (ref: PrRef, state: PrState, row: PrRow) => {
     signalPr(flows.signal, ref, state);
     prEvents.observe(ref, state, row);
+    if (state.state === "merged" || state.state === "closed") cleanup.request();
   };
   const prCache = createPrCache({ store, repos, prs, onChange: onPrChange });
   const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtime) ? runtime : undefined });
@@ -238,6 +240,15 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       if (runId) workspaces.releaseHeldBy(runId);
     },
     { types: ["run.finished"] },
+  );
+  // Un worktree cuyo PR terminó se archiva en cuanto nadie lo tiene: al soltarse el último lease (`pr.merged` y los
+  // cierres sin merge llegan por `onPrChange`), y a los 7 días se borra.
+  const cleanup = startCleanup({ workspaces, errors: watchErrors });
+  const stopCleaningOnRelease = store.events.subscribe(
+    ({ payload }) => {
+      if (payload.resource === "workspace") cleanup.request();
+    },
+    { types: ["lease.released"] },
   );
   // Al devolver un sujeto prestado la branch pudo moverse: la dueña relee su `head_sha` antes de seguir.
   const stopRereading = store.events.subscribe(
@@ -325,6 +336,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       await server.close();
       stopReleasing();
       stopRereading();
+      stopCleaningOnRelease();
+      await cleanup.stop();
       await askpass.close();
     },
   };

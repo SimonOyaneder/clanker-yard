@@ -318,6 +318,26 @@ describe("arranque", () => {
     await vi.waitFor(() => expect(store.db.$client.prepare("SELECT head_sha FROM workspaces").get()).toEqual({ head_sha: repo.git("rev-parse", "HEAD") }));
   });
 
+  test("un worktree idle cuyo PR terminó se archiva al arrancar y al soltarse un lease", async () => {
+    const insert = (id: string, branch: string, number: number) => {
+      store.db.$client
+        .prepare("INSERT INTO workspaces (id, repo_id, path, branch, base_ref, state, fencing_token) VALUES (?, 'demo', ?, ?, 'main', 'idle', 1)")
+        .run(id, join(home.path, "worktrees", branch), branch);
+      store.db.$client
+        .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'demo', ?, '', ?, 'main', '', 'merged', 0, 1)")
+        .run(`pr_${id}`, number, branch);
+    };
+    const states = () => store.db.$client.prepare("SELECT branch, state FROM workspaces ORDER BY branch").all();
+    insert("wsp_a", "a", 1);
+    await boot();
+    await vi.waitFor(() => expect(states()).toEqual([{ branch: "a", state: "archived" }]));
+
+    insert("wsp_b", "b", 2);
+    store.tx((tx) => tx.emit({ type: "lease.released", origin: "core", payload: { resource: "workspace", id: "wsp_b", token: 1 } }));
+
+    await vi.waitFor(() => expect(states()).toEqual([{ branch: "a", state: "archived" }, { branch: "b", state: "archived" }]));
+  });
+
   test("al arrancar despacha los pasos pending que dejó el core anterior", async () => {
     let client = await boot();
     const repoId = createRepos(store).add({ name: "demo", path: repo.dir });

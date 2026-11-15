@@ -9,6 +9,7 @@ import { git, GitError, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { diffBetween, snapshotTree } from "../git/tree";
 import { defaultLogDir, excerpt, execLogged, stepLogPath, type ExecResult } from "./exec";
+import { createArchive, type CleanupResult } from "./archive";
 import { continueRebase, rebaseInProgress, rebaseOnto, startRebase, type RebaseStep } from "./rebase";
 import { planRestack } from "./restack";
 import { newId } from "../store/conventions";
@@ -155,6 +156,16 @@ export interface Workspaces {
    * (terminó con el conflicto a medias) se aborta antes: la dueña sigue sobre su branch como la prestó.
    */
   reread(runId: RunId): Promise<void>;
+  /**
+   * Archiva y borra los worktrees de PRs que terminaron (`docs/design.html#d-ops`, estados del worktree).
+   * Un `idle` cuyos PRs se mergearon o cerraron (y ninguno sigue abierto) pasa a `archived`; uno `archived`
+   * cuyo PR se reabrió vuelve a `idle`. A los 7 días (`ARCHIVE_TTL_MS`) del archivado, `git worktree unlock` y
+   * `remove`, borra la branch local y la fila, salvo que quede algo sin pushear (cambios sin commitear, un
+   * rebase a medias o commits que GitHub no tiene): ese se conserva. Nunca toca un worktree que una corrida
+   * tiene tomado, también estacionada: se archiva en la pasada que sigue a su `release`. Idempotente; si un
+   * worktree falla, sigue con los demás y lanza un `AggregateError` al final.
+   */
+  cleanup(): Promise<CleanupResult>;
   /** Lanza `StaleLeaseError` si `lease` ya no es el lease vigente del worktree. */
   validate(lease: WorkspaceRef): void;
   /**
@@ -299,6 +310,8 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     }
   }
 
+  const { cleanup } = createArchive({ store, repos, now, withRepoLock });
+
   function takeLease(db: Store["db"], id: string, runId: RunId) {
     const t = now();
     return db
@@ -307,11 +320,13 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         holderRunId: runId,
         leaseUntil: t + leaseTtlMs,
         fencingToken: sql`${workspaces.fencingToken} + 1`,
+        // Tomar un archivado (su PR se reabrió, o se vuelve a usar la branch) lo revive.
+        state: sql`CASE WHEN ${workspaces.state} = 'archived' THEN 'idle' ELSE ${workspaces.state} END`,
+        archivedAt: null,
       })
       .where(
         and(
           eq(workspaces.id, id),
-          ne(workspaces.state, "archived"),
           // Una corrida que ya lo tiene lo vuelve a tomar (su `workspace.acquire` se re-ejecuta tras un corte).
           or(isNull(workspaces.holderRunId), lt(workspaces.leaseUntil, t), eq(workspaces.holderRunId, runId)),
         ),
@@ -393,17 +408,9 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const baseRef = normalizeBase(base);
 
     const claim = store.tx(({ db, emit }) => {
-      const existing = db
-        .select()
-        .from(workspaces)
-        .where(
-          and(
-            eq(workspaces.repoId, repo),
-            eq(workspaces.branch, branch),
-            ne(workspaces.state, "archived"),
-          ),
-        )
-        .get();
+      // El vivo si lo hay; si no, el archivado de esa branch (todavía tiene su carpeta y sale de `archived` al tomarlo).
+      const rows = db.select().from(workspaces).where(and(eq(workspaces.repoId, repo), eq(workspaces.branch, branch))).all();
+      const existing = rows.find((r) => r.state !== "archived") ?? rows[0];
 
       let row: typeof workspaces.$inferSelect;
       if (existing) {
@@ -1149,6 +1156,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     baseSha,
     syncBase,
     release,
+    cleanup,
     handOver,
     reread,
     releaseHeldBy(runId) {
