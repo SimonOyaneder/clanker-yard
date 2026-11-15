@@ -47,7 +47,7 @@ const PACK = {
     lgtm: { reviewState: "APPROVED", bodyMatch: "LGTM", sameSha: true },
     resolvableAuthors: [BOT],
   },
-  conventions: { commentPrefix: COMMENT_PREFIX },
+  conventions: { commentPrefix: COMMENT_PREFIX, councilPrefix: "[clanker-council] " },
 };
 
 const RECIPE = {

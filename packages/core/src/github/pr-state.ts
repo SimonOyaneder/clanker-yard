@@ -227,7 +227,8 @@ function threadsOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: s
   return threads;
 }
 
-function answered(thread: RawThread, prefix: string | undefined): boolean {
+/** Alguna respuesta del thread (no su primer comentario) lleva el prefijo de comentarios del pack. */
+export function answered(thread: RawThread, prefix: string | undefined): boolean {
   return prefix !== undefined && thread.comments.nodes.slice(1).some((reply) => reply.body.startsWith(prefix));
 }
 

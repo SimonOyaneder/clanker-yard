@@ -1,0 +1,24 @@
+# Council: el primer thread (src/transfer.ts) se aplica y el segundo (el test) se rechaza con su razón.
+# Los ids salen del brief: `instructions` llega en el orden de los threads.
+match: { mode: council, round: "*" }
+events:
+  - { at: 0, text: "Aplico el primer thread y descarto el segundo" }
+  - { at: 2, tool: Edit, input: { file_path: src/transfer.ts } }
+  - { at: 5, usage: { model: sonnet, in: 900, out: 220, cacheWrite: 0, cacheRead: 0, costUsd: 0.024 } }
+effects:
+  - apply: patches/council.patch
+run:
+  test:
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Un thread aplicado y otro rechazado"
+    payload:
+      files: [src/transfer.ts]
+      rejected:
+        - { id: "$brief.payload.instructions.1.id", reason: "el repo no tiene un framework de test: transfer.test.ts es un script, no un spec" }
+      deletedTests: []
+      cuts:
+        - { behavior: "Rechazar montos no finitos", paths: [src/transfer.ts] }

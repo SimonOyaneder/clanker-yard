@@ -128,7 +128,7 @@ function factsOf(state: PrState): PrEventInput[] {
     facts.push({ type: "pr.conflict", keys: [state.headSha], payload: () => ({ sha: state.headSha, base: state.baseRef }) });
   }
   if (threads.councilOpen.length > 0) {
-    facts.push({ type: "pr.comment", keys: threads.councilOpen.map(String), payload: (fresh) => ({ threadIds: fresh.map(Number) }) });
+    facts.push({ type: "pr.comment", keys: threads.councilOpen.map(String), payload: (fresh) => ({ threadIds: fresh.map(Number), base: state.baseRef }) });
   }
   const talkKey = ({ author, at }: PrState["talk"][number]) => `${author}@${at}`;
   if (talk.length > 0) {

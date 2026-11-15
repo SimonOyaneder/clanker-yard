@@ -28,7 +28,7 @@ export interface TriggersDeps {
  * disparan flujos; los demás (los tuyos que el sistema no abrió) solo generan el evento.
  *
  * Params: un flujo recibe lo que declare entre `pr` (`PrRef`), `repo` (el id del repo registrado), `branch`
- * (la branch del PR), los campos del payload del evento (`sha`, `from`, `to`, `threadIds`, `files`...) y los
+ * (la branch del PR), los campos del payload del evento (`sha`, `from`, `to`, `base`, `threadIds`, `files`...) y los
  * `flowParams` del proyecto que abrió el PR (una política como `rebaseNonDraft`). El `filter` del trigger
  * pide que cada clave valga lo mismo en el payload. `start` es idempotente por (flujo, sujeto): un
  * evento nuevo con la corrida anterior todavía viva no abre otra. Un flujo que no arranca (falta un

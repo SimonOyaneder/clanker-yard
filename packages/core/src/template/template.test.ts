@@ -91,7 +91,7 @@ const flowNodes = [
   { role: "triage", mode: "bot", on: ["fix", "reply"], brief: { items: "$bot-wait.items" } },
   { role: "triage", mode: "ci", on: ["fix", "foreign"], brief: { items: "$ci-wait.failures" } },
   { role: "triage", mode: "coverage", on: ["fix", "reply"], brief: { items: "$cov.items" } },
-  { role: "dev", mode: "council", on: ["ok"], brief: {} },
+  { role: "dev", mode: "council", on: ["ok"], brief: { instructions: "$threads.items" } },
   { role: "dev", mode: "conflict", on: ["resolved", "behavior"], brief: { failures: "$prev.failures" } },
   { role: "dev", mode: "fix", on: ["ok"], brief: { failures: "$prev.failures" } },
 ];

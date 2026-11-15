@@ -204,7 +204,7 @@ export type { RebasePrDeps } from "./github/rebase-pr";
 export { stackRestackAction, stackRestackRewrittenAction } from "./github/restack";
 export type { ChildReport, StackRestackDeps } from "./github/restack";
 export type { PrPushFixupsDeps } from "./github/push-fixups";
-export { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
+export { councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
 export type { PrFeedbackDeps } from "./github/pr-feedback";
 export { preparePush } from "./commits/prepare-push";
 export type { PreparePushOptions, PreparePushResult } from "./commits/prepare-push";

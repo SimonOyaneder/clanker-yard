@@ -7,7 +7,7 @@ import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult
 import type { Packs } from "../packs/packs";
 import type { GitHubClient } from "./client";
 import { fetchPr, PrNotFoundError, type PrNode, type RawThread } from "./pr-query";
-import { humanTest } from "./pr-state";
+import { answered, humanTest } from "./pr-state";
 
 // Lo que el core escribe en un PR además de publicarlo: comentarios, respuestas a threads, resolverlos y
 // pedirle review al bot (`docs/design.html#d-agents`, biblioteca de acciones). Todo sale con el token de
@@ -195,15 +195,24 @@ const ReplyArgs = z.object({
     .transform((triage) => triage ?? { items: [] }),
   /** El sha del fixup que arregló cada ítem (`pr.pushFixups`): sin `reply`, es lo que se le dice al thread. */
   shas: z.record(z.string(), z.string()).default({}),
+  /**
+   * Los ítems que el dev no aplicó (`DevWorkReport.rejected`), cada uno con su razón: el thread recibe la
+   * razón aunque `shas` traiga un sha para él (`pr.pushFixups` da uno a todo ítem que le pasaron).
+   */
+  rejected: z
+    .array(z.object({ id: ThreadId, reason: z.string() }))
+    .nullish()
+    .transform((rejected) => rejected ?? []),
   /** Después de responder, vuelve a pedirle review al bot del pack. */
   rerequestBot: z.boolean().default(false),
 });
 
 /**
  * `pr.reply`: responde cada ítem del triage en su thread, con el sha del fixup que lo arregló o con la
- * razón (`reply`) y con el prefijo de comentarios del pack. Después resuelve el thread si es de un autor
- * resoluble del pack; los de council se responden y no se resuelven. Un thread humano solo se responde
- * con el PR en draft. Cada respuesta lleva `<!-- clanker:clave -->` y se busca antes de publicar: un
+ * razón (`reply`, o la de `rejected`, que gana) y con el prefijo de comentarios del pack. Después resuelve
+ * el thread si es de un autor resoluble del pack; los de council se responden y no se resuelven, y uno ya
+ * respondido (otra vuelta del flujo, tras un CI rojo) no se vuelve a responder. Un thread humano solo se
+ * responde con el PR en draft. Cada respuesta lleva `<!-- clanker:clave -->` y se busca antes de publicar: un
  * reintento retoma sin duplicar. Un ítem que no es un thread del PR (un check de CI) o sin qué decir se
  * salta.
  *
@@ -223,6 +232,8 @@ export function prReplyAction(deps: PrFeedbackDeps): ActionDef<typeof ReplyArgs>
         const write = spaced(deps, ctx.signal);
         const out = { replied: [] as string[], resolved: [] as string[], skipped: [] as { id: string; reason: string }[] };
 
+        const reasons = new Map(args.rejected.map(({ id, reason }) => [id, reason]));
+
         for (const { id, reply } of args.triage.items) {
           const skip = (reason: string) => void out.skipped.push({ id, reason });
           const found = findThread(node, pack, id);
@@ -235,7 +246,8 @@ export function prReplyAction(deps: PrFeedbackDeps): ActionDef<typeof ReplyArgs>
             continue;
           }
           const sha = args.shas[id];
-          const text = sha === undefined ? reply : `aplicado en ${sha.slice(0, 7)}`;
+          const reason = reasons.get(id);
+          const text = reason ?? (sha === undefined ? reply : `aplicado en ${sha.slice(0, 7)}`);
           if (!text || cleanMessage(text) === "") {
             skip("sin sha del fixup ni razón que decir");
             continue;
@@ -243,7 +255,12 @@ export function prReplyAction(deps: PrFeedbackDeps): ActionDef<typeof ReplyArgs>
 
           const marker = markerOf(`${ctx.key}:${id}`);
           const comments = found.thread.comments.nodes;
-          if (!comments.some((c) => c.body.includes(marker))) {
+          const replied = comments.some((c) => c.body.includes(marker));
+          if (!replied && found.owner === "council" && answered(found.thread, pack.conventions.commentPrefix)) {
+            skip("el thread de council ya tiene una respuesta");
+            continue;
+          }
+          if (!replied) {
             const body = `${withPrefix(pack, text)}\n\n${marker}`;
             await write(() =>
               client.request("POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies", {
@@ -264,6 +281,38 @@ export function prReplyAction(deps: PrFeedbackDeps): ActionDef<typeof ReplyArgs>
 
         const requested = args.rerequestBot ? await requestBot(target, ctx, write) : undefined;
         return { outcome: "ok", output: { ...out, ...requested } };
+      }),
+  };
+}
+
+const CouncilThreadsArgs = z.object({ pr: PrRef });
+
+/**
+ * `council.threads` (`docs/design.html#d-flows`, plantilla council): los threads de council abiertos del PR,
+ * los mismos que cuenta `PrState.threads.councilOpen` (con el prefijo del council del pack, sin resolver y
+ * sin una respuesta con el prefijo de comentarios). Output del `ok`: `items`, uno por thread, con la forma
+ * de `DevWorkBrief.instructions` (`id` es el del primer comentario, `change` su texto sin el prefijo) y
+ * `path` y `line` para que `pr.pushFixups` ate cada ítem a su commit. `none` si no hay ninguno, o si el PR ya
+ * no está abierto: no hay nada que atender.
+ */
+export function councilThreadsAction(deps: PrFeedbackDeps): ActionDef<typeof CouncilThreadsArgs> {
+  return {
+    name: "council.threads",
+    args: CouncilThreadsArgs,
+    outcomes: ["ok", "none"],
+    effects: "local",
+    run: (args) =>
+      onPr(deps, args.pr, async ({ client, owner, name, number, pack }): Promise<ActionResult> => {
+        const prefix = pack.conventions.councilPrefix;
+        if (!prefix) return { outcome: "none" };
+        const node = await fetchPr(client, { owner, name }, number);
+        const items = (node.state === "OPEN" ? node.reviewThreads : []).flatMap((thread) => {
+          const first = thread.comments.nodes[0];
+          if (!first?.body.startsWith(prefix) || thread.isResolved || answered(thread, pack.conventions.commentPrefix)) return [];
+          const line = first.line == null ? {} : { line: first.line };
+          return [{ id: first.fullDatabaseId, path: first.path ?? "", ...line, change: first.body.slice(prefix.length).trim() }];
+        });
+        return items.length === 0 ? { outcome: "none" } : { outcome: "ok", output: { items } };
       }),
   };
 }

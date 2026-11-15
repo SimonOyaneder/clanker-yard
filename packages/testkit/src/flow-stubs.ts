@@ -1,7 +1,7 @@
 import type { Flows } from "@clanker/core";
 import { z } from "zod";
 
-// Las acciones y waits de las plantillas de flujo (`techlead-clasico`, `pr-feedback`) con los outcomes del
+// Las acciones y waits de las plantillas de flujo (`techlead-clasico`, `pr-feedback`, `council`) con los outcomes del
 // diseño (`docs/design.html#d-flows`): sirven para validar un flujo y recorrerlo con el runtime fake
 // guionando lo que la implementación real no produce a pedido (un check rojo, un conflicto con la base). Las
 // demás las registra el test con su acción real (`pr.reply`, `review.requestBot`, `pr.pushFixups`...).
@@ -20,6 +20,25 @@ const SPECS: Record<string, StubSpec> = {
     outcomes: ["ok"],
     effects: "local",
     outputs: { ok: { workspaceId: "wsp_stub", path: "/work/tree", branch: "cla-1", baseSha: "0".repeat(40), fencingToken: 1 } },
+  },
+  "workspace.attach": {
+    kind: "action",
+    outcomes: ["ok"],
+    effects: "local",
+    outputs: { ok: { workspaceId: "wsp_stub", path: "/work/tree", branch: "cla-1", baseSha: "0".repeat(40), fencingToken: 1, fastForwarded: false } },
+  },
+  "council.threads": {
+    kind: "action",
+    outcomes: ["ok", "none"],
+    effects: "local",
+    outputs: {
+      ok: {
+        items: [
+          { id: "t1", path: "app/models/transfer.rb", line: 42, change: "Renombra el método" },
+          { id: "t2", path: "app/models/transfer.rb", line: 50, change: "Agrega un test" },
+        ],
+      },
+    },
   },
   "workspace.syncBase": {
     kind: "action",

@@ -292,6 +292,7 @@ describe("arranque", () => {
 
     expect(store.events.since(0, { types: ["def.versioned"] })).toHaveLength(versions);
     expect(store.db.$client.prepare("SELECT slug FROM defs WHERE kind = 'flow' AND scope = 'builtin' ORDER BY slug").all()).toEqual([
+      { slug: "council" },
       { slug: "juguete" },
       { slug: "pr-feedback" },
       { slug: "rebase-conflicto" },

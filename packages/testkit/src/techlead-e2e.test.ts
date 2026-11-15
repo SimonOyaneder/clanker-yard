@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
-import { startTechleadScenario, TOKEN, type TechleadScenario } from "./techlead-scenario";
+import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
+import { REPO, startTechleadScenario, TOKEN, type TechleadScenario } from "./techlead-scenario";
 
 // Criterio de la fase 1 sin gastar tokens: una issue del tracker local corre `techlead-clasico` en el core
 // real (`startCore`) con el runtime fake hasta un PR draft con LGTM del bot, sin ningún LLM orquestador.
@@ -140,5 +140,90 @@ describe("pr-feedback con el core real", () => {
     expect(second!.comments.nodes).toHaveLength(1);
     expect(second!.isResolved).toBe(false);
     expect(scenario.remoteLog(scenario.github.pulls()[0]!.head.ref).map((c) => c.subject)).not.toContainEqual(expect.stringMatching(/^fixup!/));
+  });
+});
+
+describe("council con el core real", () => {
+  test("dos threads, uno aplicado y uno rechazado: fixup! visibles en el remoto, sin force push, respondidos con [clanker] y sin resolver", async () => {
+    scenario = await startTechleadScenario();
+    const { store, github, project } = scenario;
+    const { run: started } = await scenario.run();
+    await scenario.finished(started.id);
+
+    // Dos comentarios del council sobre el PR que abrió la corrida.
+    const pr = scenario.pr();
+    const [pull] = github.pulls();
+    const branch = pull!.head.ref;
+    const before = scenario.remoteLog(branch);
+    const applied = pr.councilThread("rechaza también los montos no finitos", { path: "src/transfer.ts", line: 2 });
+    const rejected = pr.councilThread("usa un framework de test", { path: "src/transfer.test.ts", line: 3 });
+
+    // Lo que Watch emite al ver un thread de council (watch.test.ts lo prueba con sondeos): `startTriggers` arranca el flujo.
+    const row = store.db.$client.prepare("SELECT id FROM pull_requests WHERE number = 1").get() as { id: string };
+    store.tx((tx) =>
+      tx.emit({
+        type: "pr.comment",
+        origin: "watch",
+        projectId: project.id,
+        subject: { type: "pr", id: row.id },
+        payload: { repo: REPO, number: 1, threadIds: [applied.commentId, rejected.commentId], base: "main" },
+      }),
+    );
+    // El CI de la punta nueva (el fixup) termina verde apenas se pushea, como el de cualquier push.
+    const green = setInterval(() => {
+      if (pr.headSha() !== before[0]!.sha) {
+        clearInterval(green);
+        pr.ci("green");
+      }
+    }, 20);
+    onTestFinished(() => clearInterval(green));
+
+    const council = await vi.waitFor(
+      async () => {
+        const runs = (await scenario!.client.runs.list({ projectId: project.id })).filter((r) => r.flow.slug === "council");
+        expect(runs).toHaveLength(1);
+        const detail = await scenario!.client.runs.get({ id: runs[0]!.id });
+        expect(detail.status).toBe("done");
+        return detail;
+      },
+      { timeout: 40_000, interval: 100 },
+    );
+
+    expect(council).toMatchObject({ outcome: "done", lane: "maintenance" });
+    expect(council.steps.filter((s) => !/^lr-/.test(s.nodeId)).map((s) => [s.nodeId, s.outcome])).toEqual([
+      ["ws", "ok"],
+      ["threads", "ok"],
+      ["work", "ok"],
+      ["checks", "ok"],
+      ["light", "ok"],
+      ["fixups", "ok"],
+      ["reply", "ok"],
+      ["ci-wait", "ok"],
+    ]);
+
+    // El remoto solo avanzó: los commits de antes siguen en su lugar y el arreglo es un `fixup!` visible, sin autosquash.
+    const after = scenario.remoteLog(branch);
+    expect(after.map((c) => c.subject).reverse()).toEqual([
+      ...before.map((c) => c.subject).reverse(),
+      "fixup! feat(transfers): validate and round the transfer amount",
+    ]);
+    expect(after.slice(1)).toEqual(before);
+    scenario.repo.git("--git-dir", scenario.repo.remoteDir!, "merge-base", "--is-ancestor", before[0]!.sha, after[0]!.sha);
+
+    // Cada thread quedó respondido una vez, el aplicado con el sha del fixup y el rechazado con la razón, y ninguno se resolvió.
+    const bodies = (id: number) => pr.node().reviewThreads.find((t) => t.comments.nodes[0]!.fullDatabaseId === String(id))!;
+    expect(bodies(applied.commentId).comments.nodes.map((c) => c.body.split("\n")[0])).toEqual([
+      "[clanker-council] rechaza también los montos no finitos",
+      `[clanker] aplicado en ${after[0]!.sha.slice(0, 7)}`,
+    ]);
+    expect(bodies(rejected.commentId).comments.nodes.map((c) => c.body.split("\n")[0])).toEqual([
+      "[clanker-council] usa un framework de test",
+      "[clanker] el repo no tiene un framework de test: transfer.test.ts es un script, no un spec",
+    ]);
+    expect([applied, rejected].map((t) => bodies(t.commentId).isResolved)).toEqual([false, false]);
+    expect(scenario.repo.git("--git-dir", scenario.repo.remoteDir!, "show", `${branch}:src/transfer.ts`)).toContain("Number.isFinite");
+    // Sin bot: el flujo no le pidió ninguna review (las dos de `/review` son de la corrida de la issue).
+    expect(pr.node().comments.map((c) => c.body.split("\n")[0])).toEqual(["/review", "/review"]);
+    expect(store.events.since(0, { types: ["error"] }).filter((e) => e.payload.scope !== "agent.context")).toEqual([]);
   });
 });

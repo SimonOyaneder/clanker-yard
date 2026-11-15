@@ -201,6 +201,18 @@ describe("validación", () => {
     expect(flows.validate(templates["techlead-clasico"]).errors).toContainEqual({ path: "nodes.feedback.flow", message: 'el flujo "pr-feedback" no existe' });
   });
 
+  test.each([false, true])("council valida, es de mantenimiento y no pide ni bot ni squash (acciones y waits reales donde existen: %s)", async (real) => {
+    const { flows } = await setup({ real, waits: real });
+
+    const saved = flows.save(templates.council!, { scope: "builtin", source: "import" });
+
+    expect([saved.version, saved.warnings]).toEqual([1, []]);
+    const { trigger, lane, nodes } = templates.council!;
+    expect([trigger, lane]).toEqual([{ type: "pr.comment" }, "maintenance"]);
+    const actions = Object.values(nodes).flatMap((node) => (node.type === "action" ? [node.action] : []));
+    expect(actions).toEqual(["workspace.attach", "council.threads", "recipe.check", "pr.pushFixups", "pr.reply"]);
+  });
+
   test("params con 3 rondas por defecto y maxSteps 200", () => {
     const { params, limits } = templates["techlead-clasico"]!;
 
@@ -288,6 +300,21 @@ describe("techlead-clasico con el runtime fake", () => {
 
     expect(run).toMatchObject({ status: "failed", outcome: "failed" });
     expect(run.steps.filter((s) => s.nodeId === "sync").map((s) => s.outcome)).toEqual(["conflict", "conflict", "conflict"]);
+  });
+});
+
+describe("council con el runtime fake", () => {
+  test("sin threads abiertos termina en done sin tocar nada", async () => {
+    const { flows, store, stubs } = await setup({ script: { "council.threads": ["none"] } });
+    flows.save(templates.council!, { scope: "builtin", source: "import" });
+
+    const runId = flows.start("council", { type: "pr", id: "pr_1" }, { pr: { account: "acme", repo: "acme/web", number: 1 }, repo: "rep_1", branch: "cla-1", base: "main" }, { profile: "eco" });
+    await finished(store, runId);
+
+    const run = flows.getRun(runId);
+    expect(run).toMatchObject({ status: "done", outcome: "done", lane: "maintenance" });
+    expect(topLevel(run)).toEqual(["ws", "threads"]);
+    expect(stubs.calls["workspace.attach"]).toEqual([{ repo: "rep_1", branch: "cla-1", base: "main" }]);
   });
 });
 

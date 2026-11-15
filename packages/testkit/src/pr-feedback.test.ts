@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  councilThreadsAction,
   createConnections,
   createDefs,
   createFileSecrets,
@@ -73,7 +74,7 @@ async function setup({ pack = PACK, draft = true }: { pack?: object | null; draf
   const deps = { connections, packs, pause: (ms: number) => (pauses.push(ms), Promise.resolve()) };
   const pr = sim.openPr({ head: "feat", draft });
   const ref = { account: ACCOUNT, repo: REPO, number: pr.number };
-  return { sim, pr, ref, pauses, comment: prCommentAction(deps), reply: prReplyAction(deps), resolve: prResolveThreadAction(deps), requestBot: reviewRequestBotAction(deps) };
+  return { sim, pr, ref, pauses, councilThreads: councilThreadsAction(deps), comment: prCommentAction(deps), reply: prReplyAction(deps), resolve: prResolveThreadAction(deps), requestBot: reviewRequestBotAction(deps) };
 }
 
 /** Un paso del motor: la `key` es la misma en todos los reintentos de una visita, y `once` recuerda las etapas hechas. */
@@ -297,6 +298,27 @@ describe("pr.reply", () => {
     expect(graphqlWrites(sim)).toHaveLength(1);
   });
 
+  test("la razón de un ítem rechazado gana al sha que pushFixups le dio, y un council ya respondido no se responde otra vez", async () => {
+    const { pr, ref, reply } = await setup({ draft: false });
+    const rejected = pr.councilThread("renombra el método");
+    const applied = pr.councilThread("agrega un test");
+    const answered = pr.councilThread("mueve esto");
+    pr.reply(answered.id, ACCOUNT, "[clanker] aplicado en abc1234");
+    const items = [rejected, applied, answered].map((t) => ({ id: String(t.commentId) }));
+    const shas = Object.fromEntries(items.map(({ id }) => [id, "f".repeat(40)]));
+
+    const { output } = await reply.run(
+      reply.args.parse({ pr: ref, triage: { items }, shas, rejected: [{ id: String(rejected.commentId), reason: "ya lo cubre otro test" }] }),
+      ctx(),
+    );
+
+    expect(bodies(pr, rejected.commentId)[1]).toMatch(/^\[clanker\] ya lo cubre otro test/);
+    expect(bodies(pr, applied.commentId)[1]).toMatch(/^\[clanker\] aplicado en fffffff/);
+    expect(bodies(pr, answered.commentId)).toHaveLength(2);
+    expect(output).toMatchObject({ replied: [String(rejected.commentId), String(applied.commentId)], skipped: [{ id: String(answered.commentId), reason: expect.stringContaining("ya tiene una respuesta") }] });
+    expect([rejected, applied].map((t) => threadOf(pr, t.commentId).isResolved)).toEqual([false, false]);
+  });
+
   test("solo resuelve a los autores resolubles del pack: coverage-bot sí, un bot que el pack no lista no", async () => {
     const { pr, ref, reply } = await setup({ pack: { ...PACK, reviewBot: { ...PACK.reviewBot, resolvableAuthors: ["coverage-bot"] } } });
     const ci = pr.thread("coverage-bot", "Cobertura baja en `Transfer`");
@@ -367,5 +389,44 @@ describe("pr.resolveThread", () => {
     const result = await resolve.run(resolve.args.parse({ pr: ref, thread: "999999" }), ctx());
 
     expect(result.outcome).toBe("refused");
+  });
+});
+
+describe("council.threads", () => {
+  test("da los threads de council abiertos con su ruta, línea y texto sin el prefijo, en el orden del PR", async () => {
+    const { pr, ref, councilThreads } = await setup({ draft: false });
+    const first = pr.councilThread("renombra el método", { path: "b.txt", line: 1 });
+    const second = pr.councilThread("  agrega un test\n", { path: "a.txt", line: 3 });
+
+    const result = await councilThreads.run(councilThreads.args.parse({ pr: ref }), ctx());
+
+    expect(result).toEqual({
+      outcome: "ok",
+      output: {
+        items: [
+          { id: String(first.commentId), path: "b.txt", line: 1, change: "renombra el método" },
+          { id: String(second.commentId), path: "a.txt", line: 3, change: "agrega un test" },
+        ],
+      },
+    });
+  });
+
+  test("no cuenta lo resuelto, lo respondido con [clanker], ni lo que no es de council: sin threads es none", async () => {
+    const { pr, ref, councilThreads } = await setup();
+    pr.resolve(pr.councilThread("ya resuelto").id);
+    const answered = pr.councilThread("ya respondido");
+    pr.reply(answered.id, ACCOUNT, "[clanker] no aplica");
+    pr.botFindings(["Falta validar el monto"]);
+    pr.thread("ana", "un humano pide algo");
+
+    expect(await councilThreads.run(councilThreads.args.parse({ pr: ref }), ctx())).toEqual({ outcome: "none" });
+  });
+
+  test("un PR que ya no está abierto no tiene nada que atender", async () => {
+    const { pr, ref, councilThreads } = await setup();
+    pr.councilThread("renombra el método");
+    pr.merge();
+
+    expect(await councilThreads.run(councilThreads.args.parse({ pr: ref }), ctx())).toEqual({ outcome: "none" });
   });
 });

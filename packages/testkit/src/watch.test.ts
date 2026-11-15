@@ -574,7 +574,7 @@ describe("dispara flujos", () => {
         id,
         name: id,
         trigger: { type },
-        params: { pr: "PrRef" },
+        params: { pr: "PrRef", ...(id === "council" && { branch: "string", base: "string" }) },
         start: "work",
         nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
       });
@@ -594,7 +594,7 @@ describe("dispara flujos", () => {
     await wake(31 * SECOND);
 
     expect(runsOf("council")).toEqual([
-      expect.objectContaining({ lane: "maintenance", subject: { type: "pr", id: expect.any(String) }, params: { pr: ref(pr.number) } }),
+      expect.objectContaining({ lane: "maintenance", subject: { type: "pr", id: expect.any(String) }, params: { pr: ref(pr.number), branch: "one", base: "main" } }),
     ]);
     // Otro thread con la corrida viva no abre otra: `start` es idempotente por (flujo, sujeto).
     pr.councilThread("y esto otro");

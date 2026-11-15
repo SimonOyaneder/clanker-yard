@@ -34,6 +34,7 @@ const ACTIONS = {
   "workspace.commitAfterRebase": ["ok"],
   "pr.pushLease": ["draft", "ready"],
   "pr.rebaseApproval": ["proceed", "ask"],
+  "council.threads": ["ok", "none"],
   "pr.reply": ["ok"],
   "review.requestBot": ["ok", "none"],
   "stack.restack": ["ok", "conflict"],
@@ -69,7 +70,7 @@ function setup() {
 const builtin = (defs: Defs, kind: "role" | "flow", slug: string) =>
   defs.list(kind, { includeArchived: true }).find((d) => d.scope === "builtin" && d.slug === slug)!;
 
-test("instala juguete y el equipo clanker-loop (sus roles, perfiles y los flujos techlead-clasico, pr-feedback, rebase-conflicto, restack-feedback, restack y restack-rewritten) y repetirlo no suma versiones", () => {
+test("instala juguete y el equipo clanker-loop (sus roles, perfiles y los flujos techlead-clasico, pr-feedback, rebase-conflicto, restack-feedback, restack, restack-rewritten y council) y repetirlo no suma versiones", () => {
   const { defs, flows } = setup();
 
   installBuiltins({ defs, flows });
@@ -82,6 +83,7 @@ test("instala juguete y el equipo clanker-loop (sus roles, perfiles y los flujos
   expect(defs.resolve("flow", "restack-feedback")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "restack")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "restack-rewritten")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("flow", "council")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "juguete")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("role", "committer")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("profile", "eco")).toMatchObject({ scope: "builtin" });

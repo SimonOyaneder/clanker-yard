@@ -517,6 +517,120 @@ export const RESTACK_REWRITTEN: FlowDef = {
   },
 };
 
+/**
+ * "Council": atiende los threads `[clanker-council]` de un PR del sistema (`pr.comment`, en mantenimiento, con
+ * el PR en draft o no). `repo`, `branch`, `base` y `pr` los pone el trigger. Un dev nuevo aplica cada thread
+ * o lo rechaza con su razón (`rejected`); lo aplicado queda como commits `fixup!` visibles en el remoto
+ * (`pr.pushFixups` con council no hace autosquash ni force push, así que no hay paso de squash) y `pr.reply`
+ * responde cada thread con el sha o con la razón, sin resolverlo. No hay bot: tras el push solo se espera
+ * al CI, con una ronda de triage. Los threads se atienden una sola vez: uno ya respondido no se reabre.
+ */
+export const COUNCIL: FlowDef = {
+  schema: 1,
+  id: "council",
+  name: "Council",
+  trigger: { type: "pr.comment" },
+  lane: "maintenance",
+  params: {
+    pr: "PrRef",
+    repo: "RepoRef",
+    branch: "string",
+    base: "string",
+    checkRounds: { type: "number", default: 2 },
+    externalRounds: { type: "number", default: 1 },
+  },
+  limits: { maxCostUsd: null, maxSteps: 100 },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.attach",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "threads" },
+    },
+    threads: {
+      type: "action",
+      action: "council.threads",
+      args: { pr: "$run.params.pr" },
+      on: { ok: "work", none: "@done" },
+    },
+    work: {
+      type: "agent",
+      role: "dev",
+      mode: "council",
+      brief: { instructions: "$threads.items" },
+      on: { ok: "checks" },
+    },
+    checks: {
+      type: "action",
+      action: "recipe.check",
+      args: { ws: "$ws", scope: "changed" },
+      on: {
+        ok: "light",
+        fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "light", note: "Tests o lint siguen rojos" } },
+      },
+    },
+    fix: {
+      type: "agent",
+      role: "dev",
+      mode: "fix",
+      resumeFrom: "work",
+      brief: { input: "$prev" },
+      on: { ok: "checks" },
+    },
+    light: {
+      type: "parallel",
+      branches: ["lr-bugs", "lr-tests"],
+      join: { fn: "items.merge", args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"] } },
+      on: { ok: "fixups", changes: { to: "fix", maxRounds: 1, exhausted: "fixups" } },
+    },
+    "lr-bugs": { type: "agent", role: "review-bugs", mode: "re-review", brief: { ws: "$ws" } },
+    "lr-tests": { type: "agent", role: "review-tests", mode: "re-review", when: "$checks.specsChanged", brief: { ws: "$ws" } },
+    fixups: {
+      type: "action",
+      action: "pr.pushFixups",
+      // `route` es el reporte del committer, que solo existe cuando la acción ya devolvió `route`.
+      args: { ws: "$ws", items: "$threads.items", route: "$route" },
+      on: { ok: "reply", route: { to: "route", maxRounds: 1, exhausted: "@failed" } },
+    },
+    route: {
+      type: "agent",
+      role: "committer",
+      mode: "route",
+      brief: { hunks: "$fixups.unrouted" },
+      on: { ok: "fixups" },
+    },
+    reply: {
+      type: "action",
+      action: "pr.reply",
+      args: { pr: "$run.params.pr", triage: "$threads", shas: "$fixups.byItem", rejected: "$work.rejected" },
+      on: { ok: "ci-wait" },
+    },
+    "ci-wait": {
+      type: "wait",
+      event: "pr.ci",
+      args: { pr: "$run.params.pr" },
+      timeoutSec: 5400,
+      on: { ok: "@done", fail: "ci-triage", timeout: { to: "@done", note: "CI sigue corriendo" } },
+    },
+    "ci-triage": {
+      type: "agent",
+      role: "triage",
+      mode: "ci",
+      brief: { items: "$ci-wait.failures" },
+      on: {
+        fix: {
+          to: "fix",
+          counter: "external",
+          maxRounds: "$run.params.externalRounds",
+          exhausted: { to: "@done", note: "CI rojo por el cambio" },
+        },
+        foreign: { to: "@done", note: "CI rojo ajeno o flaky" },
+      },
+    },
+  },
+};
+
 export const flows: Record<string, FlowDef> = {
   "techlead-clasico": TECHLEAD_CLASICO,
   "pr-feedback": PR_FEEDBACK,
@@ -524,4 +638,5 @@ export const flows: Record<string, FlowDef> = {
   "restack-feedback": RESTACK_FEEDBACK,
   restack: RESTACK,
   "restack-rewritten": RESTACK_REWRITTEN,
+  council: COUNCIL,
 };
