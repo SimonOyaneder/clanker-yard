@@ -31,7 +31,7 @@ El core es un proceso largo: un callback de timer o de evento (`setInterval`, `.
 
 UI sola: `npm run dev -w packages/ui` abre la UI en el navegador (puerto 8890) con datos de ejemplo en memoria.
 
-Capturas de UI: todavía no hay captura automática. Cuando exista el E2E con Playwright `_electron` se documenta aquí; mientras tanto usa `chrome-devtools-mcp`.
+App de escritorio: `npm run dev -w apps/desktop` construye el core y abre Electron (con `CLANKER_HOME=$(mktemp -d)` delante no toca tus datos; sin él usa los reales). Para capturar la ventana de verdad, arráncala con `npx electron-vite dev -- --remote-debugging-port=9333` desde `apps/desktop` y habla CDP con `http://127.0.0.1:9333/json` (`Page.captureScreenshot`, `Runtime.evaluate`, `Emulation.setEmulatedMedia` para claro y oscuro). Ciérrala con `Browser.close` por CDP, no con `pkill`: hay otras Electron corriendo. Cuando exista el E2E con Playwright `_electron` se documenta aquí.
 
 ## Paquetes y dependencias permitidas
 
@@ -68,6 +68,18 @@ Los tokens (PAT de GitHub, OAuth de Linear...) viven detrás de la interfaz `Sec
 - Paso manual pendiente (Simón): no hay OAuth app de Linear registrada ni `client_id`. Se crea en https://linear.app/settings/api/applications/new (Settings, API, OAuth applications, New): nombre sin la palabra "Linear" (p. ej. "Clanker Yard"), tu nombre como developer, redirect URI exacto `http://127.0.0.1:48721/oauth/linear/callback` (Linear compara la URI completa, por eso el puerto es fijo; si lo cambias, pásalo en `redirectPort`) y distribución privada (solo tu workspace). No se usa client secret: el flujo es PKCE. Copia el `client_id` y pásalo como `createConnections(store, secrets, { linear: { clientId } })`; el arranque del core (CLA-11) debe leerlo de su configuración. Sin `client_id`, `linearAuth` falla con ese mismo mensaje. Los pasos y la URI no se probaron contra Linear real.
 - Nunca guardes aquí el token OAuth de la suscripción de Claude (`docs/claude-subscription.md`).
 - Los tests no tocan el Keychain real: usan `createFileSecrets` en un directorio temporal, o un `.keychain-db` temporal creado con `security create-keychain` y pasado en `keychain` (ver `secrets.test.ts`).
+
+## App de escritorio
+
+`apps/desktop` es solo el host (`docs/design.html#remoto`, `#d-data`): `main` lanza y vigila el core, `preload` le pasa la conexión a la ventana y `renderer` monta `@clanker/ui` con un `Host` armado sobre el preload.
+
+- `createCoreSupervisor` (`src/main/core-supervisor.ts`) llama a `ensureCore` al arrancar y comprueba cada 2 s con `connectToCore`. Estados: `starting`, `live` (con `port`, `token` y `bootId`, que el preload entrega a la ventana) y `down` con el motivo. No relanza solo: el botón Reintentar de `StatusBanner` llama a `start()`. Si otro proceso (la CLI) levanta el core, pasa a `live` sin más.
+- Cerrar la ventana o la app no detiene el core. El menú Archivo → "Salir y detener agentes" pide `system.shutdown({ drain: true })` y sale.
+- El core es el bundle `packages/core/dist/main.js` (desktop no lo importa). Electron guarda sus cachés y preferencias en `<datos>/desktop`, así que con `CLANKER_HOME` un arranque de prueba no toca nada del usuario.
+- Todo lo de Electron que la UI necesita (menú, notificaciones, editor, tema, estado del core) pasa por `Host` (`packages/ui/src/host.ts`); `Host.core` solo existe donde el host aloja el core. El main valida cada payload que llega por IPC.
+- Los datos de la UI siguen siendo `createMemoryAppData` hasta que exista el `AppData` sobre la API.
+- `packages/ui/src/styles/globals.css` se exporta como `@clanker/ui/styles.css` (el único archivo interno que otro paquete puede importar) y trae `@source` para que Tailwind compile las clases de la UI desde `apps/desktop`. El Vite del desktop apunta el alias `@` al `src` de la UI.
+- Los tests de `core-supervisor` lanzan el core real sobre un `CLANKER_HOME` temporal con su propio bundle (`node scripts/build.ts <outfile>` de `packages/core`), sin pisar `dist/`.
 
 ## Trackers
 

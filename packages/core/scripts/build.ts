@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url";
 const root = new URL("../", import.meta.url);
 export const coreBundle = fileURLToPath(new URL("dist/main.js", root));
 
-export async function buildCore(): Promise<string> {
+/** `outfile` distinto del de `dist/` para quien construye su propia copia (las migraciones se buscan en `../migrations` del bundle). */
+export async function buildCore(outfile = coreBundle): Promise<string> {
   await build({
     entryPoints: [fileURLToPath(new URL("src/main.ts", root))],
-    outfile: coreBundle,
+    outfile,
     bundle: true,
     platform: "node",
     target: "node24",
@@ -20,7 +21,7 @@ export async function buildCore(): Promise<string> {
     },
     logLevel: "warning",
   });
-  return coreBundle;
+  return outfile;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await buildCore();
+if (import.meta.url === `file://${process.argv[1]}`) await buildCore(process.argv[2]);

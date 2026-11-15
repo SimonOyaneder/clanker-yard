@@ -11,6 +11,7 @@ import { type LoopTab, LoopView } from "@/components/loop/loop-view"
 import { NewLoopDialog } from "@/components/new-loop-dialog"
 import { PrsView } from "@/components/prs/prs-view"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
+import { StatusBanner } from "@/components/status-banner"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +28,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePoll } from "@/hooks/use-poll"
 import { type AppActions, AppActionsContext, isRunning, lastSession } from "@/lib/app-context"
+import { useCoreState } from "@/lib/core-status"
 import { reportLaunch } from "@/lib/launch"
 import { readPref, writePref } from "@/lib/prefs"
 import { reviewStatus } from "@/lib/pr-status"
@@ -74,6 +76,9 @@ function Shell() {
   const appData = useAppData()
   const host = useHost()
   const { data, error, updatedAt, refresh } = usePoll(() => appData.snapshot(), [])
+  const core = useCoreState(host.core)
+  // Con el core caído lo que se ve es lo último que llegó: se atenúa y no se opera sobre eso.
+  const stale = !!core && core.status !== "live"
   const [slug, setSlug] = useState<string | null>(() => readPref<string | null>("slug", null))
   const [view, setView] = useState<View>({ kind: "loop" })
   const [tab, setTabState] = useState<LoopTab>(() => readPref<LoopTab>("tab", "operacion"))
@@ -318,11 +323,13 @@ function Shell() {
           onSelectPrs={() => go({ module: "prs" })}
           updatedAt={updatedAt}
           error={error}
+          core={core}
           planUsage={data?.planUsage ?? null}
           onOpenPalette={() => setPaletteOpen(true)}
           onOpenShortcuts={() => setShortcutsOpen(true)}
         />
         <SidebarInset className="min-h-0 overflow-hidden">
+          {host.core && core && core.status !== "live" ? <StatusBanner core={host.core} state={core} /> : null}
           <header className={cn("drag flex h-11 flex-none items-center gap-2 border-b pr-3", sidebarOpen ? "pl-3" : "pl-[84px]")}>
             <Hint label={sidebarOpen ? "Ocultar barra lateral" : "Mostrar barra lateral"} keys="⌘B" side="bottom">
               <SidebarTrigger className="size-7 text-muted-foreground" />
@@ -357,11 +364,11 @@ function Shell() {
           </header>
 
           {module === "prs" ? (
-            <main className="min-h-0 flex-1 overflow-hidden">
+            <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
               <PrsView data={prs.data} error={prs.error} onRefresh={refreshPrs} />
             </main>
           ) : (
-          <main className="min-h-0 flex-1 overflow-y-auto">
+          <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>
             <div className="px-6 pt-5 pb-10">
               {error && !data ? <p className="text-[13px] text-destructive">{error}</p> : null}
               {!data ? (

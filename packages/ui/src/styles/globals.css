@@ -1,6 +1,8 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 @import "tailwindcss";
+/* Quien importa este CSS desde otro paquete (apps/desktop) también compila las clases de estos componentes. */
+@source "../";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));

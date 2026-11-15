@@ -1,5 +1,6 @@
 import { Archive, ArchiveRestore, ChevronRight, ExternalLink, GitPullRequest, Keyboard, Plus, RefreshCw, RotateCcw, Search, Square } from "lucide-react"
 import type { AgentInfo, Loop, PlanUsage } from "@/types"
+import type { CoreState } from "@/host"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   ContextMenu,
@@ -22,7 +23,8 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { isRunning, lastSession, useAppActions } from "@/lib/app-context"
-import { ago, loopTone } from "@/lib/format"
+import { footerStatus, type FooterTone } from "@/lib/core-status"
+import { loopTone } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
 import { cn } from "@/lib/utils"
 import { Hint } from "./common"
@@ -37,6 +39,7 @@ interface Props {
   onSelectPrs: () => void
   updatedAt: number | null
   error: string | null
+  core: CoreState | undefined
   planUsage: PlanUsage | null
   onOpenPalette: () => void
   onOpenShortcuts: () => void
@@ -97,8 +100,16 @@ function LoopItem({ loop, index, active }: { loop: Loop; index: number | null; a
   )
 }
 
-export function AppSidebar({ loops, starting, selected, prsActive, prsBadge, onSelectPrs, updatedAt, error, planUsage, onOpenPalette, onOpenShortcuts }: Props) {
+const DOT: Record<FooterTone, string> = {
+  live: "cc-blink bg-emerald-500",
+  pending: "bg-muted-foreground",
+  down: "bg-destructive",
+  error: "bg-destructive",
+}
+
+export function AppSidebar({ loops, starting, selected, prsActive, prsBadge, onSelectPrs, updatedAt, error, core, planUsage, onOpenPalette, onOpenShortcuts }: Props) {
   const actions = useAppActions()
+  const status = footerStatus(core, { error, updatedAt })
   const inBar = loops.filter((l) => !l.archived || isRunning(l))
   const running = inBar.filter(isRunning)
   const stopped = inBar.filter((l) => !isRunning(l))
@@ -211,8 +222,8 @@ export function AppSidebar({ loops, starting, selected, prsActive, prsBadge, onS
         <div className="flex items-center justify-between gap-2">
         <Hint label="Actualizar ahora" keys="⌘R" side="top">
           <button type="button" onClick={actions.refresh} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
-            <span className={cn("size-1.5 flex-none rounded-full", error ? "bg-red-500" : "cc-blink bg-emerald-500")} />
-            <span className="truncate">{error ? "error leyendo datos" : updatedAt ? `en vivo · ${ago(new Date(updatedAt).toISOString())}` : "cargando…"}</span>
+            <span className={cn("size-1.5 flex-none rounded-full", DOT[status.tone])} />
+            <span className="truncate">{status.text}</span>
             <RefreshCw className="size-3 flex-none" />
           </button>
         </Hint>

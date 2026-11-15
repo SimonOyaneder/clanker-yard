@@ -29,6 +29,10 @@ const files: Record<string, string> = {
   "apps/desktop/src/index.ts": 'import { ui } from "@clanker/ui"; import { api } from "@clanker/api"; export const d = [ui, api];',
   "apps/cli/src/index.ts": 'import { api } from "@clanker/api"; export const cli = api;',
 
+  "packages/ui/src/styles/globals.css": "body {}",
+  "packages/ui/src/styles/other.css": "body {}",
+  "apps/desktop/src/styles.ts": 'import "@clanker/ui/styles.css";',
+
   "packages/ui/src/bad-core.ts": 'import { core } from "@clanker/core"; export const x = core;',
   "packages/ui/src/bad-core-relative.ts": 'import { core } from "../../core/src/index"; export const x = core;',
   "packages/ui/src/bad-api-node.ts": 'import { apiNode } from "@clanker/api/node"; export const x = apiNode;',
@@ -38,6 +42,7 @@ const files: Record<string, string> = {
   "packages/api/src/bad-cli.ts": 'import { cli } from "@clanker/cli"; export const x = cli;',
   "apps/cli/src/bad-core.ts": 'import { core } from "@clanker/core"; export const x = core;',
   "packages/testkit/src/bad-ui.ts": 'import { ui } from "@clanker/ui"; export const x = ui;',
+  "apps/desktop/src/bad-css.ts": 'import "../../../packages/ui/src/styles/other.css";',
   "packages/ui/src/bad-internal.ts": 'import { contract } from "../../api/src/contract"; export const x = contract;',
 };
 
@@ -53,7 +58,12 @@ beforeAll(() => {
   };
   mkdirSync(join(fixture, "node_modules/@clanker"), { recursive: true });
   for (const [name, dir] of Object.entries(packageDirs)) {
-    const exports = name === "@clanker/api" ? { ".": "./src/index.ts", "./node": "./src/node.ts" } : { ".": "./src/index.ts" };
+    const exports =
+      name === "@clanker/api"
+        ? { ".": "./src/index.ts", "./node": "./src/node.ts" }
+        : name === "@clanker/ui"
+          ? { ".": "./src/index.ts", "./styles.css": "./src/styles/globals.css" }
+          : { ".": "./src/index.ts" };
     write(`${dir}/package.json`, JSON.stringify({ name, type: "module", exports }));
     symlinkSync(join(fixture, dir), join(fixture, "node_modules", name));
   }
@@ -81,6 +91,7 @@ describe("límites entre paquetes (.dependency-cruiser.mjs)", () => {
         "core-no-electron: packages/core/src/bad-electron.ts -> electron",
         "core-only-allowed-packages: packages/core/src/bad-ui.ts -> packages/ui/src/index.ts",
         "desktop-no-core: apps/desktop/src/bad-core.ts -> packages/core/src/index.ts",
+        "only-package-entrypoints: apps/desktop/src/bad-css.ts -> packages/ui/src/styles/other.css",
         "only-package-entrypoints: packages/ui/src/bad-internal.ts -> packages/api/src/contract.ts",
         "testkit-only-allowed-packages: packages/testkit/src/bad-ui.ts -> packages/ui/src/index.ts",
         "ui-no-api-node: packages/ui/src/bad-api-node.ts -> packages/api/src/node.ts",

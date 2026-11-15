@@ -76,12 +76,17 @@ export default {
     },
     {
       name: "only-package-entrypoints",
-      comment: "Cada paquete exporta solo `src/index.ts` (y `@clanker/api/node`); nada de imports a archivos internos de otro paquete.",
+      comment: "Cada paquete exporta solo `src/index.ts` (más `@clanker/api/node` y `@clanker/ui/styles.css`); nada de imports a archivos internos de otro paquete.",
       severity: "error",
       from: { path: "^((?:apps|packages)/[^/]+)/" },
       to: {
         path: "^(apps|packages)/",
-        pathNot: ["^$1/", "^(apps|packages)/[^/]+/src/index\\.ts$", `^${dirs.api}/src/node\\.ts$`],
+        pathNot: [
+          "^$1/",
+          "^(apps|packages)/[^/]+/src/index\\.ts$",
+          `^${dirs.api}/src/node\\.ts$`,
+          `^${dirs.ui}/src/styles/globals\\.css$`,
+        ],
       },
     },
   ],
