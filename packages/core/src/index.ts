@@ -19,6 +19,8 @@ export type {
   ResumeRequest,
   RunRequest,
 } from "./agents/agents";
+export { acceptanceCriteria, createBriefs, listHunks, RUN_DIR } from "./agents/brief";
+export type { BriefRequest, Briefs, Hunk, PreparedBrief, PreviousReport } from "./agents/brief";
 export { createClaudeRuntime } from "./agents/claude/claude-runtime";
 export type { ClaudeRuntimeOptions, QueryFn } from "./agents/claude/claude-runtime";
 export { apiKeyCredentials, subscriptionCredentials } from "./agents/claude/credentials";

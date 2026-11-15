@@ -83,6 +83,10 @@ El core corre como proceso propio (`packages/core/src/main.ts`, bundle en `packa
 - Un cierre normal (SIGTERM, SIGINT, `system.shutdown`) borra `core.json` y `core.lock`; un crash los deja y el próximo arranque los recupera.
 - Los tests de proceso (`packages/core/src/process/process.test.ts`) construyen el bundle y lanzan el core real sobre un `CLANKER_HOME` temporal. A mano: `CLANKER_HOME=$(mktemp -d) node packages/core/dist/main.js`.
 
+## Brief y artefactos del worktree
+
+`createBriefs({ workspaces, artifacts }).prepare(...)` (`packages/core/src/agents/brief.ts`) arma el `Brief` de cualquier rol y deja en `<worktree>/.clanker-run/` lo que el agente lee si lo necesita: `issue.md`, `diff.patch` contra la base del lease (incluye cambios sin commit y archivos nuevos), `diff-round.patch` (solo con `since`, el `snapshot` que devolvió la ronda anterior), `hunks.json` (`h1`, `h2`... por hunk, en el orden del patch) y `reports/r<n>-<rol>.json`. La carpeta se agrega a `.git/info/exclude` y cada archivo también se guarda en `artifacts` con una ref a la corrida (`r<ronda>/<archivo>`). El brief lleva a lo más 5 criterios (los ítems bajo "Criterios de aceptación" del cuerpo) y 10 learnings, y cita los archivos con rutas relativas al worktree. Se prueba en `packages/testkit` (necesita repos git reales).
+
 ## Testkit
 
 `@clanker/testkit` (devDependency de quien lo use; solo se importa desde tests) trae lo necesario para probar sin tocar nada del usuario:
