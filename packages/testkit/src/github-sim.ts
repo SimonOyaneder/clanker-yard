@@ -193,6 +193,17 @@ interface PrData {
 
 const DOCS = "https://docs.github.com/rest";
 
+/** Los inputs de las mutations que el simulador sabe responder, con los campos que acepta el schema de GitHub. */
+const MUTATION_INPUTS: Record<string, { type: string; thread: string; fields: string[] }> = {
+  resolveReviewThread: { type: "ResolveReviewThreadInput", thread: "threadId", fields: ["threadId", "clientMutationId"] },
+  unresolveReviewThread: { type: "UnresolveReviewThreadInput", thread: "threadId", fields: ["threadId", "clientMutationId"] },
+  addPullRequestReviewThreadReply: {
+    type: "AddPullRequestReviewThreadReplyInput",
+    thread: "pullRequestReviewThreadId",
+    fields: ["pullRequestReviewThreadId", "pullRequestReviewId", "body", "clientMutationId"],
+  },
+};
+
 const json = (status: number, body: unknown, headers: Record<string, string> = {}): RecordedResponse => ({ status, headers, body });
 const notFound = (): RecordedResponse =>
   json(404, { message: "Not Found", documentation_url: DOCS, status: "404" });
@@ -683,33 +694,29 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   const unsupported = (what: string): RecordedResponse =>
     json(200, { errors: [{ type: "SIMULATOR_UNSUPPORTED", message: `El GitHub simulado no sabe responder ${what}: agrégalo a github-sim.ts.` }] });
 
-  function mutate(field: FieldNode, variables: Record<string, unknown>): { key: string; data?: unknown; error?: object } {
+  function mutate(field: FieldNode, variables: Record<string, unknown>): { key: string; data?: unknown; error?: object; invalid?: string } {
     const key = field.alias?.value ?? field.name.value;
+    const shape = MUTATION_INPUTS[field.name.value];
+    if (!shape) throw new Error(`la mutation ${field.name.value}`);
     const args = Object.fromEntries((field.arguments ?? []).map((a) => [a.name.value, valueFromASTUntyped(a.value, variables)]));
     const input = (args.input ?? {}) as Record<string, string>;
-    const threadId = input.threadId ?? input.pullRequestReviewThreadId ?? "";
-    const missing = {
-      key,
-      error: { type: "NOT_FOUND", path: [key], message: `Could not resolve to a node with the global id of '${threadId}'.` },
-    };
+    // GitHub valida el input contra el schema antes de ejecutar: un campo de otra mutation es un error del documento.
+    const unknown = Object.keys(input).find((k) => !shape.fields.includes(k));
+    if (unknown) return { key, invalid: `InputObject '${shape.type}' doesn't accept argument '${unknown}'` };
+    const threadId = input[shape.thread];
+    if (!threadId) return { key, invalid: `Argument '${shape.thread}' on InputObject '${shape.type}' is required. Expected type ID!` };
     const found = findThread(threadId);
-    switch (field.name.value) {
-      case "resolveReviewThread":
-      case "unresolveReviewThread": {
-        if (!found) return missing;
-        found.thread.resolved = field.name.value === "resolveReviewThread";
-        return { key, data: { thread: rawThread(found.thread) } };
-      }
-      case "addPullRequestReviewThreadReply": {
-        if (!found) return missing;
-        const first = found.thread.comments[0]!;
-        const reply = newComment(viewer, input.body ?? "", { path: first.path, line: first.line });
-        found.thread.comments.push(reply);
-        return { key, data: { comment: { id: reply.nodeId, fullDatabaseId: String(reply.id), body: reply.body, createdAt: reply.createdAt, author: withAvatar(viewer) } } };
-      }
-      default:
-        throw new Error(`la mutation ${field.name.value}`);
+    if (!found) {
+      return { key, error: { type: "NOT_FOUND", path: [key], message: `Could not resolve to a node with the global id of '${threadId}'.` } };
     }
+    if (field.name.value === "addPullRequestReviewThreadReply") {
+      const first = found.thread.comments[0]!;
+      const reply = newComment(viewer, input.body ?? "", { path: first.path, line: first.line });
+      found.thread.comments.push(reply);
+      return { key, data: { comment: { id: reply.nodeId, fullDatabaseId: String(reply.id), body: reply.body, createdAt: reply.createdAt, author: withAvatar(viewer) } } };
+    }
+    found.thread.resolved = field.name.value === "resolveReviewThread";
+    return { key, data: { thread: rawThread(found.thread) } };
   }
 
   function graphql(request: FakeRequest): RecordedResponse {
@@ -730,6 +737,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         if (field.kind !== "Field") return unsupported("fragmentos en una mutation");
         try {
           const result = mutate(field, variables);
+          if (result.invalid) return json(200, { errors: [{ message: result.invalid }] });
           data[result.key] = result.data ?? null;
           if (result.error) errors.push(result.error);
         } catch (error) {

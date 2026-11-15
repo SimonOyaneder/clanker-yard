@@ -291,6 +291,25 @@ describe("REST: comentarios y threads", () => {
     ]);
   });
 
+  test("un input con el campo de otra mutation, o sin el id del thread, es un error del documento sin data", async () => {
+    sim.openPr({ head: BRANCH });
+    const thread = sim.pr(1).thread("ana", "falta un test");
+
+    const wrongField = await graphql(
+      "mutation($id: ID!) { resolveReviewThread(input: { pullRequestReviewThreadId: $id }) { thread { id } } }",
+      { id: thread.id },
+    );
+    const noThread = await graphql('mutation { addPullRequestReviewThreadReply(input: { body: "hecho" }) { comment { body } } }');
+
+    expect(wrongField.body).toEqual({
+      errors: [{ message: "InputObject 'ResolveReviewThreadInput' doesn't accept argument 'pullRequestReviewThreadId'" }],
+    });
+    expect(noThread.body).toEqual({
+      errors: [{ message: "Argument 'pullRequestReviewThreadId' on InputObject 'AddPullRequestReviewThreadReplyInput' is required. Expected type ID!" }],
+    });
+    expect(sim.pr(1).node().reviewThreads[0]).toMatchObject({ isResolved: false, comments: { nodes: [{ body: "falta un test" }] } });
+  });
+
   test("una mutation sobre un thread que no existe falla como NOT_FOUND con data nulo", async () => {
     const reply = await graphql("mutation { resolveReviewThread(input: { threadId: \"PRRT_nope\" }) { thread { id } } }");
 
