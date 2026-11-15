@@ -22,7 +22,7 @@ import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
-import { Lanes, LanesPatch, Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
+import { Breaker, Lanes, LanesPatch, Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 
 /**
@@ -68,6 +68,8 @@ const system = {
    * porque baje el tope.
    */
   setLanes: base.input(LanesPatch).output(Lanes),
+  /** Los circuit breakers abiertos ahora, el más antiguo primero: qué está en pausa, por qué y cuándo se vuelve a probar. */
+  breakers: base.output(z.array(Breaker)),
 };
 
 const events = {
@@ -196,6 +198,12 @@ const projects = {
    * `NOT_FOUND` si el proyecto no existe; `BAD_REQUEST` si la issue no es de ese proyecto.
    */
   skipIssue: base.input(z.object({ id: ProjectId, issueId: IssueId, skipped: z.boolean().default(true) })),
+  /**
+   * Con `boosted: true` (por defecto) la issue pasa al principio de la cola: el Scheduler la lanza antes que
+   * las demás `ready`, la última subida primero; sigue sujeta a lo que la bloquea. Con `false` vuelve a su
+   * lugar. Emite `issue.queued`. Los mismos errores que `skipIssue`.
+   */
+  boostIssue: base.input(z.object({ id: ProjectId, issueId: IssueId, boosted: z.boolean().default(true) })),
   /**
    * La cola del proyecto, calculada por el core a partir del caché de issues, sus corridas y sus PRs:
    * primero las `ready` (en el orden en que se lanzarían), luego `waiting` y `blocked`, cada una con su

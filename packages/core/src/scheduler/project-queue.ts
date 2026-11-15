@@ -2,7 +2,7 @@ import type { ProjectId, QueueEntry } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Prs } from "../github/prs";
 import { ProjectNotFoundError, type Projects } from "../projects/projects";
-import { issueSkips, pullRequests, runs } from "../store/schema";
+import { issueBoosts, issueSkips, pullRequests, runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
@@ -91,7 +91,8 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
         .all();
       const [me, prs] = await Promise.all([tracker.viewer(), prFacts([...blockerIds], project.stackOn === "ci_green")]);
       const skipped = new Set<string>(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
-      return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs, skipped });
+      const boosted = new Map(store.db.select().from(issueBoosts).all().map((row) => [row.issueId, row.createdAt]));
+      return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs, skipped, boosted });
     },
   };
 }

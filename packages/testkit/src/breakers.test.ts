@@ -102,6 +102,7 @@ describe("login vencido en un run real", () => {
     expect(eventsOf(["breaker.opened"]).map((e) => e.payload)).toMatchObject([{ scope: "runtime:claude-sdk", cause: "login_expired" }]);
     const alerts = await client.decisions.list({ kind: ["alert"], status: ["pending"] });
     expect(alerts).toMatchObject([{ title: "Pausado: runtime:claude-sdk" }]);
+    expect(await client.system.breakers()).toMatchObject([{ scope: "runtime:claude-sdk", label: "runtime:claude-sdk", cause: "login_expired", probes: 0, decisionId: alerts[0]!.id }]);
 
     // Pausado: la corrida espera y una issue nueva ni se lanza, queda en la cola con su motivo.
     const second = await client.issues.createLocal({ projectId: project.id, title: "Otra", priority: 2 });
@@ -116,6 +117,7 @@ describe("login vencido en un run real", () => {
       expect((await client.runs.list({ projectId: project.id })).map((r) => [r.subject.id, r.status]).sort()).toEqual([[first.id, "done"], [second.id, "done"]].sort());
     });
     expect(eventsOf(["breaker.closed"])).toHaveLength(1);
+    expect(await client.system.breakers()).toEqual([]);
     expect(await client.decisions.list({ kind: ["alert"], status: ["pending"] })).toEqual([]);
     expect(connections.list()).toMatchObject([{ status: "active" }]);
   });

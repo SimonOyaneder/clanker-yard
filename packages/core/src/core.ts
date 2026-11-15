@@ -285,6 +285,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     queue: scheduler.queue,
     scheduler,
     lanes,
+    breakers,
     flows,
     onPrChange,
     artifacts,

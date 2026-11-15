@@ -1,6 +1,6 @@
 import * as z from "zod";
 import { Report } from "./agents";
-import { AgentSessionId, ArtifactHash, ArtifactKind, IssueId, ProjectId, RunId, StepRunId, SubjectRef } from "./domain";
+import { AgentSessionId, ArtifactHash, ArtifactKind, DecisionId, IssueId, ProjectId, RunId, StepRunId, SubjectRef } from "./domain";
 import { FlowDef } from "./flow";
 
 export const RunStatus = z.enum([
@@ -41,6 +41,30 @@ export const LanesPatch = z.object({
 });
 export type LanesPatch = z.infer<typeof LanesPatch>;
 
+export const BreakerCause = z.enum(["quota_exhausted", "login_expired", "connection_lost", "rate_limited", "environment"]);
+export type BreakerCause = z.infer<typeof BreakerCause>;
+
+/**
+ * Un circuit breaker abierto (`docs/design.html#nunca-se-congela`): pausa solo lo que depende de su ámbito,
+ * que es `github`, `runtime:<id>` o `repo:<id>`, y se cierra solo cuando la causa se va.
+ */
+export const Breaker = z.object({
+  scope: z.string(),
+  /** El ámbito en palabras: `github`, `runtime:claude-sdk`, `repo api`. */
+  label: z.string(),
+  cause: BreakerCause,
+  reason: z.string(),
+  /** ms epoch */
+  openedAt: z.int().nonnegative(),
+  /** Las pruebas que fallaron desde que abrió. */
+  probes: z.int().nonnegative(),
+  /** ms epoch de la próxima prueba. */
+  nextProbeAt: z.int().nonnegative(),
+  /** La alerta de la bandeja; se cierra con el breaker. */
+  decisionId: DecisionId,
+});
+export type Breaker = z.infer<typeof Breaker>;
+
 export const StepStatus = z.enum(["pending", "leased", "running", "waiting", "done", "failed", "canceled"]);
 export type StepStatus = z.infer<typeof StepStatus>;
 
@@ -70,8 +94,12 @@ export const Run = z.object({
   id: RunId,
   projectId: ProjectId.nullable(),
   flow: z.object({ slug: z.string(), version: z.int().positive() }),
+  /** La corrida que la lanzó como subflujo (nodo `flow`): usa el cupo de su raíz y no cuenta aparte; `null` en una corrida raíz. */
+  parentRunId: RunId.nullable(),
   subject: SubjectRef,
   lane: Lane,
+  /** La corrida de dev estacionada que le prestó su sujeto (el PR y su worktree) a esta corrida de mantenimiento; `null` si no es un préstamo. */
+  borrowedFromRunId: RunId.nullable(),
   status: RunStatus,
   parkReason: ParkReason.nullable(),
   /** `done`, `blocked` o `failed` cuando la corrida terminó. */

@@ -96,7 +96,7 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen }: Option
   const status = (issue: CachedIssue) => runOf(issue)?.status;
   const finish = (issue: CachedIssue) => open.get(runOf(issue)!.id)?.();
   const abandon = () => open.clear();
-  const events = (type: "issue.claimed" | "issue.skipped") => h.store.events.since(0, { types: [type] });
+  const events = (type: "issue.claimed" | "issue.skipped" | "issue.queued") => h.store.events.since(0, { types: [type] });
   const resolveGate = (issue: CachedIssue) => h.flows.resolveGate(h.decisions.list({ runId: runOf(issue)!.id, status: ["pending"] })[0]!.id, "go", "ui");
   /** Espera a que la corrida de la issue esté en `work`, esperando que el test la suelte. */
   const working = (issue: CachedIssue) => until(() => expect(open.has(runOf(issue)?.id as RunId)).toBe(true));
@@ -293,6 +293,36 @@ describe("lanzar issues por carril", () => {
     h.scheduler.start();
     h.scheduler.skipIssue({ projectId: h.projectId, issueId: skipped.id, skipped: false }, "ui");
     await until(() => expect(h.status(skipped)).toBe("running"));
+  });
+
+  test("projects.boostIssue sube la issue al principio de la cola y el Scheduler la lanza primero", async () => {
+    const h = setup({ parallel: 1 });
+    const first = await h.create("primera", 1);
+    const boosted = await h.create("subida", 4);
+    h.scheduler.boostIssue({ projectId: h.projectId, issueId: boosted.id, boosted: true }, "ui");
+
+    expect((await h.scheduler.queue.of(h.projectId)).map((e) => e.issue.id)).toEqual([boosted.id, first.id]);
+    expect(h.events("issue.queued")).toMatchObject([{ origin: "ui", payload: { issueId: boosted.id } }]);
+    await h.scheduler.tick();
+    expect([first, boosted].map(h.status)).toEqual([undefined, "running"]);
+  });
+
+  test("boostIssue con boosted: false la devuelve a su lugar", async () => {
+    const h = setup({ parallel: 1 });
+    const first = await h.create("primera", 1);
+    const boosted = await h.create("subida", 4);
+    h.scheduler.boostIssue({ projectId: h.projectId, issueId: boosted.id, boosted: true }, "ui");
+    h.scheduler.boostIssue({ projectId: h.projectId, issueId: boosted.id, boosted: false }, "ui");
+
+    expect((await h.scheduler.queue.of(h.projectId)).map((e) => e.issue.id)).toEqual([first.id, boosted.id]);
+  });
+
+  test("boostIssue rechaza una issue que no es del proyecto", async () => {
+    const h = setup();
+    const other = h.projects.create(NewProject.parse({ slug: "otro", name: "Otro", tracker: "local" }), "cli");
+    const issue = await h.create("a");
+
+    expect(() => h.scheduler.boostIssue({ projectId: other.id, issueId: issue.id, boosted: true }, "ui")).toThrow(/no es del proyecto/);
   });
 
   test("skipIssue rechaza una issue que no es del proyecto", async () => {

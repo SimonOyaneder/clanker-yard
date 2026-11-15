@@ -157,6 +157,8 @@ describe("préstamo del sujeto", () => {
 
     const borrower = h.start("rebase", PR);
     expect(h.row(borrower)).toMatchObject({ status: "running", borrowedFromRunId: owner });
+    expect(h.flows.getRun(borrower).borrowedFromRunId).toBe(owner);
+    expect(h.flows.listRuns().find((run) => run.id === owner)?.borrowedFromRunId).toBeNull();
     expect(h.events(borrower, "run.borrowed")[0]?.payload).toEqual({ runId: borrower, fromRunId: owner });
     expect(handovers).toEqual([`${owner}>${borrower}`]);
 

@@ -34,6 +34,7 @@ const router = os.router({
     })),
     lanes: os.system.lanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
     setLanes: os.system.setLanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
+    breakers: os.system.breakers.handler(() => []),
     shutdown: os.system.shutdown.handler(() => {}),
   },
   connections: {
@@ -95,6 +96,9 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
     skipIssue: os.projects.skipIssue.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    boostIssue: os.projects.boostIssue.handler(() => {
       throw new Error("no se usa en este test");
     }),
     queue: os.projects.queue.handler(() => {

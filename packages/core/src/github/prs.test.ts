@@ -227,7 +227,7 @@ describe("API", () => {
     );
     const client = await clientFor(connections, repos);
 
-    expect(await client.prs.list({})).toEqual([{ ref: REPO, owned: true, issueId: null, runId: null, state: null, readAt: null }]);
+    expect(await client.prs.list({})).toEqual([{ id: expect.any(String), ref: REPO, owned: true, issueId: null, runId: null, state: null, readAt: null }]);
     expect(graphqlRequests()).toEqual([]);
 
     expect(await client.prs.refresh(REPO)).toMatchObject({ state: "draft" });

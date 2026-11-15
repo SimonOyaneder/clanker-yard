@@ -1,4 +1,4 @@
-import { type CachedIssue, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type ProjectId, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type IssueId, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildPrs } from "@/seed-prs"
@@ -98,6 +98,8 @@ export function createMemoryAppData(now = Date.now()): AppData {
     return {
       id: id("run", n),
       projectId: issues[issueN - 1]!.projectId,
+      parentRunId: null,
+      borrowedFromRunId: null,
       flow: { slug: flowDef.id, version: 1 },
       subject: { type: "issue", id: issues[issueN - 1]!.id },
       lane: "dev",
@@ -285,6 +287,10 @@ export function createMemoryAppData(now = Date.now()): AppData {
     const repo: Repo = { id: id("repo", i + 1), name, path: `/Users/dev/${name}`, remote: `acme/${name}`, defaultBranch: "main" }
     return { repo, recipe, lastTest }
   })
+  // Lo que el usuario saltó o subió en la cola, que `queue` refleja.
+  const skipped = new Set<IssueId>()
+  const boosted: IssueId[] = []
+  const breakers: Breaker[] = []
   const projectOf = (projectId: ProjectId) => projects.find((p) => p.id === projectId)
   const detailOf = (runId: string) => {
     const found = runs.find((r) => r.id === runId)
@@ -339,12 +345,37 @@ export function createMemoryAppData(now = Date.now()): AppData {
       projects.push(created)
       return created
     },
+    updateProject: async (projectId, patch) => {
+      const project = projectOf(projectId)
+      if (!project) throw new Error(`No existe el proyecto ${projectId}`)
+      Object.assign(project, patch)
+      return { ...project }
+    },
+    skipIssue: async (_projectId, issueId, skip) => void (skip ? skipped.add(issueId) : skipped.delete(issueId)),
+    boostIssue: async (_projectId, issueId, boost) => {
+      const at = boosted.indexOf(issueId)
+      if (at >= 0) boosted.splice(at, 1)
+      if (boost) boosted.unshift(issueId)
+    },
+    lanes: async () => {
+      const holding = (lane: Run["lane"]) => runs.filter((r) => r.lane === lane && (r.status === "running" || r.status === "waiting" || r.status === "paused")).length
+      return { dev: { active: holding("dev"), capacity: 4 }, maintenance: { active: holding("maintenance"), capacity: 2 } }
+    },
+    breakers: async () => breakers.map((b) => ({ ...b })),
+    openPrs: async () => [],
     issues: async (projectId) => issues.filter((i) => i.projectId === projectId),
-    // Sin bloqueos en los datos de ejemplo: la cola son las issues en todo que ninguna corrida tomó.
-    queue: async (projectId) =>
-      issues
+    // Sin bloqueos en los datos de ejemplo: la cola son las issues en todo que ninguna corrida tomó; las saltadas salen bloqueadas.
+    queue: async (projectId) => {
+      const entries = issues
         .filter((i) => i.projectId === projectId && i.status === "todo" && !runs.some((r) => r.subject.id === i.id))
-        .map((issue) => ({ issue, state: "ready" as const, reason: "lista sobre la branch por defecto", base: { kind: "default" as const }, dependsOn: [] })),
+        .map((issue): QueueEntry =>
+          skipped.has(issue.id)
+            ? { issue, state: "blocked", skipped: true, reason: "saltada a mano: el usuario pidió que el Scheduler no la lance (projects.skipIssue)" }
+            : { issue, state: "ready", reason: "lista sobre la branch por defecto", base: { kind: "default" }, dependsOn: [] },
+        )
+      const rank = (e: QueueEntry) => (e.state === "blocked" ? 1 : 0) * 1000 + (boosted.includes(e.issue.id) ? boosted.indexOf(e.issue.id) : 500)
+      return entries.sort((a, b) => rank(a) - rank(b))
+    },
     runs: async (filter = {}) =>
       runs
         .filter((r) => (!filter.projectId || r.projectId === filter.projectId) && (!filter.status || filter.status.includes(r.status)))

@@ -1,7 +1,9 @@
 import type {
   AgentSessionId,
   ArtifactHash,
+  Breaker,
   CachedIssue,
+  CachedPr,
   ClankerProject,
   ClaudeMode,
   ClaudeStatus,
@@ -12,8 +14,11 @@ import type {
   DecisionId,
   Event,
   GitHubPatForm,
+  IssueId,
+  Lanes,
   NewProject,
   ProjectId,
+  ProjectPatch,
   QueueEntry,
   RecipeStatus,
   RecipeTestResult,
@@ -44,6 +49,17 @@ export interface RepoRow {
 export interface AppData {
   projects(): Promise<ClankerProject[]>
   createProject(input: NewProject): Promise<ClankerProject>
+  updateProject(id: ProjectId, patch: ProjectPatch): Promise<ClankerProject>
+  /** Saca la issue de la cola (`skipped`) o la devuelve. */
+  skipIssue(projectId: ProjectId, issueId: IssueId, skipped: boolean): Promise<void>
+  /** Sube la issue al principio de la cola o la devuelve a su lugar. */
+  boostIssue(projectId: ProjectId, issueId: IssueId, boosted: boolean): Promise<void>
+  /** La capacidad de cada carril de la máquina y cuánto está en uso. */
+  lanes(): Promise<Lanes>
+  /** Los circuit breakers abiertos: qué está en pausa y cuándo se vuelve a probar. */
+  breakers(): Promise<Breaker[]>
+  /** Los PRs abiertos que Watch conoce (los que abrió el sistema y los de tu búsqueda). */
+  openPrs(): Promise<CachedPr[]>
   /** Las issues del caché del proyecto. */
   issues(projectId: ProjectId): Promise<CachedIssue[]>
   /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */

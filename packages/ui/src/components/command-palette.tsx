@@ -1,9 +1,10 @@
-import type { CachedIssue, ClankerProject, Decision, DecisionId, Run, RunId } from "@clanker/api"
-import { Bot, Check, CornerDownLeft, FileText, GitPullRequest, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, ScrollText, Square, Undo2, X } from "lucide-react"
+import type { CachedIssue, ClankerProject, Decision, DecisionId, QueueEntry, Run, RunId } from "@clanker/api"
+import { Bot, Check, CornerDownLeft, FileText, Gauge, GitPullRequest, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, ScrollText, Square, Undo2, X } from "lucide-react"
 import type { PullRequest } from "@/types"
 import type { RunTab } from "@/components/project/run-view"
 import type { StepTab } from "@/components/project/step-panel"
 import { KindIcon } from "@/components/inbox/decision-parts"
+import { ParallelPage, QueueCommands } from "@/components/project/project-palette"
 import { useRunCommands } from "@/components/project/run-commands"
 import { RunStatusIcon, isLive } from "@/components/project/status"
 import {
@@ -16,6 +17,7 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from "@/components/ui/command"
+import { useState } from "react"
 import { useHost } from "@/host"
 import { useAppActions } from "@/lib/app-context"
 import { KIND_LABEL, optionLabel, optionsOf, takesText } from "@/lib/decisions"
@@ -31,6 +33,8 @@ interface Props {
   current: ClankerProject | null
   runs: Run[]
   issues: CachedIssue[]
+  /** La cola del proyecto que se ve; `null` si la vista actual no es la del proyecto. */
+  queue: QueueEntry[] | null
   onToggleSidebar: () => void
   onOpenShortcuts: () => void
   prs: PullRequest[]
@@ -52,12 +56,18 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
   const host = useHost()
+  // Una acción con parámetro abre una sub-página dentro de la paleta (patrón de páginas de cmdk).
+  const [parallelPage, setParallelPage] = useState(false)
+  const close = (next: boolean) => {
+    if (!next) setParallelPage(false)
+    onOpenChange(next)
+  }
   const run = (fn: () => void) => () => {
-    onOpenChange(false)
+    close(false)
     fn()
   }
 
@@ -66,8 +76,10 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
   const runnable = current?.status === "active" ? issues.filter((i) => i.status === "todo" && !live.has(i.id)) : []
   const ordered = [...barProjects(projects), ...projects.filter((p) => p.status === "archived")]
 
+  if (parallelPage && current) return <ParallelPage open={open} onOpenChange={close} project={current} onBack={() => setParallelPage(false)} />
+
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange} title="Paleta de comandos" description="Busca un proyecto, una corrida o una acción">
+    <CommandDialog open={open} onOpenChange={close} title="Paleta de comandos" description="Busca un proyecto, una corrida o una acción">
       <CommandInput placeholder="Busca un proyecto, una corrida o una acción…" />
       <CommandList className="max-h-[420px]">
         <CommandEmpty>Sin resultados.</CommandEmpty>
@@ -149,8 +161,16 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
               {current.status === "active" ? <Pause /> : <Play />} {current.status === "active" ? "Pausar el proyecto" : "Reanudar el proyecto"}
               <CommandShortcut>⇧⌘Y</CommandShortcut>
             </CommandItem>
+            {queue ? (
+              <CommandItem value="cambiar paralelismo" onSelect={() => setParallelPage(true)}>
+                <Gauge /> Cambiar paralelismo
+                <CommandShortcut>›</CommandShortcut>
+              </CommandItem>
+            ) : null}
           </CommandGroup>
         ) : null}
+
+        {current && queue ? <QueueCommands project={current} queue={queue} run={run} /> : null}
 
         {onStep ? (
           <CommandGroup heading="Panel del paso">

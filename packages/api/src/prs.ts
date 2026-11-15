@@ -128,6 +128,8 @@ export function reviewStatusOf(pr: PrState): ReviewStatus {
 
 /** Un PR del caché de Watch (`pull_requests`): lo último que se leyó de él, sin ir a GitHub. */
 export const CachedPr = z.object({
+  /** El id del PR en el core: el `subject.id` de las corridas que lo toman como sujeto. */
+  id: z.string(),
   ref: PrRef,
   /** Lo abrió el sistema (`pr.publish`); los demás los descubrió la búsqueda de tus PRs. */
   owned: z.boolean(),

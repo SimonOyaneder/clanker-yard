@@ -10,6 +10,13 @@ export interface AppActions {
   openNewProject: () => void
   /** Lanza el flujo del proyecto sobre la issue y avisa el resultado con un toast. */
   startRun: (project: ClankerProject, issue: CachedIssue) => Promise<void>
+  /** Cambia cuántas corridas del carril dev puede tener el proyecto a la vez. */
+  setParallel: (project: ClankerProject, parallel: number) => Promise<void>
+  /** Saca la issue de la cola (`skipped`) o la devuelve; el toast permite deshacerlo. */
+  skipIssue: (project: ClankerProject, issue: CachedIssue, skipped: boolean) => Promise<void>
+  /** La sube al principio de la cola; el toast permite deshacerlo. */
+  boostIssue: (project: ClankerProject, issue: CachedIssue) => Promise<void>
+  openExternal: (url: string) => void
   refresh: () => void
   goConnections: () => void
   /** Va a Conexiones e inicia el login de Linear en el navegador. */

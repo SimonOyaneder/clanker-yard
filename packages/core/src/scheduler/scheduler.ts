@@ -8,8 +8,8 @@ import type { Projects } from "../projects/projects";
 import { ProjectNotFoundError } from "../projects/projects";
 import { repoOf } from "../projects/repo-of";
 import type { RunStarter } from "../projects/start-run";
-import { issueSkips, issues as issuesTable, runs } from "../store/schema";
-import type { Store } from "../store/store";
+import { issueBoosts, issueSkips, issues as issuesTable, runs } from "../store/schema";
+import type { Store, Tx } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
 import type { LaneSettings } from "./lanes";
@@ -76,6 +76,8 @@ export interface Scheduler {
   queue: ProjectQueue;
   /** Pide (o devuelve) que el Scheduler no lance la issue. Lanza `ProjectNotFoundError` o `IssueNotInProjectError`. */
   skipIssue(input: { projectId: ProjectId; issueId: IssueId; skipped: boolean }, origin: Origin): void;
+  /** Sube la issue al principio de la cola (o la devuelve a su lugar con `boosted: false`) y emite `issue.queued`. */
+  boostIssue(input: { projectId: ProjectId; issueId: IssueId; boosted: boolean }, origin: Origin): void;
   /** Hace el tick de arranque y deja los demás en sus momentos: los eventos de `TRIGGERS` y cada 5 min. */
   start(): void;
   /** Deja de lanzar y espera al tick en curso. Antes de apagar el motor, para que el cierre no abra corridas nuevas. */
@@ -229,6 +231,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     store.tx((tx) => tx.emit({ type: "error", origin: "core", projectId, payload: { scope: "scheduler.tick", message } }));
   }
 
+  /** El sujeto de la issue, que debe ser del proyecto. */
+  function subjectOf(tx: Tx, projectId: ProjectId, issueId: IssueId) {
+    if (!projects.get(projectId)) throw new ProjectNotFoundError(projectId);
+    const issue = tx.db.select({ projectId: issuesTable.projectId }).from(issuesTable).where(eq(issuesTable.id, issueId)).get();
+    if (issue?.projectId !== projectId) throw new IssueNotInProjectError(`La issue ${issueId} no es del proyecto ${projectId}.`);
+    return { type: "issue", id: issueId } as const;
+  }
+
   const queue: ProjectQueue = {
     async of(projectId) {
       const entries = await deps.queue.of(projectId);
@@ -247,11 +257,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     queue,
 
     skipIssue({ projectId, issueId, skipped: skip }, origin) {
-      if (!projects.get(projectId)) throw new ProjectNotFoundError(projectId);
       store.tx((tx) => {
-        const issue = tx.db.select({ projectId: issuesTable.projectId }).from(issuesTable).where(eq(issuesTable.id, issueId)).get();
-        if (issue?.projectId !== projectId) throw new IssueNotInProjectError(`La issue ${issueId} no es del proyecto ${projectId}.`);
-        const subject = { type: "issue", id: issueId } as const;
+        const subject = subjectOf(tx, projectId, issueId);
         if (skip) {
           tx.db.insert(issueSkips).values({ issueId, createdAt: Date.now() }).onConflictDoNothing().run();
           tx.emit({ type: "issue.skipped", origin, projectId, subject, payload: { issueId, reason: "saltada a mano" } });
@@ -259,6 +266,20 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           tx.db.delete(issueSkips).where(eq(issueSkips.issueId, issueId)).run();
           tx.emit({ type: "issue.queued", origin, projectId, subject, payload: { issueId } });
         }
+      });
+    },
+
+    boostIssue({ projectId, issueId, boosted }, origin) {
+      store.tx((tx) => {
+        const subject = subjectOf(tx, projectId, issueId);
+        if (boosted) {
+          // Subirla otra vez la deja arriba de todas: gana la subida más reciente.
+          const createdAt = Date.now();
+          tx.db.insert(issueBoosts).values({ issueId, createdAt }).onConflictDoUpdate({ target: issueBoosts.issueId, set: { createdAt } }).run();
+        } else {
+          tx.db.delete(issueBoosts).where(eq(issueBoosts.issueId, issueId)).run();
+        }
+        tx.emit({ type: "issue.queued", origin, projectId, subject, payload: { issueId } });
       });
     },
 

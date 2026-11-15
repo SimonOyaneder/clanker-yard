@@ -45,6 +45,8 @@ export interface TickDevInput {
   prs: readonly QueuePrFact[];
   /** Ids de issues que el usuario pidió no lanzar (`projects.skipIssue`): quedan en la cola como `blocked`. */
   skipped?: ReadonlySet<string>;
+  /** Issue id → ms epoch en que el usuario la subió (`projects.boostIssue`): van antes que el resto, la más reciente primero. */
+  boosted?: ReadonlyMap<string, number>;
 }
 
 const LIVE: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting", "parked", "paused"]);
@@ -61,8 +63,9 @@ const CLOSED: ReadonlySet<StatusCategory> = new Set(["done", "canceled"]);
  *
  * Una issue que el usuario saltó (`skipped`) sale `blocked` con ese motivo.
  *
- * Orden: prioridad (0 al final), milestone (el que vence antes, luego el que no tiene fecha, luego
- * sin milestone), la que bloquea a más issues, estimate menor (sin estimate al final) y la más antigua.
+ * Orden: primero las que el usuario subió (`boosted`, la última subida primero) y después prioridad (0 al
+ * final), milestone (el que vence antes, luego el que no tiene fecha, luego sin milestone), la que bloquea a
+ * más issues, estimate menor (sin estimate al final) y la más antigua.
  */
 export function tickDev(input: TickDevInput): QueueEntry[] {
   const { project, me, capabilities, issues } = input;
@@ -88,13 +91,13 @@ export function tickDev(input: TickDevInput): QueueEntry[] {
         !(childrenOf.get(refKey(issue.ref)) ?? []).some((child) => !CLOSED.has(child.status)) &&
         !runsOf.has(issue.id),
     )
-    .sort(byQueueOrder);
+    .sort((a, b) => (input.boosted?.get(b.id) ?? 0) - (input.boosted?.get(a.id) ?? 0) || byQueueOrder(a, b));
 
   const world: World = { project, me, byRef, runsOf, prsOf };
   const entries = eligible.map(
     (issue): QueueEntry =>
       input.skipped?.has(issue.id)
-        ? { issue, state: "blocked", reason: "saltada a mano: el usuario pidió que el Scheduler no la lance (projects.skipIssue)" }
+        ? { issue, state: "blocked", skipped: true, reason: "saltada a mano: el usuario pidió que el Scheduler no la lance (projects.skipIssue)" }
         : classify(issue, capabilities.relations ? issue.relations.blockedBy : [], world),
   );
   return [...entries.filter((e) => e.state === "ready"), ...entries.filter((e) => e.state === "waiting"), ...entries.filter((e) => e.state === "blocked")];

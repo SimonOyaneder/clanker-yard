@@ -2,7 +2,7 @@ import type { Client, EventType } from "@clanker/api"
 import type { AppData } from "@/app-data"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
-export type CoreClient = Pick<Client, "projects" | "issues" | "runs" | "artifacts" | "events" | "connections" | "repos" | "decisions">
+export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "connections" | "repos">
 
 // Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos, las sesiones de agente que el
 // panel del paso y su transcript siguen en vivo, las decisiones de la bandeja, conexiones y pruebas de receta).
@@ -17,6 +17,10 @@ const LIVE_EVENTS = [
   "issue.queued",
   "issue.claimed",
   "issue.skipped",
+  "breaker.opened",
+  "breaker.closed",
+  "pr.changed",
+  "pr.merged",
   "run.started",
   "run.status",
   "run.parked",
@@ -63,6 +67,12 @@ export function createCoreAppData(client: CoreClient): AppData {
   return {
     projects: () => client.projects.list(),
     createProject: (input) => client.projects.create(input),
+    updateProject: (id, patch) => client.projects.update({ id, ...patch }),
+    skipIssue: async (id, issueId, skipped) => void (await client.projects.skipIssue({ id, issueId, skipped })),
+    boostIssue: async (id, issueId, boosted) => void (await client.projects.boostIssue({ id, issueId, boosted })),
+    lanes: () => client.system.lanes(),
+    breakers: () => client.system.breakers(),
+    openPrs: () => client.prs.list({ state: "open" }),
     issues: (projectId) => client.issues.list({ projectId }),
     queue: (projectId) => client.projects.queue({ id: projectId }),
     runs: (filter) => client.runs.list(filter),

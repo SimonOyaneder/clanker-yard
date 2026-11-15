@@ -1,15 +1,20 @@
-import type { CachedIssue, ClankerProject, QueueEntry, Run } from "@clanker/api"
-import { Copy, Pause, Play } from "lucide-react"
+import type { Breaker, CachedIssue, CachedPr, ClankerProject, Decision, Lanes, QueueEntry, Run } from "@clanker/api"
+import { Copy, Ellipsis, Pause, Play } from "lucide-react"
+import { BreakerStrip } from "@/components/project/breaker-strip"
 import { Ago, Hint, Pill, SectionTitle, StatBar } from "@/components/common"
+import { ParkedList, QueueList } from "@/components/project/issue-lists"
+import { LaneBoard } from "@/components/project/lanes"
 import { useRunCommands } from "@/components/project/run-commands"
 import { RunStatusIcon, RunStatusPill, isLive } from "@/components/project/status"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useNow } from "@/hooks/use-now"
 import { useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
-import { costUsd, elapsed, issueKey, tone } from "@/lib/format"
-import { cn } from "@/lib/utils"
+import { costUsd, elapsed, tone } from "@/lib/format"
+import { subjectLabeler, type SubjectLabel } from "@/lib/subject"
+import { borrowers as borrowersOf, breakersOf, laneUsage, parkedRuns, projectPrs, spentToday } from "@/lib/project-ops"
 
 const PROJECT_STATUS = {
   active: { label: "activo", tone: tone.green, hint: "Toma issues de su cola y lanza corridas." },
@@ -17,34 +22,43 @@ const PROJECT_STATUS = {
   archived: { label: "archivado", tone: tone.neutral, hint: "Fuera de la barra lateral. No lanza corridas." },
 } as const
 
+/** Los paralelismos que ofrecen el menú y ⌘K. */
+export const PARALLEL_OPTIONS = [1, 2, 3, 4, 5, 6] as const
+
 interface Props {
   project: ClankerProject
   runs: Run[]
   issues: CachedIssue[]
   /** La cola que calcula el core (`projects.queue`). */
   queue: QueueEntry[]
+  /** Las decisiones del proyecto; las pendientes son las que estacionan una corrida o esperan respuesta. */
+  decisions: Decision[]
+  /** Los cupos de los carriles de la máquina. */
+  lanes: Lanes
+  /** Los circuit breakers abiertos de todo el core. */
+  breakers: Breaker[]
+  /** Los PRs que Watch conoce. */
+  prs: CachedPr[]
 }
-
-const QUEUE_STATE = {
-  ready: { label: "lista", tone: tone.green, hint: "Se puede lanzar ya." },
-  waiting: { label: "esperando", tone: tone.sky, hint: "Espera a una issue bloqueante en curso; se reevalúa sola." },
-  blocked: { label: "bloqueada", tone: tone.amber, hint: "Necesita que alguien haga algo con lo que la bloquea." },
-} as const
 
 /** Las issues de un proyecto por su id, para ponerle clave y título a cada corrida. */
 export const issuesById = (issues: CachedIssue[]) => new Map<string, CachedIssue>(issues.map((i) => [i.id, i]))
 
-// Operación del proyecto: qué corre, qué espera a una persona y qué viene.
-export function ProjectView({ project, runs, issues, queue }: Props) {
-  const live = runs.filter((r) => isLive(r.status))
-  const inProgress = live.filter((r) => r.status !== "parked")
-  const parked = live.filter((r) => r.status === "parked")
-  const finished = runs.filter((r) => !isLive(r.status))
-  const devBusy = live.filter((r) => r.lane === "dev" && (r.status === "running" || r.status === "waiting")).length
-  const now = useNow(inProgress.length > 0)
-  const byId = issuesById(issues)
+// Operación del proyecto: qué corre en cada carril, qué espera a una persona, qué viene y por qué no corre.
+export function ProjectView({ project, runs, issues, queue, decisions, lanes, breakers, prs }: Props) {
+  const roots = runs.filter((r) => r.parentRunId === null)
+  const live = roots.filter((r) => isLive(r.status))
+  const parked = parkedRuns(roots)
+  const finished = roots.filter((r) => !isLive(r.status))
+  const stopped = breakersOf(project, breakers)
+  const now = useNow(live.length > 0 || stopped.length > 0)
+  const subjectOf = subjectLabeler(issues, prs)
+  const usage = laneUsage(project, roots, lanes)
+  const pending = decisions.filter((d) => d.status === "pending")
   const status = PROJECT_STATUS[project.status]
-  const commands = useRunCommands()
+  const queued = queue.filter((e) => e.state !== "blocked")
+  const blocked = queue.filter((e) => e.state === "blocked")
+  const spent = spentToday(runs, now)
 
   return (
     <div className="flex flex-col gap-6">
@@ -54,19 +68,7 @@ export function ProjectView({ project, runs, issues, queue }: Props) {
           <Pill className={status.tone} hint={status.hint}>
             {status.label}
           </Pill>
-          {project.status === "active" ? (
-            <Hint label="El Scheduler deja de lanzar issues de este proyecto. Lo que ya corre, y los demás proyectos, siguen" keys="⇧⌘Y">
-              <Button size="sm" variant="outline" className="ml-auto" onClick={() => commands.pauseProject(project)}>
-                <Pause /> Pausar
-              </Button>
-            </Hint>
-          ) : project.status === "paused" ? (
-            <Hint label="El Scheduler vuelve a lanzar las issues de la cola" keys="⇧⌘Y">
-              <Button size="sm" className="ml-auto" onClick={() => commands.resumeProject(project)}>
-                <Play /> Reanudar
-              </Button>
-            </Hint>
-          ) : null}
+          <ProjectActions project={project} />
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <Pill className={tone.neutral} hint="Flujo con que corre una issue si no se pide otro.">
@@ -78,38 +80,89 @@ export function ProjectView({ project, runs, issues, queue }: Props) {
           <Pill className={tone.neutral} hint="De dónde salen las issues del proyecto.">
             {project.tracker === "local" ? "tracker local" : `${project.tracker} · ${project.trackerRef}`}
           </Pill>
-          <Pill className={tone.neutral} hint="Cuántas corridas del carril dev puede tener en curso a la vez.">
-            carril dev: {devBusy}/{project.parallel}
-          </Pill>
         </div>
       </header>
 
       <StatBar
         items={[
-          { label: "En curso", value: String(inProgress.length), sub: `carril dev ${devBusy}/${project.parallel}` },
-          { label: "Estacionadas", value: String(parked.length), sub: parked.length ? "te esperan" : "ninguna", tone: parked.length ? "text-amber-700 dark:text-amber-300" : undefined },
-          { label: "Terminadas", value: String(finished.length), sub: `${finished.filter((r) => r.status === "failed").length} fallaron` },
-          { label: "Gasto", value: costUsd(runs.reduce((sum, r) => sum + r.costMicros, 0)), sub: `${runs.length} ${runs.length === 1 ? "corrida" : "corridas"}` },
+          { label: "Carril dev", value: `${usage.dev.active}/${usage.dev.capacity}`, sub: `máquina ${usage.dev.machine.active}/${usage.dev.machine.capacity}` },
+          {
+            label: "Carril mantenimiento",
+            value: `${usage.maintenance.active}/${usage.maintenance.capacity}`,
+            sub: `máquina ${usage.maintenance.machine.active}/${usage.maintenance.machine.capacity}`,
+          },
+          { label: "PRs abiertos", value: String(projectPrs(prs, runs).length), sub: "que abrió el proyecto" },
+          {
+            label: "Decisiones pendientes",
+            value: String(pending.length),
+            sub: parked.length ? `${parked.length} ${parked.length === 1 ? "corrida estacionada" : "corridas estacionadas"}` : "ninguna estaciona",
+            tone: pending.length ? "text-amber-700 dark:text-amber-300" : undefined,
+          },
+          { label: "Gasto de hoy", value: costUsd(spent), sub: project.maxCostUsd === null ? "sin tope" : `tope por corrida $${project.maxCostUsd}` },
         ]}
       />
 
-      {runs.length === 0 && queue.length === 0 ? <EmptyProject /> : null}
+      <BreakerStrip breakers={stopped} now={now} />
 
-      <RunGroup title="En curso" runs={inProgress} byId={byId} now={now} project={project} />
-      <RunGroup title="Estacionadas" runs={parked} byId={byId} now={now} project={project} />
+      {roots.length === 0 && queue.length === 0 ? (
+        <EmptyProject />
+      ) : (
+        <LaneBoard project={project} runs={roots} usage={usage} subjectOf={subjectOf} now={now} />
+      )}
 
-      {queue.length ? (
-        <section className="flex flex-col gap-2">
-          <SectionTitle count={queue.length}>En cola</SectionTitle>
-          <ul className="overflow-hidden rounded-lg border bg-card">
-            {queue.map((entry) => (
-              <QueueRow key={entry.issue.id} entry={entry} project={project} />
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <ParkedList runs={parked} decisions={decisions} subjectOf={subjectOf} borrowers={borrowersOf(roots)} project={project} />
+      {roots.length || queue.length ? <QueueList title="En cola" entries={queued} project={project} empty={emptyQueue(project)} /> : null}
+      <QueueList title="Bloqueadas" entries={blocked} project={project} />
+      <RunGroup title="Terminadas" runs={finished} subjectOf={subjectOf} now={now} project={project} />
+    </div>
+  )
+}
 
-      <RunGroup title="Terminadas" runs={finished} byId={byId} now={now} project={project} />
+/** Dice qué filtro dejó la cola vacía, para saber qué cambiar. */
+function emptyQueue(project: ClankerProject): string {
+  const status = project.queueFilter.status?.join(" o ") ?? "todo"
+  const labels = project.queueFilter.labels?.length ? ` con el label ${project.queueFilter.labels.join(" o ")}` : ""
+  const excluded = project.queueFilter.excludeLabels ?? ["no-clanker"]
+  return `0 issues en ${status}${labels} sin el label ${excluded.join(" ni ")}. Crea o mueve una issue a ${status} en ${project.tracker === "local" ? "el tracker local" : project.tracker}, o ajusta los filtros de la cola del proyecto.`
+}
+
+// El botón principal del proyecto (Pausar o Reanudar) y, en "…", el resto de lo que se hace con él.
+function ProjectActions({ project }: { project: ClankerProject }) {
+  const actions = useAppActions()
+  const commands = useRunCommands()
+  if (project.status === "archived") return null
+  const pausing = project.status === "active"
+  return (
+    <div className="ml-auto flex items-center gap-1.5">
+      <Hint label={pausing ? "El Scheduler deja de lanzar issues de este proyecto. Lo que ya corre, y los demás proyectos, siguen" : "El Scheduler vuelve a lanzar las issues de la cola"} keys="⇧⌘Y">
+        <Button size="sm" variant={pausing ? "outline" : "default"} onClick={() => (pausing ? commands.pauseProject(project) : commands.resumeProject(project))}>
+          {pausing ? <Pause /> : <Play />}
+          {pausing ? "Pausar" : "Reanudar"}
+        </Button>
+      </Hint>
+      <DropdownMenu>
+        <Hint label="Más acciones del proyecto">
+          <DropdownMenuTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label="Más acciones del proyecto">
+              <Ellipsis />
+            </Button>
+          </DropdownMenuTrigger>
+        </Hint>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Cambiar paralelismo</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup value={String(project.parallel)} onValueChange={(value) => void actions.setParallel(project, Number(value))}>
+                {PARALLEL_OPTIONS.map((n) => (
+                  <DropdownMenuRadioItem key={n} value={String(n)}>
+                    {n} {n === 1 ? "corrida" : "corridas"} a la vez
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }
@@ -130,21 +183,21 @@ function EmptyProject() {
   )
 }
 
-function RunGroup({ title, runs, byId, now, project }: { title: string; runs: Run[]; byId: Map<string, CachedIssue>; now: number; project: ClankerProject }) {
+function RunGroup({ title, runs, subjectOf, now, project }: { title: string; runs: Run[]; subjectOf: (run: Run) => SubjectLabel; now: number; project: ClankerProject }) {
   if (!runs.length) return null
   return (
     <section className="flex flex-col gap-2">
       <SectionTitle count={runs.length}>{title}</SectionTitle>
       <ul className="overflow-hidden rounded-lg border bg-card">
         {runs.map((run) => (
-          <RunRow key={run.id} run={run} issue={byId.get(run.subject.id)} now={now} project={project} />
+          <RunRow key={run.id} run={run} subject={subjectOf(run)} now={now} project={project} />
         ))}
       </ul>
     </section>
   )
 }
 
-function RunRow({ run, issue, now, project }: { run: Run; issue: CachedIssue | undefined; now: number; project: ClankerProject }) {
+function RunRow({ run, subject, now, project }: { run: Run; subject: SubjectLabel; now: number; project: ClankerProject }) {
   const actions = useAppActions()
   const open = () => actions.openRun(project.slug, run.id)
   const duration = (run.endedAt ?? now) - run.startedAt
@@ -154,8 +207,8 @@ function RunRow({ run, issue, now, project }: { run: Run; issue: CachedIssue | u
         <ContextMenuTrigger asChild>
           <button type="button" onClick={open} className="flex h-9 w-full items-center gap-3 px-3 text-left hover:bg-accent/60">
             <RunStatusIcon run={run} />
-            <span className="w-20 flex-none truncate font-mono text-xs text-muted-foreground">{issue ? issueKey(issue) : run.subject.id}</span>
-            <span className="min-w-0 flex-1 truncate">{issue?.title ?? "issue fuera del caché"}</span>
+            <span className="w-20 flex-none truncate font-mono text-xs text-muted-foreground">{subject.key}</span>
+            <span className="min-w-0 flex-1 truncate">{subject.title}</span>
             <Pill className={tone.neutral} hint={`Flujo ${run.flow.slug}, versión ${run.flow.version}. La corrida sigue con esa versión aunque el flujo cambie.`}>
               {run.flow.slug} v{run.flow.version}
             </Pill>
@@ -170,54 +223,6 @@ function RunRow({ run, issue, now, project }: { run: Run; issue: CachedIssue | u
           <ContextMenuSeparator />
           <ContextMenuItem onSelect={() => copy(run.id, "el ID de la corrida")}>
             <Copy /> Copiar ID de la corrida
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-    </li>
-  )
-}
-
-function QueueRow({ entry, project }: { entry: QueueEntry; project: ClankerProject }) {
-  const actions = useAppActions()
-  const { issue } = entry
-  const state = QUEUE_STATE[entry.state]
-  const runnable = project.status === "active" && entry.state === "ready"
-  const run = () => void actions.startRun(project, issue)
-  return (
-    <li className="border-b last:border-b-0">
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div className="flex h-9 items-center gap-3 px-3">
-            <span className="size-3.5 flex-none rounded-full border border-muted-foreground/50" />
-            <span className="w-20 flex-none truncate font-mono text-xs text-muted-foreground">{issueKey(issue)}</span>
-            <span className="min-w-0 flex-1 truncate">{issue.title}</span>
-            <Pill className={state.tone} hint={`${state.hint} ${entry.reason}`}>
-              {state.label}
-            </Pill>
-            <Hint
-              label={
-                runnable
-                  ? "Lanza el flujo del proyecto sobre esta issue (también en ⌘K)"
-                  : project.status !== "active"
-                    ? "El proyecto no está activo: reanúdalo para lanzar corridas"
-                    : `No se puede lanzar todavía: ${entry.reason}`
-              }
-            >
-              <span>
-                <Button size="xs" variant="outline" disabled={!runnable} onClick={run} className={cn(!runnable && "pointer-events-none")}>
-                  <Play /> Correr
-                </Button>
-              </span>
-            </Hint>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-52">
-          <ContextMenuItem disabled={!runnable} onSelect={run}>
-            <Play /> Correr ahora
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => copy(issueKey(issue), "la clave de la issue")}>
-            <Copy /> Copiar clave
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>

@@ -109,6 +109,7 @@ export function createPrCache({ store, repos, prs, onChange, now = Date.now }: P
         if (!remote || (repo !== undefined && remote.repo !== repo)) return [];
         return [
           {
+            id: row.id,
             ref: { account: remote.account, repo: remote.repo, number: row.number },
             owned: row.owned,
             issueId: row.issueId,

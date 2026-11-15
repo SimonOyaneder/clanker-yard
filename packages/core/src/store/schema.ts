@@ -458,6 +458,16 @@ export const issueSkips = sqliteTable(
   (t) => [foreignKey({ columns: [t.issueId], foreignColumns: [issues.id] })],
 );
 
+/** Las issues que el usuario subió en la cola (`projects.boostIssue`): salen primero, la última subida arriba de todas. */
+export const issueBoosts = sqliteTable(
+  "issue_boosts",
+  {
+    issueId: text("issue_id").$type<IssueId>().primaryKey(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [foreignKey({ columns: [t.issueId], foreignColumns: [issues.id] })],
+);
+
 /** Las issues del tracker `local`: la fuente de verdad, no el caché. Ver `tracker/local.ts`. */
 export const localIssues = sqliteTable(
   "local_issues",

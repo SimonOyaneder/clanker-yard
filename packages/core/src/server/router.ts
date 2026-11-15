@@ -7,6 +7,7 @@ import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
 import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
+import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
@@ -49,9 +50,11 @@ export interface RouterDeps {
   /** `projects.queue`. */
   queue: ProjectQueue;
   /** `projects.skipIssue`, y el tick que `system.setLanes` y `projects.setParallel` piden para repartir el cupo que liberaron. */
-  scheduler: Pick<Scheduler, "skipIssue" | "tick">;
+  scheduler: Pick<Scheduler, "skipIssue" | "boostIssue" | "tick">;
   /** `system.lanes` y `system.setLanes`. */
   lanes: LaneSettings;
+  /** `system.breakers`. */
+  breakers: Pick<Breakers, "list">;
   flows: Engine;
   /** Lo que `prs.refresh` avisa cuando un PR cambió (los waits y los eventos de Watch): el core lo comparte con su propio caché. */
   onPrChange?: PrCacheDeps["onChange"];
@@ -131,6 +134,7 @@ export function createRouter(deps: RouterDeps) {
         platform,
       })),
       lanes: os.system.lanes.handler(() => deps.lanes.usage()),
+      breakers: os.system.breakers.handler(() => deps.breakers.list()),
       setLanes: os.system.setLanes.handler(({ input }) => {
         deps.lanes.set(input);
         void deps.scheduler.tick();
@@ -240,6 +244,9 @@ export function createRouter(deps: RouterDeps) {
       ),
       skipIssue: os.projects.skipIssue.handler(({ input: { id, issueId, skipped }, context }) =>
         asApiError(() => deps.scheduler.skipIssue({ projectId: id, issueId, skipped }, context.origin)),
+      ),
+      boostIssue: os.projects.boostIssue.handler(({ input: { id, issueId, boosted }, context }) =>
+        asApiError(() => deps.scheduler.boostIssue({ projectId: id, issueId, boosted }, context.origin)),
       ),
       queue: os.projects.queue.handler(({ input }) => asApiErrorAsync(() => deps.queue.of(input.id))),
       summary: os.projects.summary.handler(({ input }) => metrics.summary(projectOrNotFound(input.id).id)),

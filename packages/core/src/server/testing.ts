@@ -32,7 +32,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "scheduler" | "lanes" | "artifacts" | "decisions" | "defs" | "legacyImport"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "defs" | "legacyImport"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -75,6 +75,7 @@ export function apiDeps(
     queue: scheduler.queue,
     scheduler,
     lanes,
+    breakers: { list: () => [] },
     flows,
     artifacts,
     decisions: createDecisions(store),

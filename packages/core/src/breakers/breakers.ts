@@ -1,4 +1,4 @@
-import type { DecisionId } from "@clanker/api";
+import type { BreakerCause, DecisionId } from "@clanker/api";
 import { eq } from "drizzle-orm";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import { meta } from "../store/schema";
@@ -11,8 +11,7 @@ export const GITHUB_SCOPE = "github";
 export const repoScope = (repoId: string): string => `repo:${repoId}`;
 export const runtimeScope = (runtime: string): string => `runtime:${runtime}`;
 
-/** Por qué se abrió, para la alerta y para quien lea el evento. */
-export type BreakerCause = "quota_exhausted" | "login_expired" | "connection_lost" | "rate_limited" | "environment";
+export type { BreakerCause };
 
 /** Los minutos entre una prueba y la siguiente: 1, 5, 15 y 30, y después cada 30. */
 const BACKOFF_MS = [1, 5, 15, 30].map((minutes) => minutes * 60_000);
@@ -45,7 +44,8 @@ export interface Breakers {
    * el backoff sigue donde iba.
    */
   trip(input: { scope: string; cause: BreakerCause; reason: string; resetsAt?: number }): void;
-  list(): OpenBreaker[];
+  /** Los abiertos, con el nombre legible de su ámbito (`label`). */
+  list(): (OpenBreaker & { label: string })[];
   /** Retoma los breakers que dejó un corte y empieza a escuchar las conexiones y la cuota de GitHub. */
   start(): void;
   close(): void;
@@ -183,7 +183,7 @@ export function createBreakers({ store, runtime, probe, label = (scope) => scope
   return {
     open: (scope) => entries.get(scope)?.reason,
     trip,
-    list: () => [...entries.values()],
+    list: () => [...entries.values()].map((entry) => ({ ...entry, label: label(entry.scope) })),
 
     start() {
       const saved = store.db.select().from(meta).where(eq(meta.key, META_KEY)).get();

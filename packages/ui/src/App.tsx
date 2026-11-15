@@ -57,6 +57,16 @@ const LIVE_STATUSES: RunStatus[] = ["queued", "running", "waiting", "parked", "p
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+// Lo reversible se hace directo y avisa con un toast que lo deshace; un fallo se muestra tal cual.
+async function undoable(message: string, apply: () => Promise<unknown>, undo: () => Promise<unknown>): Promise<void> {
+  try {
+    await apply()
+    toast(message, { action: { label: "Deshacer", onClick: () => void undo().catch((e: unknown) => toast.error(messageOf(e))) } })
+  } catch (e) {
+    toast.error(messageOf(e))
+  }
+}
+
 // La UI no sabe de dónde vienen los datos ni quién la aloja: `appData` y `host` se los da quien la monta.
 export function App({ appData, host }: { appData: AppData; host: Host }) {
   // El tema lo decide el host (macOS vía nativeTheme, o el navegador): seguimos prefers-color-scheme.
@@ -130,8 +140,16 @@ function Shell() {
   const project = projects.find((p) => p.slug === slug) ?? barProjects(projects)[0] ?? projects[0] ?? null
   const projectData = useLiveQuery(project ? `project:${project.id}` : "no-project", async () => {
     if (!project) return null
-    const [runs, issues, queue] = await Promise.all([appData.runs({ projectId: project.id }), appData.issues(project.id), appData.queue(project.id)])
-    return { runs, issues, queue }
+    const [runs, issues, queue, decisions, lanes, breakers, prs] = await Promise.all([
+      appData.runs({ projectId: project.id }),
+      appData.issues(project.id),
+      appData.queue(project.id),
+      appData.decisions({ projectId: project.id, status: ["pending"] }),
+      appData.lanes(),
+      appData.breakers(),
+      appData.openPrs(),
+    ])
+    return { runs, issues, queue, decisions, lanes, breakers, prs }
   })
 
   const forcePrs = useRef(false)
@@ -349,9 +367,28 @@ function Shell() {
           toast.error(messageOf(e))
         }
       },
+      setParallel: (p, parallel) =>
+        undoable(
+          `${p.name}: ${parallel} ${parallel === 1 ? "corrida" : "corridas"} a la vez en dev`,
+          () => appData.updateProject(p.id, { parallel }),
+          () => appData.updateProject(p.id, { parallel: p.parallel }),
+        ),
+      skipIssue: (p, issue, skipped) =>
+        undoable(
+          skipped ? `No tomaré ${issueKey(issue)}` : `${issueKey(issue)} vuelve a la cola`,
+          () => appData.skipIssue(p.id, issue.id, skipped),
+          () => appData.skipIssue(p.id, issue.id, !skipped),
+        ),
+      boostIssue: (p, issue) =>
+        undoable(
+          `${issueKey(issue)} sube al principio de la cola`,
+          () => appData.boostIssue(p.id, issue.id, true),
+          () => appData.boostIssue(p.id, issue.id, false),
+        ),
+      openExternal: host.openExternal,
       refresh,
     }),
-    [selectProject, go, appData, refresh, goConnections, connectLinear, probeClaude, openDecision],
+    [selectProject, go, appData, host, refresh, goConnections, connectLinear, probeClaude, openDecision],
   )
 
   // Menú nativo (accelerators) y clicks en notificaciones.
@@ -584,7 +621,7 @@ function Shell() {
                 ) : runId ? (
                   <RunPane key={runId} query={runQuery} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />
                 ) : (
-                  <ProjectView project={project} runs={detail.runs} issues={detail.issues} queue={detail.queue} />
+                  <ProjectView project={project} {...detail} />
                 )}
               </div>
             </main>
@@ -599,6 +636,7 @@ function Shell() {
         current={project}
         runs={detail?.runs ?? []}
         issues={detail?.issues ?? []}
+        queue={module === "projects" && !runId ? (detail?.queue ?? []) : null}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         prs={prs.data?.prs ?? []}

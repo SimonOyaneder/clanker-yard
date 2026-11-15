@@ -124,6 +124,8 @@ export interface RunView {
   projectId: ProjectId | null;
   /** La corrida que la lanzó con un nodo `flow`; `null` en una corrida raíz. */
   parentRunId: RunId | null;
+  /** La corrida de dev estacionada que le prestó su sujeto a esta (de mantenimiento); `null` si no es un préstamo. */
+  borrowedFromRunId: RunId | null;
   flow: { slug: string; version: number };
   subject: SubjectRef;
   lane: RunRow["lane"];
@@ -2473,6 +2475,7 @@ export function createEngine(deps: EngineDeps): Engine {
       id: run.id,
       projectId: run.projectId,
       parentRunId: run.parentRunId,
+      borrowedFromRunId: run.borrowedFromRunId,
       flow: { slug: flow?.slug ?? run.flowDefId, version: run.flowVersion },
       subject: { type: run.subjectType, id: run.subjectId },
       lane: run.lane,

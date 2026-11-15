@@ -41,6 +41,8 @@ const issue = CachedIssue.parse({
 const run: RunDetail = {
   id: runId,
   projectId,
+  parentRunId: null,
+  borrowedFromRunId: null,
   flow: { slug: "juguete", version: 1 },
   subject: { type: "issue", id: issueId },
   lane: "dev",

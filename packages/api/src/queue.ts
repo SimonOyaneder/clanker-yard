@@ -35,6 +35,11 @@ export const QueueEntry = z.discriminatedUnion("state", [
     dependsOn: z.array(z.string()),
   }),
   z.object({ ...common, state: z.literal("waiting") }),
-  z.object({ ...common, state: z.literal("blocked") }),
+  z.object({
+    ...common,
+    state: z.literal("blocked"),
+    /** `true` si el usuario la sacó de la cola con `projects.skipIssue`: `skipIssue({ skipped: false })` la devuelve. */
+    skipped: z.literal(true).optional(),
+  }),
 ]);
 export type QueueEntry = z.infer<typeof QueueEntry>;

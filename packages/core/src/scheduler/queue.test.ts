@@ -175,6 +175,25 @@ describe("orden", () => {
     expect(keys(queue(issues))).toEqual(["CLA-2", "CLA-1", "CLA-3"]);
   });
 
+  test("las que el usuario subió van antes que todo, la última subida primero", () => {
+    const issues = [issue(1, { priority: 1 }), issue(2, { priority: 4 }), issue(3), issue(4, { priority: 2 })];
+    const boosted = new Map([
+      [issueId(3), 100],
+      [issueId(2), 200],
+    ]);
+
+    expect(keys(queue(issues, { boosted }))).toEqual(["CLA-2", "CLA-3", "CLA-1", "CLA-4"]);
+  });
+
+  test("una issue saltada sale blocked y marcada como saltada por el usuario", () => {
+    const entries = queue([issue(1), issue(2)], { skipped: new Set([issueId(1)]) });
+
+    expect(entries.map((e) => [e.issue.ref.key, e.state, "skipped" in e ? e.skipped : undefined])).toEqual([
+      ["CLA-2", "ready", undefined],
+      ["CLA-1", "blocked", true],
+    ]);
+  });
+
   test("salen primero las ready, luego las waiting y las blocked, cada grupo en su orden", () => {
     const issues = [
       issue(1, { priority: 1, ...blockedBy(10) }),

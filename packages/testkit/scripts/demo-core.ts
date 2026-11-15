@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startCore, startFakeLinear } from "@clanker/core";
-import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, startGitHubSim, tempGitRepo } from "../src/index";
+import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, seedLanes, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
 // y tres repos git temporales (sin receta, con una válida y con una inválida). Publica `core.json` en
@@ -19,6 +19,9 @@ import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, startGitH
 // `github_pat_demo`), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
 // esperar, escribe `<CLANKER_HOME>/demo-control.json` con `{ "clockDays": 40, "claude": "login_expired" }`: el
 // reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario.
+//
+// Con `DEMO_SCENARIO=lanes` además siembra el proyecto de la vista de Operación (`lanes-scenario.ts`): dev lleno,
+// una corrida estacionada, un rebase en mantenimiento y un breaker abierto.
 //
 //   CLANKER_HOME=$(mktemp -d) npm run demo-core -w @clanker/testkit
 
@@ -79,7 +82,9 @@ const core = await startCore({
 
 const client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
 const repos = createRepos(store);
-const repoId = repos.add({ name: "demo", path: repo.dir });
+const lanes = process.env.DEMO_SCENARIO === "lanes";
+// En el escenario de carriles el repo tiene remoto, para que `prs.list` conozca los PRs que deja sembrados.
+const repoId = repos.add({ name: "demo", path: repo.dir, remote: lanes ? "octocat/demo" : null });
 repos.add({ name: "demo-receta", path: withRecipe.dir });
 repos.add({ name: "demo-rota", path: withBrokenRecipe.dir });
 const project = await client.projects.create({
@@ -156,6 +161,12 @@ if (process.env.DEMO_INBOX) {
     store.tx((tx) => closeDecision(tx, alert.id, { status: "superseded", by: "core" }));
   }, 500);
   closing.unref();
+}
+
+if (lanes) {
+  // Sin una cuenta de GitHub conectada, `prs.list` no conoce el remoto del repo y los PRs sembrados no salen.
+  await client.connections.setPat({ token: "github_pat_demo" });
+  await seedLanes({ client, store, repoId });
 }
 
 writeCoreJson(home, {
