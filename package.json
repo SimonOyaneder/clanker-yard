@@ -11,11 +11,13 @@
   },
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint .",
-    "test": "vitest run"
+    "lint": "eslint . && npm run depcheck",
+    "test": "vitest run",
+    "depcheck": "depcruise apps packages --config .dependency-cruiser.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "dependency-cruiser": "^18.7.2",
     "eslint": "^10.15.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.2",

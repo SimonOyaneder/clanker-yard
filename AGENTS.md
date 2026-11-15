@@ -19,7 +19,7 @@ Ids más usados: `devx` (dev setup), `d-data` (schema, API, monorepo), `stack`, 
 nvm use                # Node 24, fijado en .nvmrc
 npm ci
 npm run typecheck      # tsc --noEmit en cada workspace
-npm run lint           # eslint desde la raíz
+npm run lint           # eslint desde la raíz, más `npm run depcheck`
 npm test               # vitest desde la raíz (un proyecto por app y paquete)
 ```
 
@@ -42,7 +42,8 @@ packages/testkit  runtime fake, fixtures, repos git temporales
 
 - `api` no depende de nadie del repo. `core` → `api`. `ui` → `api`. `desktop` → `ui`, `api`. `cli` → `api`. `testkit` → `core`, `api`, solo como `devDependency`.
 - Prohibido: `ui` → `core`, `desktop` → `core` (el core se empaqueta y se lanza, no se importa), `core` → `electron`.
-- Cada paquete exporta solo su `src/index.ts`. Nada de imports a archivos internos de otro paquete.
+- Cada paquete exporta solo su `src/index.ts` (más `@clanker/api/node`, que la UI no puede usar). Nada de imports a archivos internos de otro paquete.
+- `npm run depcheck` lo hace cumplir con dependency-cruiser (`.dependency-cruiser.mjs`) y corre dentro de `npm run lint`, así que la CI lo ejecuta en cada PR. Si agregas un paquete o cambias una dependencia permitida, edita esa config y el test `scripts/depcheck.test.ts`. Que `testkit` use `core` y `api` solo como `devDependency` lo verifica ese test, no dependency-cruiser.
 
 ## Base de datos
 
