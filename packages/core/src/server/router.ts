@@ -1,11 +1,14 @@
 import { API_MAJOR, type ClientOrigin, contract, type ProjectId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubPatError, githubPatForm } from "../github/pat";
+import { PrNotFoundError } from "../github/pr-query";
+import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
 import type { Connections } from "../connections/connections";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Engine } from "../flows/engine";
 import { RunNotFoundError, RunStartError } from "../flows/engine";
+import type { Packs } from "../packs/packs";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
@@ -22,6 +25,7 @@ export interface RouterDeps {
   connections: Connections;
   issues: Issues;
   projects: Projects;
+  packs: Packs;
   flows: Engine;
   artifacts: Artifacts;
   coreVersion: string;
@@ -39,6 +43,7 @@ export function createRouter(deps: RouterDeps) {
   const { store } = deps;
   const schemaVersion = readSchemaVersion(store.db.$client);
   const { artifacts, flows, projects } = deps;
+  const prs = createPrs({ connections: deps.connections, packs: deps.packs });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
     if (!project) throw new ORPCError("NOT_FOUND", { message: `No existe el proyecto ${id}.` });
@@ -143,6 +148,21 @@ export function createRouter(deps: RouterDeps) {
       update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
         asApiError(() => projects.update(id, patch, context.origin)),
       ),
+    },
+    prs: {
+      get: os.prs.get.handler(async ({ input }) => {
+        if (!deps.connections.list().some((c) => c.provider === "github" && c.account === input.account)) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `No hay una cuenta github conectada como "${input.account}": conéctala primero.`,
+          });
+        }
+        try {
+          return await prs.get(input);
+        } catch (error) {
+          if (error instanceof PrNotFoundError) throw new ORPCError("NOT_FOUND", { message: error.message, cause: error });
+          throw error;
+        }
+      }),
     },
     runs: {
       list: os.runs.list.handler(({ input }) => flows.listRuns(input)),

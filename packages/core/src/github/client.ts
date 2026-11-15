@@ -57,7 +57,7 @@ export function createGitHubClient({ tokens, quota, baseUrl, fetch }: GitHubClie
   });
 
   if (quota) {
-    octokit.hook.after("request", (response) => recordQuota(quota, response.status, response.headers));
+    octokit.hook.after("request", (response) => recordQuota(quota, response.status, response.headers, response.data));
     octokit.hook.error("request", (error) => {
       if (error instanceof RequestError && error.response) {
         recordQuota(quota, error.status, error.response.headers);
@@ -70,10 +70,15 @@ export function createGitHubClient({ tokens, quota, baseUrl, fetch }: GitHubClie
 
 type Headers = Record<string, string | number | undefined>;
 
-function recordQuota({ store, account }: { store: Store; account: string }, status: number, headers: Headers) {
+function recordQuota(
+  { store, account }: { store: Store; account: string },
+  status: number,
+  headers: Headers,
+  body?: unknown,
+) {
   const remaining = numberHeader(headers["x-ratelimit-remaining"]);
   const reset = numberHeader(headers["x-ratelimit-reset"]);
-  const limitedUntil = rateLimitReset(status, headers);
+  const limitedUntil = rateLimitReset(status, headers, body);
   if (remaining === undefined && limitedUntil === undefined) return;
   store.tx((tx) => {
     if (remaining !== undefined && reset !== undefined) {
@@ -98,15 +103,22 @@ function recordQuota({ store, account }: { store: Store; account: string }, stat
 /**
  * Cuándo se puede volver a pedir (ms epoch) si la respuesta es un corte por cuota, o `undefined`.
  * Un 403/429 con la cuota primaria en 0 espera al reset; uno con `retry-after` es la cuota
- * secundaria y espera esos segundos (docs: "Rate limits for the REST API").
+ * secundaria y espera esos segundos (docs: "Rate limits for the REST API"). GraphQL responde igual pero
+ * también con un 200 y `errors` en el body (docs: "Rate limits and query limits for the GraphQL API"):
+ * un 200 con `errors` solo es un corte si trae `retry-after` o la cuota primaria en 0.
  */
-function rateLimitReset(status: number, headers: Headers = {}): number | undefined {
-  if (status !== 403 && status !== 429) return undefined;
+function rateLimitReset(status: number, headers: Headers = {}, body?: unknown): number | undefined {
+  if (status !== 403 && status !== 429 && !(status === 200 && hasGraphqlErrors(body))) return undefined;
   const retryAfter = numberHeader(headers["retry-after"]);
   if (retryAfter !== undefined) return Date.now() + retryAfter * 1000;
   const reset = numberHeader(headers["x-ratelimit-reset"]);
   if (numberHeader(headers["x-ratelimit-remaining"]) === 0 && reset !== undefined) return reset * 1000;
   return undefined;
+}
+
+function hasGraphqlErrors(body: unknown): boolean {
+  const errors = (body as { errors?: unknown } | null | undefined)?.errors;
+  return Array.isArray(errors) && errors.length > 0;
 }
 
 function numberHeader(value: string | number | undefined): number | undefined {

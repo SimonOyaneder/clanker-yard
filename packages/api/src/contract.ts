@@ -12,6 +12,7 @@ import {
   RunId,
 } from "./domain";
 import { ClankerProject, NewProject, ProjectPatch } from "./projects";
+import { PrRef, PrState } from "./prs";
 import { Run, RunDetail, RunFilter, StartRun } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
 
@@ -172,6 +173,15 @@ const projects = {
   update: base.input(ProjectPatch.extend({ id: ProjectId })).output(ClankerProject),
 };
 
+const prs = {
+  /**
+   * Lee el PR de GitHub (una query GraphQL de detalle) y lo entrega normalizado con las reglas del pack
+   * de la org del repo. `NOT_FOUND` si el repo o el PR no existen o la cuenta no los ve; `BAD_REQUEST`
+   * si la cuenta no está conectada.
+   */
+  get: base.input(PrRef).output(PrState),
+};
+
 const runs = {
   /** De la más reciente a la más antigua. Sin pasos: están en `get`. */
   list: base.input(RunFilter.default({})).output(z.array(Run)),
@@ -186,5 +196,5 @@ const runs = {
   start: base.input(StartRun).output(RunDetail),
 };
 
-export const contract = { system, events, connections, artifacts, issues, projects, runs };
+export const contract = { system, events, connections, artifacts, issues, projects, prs, runs };
 export type Contract = typeof contract;

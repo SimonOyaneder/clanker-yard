@@ -79,6 +79,11 @@ export type {
 } from "./connections/connections";
 export { LinearAuthError } from "./linear/oauth";
 export { GitHubPatError } from "./github/pat";
+export { PrNotFoundError } from "./github/pr-query";
+export { buildPrState } from "./github/pr-state";
+export type { PrStateContext } from "./github/pr-state";
+export { createPrs } from "./github/prs";
+export type { Prs } from "./github/prs";
 export type {
   GitHubApiOptions,
   GitHubClient,

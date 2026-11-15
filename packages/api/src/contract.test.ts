@@ -3,13 +3,14 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 import { type Contract, type Event, contract } from "./index";
 
 describe("contrato", () => {
-  test("exporta los routers system, events, connections, artifacts, issues, projects y runs con sus procedimientos", () => {
+  test("exporta los routers system, events, connections, artifacts, issues, projects, prs y runs con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual([
       "artifacts",
       "connections",
       "events",
       "issues",
       "projects",
+      "prs",
       "runs",
       "system",
     ]);
@@ -19,6 +20,7 @@ describe("contrato", () => {
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);
     expect(Object.keys(contract.issues).sort()).toEqual(["createLocal", "get", "list"]);
     expect(Object.keys(contract.projects).sort()).toEqual(["create", "get", "list", "update"]);
+    expect(Object.keys(contract.prs)).toEqual(["get"]);
     expect(Object.keys(contract.runs).sort()).toEqual(["get", "list", "start"]);
     for (const procedure of [
       ...Object.values(contract.system),
@@ -26,6 +28,7 @@ describe("contrato", () => {
       ...Object.values(contract.artifacts),
       ...Object.values(contract.issues),
       ...Object.values(contract.projects),
+      ...Object.values(contract.prs),
       ...Object.values(contract.runs),
     ]) {
       expect(isContractProcedure(procedure)).toBe(true);

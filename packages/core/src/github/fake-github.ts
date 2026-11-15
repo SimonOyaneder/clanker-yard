@@ -18,6 +18,8 @@ export interface FakeRequest {
   /** Ruta sin query: `/repos/octocat/secret-project/issues`. */
   path: string;
   authorization: string | undefined;
+  /** El body JSON de un POST (GraphQL: `{ query, variables }`); `undefined` si no hay. */
+  body: unknown;
 }
 
 export interface FakeGitHub {
@@ -27,16 +29,24 @@ export interface FakeGitHub {
   close(): Promise<void>;
 }
 
+async function readBody(req: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 /** Un GitHub falso en 127.0.0.1: `respond` decide por request; sin respuesta contesta 404. */
 export async function startFakeGitHub(
   respond: (request: FakeRequest) => RecordedResponse | undefined,
 ): Promise<FakeGitHub> {
   const requests: FakeRequest[] = [];
-  const server = createServer((req: IncomingMessage, res) => {
+  const server = createServer(async (req: IncomingMessage, res) => {
+    const text = await readBody(req);
     const request: FakeRequest = {
       method: req.method ?? "GET",
       path: new URL(req.url ?? "/", "http://fake").pathname,
       authorization: req.headers.authorization,
+      body: text === "" ? undefined : JSON.parse(text),
     };
     requests.push(request);
     const response = respond(request) ?? {

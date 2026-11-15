@@ -8,6 +8,7 @@ import { installBuiltins } from "./builtin/install";
 import { createConnections } from "./connections/connections";
 import { createDefs, type Defs } from "./defs/defs";
 import { createFlows } from "./flows/flows";
+import { createPacks } from "./packs/packs";
 import { createProjects } from "./projects/projects";
 import type { Secrets } from "./secrets/secrets";
 import { startServer, type CoreServer, type StartServerOptions } from "./server/server";
@@ -71,6 +72,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     connections: createConnections(store, opts.secrets),
     issues: createIssues(store),
     projects: createProjects(store, defs),
+    packs: createPacks({ defs }),
     flows,
     artifacts,
     bootId,

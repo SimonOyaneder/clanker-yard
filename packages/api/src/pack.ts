@@ -22,7 +22,7 @@ const Pattern = z.string().min(1).superRefine((source, ctx) => {
 /** Quién cuenta como humano: lo que `ignore` captura es un bot o una cuenta del sistema. */
 const Actors = z.strictObject({
   ignore: Pattern.optional(),
-  /** Cuerpo de review que no cuenta como comentario (un "LGTM" solo). */
+  /** Cuerpo de review que no cuenta como comentario (un "LGTM" solo). Se evalúa sin distinguir mayúsculas. */
   silentReviewBody: Pattern.optional(),
 });
 

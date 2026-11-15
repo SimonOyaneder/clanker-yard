@@ -9,7 +9,7 @@ import { createRouter, type CoreContext, type CoreRouter, type RouterDeps } from
 
 export interface StartServerOptions extends Pick<
   RouterDeps,
-  "store" | "connections" | "issues" | "projects" | "flows" | "artifacts" | "coreVersion" | "dataDir" | "onShutdown"
+  "store" | "connections" | "issues" | "projects" | "packs" | "flows" | "artifacts" | "coreVersion" | "dataDir" | "onShutdown"
 > {
   /** Identifica a este arranque; por defecto uno nuevo. Quien arma los módulos que lo necesitan (Flows) lo fija antes. */
   bootId?: string;
