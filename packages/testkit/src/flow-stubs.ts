@@ -1,9 +1,10 @@
 import type { Flows } from "@clanker/core";
 import { z } from "zod";
 
-// Las acciones y waits que usan las plantillas de flujo (`techlead-clasico`, `pr-feedback`), con los
-// outcomes del diseño (`docs/design.html#d-flows`) y sin su implementación: sirven para validar un flujo y
-// recorrerlo con el runtime fake sin depender de Workspaces ni de CodeHost.
+// Las acciones y waits que usan las plantillas de flujo (`techlead-clasico`, `pr-feedback`) y todavía no
+// tienen implementación, con los outcomes del diseño (`docs/design.html#d-flows`): sirven para validar un
+// flujo y recorrerlo con el runtime fake sin depender de Workspaces ni de CodeHost. Las que ya existen
+// (`pr.reply`, `review.requestBot`) las registra el test con su acción real.
 
 type StubSpec = {
   outcomes: string[];
@@ -33,14 +34,12 @@ const SPECS: Record<string, StubSpec> = {
     outputs: { ok: { specsChanged: true }, fail: { failures: "1 test rojo" } },
   },
   "pr.publish": { kind: "action", outcomes: ["ok", "replan"], effects: "remote", outputs: { ok: { pr: prRef } } },
-  "review.requestBot": { kind: "action", outcomes: ["ok", "none"], effects: "remote", outputs: { ok: { requestedAt: 1 } } },
   "pr.pushFixups": {
     kind: "action",
     outcomes: ["ok", "route"],
     effects: "remote",
     outputs: { ok: { byItem: { b1: "abc1234" } }, route: { unrouted: [] } },
   },
-  "pr.reply": { kind: "action", outcomes: ["ok"], effects: "remote", outputs: {} },
   "pr.botReview": {
     kind: "wait",
     outcomes: ["lgtm", "findings"],
@@ -69,10 +68,12 @@ export interface FlowStubsOptions {
   script?: Record<string, StubResult[]>;
   /** Stubs que el test no registra porque registra la acción real. */
   skip?: string[];
+  /** Pisa el output que un stub da por defecto con cada outcome, por nombre de acción o wait. */
+  outputs?: Record<string, Record<string, unknown>>;
 }
 
-export function registerFlowStubs(flows: Flows, { script = {}, skip = [] }: FlowStubsOptions = {}): FlowStubs {
-  for (const name of [...Object.keys(script), ...skip]) {
+export function registerFlowStubs(flows: Flows, { script = {}, skip = [], outputs = {} }: FlowStubsOptions = {}): FlowStubs {
+  for (const name of [...Object.keys(script), ...skip, ...Object.keys(outputs)]) {
     if (!Object.hasOwn(SPECS, name)) throw new Error(`"${name}" no es una acción ni un wait de las plantillas (${Object.keys(SPECS).join(", ")}).`);
   }
   const calls: Record<string, unknown[]> = {};
@@ -83,7 +84,7 @@ export function registerFlowStubs(flows: Flows, { script = {}, skip = [] }: Flow
     const given = queues.get(name)?.shift();
     const outcome = typeof given === "string" ? given : (given?.outcome ?? spec.outcomes[0] ?? "ok");
     if (!spec.outcomes.includes(outcome)) throw new Error(`"${outcome}" no es un outcome de ${name} (${spec.outcomes.join(", ")}).`);
-    const output = typeof given === "object" && "output" in given ? given.output : spec.outputs[outcome];
+    const output = typeof given === "object" && "output" in given ? given.output : (outputs[name]?.[outcome] ?? spec.outputs[outcome]);
     return { outcome, output };
   }
 

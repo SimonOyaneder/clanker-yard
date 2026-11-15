@@ -18,11 +18,7 @@ const DEFAULT_OK_STATES = ["SUCCESS", "SKIPPED", "NEUTRAL"];
  * pack no hay bot, ni señales, ni reglas de CI propias.
  */
 export function buildPrState(node: PrNode, { pack, viewer }: PrStateContext): PrState {
-  const botLogins = new Set(pack.reviewBot?.logins);
-  const ignore = pack.actors.ignore === undefined ? undefined : new RegExp(pack.actors.ignore);
-  // Un humano no es un bot de GitHub, ni una cuenta que el pack ignora, ni el bot de review del pack.
-  const isHuman = (actor: Actor | null): actor is Actor =>
-    !!actor && actor.__typename !== "Bot" && !botLogins.has(actor.login) && !ignore?.test(actor.login);
+  const isHuman = humanTest(pack);
 
   return {
     key: `${node.repo.name}#${node.number}`,
@@ -51,6 +47,13 @@ function mergeableOf(node: PrNode): PrState["mergeable"] {
 }
 
 type IsHuman = (actor: Actor | null) => actor is Actor;
+
+/** Un humano no es un bot de GitHub, ni una cuenta que el pack ignora, ni el bot de review del pack. */
+export function humanTest(pack: ResolvedPack): IsHuman {
+  const botLogins = new Set(pack.reviewBot?.logins);
+  const ignore = pack.actors.ignore === undefined ? undefined : new RegExp(pack.actors.ignore);
+  return (actor): actor is Actor => !!actor && actor.__typename !== "Bot" && !botLogins.has(actor.login) && !ignore?.test(actor.login);
+}
 
 const byTime = (time: string | null | undefined) => time ?? "";
 

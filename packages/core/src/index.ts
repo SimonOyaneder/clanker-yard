@@ -167,5 +167,7 @@ export { prPublishAction } from "./github/publish";
 export type { PrPublishDeps } from "./github/publish";
 export { prPushFixupsAction } from "./github/push-fixups";
 export type { PrPushFixupsDeps } from "./github/push-fixups";
+export { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
+export type { PrFeedbackDeps } from "./github/pr-feedback";
 export { preparePush } from "./commits/prepare-push";
 export type { PreparePushOptions, PreparePushResult } from "./commits/prepare-push";

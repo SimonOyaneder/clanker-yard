@@ -54,6 +54,7 @@ export function comment(by: Actor | null, body: string, at = "2026-11-10T10:00:0
 export function thread(by: Actor | null, body: string, opts: { resolved?: boolean; replies?: [Actor, string][] } = {}): RawThread {
   const comments = [[by, body] as const, ...(opts.replies ?? [])];
   return {
+    id: `PRRT_kwDOfixture${nextId++}`,
     isResolved: opts.resolved ?? false,
     comments: { nodes: comments.map(([author, text]) => ({ fullDatabaseId: String(nextId++), body: text, author })) },
   };
