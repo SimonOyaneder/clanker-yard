@@ -1,0 +1,14 @@
+#!/bin/sh
+# La CLI `clanker` de la app instalada: corre apps/cli con el Node del propio Electron
+# (ELECTRON_RUN_AS_NODE), igual que el core, así que no depende de un `node` en el PATH.
+# Se usa por symlink (~/.local/bin/clanker), por eso resuelve su propia ubicación real.
+self="$0"
+while [ -L "$self" ]; do
+  dir=$(cd "$(dirname "$self")" && pwd)
+  self=$(readlink "$self")
+  case "$self" in /*) ;; *) self="$dir/$self" ;; esac
+done
+resources=$(cd "$(dirname "$self")/.." && pwd)
+export CLANKER_CORE_ENTRY="${CLANKER_CORE_ENTRY:-$resources/core/dist/main.js}"
+export ELECTRON_RUN_AS_NODE=1
+exec "$resources/../MacOS/Clanker Yard" "$resources/cli/clanker.js" "$@"

@@ -6,6 +6,7 @@ export interface MenuHandlers {
   theme: Theme;
   setTheme(theme: Theme): void;
   openLogs(): void;
+  installCli(): void;
   quitAndStopAgents(): void;
   devTools: boolean;
 }
@@ -26,6 +27,7 @@ export function buildMenu(h: MenuHandlers): void {
         { label: "Nuevo proyecto…", accelerator: "CmdOrCtrl+N", click: () => h.send("new-project") },
         { type: "separator" },
         { label: "Ver logs del core", click: h.openLogs },
+        { label: "Instalar comando clanker…", click: h.installCli },
         // Cerrar la ventana o salir con ⌘Q deja el core y sus flujos corriendo; esto los apaga.
         { label: "Salir y detener agentes", accelerator: "Alt+CmdOrCtrl+Q", click: h.quitAndStopAgents },
         { type: "separator" },

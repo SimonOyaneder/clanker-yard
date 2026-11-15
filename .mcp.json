@@ -9,8 +9,8 @@
       "args": ["chrome-devtools-mcp@latest"]
     },
     "clanker": {
-      "command": "npx",
-      "args": ["--no-install", "tsx", "apps/cli/src/main.ts", "mcp"]
+      "command": "sh",
+      "args": ["-c", "if command -v clanker >/dev/null; then exec clanker mcp; else exec npx --no-install tsx apps/cli/src/main.ts mcp; fi"]
     }
   }
 }

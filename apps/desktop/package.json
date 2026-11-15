@@ -8,7 +8,8 @@
     "dev": "npm run build -w @clanker/core && electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
-    "e2e": "npm run build -w @clanker/core && electron-vite build && playwright test"
+    "e2e": "npm run build -w @clanker/core && electron-vite build && playwright test",
+    "build:mac": "npm run build -w @clanker/core && npm run build -w @clanker/cli && electron-vite build && electron-builder --mac -c.electronVersion=$(node -p \"require('electron/package.json').version\")"
   },
   "dependencies": { "@clanker/api": "*", "@clanker/ui": "*" },
   "devDependencies": {
@@ -18,6 +19,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "electron": "^45.3.1",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

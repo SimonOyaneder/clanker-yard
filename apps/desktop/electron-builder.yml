@@ -1,0 +1,31 @@
+appId: io.github.simonoyaneder.clanker-yard
+productName: Clanker Yard
+copyright: Copyright © 2026 Simón Oyaneder
+directories:
+  output: dist
+# Todo el código de la app (incluidos @clanker/api y @clanker/ui) ya queda bundleado en `out`: sin node_modules.
+files:
+  - package.json
+  - out
+  - "!node_modules"
+# El core, sus migraciones y la CLI van fuera del asar: el core lo ejecuta el binario de Electron con
+# ELECTRON_RUN_AS_NODE (`ensureCore`) y lee las migraciones de `../migrations` de su bundle.
+# `npm run build:mac` deja los bundles construidos antes de empaquetar.
+extraResources:
+  - from: ../../packages/core/dist/main.js
+    to: core/dist/main.js
+  - from: ../../packages/core/migrations
+    to: core/migrations
+  - from: ../cli/dist/clanker.js
+    to: cli/clanker.js
+  - from: resources/clanker
+    to: bin/clanker
+npmRebuild: false
+publish: null
+mac:
+  category: public.app-category.developer-tools
+  identity: null
+  target:
+    - target: dir
+      arch:
+        - arm64

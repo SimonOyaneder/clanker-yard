@@ -14,7 +14,9 @@
     "lint": "eslint . && npm run depcheck && npm run -s db:check -w @clanker/core",
     "test": "vitest run",
     "depcheck": "depcruise apps packages --config .dependency-cruiser.mjs",
-    "e2e": "npm run e2e -w @clanker/desktop"
+    "e2e": "npm run e2e -w @clanker/desktop",
+    "build:mac": "npm run build:mac -w @clanker/desktop",
+    "install:mac": "npm run build:mac && apps/desktop/scripts/install-app.sh"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
