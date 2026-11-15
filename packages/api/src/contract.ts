@@ -551,7 +551,7 @@ const learnings = {
   /**
    * Un `proposed`, `rejected` o `archived` pasa a `approved`: desde la próxima corrida entra a los briefs de
    * su alcance y sus roles. Emite `learning.approved`. Uno ya aprobado se devuelve igual, sin evento.
-   * `NOT_FOUND` si no existe.
+   * Solo lo pide una persona desde la app (`origin: "ui"`): `FORBIDDEN` para CLI y MCP. `NOT_FOUND` si no existe.
    */
   approve: base.input(z.object({ id: LearningId })).output(Learning),
   /**
@@ -560,7 +560,11 @@ const learnings = {
    * `NOT_FOUND` si no existe.
    */
   reject: base.input(z.object({ id: LearningId })).output(Learning),
-  /** Cambia texto, roles o tags, en cualquier estado; los campos que faltan quedan como estaban. `NOT_FOUND` si no existe; `BAD_REQUEST` si el texto nuevo ya existe en su alcance. */
+  /**
+   * Cambia texto, roles o tags, en cualquier estado; los campos que faltan quedan como estaban. Uno `approved` solo
+   * se edita desde la app (`FORBIDDEN` para CLI y MCP). `NOT_FOUND` si no existe; `BAD_REQUEST` si el texto nuevo
+   * ya existe en su alcance.
+   */
   update: base.input(LearningPatch).output(Learning),
 };
 

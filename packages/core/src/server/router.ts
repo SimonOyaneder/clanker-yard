@@ -360,9 +360,18 @@ export function createRouter(deps: RouterDeps) {
         return learning;
       }),
       propose: os.learnings.propose.handler(({ input, context }) => deps.learnings.propose(input, context.origin)),
-      approve: os.learnings.approve.handler(({ input, context }) => asApiError(() => deps.learnings.approve(input.id, context.origin))),
+      // Lo aprobado entra a los briefs de las corridas que siguen: un agente que lo aprobara por el CLI se dejaría instrucciones a sí mismo.
+      approve: os.learnings.approve.handler(({ input, context }) => {
+        if (context.origin !== "ui") throw new ORPCError("FORBIDDEN", { message: "Un learning lo aprueba una persona desde la app." });
+        return asApiError(() => deps.learnings.approve(input.id, context.origin));
+      }),
       reject: os.learnings.reject.handler(({ input, context }) => asApiError(() => deps.learnings.reject(input.id, context.origin))),
-      update: os.learnings.update.handler(({ input }) => asApiError(() => deps.learnings.update(input))),
+      update: os.learnings.update.handler(({ input, context }) => {
+        if (context.origin !== "ui" && deps.learnings.get(input.id)?.status === "approved") {
+          throw new ORPCError("FORBIDDEN", { message: "Un learning aprobado solo se edita desde la app: el texto nuevo entra a los briefs sin otra aprobación." });
+        }
+        return asApiError(() => deps.learnings.update(input));
+      }),
     },
     defs: {
       list: os.defs.list.handler(({ input }) => deps.defs.list(input.kind, { includeArchived: input.includeArchived })),
