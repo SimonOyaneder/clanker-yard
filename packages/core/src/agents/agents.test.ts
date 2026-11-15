@@ -400,7 +400,7 @@ describe("agent.activity", () => {
 
     await agents.run(request());
 
-    const activity = store.events.since(0, { type: "agent.activity" });
+    const activity = store.events.since(0, { types: ["agent.activity"] });
     expect(activity.map((e) => e.payload)).toEqual([
       expect.objectContaining({ tool: "Read", detail: "d-Read" }),
       expect.objectContaining({ tool: "Bash", detail: "d-Bash" }),

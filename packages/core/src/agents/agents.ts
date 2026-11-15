@@ -2,10 +2,12 @@ import {
   Brief,
   compileJsonSchema,
   Profile,
+  type ProjectId,
   Report,
   Role,
   type JsonSchema,
   type RoleMode,
+  type StepRunId,
 } from "@clanker/api";
 import { and, eq } from "drizzle-orm";
 import * as z from "zod";
@@ -24,8 +26,8 @@ interface Placement {
   profile: string;
   /** Para resolver defs con scope `repo`. */
   repoId?: string;
-  stepRunId?: string;
-  projectId?: string;
+  stepRunId?: StepRunId;
+  projectId?: ProjectId;
 }
 
 export interface RunRequest extends Placement {
@@ -91,7 +93,7 @@ export function createAgents({ store, defs, runtime, now = Date.now }: AgentsOpt
     mode: RoleMode;
     budget: Pick<ResumeSpec, "maxBudgetUsd" | "maxTurns">;
     placement: Placement;
-    runId: string;
+    runId: Brief["run"]["id"];
   }
 
   function resolveProfileRole(placement: Placement, roleSlug: string) {
@@ -401,7 +403,7 @@ const ZERO_USAGE: Usage = {
   costSource: "runtime",
 };
 
-function scope(c: { placement: Placement; runId: string }) {
+function scope(c: { placement: Placement; runId: Brief["run"]["id"] }) {
   return { projectId: c.placement.projectId, runId: c.runId, stepRunId: c.placement.stepRunId };
 }
 
