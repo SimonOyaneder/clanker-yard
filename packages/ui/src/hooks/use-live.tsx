@@ -24,6 +24,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }, COALESCE_MS)
   })
   useEffect(() => () => clearTimeout(timer.current), [])
+  // Al conectar (y al volver tras una caída) todo se relee: lo que se pidió con el core caído o
+  // levantándose quedó en error, y si no llegan eventos nuevos nada más lo vuelve a pedir.
+  useEffect(() => {
+    if (connected) setRevision((r) => r + 1)
+  }, [connected])
   const refresh = useCallback(() => setRevision((r) => r + 1), [])
   return <LiveContext.Provider value={{ revision, connected, refresh }}>{children}</LiveContext.Provider>
 }
