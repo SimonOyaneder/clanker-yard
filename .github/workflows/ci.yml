@@ -25,3 +25,32 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+
+  # E2E de la app de escritorio con Playwright `_electron` bajo xvfb. Va en su propio job para no alargar
+  # `check`; deja los screenshots claro y oscuro como artefacto.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # `npm ci` no corre el install script de Electron: baja el binario a mano y lo cachea entre corridas.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: node node_modules/electron/install.js
+      - run: xvfb-run --auto-servernum --server-args="-screen 0 1600x1000x24" npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screens
+          path: |
+            apps/desktop/out/screens
+            apps/desktop/out/e2e-results
+          if-no-files-found: ignore
+          retention-days: 14

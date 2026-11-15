@@ -13,7 +13,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint . && npm run depcheck",
     "test": "vitest run",
-    "depcheck": "depcruise apps packages --config .dependency-cruiser.mjs"
+    "depcheck": "depcruise apps packages --config .dependency-cruiser.mjs",
+    "e2e": "npm run e2e -w @clanker/desktop"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
