@@ -25,6 +25,8 @@ npm test               # vitest desde la raíz (un proyecto por app y paquete)
 
 Los tres deben pasar antes de dar algo por listo; la CI corre los mismos en cada PR y en `main`. Un test de un paquete va junto a su código como `src/**/*.test.ts`.
 
+UI sola: `npm run dev -w packages/ui` abre la UI en el navegador (puerto 8890) con datos de ejemplo en memoria.
+
 Capturas de UI: todavía no hay captura automática. Cuando exista el E2E con Playwright `_electron` se documenta aquí; mientras tanto usa `chrome-devtools-mcp`.
 
 ## Paquetes y dependencias permitidas
