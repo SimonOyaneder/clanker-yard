@@ -378,17 +378,34 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       );
     }
 
-    // `--no-track`: el tracking escribiría `branch.<b>.*` en .git/config, que los worktrees comparten.
-    const add = ["worktree", "add", "--lock", "--reason", WORKTREE_LOCK_REASON, "--no-track"];
-    if (localExists) await git(cfg.path, [...add, row.path, row.branch]);
-    else {
+    const add = ["worktree", "add", "--lock", "--reason", WORKTREE_LOCK_REASON];
+    if (localExists) {
+      await forgetDeletedWorktree(cfg, row.branch);
+      await git(cfg.path, [...add, row.path, row.branch]);
+    } else {
       const start = remoteExists ? `refs/remotes/${REMOTE}/${row.branch}` : baseSha;
-      await git(cfg.path, [...add, "-b", row.branch, row.path, start]);
+      // `--no-track` (solo vale con `-b`): el tracking escribiría `branch.<b>.*` en .git/config, que los worktrees comparten.
+      await git(cfg.path, [...add, "--no-track", "-b", row.branch, row.path, start]);
     }
     return {
       baseSha,
       ...(remoteExists && { remoteSha: await git(cfg.path, ["rev-parse", `refs/remotes/${REMOTE}/${row.branch}`]) }),
     };
+  }
+
+  /**
+   * Si borraron a mano la carpeta del worktree de `branch`, git lo sigue teniendo registrado y
+   * bloqueado, y `worktree add` de esa branch fallaría para siempre: se olvida ese registro.
+   */
+  async function forgetDeletedWorktree(cfg: RepoConfig, branch: string): Promise<void> {
+    const list = await git(cfg.path, ["worktree", "list", "--porcelain", "-z"]);
+    for (const entry of list.split("\0\0")) {
+      const fields = entry.split("\0");
+      const path = fields.find((f) => f.startsWith("worktree "))?.slice("worktree ".length);
+      if (path !== undefined && fields.includes(`branch refs/heads/${branch}`) && !existsSync(path)) {
+        await git(cfg.path, ["worktree", "remove", "--force", "--force", path]);
+      }
+    }
   }
 
   /**

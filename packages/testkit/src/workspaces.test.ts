@@ -196,6 +196,21 @@ describe("acquire", () => {
     ]);
   });
 
+  test("si borraron la carpeta del worktree, el siguiente acquire la recrea con la branch como estaba", async () => {
+    const id = repo("r1");
+    const first = await acquire(id, "cla-1", runA);
+    await workspaces.git(first, "commit", "--allow-empty", "--message", "wip");
+    const head = await workspaces.git(first, "rev-parse", "HEAD");
+    workspaces.release(first);
+    rmSync(first.path, { recursive: true, force: true });
+
+    const second = await acquire(id, "cla-1", runB);
+
+    expect(second.path).toBe(first.path);
+    expect(await workspaces.git(second, "rev-parse", "HEAD")).toBe(head);
+    expect(repoById.get(id)!.git("worktree", "list", "--porcelain")).toContain("locked clanker-yard");
+  });
+
   test("un lease vencido se puede tomar y deja un evento lease.expired del anterior", async () => {
     const id = repo("r1");
     const stale = await acquire(id, "cla-1", runA);
