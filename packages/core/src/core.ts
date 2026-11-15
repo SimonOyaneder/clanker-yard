@@ -95,7 +95,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     projects,
     packs: createPacks({ defs }),
     repos,
-    recipeTester: createRecipeTester({ store, repos, dataDir }),
+    recipeTester: createRecipeTester({ store, repos, dataDir, procs }),
     runs: createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local, linear: createLinearTracker({ connections: opts.connections }) } }),
     flows,
     artifacts,

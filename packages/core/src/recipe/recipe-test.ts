@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { renderTemplate, type Origin, type Recipe, type RecipeTestPhase, type RecipeTestResult, type RecipeTestStep, type RepoId, type TemplateVars } from "@clanker/api";
 import { git as runGit } from "../git/git";
+import type { Procs } from "../procs/procs";
 import type { Store } from "../store/store";
 import { excerpt, execStreaming } from "../workspaces/exec";
 import { RepoNotFoundError, type Repos } from "../workspaces/repos";
@@ -33,9 +34,11 @@ export interface RecipeTesterOptions {
   repos: Repos;
   /** Los worktrees desechables viven en `<dataDir>/recipe-tests`. */
   dataDir: string;
+  /** Donde se registran los comandos de la receta, para matar los que deje un crash. */
+  procs?: Procs;
 }
 
-export function createRecipeTester({ store, repos, dataDir }: RecipeTesterOptions): RecipeTester {
+export function createRecipeTester({ store, repos, dataDir, procs }: RecipeTesterOptions): RecipeTester {
   const running = new Set<RepoId>();
 
   return {
@@ -59,7 +62,7 @@ export function createRecipeTester({ store, repos, dataDir }: RecipeTesterOption
         await git(repo.path, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", worktree, "HEAD");
         worktreeAdded = true;
         emit("recipe.test_started", {});
-        const result = await runRecipe(recipe, worktree, (phase, text) => emit("recipe.test_output", { phase, text }));
+        const result = await runRecipe(recipe, worktree, (phase, text) => emit("recipe.test_output", { phase, text }), procs);
         emit("recipe.test_finished", { ok: result.ok });
         return result;
       } finally {
@@ -75,6 +78,7 @@ async function runRecipe(
   recipe: Recipe,
   worktree: string,
   onOutput: (phase: RecipeTestPhase, text: string) => void,
+  procs: Procs | undefined,
 ): Promise<RecipeTestResult> {
   const vars: TemplateVars = { slot: 1, worktree, branch: "recipe-test", files: [], envKeys: Object.keys(recipe.env) };
   const env = Object.fromEntries(Object.entries(recipe.env).map(([key, value]) => [key, renderTemplate(value, vars, { shell: false })]));
@@ -84,7 +88,14 @@ async function runRecipe(
 
   async function run(phase: RecipeTestPhase, name: string, command: string, expect?: string): Promise<boolean> {
     const pump = createOutputPump((text) => onOutput(phase, text));
-    const { exitCode, output } = await execStreaming({ cwd: worktree, command, env, onOutput: pump.push, signal });
+    const { exitCode, output } = await execStreaming({
+      cwd: worktree,
+      command,
+      env,
+      onOutput: pump.push,
+      signal,
+      onSpawn: procs && ((child) => procs.track(child, { kind: "recipe" })),
+    });
     pump.finish();
     const timedOut = signal.aborted;
     const mismatch = exitCode === 0 && expect !== undefined && output.trim() !== expect;

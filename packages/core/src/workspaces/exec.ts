@@ -59,6 +59,8 @@ export interface StreamRequest {
   /** Cada trozo de stdout o stderr, apenas sale. No debe lanzar: corre dentro de un callback del stream. */
   onOutput(text: string): void;
   signal: AbortSignal;
+  /** Se llama con el proceso recién lanzado, para registrarlo en `procs`. */
+  onSpawn?: (child: ChildProcess) => void;
 }
 
 /** Cuánto de la salida se conserva en memoria (la cola): lo que sigue se pasó por `onOutput`. */
@@ -69,11 +71,12 @@ const STREAM_KEEP_CHARS = 64 * 1024;
  * `output` (stdout y stderr entrelazados, solo la cola). Un `signal` abortado mata el grupo de procesos
  * del comando; el resultado es su exit, sin lanzar.
  */
-export async function execStreaming({ cwd, command, env, onOutput, signal }: StreamRequest): Promise<{ exitCode: number; output: string }> {
+export async function execStreaming({ cwd, command, env, onOutput, signal, onSpawn }: StreamRequest): Promise<{ exitCode: number; output: string }> {
   signal.throwIfAborted();
   let output = "";
   const { code } = await new Promise<{ code: number | null }>((resolve, reject) => {
     const child = spawn("sh", ["-c", command], { cwd, env: { ...inheritedEnv(), ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    onSpawn?.(child);
     const abort = () => {
       try {
         process.kill(-child.pid!, "SIGKILL");

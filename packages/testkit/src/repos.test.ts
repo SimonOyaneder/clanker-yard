@@ -181,6 +181,18 @@ describe("repos.testRecipe", () => {
     expect(readFileSync(seen, "utf8")).not.toContain("secreto");
   });
 
+  test("cada comando queda en procs mientras corre, para que un arranque tras un crash lo mate", async () => {
+    const repo = repoWith({ version: 1, setup: { worktree: ["sleep 1"] } });
+    const { id } = await client.repos.add({ path: repo.dir });
+    const procs = () => store.db.$client.prepare("SELECT kind FROM procs").all();
+
+    const testing = client.repos.testRecipe({ repoId: id });
+    await vi.waitFor(() => expect(procs()).toEqual([{ kind: "recipe" }]), { timeout: 5000 });
+
+    expect((await testing).ok).toBe(true);
+    expect(procs()).toEqual([]);
+  });
+
   test("un comando rojo corta la prueba y se informa su exit y su salida", async () => {
     const repo = repoWith({ version: 1, setup: { worktree: ["echo uno", "echo roto >&2; exit 3", "echo nunca"] } });
     const { id } = await client.repos.add({ path: repo.dir });
