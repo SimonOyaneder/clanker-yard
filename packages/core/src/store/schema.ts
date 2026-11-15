@@ -167,3 +167,37 @@ export const connections = sqliteTable(
     check("connections_scopes_json", sql`json_valid(${t.scopes})`),
   ],
 );
+
+export const WORKSPACE_STATES = ["creating", "leased", "idle", "archived"] as const;
+
+/**
+ * Un worktree por fila, con su lease. Lo que antes vivía en `.git/config` (dueño de la branch,
+ * base) vive aquí: los worktrees comparten ese archivo y los escritores en paralelo se pisan.
+ */
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text().primaryKey(),
+    repoId: text("repo_id").notNull(),
+    path: text().notNull(),
+    branch: text().notNull(),
+    /** La base normalizada: `main`, nunca `origin/main`. */
+    baseRef: text("base_ref").notNull(),
+    /** NULL mientras el worktree está en `creating`. */
+    baseSha: text("base_sha"),
+    headSha: text("head_sha"),
+    /** Última punta que pusheó el core; la usa `--force-with-lease`. */
+    remoteSha: text("remote_sha"),
+    state: text({ enum: WORKSPACE_STATES }).notNull(),
+    holderRunId: text("holder_run_id").$type<RunId>(),
+    leaseUntil: integer("lease_until"),
+    /** Sube en 1 en cada toma del lease; las operaciones con efecto lo validan antes de actuar. */
+    fencingToken: integer("fencing_token").notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex("workspaces_path").on(t.path),
+    uniqueIndex("workspaces_repo_branch_live")
+      .on(t.repoId, t.branch)
+      .where(sql`${t.state} != 'archived'`),
+  ],
+);

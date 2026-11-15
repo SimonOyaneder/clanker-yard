@@ -1,0 +1,465 @@
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+import type { RunId } from "@clanker/api";
+import { and, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
+import * as z from "zod";
+import { newId } from "../store/conventions";
+import { workspaces } from "../store/schema";
+import type { Store } from "../store/store";
+
+const execFileAsync = promisify(execFile);
+
+const REMOTE = "origin";
+const WORKTREE_LOCK_REASON = "clanker-yard";
+
+/** 2 min; el core renueva cada ttl/3. */
+export const LEASE_TTL_MS = 120_000;
+
+export interface RepoConfig {
+  /** El checkout del usuario: de ahí cuelgan los worktrees y ahí se hace el fetch. */
+  path: string;
+  /** La branch por defecto nunca es de un workspace. */
+  defaultBranch: string;
+  /** Otras branches que ningún workspace puede usar. */
+  protectedBranches?: string[];
+  /** Raíz de los worktrees en lugar de `<dataDir>/worktrees`; relativa se resuelve contra `dataDir`. */
+  worktreeDir?: string;
+}
+
+export interface WorkspacesOptions {
+  store: Store;
+  /** Directorio de datos de la app (D3): ahí viven `worktrees/<repo>/<branch>`. */
+  dataDir: string;
+  repos: (repoId: string) => RepoConfig;
+  /** Autor y committer de todo lo que corre `git` en un worktree. */
+  identity: { name: string; email: string };
+  leaseTtlMs?: number;
+  now?: () => number;
+}
+
+export interface AcquireRequest {
+  repo: string;
+  /** La branch del workspace; `refs/heads/x` se acepta como `x`. */
+  branch: string;
+  /** `main`, `origin/main` y `refs/heads/main` son la misma base. */
+  base: string;
+  runId: RunId;
+}
+
+/** Lo que una corrida recibe al tomar el worktree. Toda operación con efecto devuelve el token. */
+export interface WorkspaceLease {
+  workspaceId: string;
+  runId: RunId;
+  path: string;
+  branch: string;
+  baseRef: string;
+  baseSha: string;
+  fencingToken: number;
+  /** Se aborta si el lease se perdió: quien corre en el worktree debe detenerse. */
+  lost: AbortSignal;
+}
+
+export interface Workspaces {
+  /**
+   * Toma el lease del worktree de `branch`, creándolo si no existe. Si otra corrida lo tiene
+   * vigente lanza `WorkspaceBusyError`. Renueva el lease cada ttl/3 hasta `release` o hasta perderlo.
+   * Un worktree que ya existe se reusa tal cual: `base` solo cuenta al crearlo.
+   */
+  acquire(request: AcquireRequest): Promise<WorkspaceLease>;
+  /** Suelta el lease y deja el worktree `idle`. No hace nada si el token ya no es el vigente. */
+  release(lease: WorkspaceLease): void;
+  /** Lanza `StaleLeaseError` si `lease` ya no es el lease vigente del worktree. */
+  validate(lease: WorkspaceLease): void;
+  /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
+  git(lease: WorkspaceLease, ...args: string[]): Promise<string>;
+}
+
+/** Otra corrida tiene el lease vigente de esa branch. */
+export class WorkspaceBusyError extends Error {}
+
+/** El lease se perdió (venció y otra corrida lo tomó): la operación no se ejecutó. */
+export class StaleLeaseError extends Error {}
+
+/** La branch no se puede usar como workspace; el mensaje dice por qué. */
+export class BranchNotAllowedError extends Error {}
+
+export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
+  const { store, dataDir, repos, identity, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
+  const heartbeats = new Map<string, NodeJS.Timeout>();
+  const repoLocks = new Map<string, Promise<unknown>>();
+
+  /** Un solo fetch o worktree add/remove a la vez por repo: tocan refs compartidas. */
+  async function withRepoLock<T>(repoId: string, fn: () => Promise<T>): Promise<T> {
+    const result = (repoLocks.get(repoId) ?? Promise.resolve()).then(fn);
+    const tail = result.catch(() => undefined);
+    repoLocks.set(repoId, tail);
+    try {
+      return await result;
+    } finally {
+      if (repoLocks.get(repoId) === tail) repoLocks.delete(repoId);
+    }
+  }
+
+  function takeLease(db: Store["db"], id: string, runId: RunId) {
+    const t = now();
+    return db
+      .update(workspaces)
+      .set({
+        holderRunId: runId,
+        leaseUntil: t + leaseTtlMs,
+        fencingToken: sql`${workspaces.fencingToken} + 1`,
+      })
+      .where(
+        and(
+          eq(workspaces.id, id),
+          ne(workspaces.state, "archived"),
+          or(isNull(workspaces.holderRunId), lt(workspaces.leaseUntil, t)),
+        ),
+      )
+      .returning()
+      .get();
+  }
+
+  function renew(workspaceId: string, runId: RunId, token: number): boolean {
+    return (
+      store.tx(({ db }) =>
+        db
+          .update(workspaces)
+          .set({ leaseUntil: now() + leaseTtlMs })
+          .where(
+            and(
+              eq(workspaces.id, workspaceId),
+              eq(workspaces.fencingToken, token),
+              eq(workspaces.holderRunId, runId),
+            ),
+          )
+          .returning({ id: workspaces.id })
+          .get(),
+      ) !== undefined
+    );
+  }
+
+  /** Por token, no por workspace: el latido de un lease perdido no debe detener el del vigente. */
+  const beatKey = (workspaceId: string, token: number) => `${workspaceId}:${token}`;
+
+  function startHeartbeat(workspaceId: string, runId: RunId, token: number): AbortSignal {
+    const lost = new AbortController();
+    const timer = setInterval(() => {
+      if (renew(workspaceId, runId, token)) return;
+      stopHeartbeat(workspaceId, token);
+      lost.abort();
+    }, leaseTtlMs / 3);
+    timer.unref();
+    heartbeats.set(beatKey(workspaceId, token), timer);
+    return lost.signal;
+  }
+
+  function stopHeartbeat(workspaceId: string, token: number): void {
+    const key = beatKey(workspaceId, token);
+    clearInterval(heartbeats.get(key));
+    heartbeats.delete(key);
+  }
+
+  function validate(lease: WorkspaceLease): void {
+    const row = store.db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(
+        and(eq(workspaces.id, lease.workspaceId), eq(workspaces.fencingToken, lease.fencingToken)),
+      )
+      .get();
+    if (!row) {
+      throw new StaleLeaseError(
+        `El lease del workspace ${lease.branch} (token ${lease.fencingToken}) ya no es el vigente: ` +
+          "otra corrida lo tomó. No se ejecutó nada.",
+      );
+    }
+  }
+
+  function workspacePath(repoId: string, cfg: RepoConfig, branch: string): string {
+    const root = cfg.worktreeDir ? resolve(dataDir, cfg.worktreeDir) : join(dataDir, "worktrees");
+    return join(root, repoId, branch);
+  }
+
+  async function acquire({ repo, branch: rawBranch, base, runId }: AcquireRequest) {
+    const cfg = repos(repo);
+    const branch = rawBranch.replace(/^refs\/heads\//, "");
+    await assertBranchAllowed(cfg, branch);
+    const baseRef = normalizeBase(base);
+
+    const claim = store.tx(({ db, emit }) => {
+      const existing = db
+        .select()
+        .from(workspaces)
+        .where(
+          and(
+            eq(workspaces.repoId, repo),
+            eq(workspaces.branch, branch),
+            ne(workspaces.state, "archived"),
+          ),
+        )
+        .get();
+
+      let row: typeof workspaces.$inferSelect;
+      if (existing) {
+        const taken = takeLease(db, existing.id, runId);
+        if (!taken) {
+          throw new WorkspaceBusyError(
+            `La branch ${branch} de ${repo} la tiene la corrida ${existing.holderRunId} ` +
+              `hasta ${new Date(existing.leaseUntil ?? 0).toISOString()}.`,
+          );
+        }
+        if (existing.holderRunId) {
+          emit({
+            type: "lease.expired",
+            origin: "core",
+            runId: existing.holderRunId,
+            payload: {
+              resource: "workspace",
+              id: existing.id,
+              runId: existing.holderRunId,
+              token: existing.fencingToken,
+            },
+          });
+        }
+        row = taken;
+      } else {
+        row = db
+          .insert(workspaces)
+          .values({
+            id: newId("ws"),
+            repoId: repo,
+            path: workspacePath(repo, cfg, branch),
+            branch,
+            baseRef,
+            state: "creating",
+            holderRunId: runId,
+            leaseUntil: now() + leaseTtlMs,
+            fencingToken: 1,
+          })
+          .returning()
+          .get();
+      }
+      emit({
+        type: "lease.acquired",
+        origin: "core",
+        runId,
+        payload: { resource: "workspace", id: row.id, runId, token: row.fencingToken },
+      });
+      return { row, isNew: !existing };
+    });
+    const { row } = claim;
+
+    // El lease se renueva desde ya: el fetch y el worktree add pueden tardar más que el ttl.
+    const lost = startHeartbeat(row.id, runId, row.fencingToken);
+    let baseSha: string;
+    let head: string;
+    try {
+      baseSha = existsSync(row.path)
+        ? (row.baseSha ?? (await resolveBase(cfg, row.baseRef)))
+        : await withRepoLock(repo, () => createWorktree(cfg, row, claim.isNew));
+      head = await git(row.path, ["rev-parse", "HEAD"]);
+    } catch (error) {
+      stopHeartbeat(row.id, row.fencingToken);
+      abandon(row, claim.isNew);
+      throw error;
+    }
+    store.tx(({ db }) => {
+      const updated = db
+        .update(workspaces)
+        .set({ state: "leased", baseSha, headSha: head })
+        .where(
+          and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, row.fencingToken)),
+        )
+        .returning({ id: workspaces.id })
+        .get();
+      if (!updated) {
+        throw new StaleLeaseError(
+          `El lease de ${branch} venció mientras se preparaba el worktree y otra corrida lo tomó.`,
+        );
+      }
+    });
+
+    return {
+      workspaceId: row.id,
+      runId,
+      path: row.path,
+      branch,
+      baseRef: row.baseRef,
+      baseSha,
+      fencingToken: row.fencingToken,
+      lost,
+    };
+  }
+
+  /** Fetch, resuelve la base y agrega el worktree. Va bajo el lock del repo. */
+  async function createWorktree(
+    cfg: RepoConfig,
+    row: typeof workspaces.$inferSelect,
+    isNew: boolean,
+  ): Promise<string> {
+    const hasRemote = await hasOrigin(cfg);
+    if (hasRemote) await git(cfg.path, ["fetch", REMOTE]);
+    const baseSha = await resolveBase(cfg, row.baseRef);
+    const localExists = await refExists(cfg, `refs/heads/${row.branch}`);
+    const remoteExists = hasRemote && (await refExists(cfg, `refs/remotes/${REMOTE}/${row.branch}`));
+
+    // Una branch local sin fila en la base es del usuario: no se la quitamos con un worktree.
+    if (localExists && isNew) {
+      throw new BranchNotAllowedError(
+        `La branch ${row.branch} ya existe en ${cfg.path} y no la creó Clanker Yard. ` +
+          "Elige otro nombre o borra esa branch si no la necesitas.",
+      );
+    }
+
+    // `--no-track`: el tracking escribiría `branch.<b>.*` en .git/config, que los worktrees comparten.
+    const add = ["worktree", "add", "--lock", "--reason", WORKTREE_LOCK_REASON, "--no-track"];
+    if (localExists) await git(cfg.path, [...add, row.path, row.branch]);
+    else {
+      const start = remoteExists ? `refs/remotes/${REMOTE}/${row.branch}` : baseSha;
+      await git(cfg.path, [...add, "-b", row.branch, row.path, start]);
+    }
+    return baseSha;
+  }
+
+  /** El worktree no se pudo preparar: una fila nueva se borra; una existente suelta su lease. */
+  function abandon(row: typeof workspaces.$inferSelect, isNew: boolean): void {
+    store.tx(({ db }) => {
+      const mine = and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, row.fencingToken));
+      if (isNew) db.delete(workspaces).where(mine).run();
+      else db.update(workspaces).set({ holderRunId: null, leaseUntil: null }).where(mine).run();
+    });
+  }
+
+  async function assertBranchAllowed(cfg: RepoConfig, branch: string): Promise<void> {
+    if (branch === cfg.defaultBranch || cfg.protectedBranches?.includes(branch)) {
+      throw new BranchNotAllowedError(
+        `${branch} es la branch por defecto o está protegida: un workspace no puede trabajar sobre ella.`,
+      );
+    }
+    try {
+      await git(cfg.path, ["check-ref-format", "--branch", branch]);
+    } catch (error) {
+      throw new BranchNotAllowedError(`"${branch}" no es un nombre de branch válido.`, { cause: error });
+    }
+  }
+
+  async function hasOrigin(cfg: RepoConfig): Promise<boolean> {
+    return (await git(cfg.path, ["remote"])).split("\n").includes(REMOTE);
+  }
+
+  async function refExists(cfg: RepoConfig, ref: string): Promise<boolean> {
+    return (await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", ref])) !== undefined;
+  }
+
+  /** La punta fresca de `origin/<base>` si hay remoto; si no, la local. */
+  async function resolveBase(cfg: RepoConfig, baseRef: string): Promise<string> {
+    for (const ref of [`refs/remotes/${REMOTE}/${baseRef}`, `refs/heads/${baseRef}`]) {
+      const sha = await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", ref]);
+      if (sha) return sha.trim();
+    }
+    throw new BranchNotAllowedError(
+      `La base ${baseRef} no existe en ${cfg.path}, ni como ${REMOTE}/${baseRef} ni como branch local.`,
+    );
+  }
+
+  return {
+    acquire,
+    release(lease) {
+      stopHeartbeat(lease.workspaceId, lease.fencingToken);
+      store.tx(({ db, emit }) => {
+        const released = db
+          .update(workspaces)
+          .set({ state: "idle", holderRunId: null, leaseUntil: null })
+          .where(
+            and(
+              eq(workspaces.id, lease.workspaceId),
+              eq(workspaces.fencingToken, lease.fencingToken),
+            ),
+          )
+          .returning({ id: workspaces.id })
+          .get();
+        if (released) {
+          emit({
+            type: "lease.released",
+            origin: "core",
+            runId: lease.runId,
+            payload: {
+              resource: "workspace",
+              id: lease.workspaceId,
+              token: lease.fencingToken,
+            },
+          });
+        }
+      });
+    },
+    validate,
+    async git(lease, ...args) {
+      validate(lease);
+      return git(lease.path, args, {
+        GIT_AUTHOR_NAME: identity.name,
+        GIT_AUTHOR_EMAIL: identity.email,
+        GIT_COMMITTER_NAME: identity.name,
+        GIT_COMMITTER_EMAIL: identity.email,
+      });
+    },
+  };
+}
+
+/** `origin/main`, `refs/remotes/origin/main` y `refs/heads/main` son `main`. */
+function normalizeBase(base: string): string {
+  return base.replace(/^refs\/(heads|remotes)\//, "").replace(new RegExp(`^${REMOTE}/`), "");
+}
+
+async function git(cwd: string, args: string[], env: Record<string, string> = {}): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd,
+      env: { ...process.env, ...env },
+      encoding: "utf8",
+    });
+    return stdout.trimEnd();
+  } catch (error) {
+    const { stderr } = error as { stderr?: string };
+    throw new Error(`git ${args.join(" ")} falló en ${cwd}: ${stderr?.trim() ?? String(error)}`, {
+      cause: error,
+    });
+  }
+}
+
+/** `undefined` si git sale con error: para preguntas de existencia, donde el error es la respuesta. */
+async function tryGit(cwd: string, args: string[]): Promise<string | undefined> {
+  try {
+    return await git(cwd, args);
+  } catch {
+    return undefined;
+  }
+}
+
+export const WorkspaceAcquireArgs = z.object({
+  repo: z.string(),
+  branch: z.string(),
+  base: z.string(),
+});
+
+/**
+ * La acción `workspace.acquire` para el motor de flujos (`registerAction`). El motor le pasa el
+ * `runId` de la corrida en `ctx`; la salida es lo que los demás nodos leen como `$ws`.
+ */
+export function workspaceAcquireAction(workspaces: Workspaces) {
+  return {
+    name: "workspace.acquire",
+    args: WorkspaceAcquireArgs,
+    outcomes: ["ok"],
+    effects: "local" as const,
+    async run(args: z.infer<typeof WorkspaceAcquireArgs>, ctx: { runId: RunId }) {
+      const { workspaceId, path, branch, baseRef, baseSha, fencingToken } = await workspaces.acquire({
+        ...args,
+        runId: ctx.runId,
+      });
+      return { outcome: "ok", output: { workspaceId, path, branch, baseRef, baseSha, fencingToken } };
+    },
+  };
+}

@@ -40,3 +40,19 @@ export { createFileSecrets } from "./secrets/encrypted-file";
 export { createKeychainSecrets } from "./secrets/keychain";
 export type { KeychainSecretsOptions } from "./secrets/keychain";
 export type { Secrets } from "./secrets/secrets";
+
+export {
+  BranchNotAllowedError,
+  createWorkspaces,
+  LEASE_TTL_MS,
+  StaleLeaseError,
+  WorkspaceBusyError,
+  workspaceAcquireAction,
+} from "./workspaces/workspaces";
+export type {
+  AcquireRequest,
+  RepoConfig,
+  WorkspaceLease,
+  Workspaces,
+  WorkspacesOptions,
+} from "./workspaces/workspaces";
