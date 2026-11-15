@@ -371,6 +371,8 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     try {
       if (!claim.isNew && existsSync(row.path)) {
         baseSha = row.baseSha ?? (await resolveBase(cfg, row.baseRef));
+        // Un corte durante `setup.worktree` deja la fila en `creating` con la carpeta ya creada.
+        if (row.state === "creating") await setupWorktree(cfg, row, false, runId, lost);
       } else {
         ({ baseSha, remoteSha } = await withRepoLock(repo, () => createWorktree(cfg, row, claim.isNew)));
         // Fuera del lock del repo: un `bundle install` largo no debe frenar el fetch ni los worktrees de otras corridas.

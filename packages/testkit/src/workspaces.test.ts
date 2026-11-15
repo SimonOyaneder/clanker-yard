@@ -272,6 +272,21 @@ describe("setup.worktree", () => {
     expect(readFileSync(join(retry.path, "installed.txt"), "utf8")).toBe("ok\n");
   });
 
+  test("un corte a medio setup deja la fila en creating y el siguiente acquire lo corre de nuevo", async () => {
+    const id = repo("r1");
+    const dirs = withSetup(["echo instalado > installed.txt"]);
+    const lease = await acquire(id, "cla-1");
+    // Como lo deja un core que murió durante `setup.worktree`, después de `recover`.
+    workspaces.release(lease);
+    store.db.$client.prepare("UPDATE workspaces SET state = 'creating'").run();
+    rmSync(join(lease.path, "installed.txt"));
+
+    const retry = await acquire(id, "cla-1", runB);
+
+    expect(readFileSync(join(retry.path, "installed.txt"), "utf8")).toBe("instalado\n");
+    expect(dirs).toEqual([lease.path, lease.path]);
+  });
+
   test("sin worktreeSetup no corre nada", async () => {
     const id = repo("r1");
 
