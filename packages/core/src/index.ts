@@ -32,3 +32,7 @@ export type {
   SessionRef,
   Usage,
 } from "./agents/runtime";
+
+export { createFlows, FlowValidationError } from "./flows/flows";
+export type { FlowVersion, Flows, FlowsDeps, SaveFlowOptions } from "./flows/flows";
+export type { ActionDef, ConsolidatorDef, RoleInfo, WaitDef } from "./flows/catalog";
