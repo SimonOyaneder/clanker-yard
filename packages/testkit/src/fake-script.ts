@@ -52,7 +52,9 @@ const ScriptFile = z.strictObject({
   /** Cuántas veces sirve este guion; después se salta y gana el siguiente que calce (o un guion sin `times`). */
   times: z.int().positive().optional(),
   events: z.array(ScriptEvent).default([]),
-  effects: z.array(z.strictObject({ apply: z.string() })).default([]),
+  effects: z
+    .array(z.union([z.strictObject({ apply: z.string() }), z.strictObject({ write: z.strictObject({ path: z.string(), content: z.string() }) })]))
+    .default([]),
   run: z
     .record(
       z.string(),
@@ -79,6 +81,8 @@ export interface Script {
   events: ScriptEvent[];
   /** Rutas absolutas de los patches a aplicar al worktree. */
   patches: string[];
+  /** Archivos a escribir enteros en el worktree (`path` relativo a él), después de los patches: para resolver un conflicto, cuyas marcas un patch no puede citar. */
+  writes: { path: string; content: string }[];
   run: Record<string, RecipeResult[]>;
   result: ScriptResult;
 }
@@ -123,7 +127,8 @@ function loadScript(file: string): Script {
     speed: parsed.data.speed,
     times: parsed.data.times,
     events: [...parsed.data.events].sort((a, b) => a.at - b.at),
-    patches: parsed.data.effects.map((effect) => existing(file, resolve(dir, effect.apply))),
+    patches: parsed.data.effects.flatMap((effect) => ("apply" in effect ? [existing(file, resolve(dir, effect.apply))] : [])),
+    writes: parsed.data.effects.flatMap((effect) => ("write" in effect ? [effect.write] : [])),
     run: Object.fromEntries(
       Object.entries(parsed.data.run).map(([command, results]) => [
         command,

@@ -18,7 +18,10 @@ import {
   PermanentActionError,
   prPublishAction,
   prPushLeaseAction,
+  prRebaseApprovalAction,
   workspaceAttachAction,
+  workspaceCommitAfterRebaseAction,
+  workspaceRebaseAbortAction,
   workspaceRebaseAction,
   type ActionCtx,
   type Askpass,
@@ -51,6 +54,9 @@ let github: GitHubSim;
 let attachAction: ReturnType<typeof workspaceAttachAction>;
 let rebaseAction: ReturnType<typeof workspaceRebaseAction>;
 let pushLease: ReturnType<typeof prPushLeaseAction>;
+let approval: ReturnType<typeof prRebaseApprovalAction>;
+let commitAfter: ReturnType<typeof workspaceCommitAfterRebaseAction>;
+let abort: ReturnType<typeof workspaceRebaseAbortAction>;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-rebase-pr-"));
@@ -93,6 +99,9 @@ beforeEach(async () => {
   attachAction = workspaceAttachAction(workspaces);
   rebaseAction = workspaceRebaseAction(rebasePr);
   pushLease = prPushLeaseAction(rebasePr);
+  approval = prRebaseApprovalAction(rebasePr);
+  commitAfter = workspaceCommitAfterRebaseAction(rebasePr);
+  abort = workspaceRebaseAbortAction(rebasePr);
 
   // El PR ya publicado: un commit sobre a.txt.
   const lease = await workspaces.acquire({ repo: "r1", branch: BRANCH, base: "main", runId: newId("run") });
@@ -301,5 +310,70 @@ describe("recipe.check con afterRebase", () => {
 
     expect(result).toMatchObject({ outcome: "fail", output: { failures: expect.stringContaining("[afterRebase] exit 3") } });
     expect((result.output as { checks: unknown[] }).checks).toHaveLength(1);
+  });
+});
+
+describe("lo que el flujo de rebase por conflicto pide además", () => {
+  const PR = { account: ACCOUNT, repo: REPO, number: 1 };
+  const approve = (behavior: boolean, policy: "auto" | "ask") => approval.run(approval.args.parse({ pr: PR, behavior, policy }), ctx());
+
+  test.each([
+    { draft: true, behavior: false, policy: "auto", outcome: "proceed" },
+    { draft: true, behavior: true, policy: "ask", outcome: "proceed" },
+    { draft: false, behavior: false, policy: "auto", outcome: "proceed" },
+    { draft: false, behavior: false, policy: "ask", outcome: "ask" },
+    { draft: false, behavior: true, policy: "auto", outcome: "ask" },
+  ] as const)("pr.rebaseApproval con draft=$draft, behavior=$behavior y rebaseNonDraft=$policy da $outcome", async ({ draft, behavior, policy, outcome }) => {
+    github.pr(1).setDraft(draft);
+
+    expect(await approve(behavior, policy)).toEqual({ outcome, output: { draft } });
+  });
+
+  test("pr.rebaseApproval de un PR cerrado lanza", async () => {
+    github.pr(1).merge();
+
+    await expect(approve(false, "auto")).rejects.toThrow(PermanentActionError);
+  });
+
+  test("workspace.commitAfterRebase commitea lo que dejó el afterRebase, y pushLease lo pushea", async () => {
+    const moved = elsewhere("main", { "b.txt": "b-main\n" });
+    const ws = await attach();
+    await rebase(ws);
+    await recipes.checkAction.run(recipes.checkAction.args.parse({ ws, scope: "all", afterRebase: true }), ctx());
+    expect(local(ws, "status", "--porcelain")).toBe("?? hook.txt");
+
+    const committed = await commitAfter.run(commitAfter.args.parse({ ws }), ctx());
+    await push(ws);
+
+    expect(committed).toEqual({ outcome: "ok", output: { committed: true, head: local(ws, "rev-parse", "HEAD") } });
+    expect(local(ws, "log", "--format=%s", `${moved}..HEAD`).split("\n")).toEqual(["chore: update generated files after rebase", "feat: mine"]);
+    expect(local(ws, "status", "--porcelain")).toBe("");
+    expect(repo.git("--git-dir", repo.remoteDir!, "show", `${BRANCH}:hook.txt`)).toBe("hook");
+  });
+
+  test("workspace.commitAfterRebase sin cambios no hace nada", async () => {
+    elsewhere("main", { "b.txt": "b-main\n" });
+    const ws = await attach();
+    await rebase(ws);
+    const head = local(ws, "rev-parse", "HEAD");
+
+    const result = await commitAfter.run(commitAfter.args.parse({ ws }), ctx());
+
+    expect(result).toEqual({ outcome: "ok", output: { committed: false, head } });
+  });
+
+  test("workspace.rebaseAbort deja la branch como estaba antes del rebase y sin él no hace nada", async () => {
+    elsewhere("main", { "a.txt": "a1\nmain\na3\n" });
+    const ws = await attach();
+    const before = local(ws, "rev-parse", "HEAD");
+    expect(await rebase(ws)).toMatchObject({ outcome: "conflict" });
+
+    const first = await abort.run(abort.args.parse({ ws }), ctx());
+    const second = await abort.run(abort.args.parse({ ws }), ctx());
+
+    expect([first.output, second.output]).toEqual([{ aborted: true }, { aborted: false }]);
+    expect(local(ws, "rev-parse", "HEAD")).toBe(before);
+    expect(local(ws, "symbolic-ref", "--short", "HEAD")).toBe(BRANCH);
+    expect(local(ws, "status", "--porcelain")).toBe("");
   });
 });

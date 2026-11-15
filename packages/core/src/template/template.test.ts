@@ -72,7 +72,7 @@ describe("prompts", () => {
   });
 });
 
-// Lo que los flujos de la plantilla (D1: techlead-clasico, pr-feedback, council, rebase) piden a los roles.
+// Lo que los flujos de la plantilla (D1: techlead-clasico, pr-feedback, council, rebase-conflicto) piden a los roles.
 const flowNodes = [
   { role: "dev", mode: "plan", on: ["ok"], brief: { issue: "$run.subject", ws: "$ws" } },
   { role: "plan-check", mode: "check", on: ["ok", "changes"], brief: { plan: "$plan" } },
@@ -92,7 +92,8 @@ const flowNodes = [
   { role: "triage", mode: "ci", on: ["fix", "foreign"], brief: { items: "$ci-wait.failures" } },
   { role: "triage", mode: "coverage", on: ["fix", "reply"], brief: { items: "$cov.items" } },
   { role: "dev", mode: "council", on: ["ok"], brief: {} },
-  { role: "dev", mode: "conflict", on: ["resolved", "behavior"], brief: {} },
+  { role: "dev", mode: "conflict", on: ["resolved", "behavior"], brief: { failures: "$prev.failures" } },
+  { role: "dev", mode: "fix", on: ["ok"], brief: { failures: "$prev.failures" } },
 ];
 
 describe("calza con los flujos de la plantilla", () => {

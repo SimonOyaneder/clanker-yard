@@ -1,0 +1,30 @@
+# El conflicto exige decidir comportamiento (¿la transfer nace `created` o `pending`?): el dev deja aplicada
+# la resolución más conservadora (la de la base) y lo explica en `decisions`.
+match: { mode: conflict, round: "*" }
+events:
+  - { at: 0, text: "La base y el PR discrepan en el estado inicial de una transfer" }
+  - { at: 5, usage: { model: sonnet, in: 900, out: 260, cacheWrite: 0, cacheRead: 0, costUsd: 0.026 } }
+effects:
+  - write:
+      path: src/transfer.ts
+      content: |
+        export function createTransfer(amount: number) {
+          if (amount <= 0) throw new RangeError(`amount must be positive, got ${amount}`);
+          return { amount: Math.round(amount), status: "pending" };
+        }
+run:
+  test:
+    - { ok: true }
+result:
+  status: success
+  structured:
+    outcome: behavior
+    summary: "Dejé el estado de la base"
+    decisions:
+      - title: "Estado inicial de la transfer"
+        body: "La base crea la transfer `pending` y el PR `created`. Dejé `pending`, que es lo que ya está en la base."
+    payload:
+      files: [src/transfer.ts]
+      rejected: []
+      deletedTests: []
+      cuts: []

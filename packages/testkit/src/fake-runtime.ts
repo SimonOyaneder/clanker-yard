@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { appendFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { Brief, compileJsonSchema, type JsonSchema } from "@clanker/api";
@@ -160,6 +160,10 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
     }
 
     for (const patch of script.patches) await applyPatch(patch, cwd);
+    for (const { path, content } of script.writes) {
+      mkdirSync(dirname(join(cwd, path)), { recursive: true });
+      writeFileSync(join(cwd, path), content);
+    }
     record?.({
       type: "result",
       subtype: result.status === "success" ? "success" : result.status,

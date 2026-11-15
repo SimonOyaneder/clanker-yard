@@ -247,4 +247,165 @@ export const PR_FEEDBACK: FlowDef = {
   },
 };
 
-export const flows: Record<string, FlowDef> = { "techlead-clasico": TECHLEAD_CLASICO, "pr-feedback": PR_FEEDBACK };
+const REBASE_ROUNDS_EXHAUSTED = {
+  to: "abort",
+  note: "El conflicto no quedó resuelto tras las rondas del agente: se abortó el rebase y el PR sigue en conflicto",
+};
+
+/**
+ * "Rebase por conflicto": un PR del sistema que quedó en conflicto con su base (`pr.conflict`; `startTriggers`
+ * no lo arranca si el PR tiene threads de council: un rebase reescribiría su historia). Corre en mantenimiento.
+ * `repo`, `branch`, `base` y `pr` los pone el trigger; `rebaseNonDraft` (`auto` o `ask`) es la política del
+ * proyecto para un PR fuera de draft sin conflicto de comportamiento (decisión 30).
+ *
+ * El agente resuelve un commit a la vez y el core hace `continue`. Si resolver exige decidir comportamiento
+ * (`behavior`), el agente deja la resolución más conservadora: en draft el flujo sigue con una nota; fuera de
+ * draft un gate estaciona solo esta corrida y el PR queda en conflicto hasta que alguien decida (decisión 32).
+ * Un rebase que falla sin conflicto estaciona solo esta corrida con una pregunta. Cada visita de `workspace.rebase` pasa la misma `base`: `from` (el sha viejo de la base, si se squasheó) se
+ * calcula contra ella. Lo que deja el `afterRebase` de la receta lo commitea el core (`workspace.commitAfterRebase`).
+ * Tras el push, un draft sigue con `pr-feedback` (que pide `/review`) y uno listo deja una nota para la persona.
+ */
+export const REBASE_CONFLICTO: FlowDef = {
+  schema: 1,
+  id: "rebase-conflicto",
+  name: "Rebase por conflicto",
+  trigger: { type: "pr.conflict" },
+  lane: "maintenance",
+  params: {
+    pr: "PrRef",
+    repo: "RepoRef",
+    branch: "string",
+    base: "string",
+    rebaseNonDraft: { type: "string", default: "auto" },
+    conflictRounds: { type: "number", default: 20 },
+    checkRounds: { type: "number", default: 2 },
+    externalRounds: { type: "number", default: 3 },
+  },
+  limits: { maxCostUsd: null, maxSteps: 200 },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.attach",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "rebase" },
+    },
+    rebase: {
+      type: "action",
+      action: "workspace.rebase",
+      args: { ws: "$ws", base: "$run.params.base" },
+      on: {
+        clean: "checks",
+        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: REBASE_ROUNDS_EXHAUSTED },
+        error: "rebase-error",
+      },
+    },
+    "rebase-error": {
+      type: "gate",
+      question:
+        "El rebase falló sin conflicto (ver el error del paso): se abortó y la branch quedó como estaba. ¿Lo reintento o dejo el PR en conflicto?",
+      options: [
+        { id: "retry", label: "Reintentar el rebase" },
+        { id: "leave", label: "Dejar el PR en conflicto" },
+      ],
+      on: { retry: { to: "rebase", maxRounds: 2, exhausted: "@blocked" }, leave: "@blocked" },
+    },
+    resolve: {
+      type: "agent",
+      role: "dev",
+      mode: "conflict",
+      brief: { failures: "$prev.failures" },
+      on: { resolved: "policy", behavior: "behavior-check" },
+    },
+    policy: {
+      type: "action",
+      action: "pr.rebaseApproval",
+      args: { pr: "$run.params.pr", behavior: false, policy: "$run.params.rebaseNonDraft" },
+      on: { proceed: "continue", ask: "ask" },
+    },
+    "behavior-check": {
+      type: "action",
+      action: "pr.rebaseApproval",
+      args: { pr: "$run.params.pr", behavior: true, policy: "$run.params.rebaseNonDraft" },
+      on: {
+        proceed: { to: "continue", note: "Resolver el conflicto exigía decidir comportamiento: se aplicó la resolución más conservadora, revísala" },
+        ask: "behavior-gate",
+      },
+    },
+    ask: {
+      type: "gate",
+      question: "El PR ya no está en draft y el proyecto pide confirmar antes de rebasearlo (rebaseNonDraft: ask). El conflicto ya está resuelto en el worktree. ¿Sigo con el rebase?",
+      options: [
+        { id: "continue", label: "Seguir con el rebase" },
+        { id: "abort", label: "Dejar el PR en conflicto" },
+      ],
+      on: { continue: "continue", abort: "abort" },
+    },
+    "behavior-gate": {
+      type: "gate",
+      question:
+        "Resolver el conflicto exige decidir comportamiento y el PR ya no está en draft. El agente dejó la resolución más conservadora (ver su nota). ¿Sigo con el rebase?",
+      options: [
+        { id: "continue", label: "Seguir con esa resolución" },
+        { id: "abort", label: "Dejar el PR en conflicto" },
+      ],
+      on: { continue: "continue", abort: "abort" },
+    },
+    continue: {
+      type: "action",
+      action: "workspace.rebase",
+      args: { ws: "$ws", base: "$run.params.base", continue: true },
+      on: {
+        clean: "checks",
+        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: REBASE_ROUNDS_EXHAUSTED },
+        error: "rebase-error",
+      },
+    },
+    checks: {
+      type: "action",
+      action: "recipe.check",
+      args: { ws: "$ws", scope: "changed", afterRebase: true },
+      on: {
+        ok: "commit",
+        fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "commit", note: "Tests o lint siguen rojos tras el rebase" } },
+      },
+    },
+    fix: {
+      type: "agent",
+      role: "dev",
+      mode: "fix",
+      brief: { failures: "$prev.failures" },
+      on: { ok: "checks" },
+    },
+    commit: {
+      type: "action",
+      action: "workspace.commitAfterRebase",
+      args: { ws: "$ws" },
+      on: { ok: "push" },
+    },
+    push: {
+      type: "action",
+      action: "pr.pushLease",
+      args: { ws: "$ws" },
+      on: { draft: "feedback", ready: { to: "@done", note: "Pide /review: el PR salió del conflicto y ya no está en draft" } },
+    },
+    feedback: {
+      type: "flow",
+      flow: "pr-feedback",
+      params: { ws: "$ws", pr: "$run.params.pr", externalRounds: "$run.params.externalRounds" },
+      on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+    },
+    abort: {
+      type: "action",
+      action: "workspace.rebaseAbort",
+      args: { ws: "$ws" },
+      on: { ok: "@blocked" },
+    },
+  },
+};
+
+export const flows: Record<string, FlowDef> = {
+  "techlead-clasico": TECHLEAD_CLASICO,
+  "pr-feedback": PR_FEEDBACK,
+  "rebase-conflicto": REBASE_CONFLICTO,
+};

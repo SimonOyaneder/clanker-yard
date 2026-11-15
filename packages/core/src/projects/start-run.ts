@@ -65,8 +65,9 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
       const params: Record<string, unknown> = {
         ...(repoId !== undefined && "repo" in declared ? { repo: repoId } : {}),
         ...(repoId !== undefined && "base" in declared ? { base: repos.config(repoId).defaultBranch } : {}),
-        // Los flowParams del proyecto son del flujo por defecto: otro flujo no los declara.
-        ...(flow === project.defaultFlowId ? project.flowParams : {}),
+        // Los flowParams del proyecto son del flujo por defecto, y solo los que declara: los demás son de los
+        // flujos que arrancan los triggers (una política como `rebaseNonDraft`) y aquí no cuentan.
+        ...(flow === project.defaultFlowId ? Object.fromEntries(Object.entries(project.flowParams).filter(([name]) => name in declared)) : {}),
         ...input.params,
       };
       if (typeof declared.repo === "string" && params.repo === undefined) {

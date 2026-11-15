@@ -74,6 +74,8 @@ export interface TechleadScenarioOptions {
   bot?: BotTurn[];
   /** De dónde salen las issues: el tracker `local` (por defecto) o el adapter de Linear contra el Linear falso. */
   tracker?: "local" | "linear";
+  /** Carpetas de guiones del runtime fake, además de `FIXTURES` (un test que corre otro flujo sobre el PR). */
+  fixtures?: string[];
 }
 
 /** La corrida con sus pasos, como la devuelve `runs.get`. */
@@ -157,7 +159,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
     store,
     dataDir: home.path,
     connections,
-    runtimes: [createFakeRuntime({ fixtures: FIXTURES, speed: Infinity })],
+    runtimes: [createFakeRuntime({ fixtures: [FIXTURES, ...(options.fixtures ?? [])], speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
     scheduler: false,
     gitUrl: () => gitServer.url,

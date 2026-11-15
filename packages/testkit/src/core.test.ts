@@ -214,6 +214,18 @@ describe("runs.start con los repos del proyecto", () => {
     expect(byCaller.params).toEqual({ repo: registered.id, base: "staging" });
   });
 
+  test("un flowParam que el flujo por defecto no declara (la política de otro flujo) no rompe runs.start", async () => {
+    const client = await boot();
+    const registered = await client.repos.add({ path: repo.dir });
+    const project = await createToyProject(client, { rebaseNonDraft: "ask" });
+    await client.projects.update({ id: project.id, repos: [{ repoId: registered.id }] });
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
+
+    const run = await client.runs.start({ projectId: project.id, issueId: issue.id });
+
+    expect(run.params).not.toHaveProperty("rebaseNonDraft");
+  });
+
   test("lanzar dos veces la misma issue devuelve la misma corrida", async () => {
     const client = await boot();
     const registered = await client.repos.add({ path: repo.dir });
@@ -282,6 +294,7 @@ describe("arranque", () => {
     expect(store.db.$client.prepare("SELECT slug FROM defs WHERE kind = 'flow' AND scope = 'builtin' ORDER BY slug").all()).toEqual([
       { slug: "juguete" },
       { slug: "pr-feedback" },
+      { slug: "rebase-conflicto" },
       { slug: "techlead-clasico" },
     ]);
   });

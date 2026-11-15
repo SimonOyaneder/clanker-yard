@@ -24,7 +24,13 @@ import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/publish";
 import { stackRestackAction } from "./github/restack";
 import { prPushFixupsAction } from "./github/push-fixups";
-import { prPushLeaseAction, workspaceRebaseAction } from "./github/rebase-pr";
+import {
+  prPushLeaseAction,
+  prRebaseApprovalAction,
+  workspaceCommitAfterRebaseAction,
+  workspaceRebaseAbortAction,
+  workspaceRebaseAction,
+} from "./github/rebase-pr";
 import { githubRemote } from "./github/remote-config";
 import { createPacks } from "./packs/packs";
 import { createLinearTracker } from "./linear/tracker";
@@ -200,6 +206,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const rebasePr = { store, workspaces, repos: repos.config, prs };
   flows.registerAction(workspaceRebaseAction(rebasePr));
   flows.registerAction(prPushLeaseAction(rebasePr));
+  flows.registerAction(prRebaseApprovalAction(rebasePr));
+  flows.registerAction(workspaceCommitAfterRebaseAction(rebasePr));
+  flows.registerAction(workspaceRebaseAbortAction(rebasePr));
   flows.registerAction(stackRestackAction({ store, workspaces, repos: repos.config, prs, connections: opts.connections }));
   const feedback = { connections: opts.connections, packs };
   for (const action of [prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction]) flows.registerAction(action(feedback));

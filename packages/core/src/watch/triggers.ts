@@ -27,8 +27,9 @@ export interface TriggersDeps {
  * igual a un evento que emite otra pieza (`stack.restack` anota `pr.conflict`). Solo los PRs `owned`
  * disparan flujos; los demás (los tuyos que el sistema no abrió) solo generan el evento.
  *
- * Params: un flujo recibe lo que declare entre `pr` (`PrRef`), `repo` (el id del repo registrado) y los
- * campos del payload del evento (`sha`, `from`, `to`, `threadIds`, `files`...). El `filter` del trigger
+ * Params: un flujo recibe lo que declare entre `pr` (`PrRef`), `repo` (el id del repo registrado), `branch`
+ * (la branch del PR), los campos del payload del evento (`sha`, `from`, `to`, `threadIds`, `files`...) y los
+ * `flowParams` del proyecto que abrió el PR (una política como `rebaseNonDraft`). El `filter` del trigger
  * pide que cada clave valga lo mismo en el payload. `start` es idempotente por (flujo, sujeto): un
  * evento nuevo con la corrida anterior todavía viva no abre otra. Un flujo que no arranca (falta un
  * param, un rol) deja un evento `error` y no frena a los demás. Devuelve cómo dejar de escuchar.
@@ -43,8 +44,10 @@ export function startTriggers({ store, defs, projects, repos, flows, errors }: T
     if (event.type === "pr.conflict" && row.detail?.threads.councilEver) return;
 
     const pr: PrRef = { account: remote.account, repo: remote.repo, number: row.number };
-    const available: Record<string, unknown> = { ...event.payload, pr, repo: row.repoId };
-    const profile = (event.projectId && projects.get(event.projectId)?.defaultProfileId) || undefined;
+    const project = event.projectId ? projects.get(event.projectId) : undefined;
+    // Lo que el evento da pisa a los `flowParams` del proyecto, que solo cambian defaults.
+    const available: Record<string, unknown> = { ...project?.flowParams, ...event.payload, pr, repo: row.repoId, branch: row.headRef };
+    const profile = project?.defaultProfileId || undefined;
 
     for (const slug of new Set(defs.list("flow").map((def) => def.slug))) {
       // El flujo que gana para este repo; uno que ya no valida lo reporta quien lo lance.

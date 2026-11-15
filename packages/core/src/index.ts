@@ -188,7 +188,13 @@ export { prOfWaitKey, prWaits, signalPr } from "./github/pr-waits";
 export { prPublishAction } from "./github/publish";
 export type { PrPublishDeps } from "./github/publish";
 export { prPushFixupsAction } from "./github/push-fixups";
-export { prPushLeaseAction, workspaceRebaseAction } from "./github/rebase-pr";
+export {
+  prPushLeaseAction,
+  prRebaseApprovalAction,
+  workspaceCommitAfterRebaseAction,
+  workspaceRebaseAbortAction,
+  workspaceRebaseAction,
+} from "./github/rebase-pr";
 export type { RebasePrDeps } from "./github/rebase-pr";
 export { stackRestackAction } from "./github/restack";
 export type { ChildReport, StackRestackDeps } from "./github/restack";

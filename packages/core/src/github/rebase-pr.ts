@@ -1,9 +1,11 @@
+import { PrRef } from "@clanker/api";
 import { and, eq } from "drizzle-orm";
 import * as z from "zod";
 import { preparePush } from "../commits/prepare-push";
 import { PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
 import { pullRequests, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
+import { rebaseInProgress } from "../workspaces/rebase";
 import { RebaseError, WorkspaceOutput, type RepoConfig, type Workspaces } from "../workspaces/workspaces";
 import type { Prs } from "./prs";
 import { pushOrThrow } from "./push";
@@ -119,6 +121,92 @@ export function prPushLeaseAction(deps: RebasePrDeps): ActionDef<typeof PushLeas
         throw new PermanentActionError(`El PR #${ref.number} de ${ref.repo} ya está ${state === "merged" ? "mergeado" : "cerrado"}: se pusheó ${ws.branch}, pero no hay nada que seguir.`);
       }
       return { outcome: state === "draft" ? "draft" : "ready", output: { head, pr: ref } };
+    },
+  };
+}
+
+const RebaseAbortArgs = z.object({ ws: WorkspaceOutput });
+
+/**
+ * `workspace.rebaseAbort`: deja el worktree como estaba antes del rebase que el agente no pudo resolver, o
+ * que una persona decidió no aplicar. Sin esto, la corrida termina con el rebase detenido y el próximo
+ * `workspace.rebase` del PR lanza por "rebase en curso". Sin rebase en curso no hace nada. Output `aborted`.
+ */
+export function workspaceRebaseAbortAction(deps: Pick<RebasePrDeps, "workspaces">): ActionDef<typeof RebaseAbortArgs> {
+  return {
+    name: "workspace.rebaseAbort",
+    args: RebaseAbortArgs,
+    outcomes: ["ok"],
+    effects: "local",
+    async run({ ws }) {
+      const git = (...args: string[]) => deps.workspaces.git(ws, ...args);
+      const aborted = await rebaseInProgress(git);
+      if (aborted) await git("rebase", "--abort");
+      return { outcome: "ok", output: { aborted } };
+    },
+  };
+}
+
+const CommitAfterRebaseArgs = z.object({ ws: WorkspaceOutput });
+
+/** El mensaje del commit con lo que dejó el `afterRebase` de la receta (o un arreglo del agente tras un check rojo). */
+const AFTER_REBASE_COMMIT_MESSAGE = "chore: update generated files after rebase";
+
+/**
+ * `workspace.commitAfterRebase`: commitea lo que `recipe.check` con `afterRebase` dejó en el worktree
+ * (la versión de `schema.rb`, `packwerk update-todo`), y lo que el agente arregló tras un check rojo, en un
+ * solo commit sobre los del PR: `pr.pushLease` no pushea lo que no está commiteado. Lo hace el core y no un
+ * agente porque no hay nada que decidir: son los cambios que la receta o el check pidieron. Sin cambios no
+ * hace nada. Output `committed` y `head`.
+ */
+export function workspaceCommitAfterRebaseAction(deps: Pick<RebasePrDeps, "workspaces">): ActionDef<typeof CommitAfterRebaseArgs> {
+  return {
+    name: "workspace.commitAfterRebase",
+    args: CommitAfterRebaseArgs,
+    outcomes: ["ok"],
+    effects: "local",
+    run: ({ ws }, ctx) =>
+      ctx.once("commit", async () => {
+        const git = (...args: string[]) => deps.workspaces.git(ws, ...args);
+        const dirty = (await git("status", "--porcelain")) !== "";
+        if (dirty) {
+          await git("add", "--all");
+          await git("commit", "--quiet", "--message", AFTER_REBASE_COMMIT_MESSAGE);
+        }
+        return { outcome: "ok", output: { committed: dirty, head: await git("rev-parse", "HEAD") } };
+      }),
+  };
+}
+
+const ApprovalArgs = z.object({
+  pr: PrRef,
+  /** El agente reportó `behavior`: resolver el conflicto exigió decidir comportamiento. */
+  behavior: z.boolean(),
+  /** `rebaseNonDraft` del proyecto: con `ask`, un PR fuera de draft pide OK antes de seguir. */
+  policy: z.enum(["auto", "ask"]),
+});
+
+/**
+ * `pr.rebaseApproval` (`docs/design.html#d-ops`, quién resuelve un conflicto; decisiones 30 y 32): dice si el
+ * rebase de un PR con el conflicto ya resuelto puede seguir solo. Un PR en draft siempre sigue (con
+ * `behavior` el flujo deja además una nota). Fuera de draft pide un OK (`ask`) si el agente decidió
+ * comportamiento o si el proyecto pide preguntar; con `auto` y sin `behavior` sigue. Lee el estado vivo del
+ * PR: puede haber salido de draft desde que arrancó la corrida. Un PR cerrado o mergeado es
+ * `PermanentActionError`.
+ */
+export function prRebaseApprovalAction(deps: Pick<RebasePrDeps, "prs">): ActionDef<typeof ApprovalArgs> {
+  return {
+    name: "pr.rebaseApproval",
+    args: ApprovalArgs,
+    outcomes: ["proceed", "ask"],
+    effects: "local",
+    async run({ pr, behavior, policy }) {
+      const { state } = await deps.prs.get(pr);
+      if (state === "merged" || state === "closed") {
+        throw new PermanentActionError(`El PR #${pr.number} de ${pr.repo} ya está ${state === "merged" ? "mergeado" : "cerrado"}: no hay nada que rebasear.`);
+      }
+      const ask = state !== "draft" && (behavior || policy === "ask");
+      return { outcome: ask ? "ask" : "proceed", output: { draft: state === "draft" } };
     },
   };
 }
