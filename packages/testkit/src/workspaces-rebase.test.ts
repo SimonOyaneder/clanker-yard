@@ -172,6 +172,39 @@ describe("workspaces.attach", () => {
     await expect(attach("cla-1")).rejects.toThrow(/divergieron/);
     expect(row(first).holder).toBeNull();
   });
+
+  test("aborta el rebase detenido que dejó una corrida que terminó con el conflicto a medias", async () => {
+    pushBranch("cla-1", [{ "a.txt": "a1\nmine\na3\n" }]);
+    const first = await attach("cla-1");
+    await advance("main", { "a.txt": "a1\nmain\na3\n" });
+    expect(await workspaces.rebase(first, { council: false })).toMatchObject({ outcome: "conflict" });
+    workspaces.release(first);
+
+    const lease = await attach("cla-1");
+
+    expect(wt(lease, "symbolic-ref", "--short", "HEAD")).toBe("cla-1");
+    expect(head(lease)).toBe(origin("refs/heads/cla-1"));
+    expect(wt(lease, "status", "--porcelain")).toBe("");
+    // Y el rebase de la corrida nueva parte de cero.
+    expect(await workspaces.rebase(lease, { council: false })).toMatchObject({ outcome: "conflict" });
+  });
+});
+
+describe("workspaces.reread", () => {
+  test("al devolver un worktree con un rebase detenido lo aborta: la dueña sigue sobre su branch como la prestó", async () => {
+    pushBranch("cla-1", [{ "a.txt": "a1\nmine\na3\n" }]);
+    const lease = await attach("cla-1");
+    const tip = head(lease);
+    await advance("main", { "a.txt": "a1\nmain\na3\n" });
+    expect(await workspaces.rebase(lease, { council: false })).toMatchObject({ outcome: "conflict" });
+
+    await workspaces.reread(run);
+
+    expect(wt(lease, "symbolic-ref", "--short", "HEAD")).toBe("cla-1");
+    expect(head(lease)).toBe(tip);
+    expect(row(lease).headSha).toBe(tip);
+    expect(wt(lease, "status", "--porcelain")).toBe("");
+  });
 });
 
 describe("workspaces.rebase", () => {

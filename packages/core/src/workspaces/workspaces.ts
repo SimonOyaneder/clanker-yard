@@ -112,7 +112,8 @@ export interface Workspaces {
   /**
    * Retoma el PR ya publicado de `branch`: trae el remoto, toma el lease (creando el worktree desde la
    * branch remota si no existe) y avanza la branch local a la punta de `origin/<branch>` con un
-   * fast-forward, que pasa a ser el `remote_sha`. Lanza `AttachError` si la branch no está en el remoto o
+   * fast-forward, que pasa a ser el `remote_sha`. Un rebase detenido que dejó otra corrida se aborta antes.
+   * Lanza `AttachError` si la branch no está en el remoto o
    * la local tiene commits que el remoto no (adelantada o divergida): sin lease en ese caso.
    */
   attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean }>;
@@ -150,7 +151,8 @@ export interface Workspaces {
    * Relee `head_sha` de los worktrees que tiene `runId` desde git: tras una devolución la branch pudo
    * moverse (un rebase). `remote_sha` no se relee: es lo que el core pusheó por última vez, la punta que
    * `--force-with-lease` espera, y adoptar la del remoto dejaría pisar el commit de otra persona. El
-   * préstamo ya lo dejó al día con cada `push` de quien lo tuvo.
+   * préstamo ya lo dejó al día con cada `push` de quien lo tuvo. Un rebase que quien lo tuvo dejó detenido
+   * (terminó con el conflicto a medias) se aborta antes: la dueña sigue sobre su branch como la prestó.
    */
   reread(runId: RunId): Promise<void>;
   /** Lanza `StaleLeaseError` si `lease` ya no es el lease vigente del worktree. */
@@ -861,6 +863,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
 
     const lease = await acquire(request);
     try {
+      await abortLeftoverRebase(lease.path);
       const head = await gitIn(lease, "rev-parse", "HEAD");
       const fastForwarded = head !== remoteTip;
       if (fastForwarded) {
@@ -1105,6 +1108,16 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     }
   }
 
+  /**
+   * Un rebase detenido que dejó la corrida que tuvo el worktree antes (cancelada o fallida con el conflicto a
+   * medias): nadie lo va a seguir, y con HEAD detached a mitad de camino la próxima corrida trabajaría (y
+   * pushearía con lease) sobre una branch a medio rebasear. `--abort` la deja como estaba antes del rebase.
+   */
+  async function abortLeftoverRebase(path: string): Promise<void> {
+    const run = (...args: string[]) => git(path, args);
+    if (await rebaseInProgress(run)) await run("rebase", "--abort");
+  }
+
   async function reread(runId: RunId): Promise<void> {
     const held = store.db
       .select()
@@ -1112,6 +1125,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       .where(and(eq(workspaces.holderRunId, runId), eq(workspaces.state, "leased")))
       .all();
     for (const row of held) {
+      await abortLeftoverRebase(row.path);
       const headSha = await git(row.path, ["rev-parse", "HEAD"]);
       store.tx(({ db }) =>
         db
