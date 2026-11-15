@@ -1,0 +1,11 @@
+# Ronda 2 de bugs: lo arreglado.
+match: { mode: review }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Sin hallazgos"
+    payload:
+      findings: []
+      previous:
+        - { id: f1, status: fixed }

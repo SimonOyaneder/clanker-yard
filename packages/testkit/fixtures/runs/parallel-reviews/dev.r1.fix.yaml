@@ -1,0 +1,11 @@
+match: { mode: fix }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Arreglado"
+    payload:
+      files: [app/models/transfer.rb]
+      rejected: []
+      deletedTests: []
+      cuts: []

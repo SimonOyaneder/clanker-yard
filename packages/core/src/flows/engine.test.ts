@@ -1,17 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { FlowDef, Role, type Profile, type RunId, type SubjectRef } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { z } from "zod";
-import { createAgents } from "../agents/agents";
-import type { AgentRuntime, RunResult, RunSpec, SessionRef, Usage } from "../agents/runtime";
-import { createArtifacts } from "../artifacts/artifacts";
-import { createDefs } from "../defs/defs";
-import { openStore } from "../store/store";
-import type { ActionCtx, ActionResult } from "./catalog";
 import { OUTPUT_INLINE_MAX_BYTES } from "./engine";
-import { createFlows } from "./flows";
+import { devProfile, devRole, harness as createHarness, okReport } from "./harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -19,145 +8,10 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-const usage: Usage = {
-  turns: 2,
-  tokensIn: 10,
-  tokensOut: 20,
-  tokensCacheRead: 0,
-  tokensCacheWrite: 0,
-  costMicros: 500,
-  costSource: "runtime",
-};
-
-const reportSchema = {
-  type: "object",
-  properties: { n: { type: "number" }, issueDoubts: { type: "array", items: { type: "string" } } },
-};
-const devRole = (prompt: string): Role => ({
-  prompt,
-  context: [],
-  modes: {
-    plan: { instructions: "Planifica.", report: reportSchema, outcomes: ["ok", "changes"], session: "new" },
-    implement: { instructions: "Implementa.", report: reportSchema, outcomes: ["ok", "changes"], session: "resume" },
-  },
-});
-const devProfile = (model: string): Profile => ({ roles: { dev: { model } } });
-
-interface AgentCall {
-  kind: "start" | "resume";
-  sessionId: string;
-  spec?: RunSpec;
-  /** El `subject.id` del brief, para distinguir de qué corrida es. */
-  subject: string;
-}
-type AgentScript = (call: AgentCall, interrupted: Promise<void>) => Promise<Partial<RunResult>>;
-
-const okReport = (payload: unknown = { n: 1 }, outcome = "ok") => ({
-  structured: { outcome, summary: "listo", payload },
-});
-
-const subjectOf = (prompt: string) => /"subject": \{[^}]*"id": "([^"]+)"/.exec(prompt)?.[1] ?? "?";
-
-function harness(options: { maxAgents?: number; script?: AgentScript } = {}) {
-  const store = openStore({ path: ":memory:" });
-  const dir = mkdtempSync(join(tmpdir(), "clanker-flows-"));
-  const defs = createDefs(store);
-
-  const calls: AgentCall[] = [];
-  const script: AgentScript = options.script ?? (() => Promise.resolve(okReport()));
-  const run = (call: AgentCall, cwd: string) => {
-    calls.push(call);
-    let interrupt = () => {};
-    const interrupted = new Promise<void>((resolve) => (interrupt = resolve));
-    const ref: SessionRef = { runtime: "fake", sessionId: call.sessionId, cwd };
-    return {
-      ref,
-      events: (async function* () {})(),
-      interrupt: () => Promise.resolve(interrupt()),
-      result: Promise.race([
-        script(call, interrupted).then((r): RunResult => ({ status: "success", text: "", usage, ...r })),
-        interrupted.then((): RunResult => ({ status: "error", text: "", usage, message: "interrumpido" })),
-      ]),
-    };
-  };
-  const runtime: AgentRuntime = {
-    id: "fake",
-    capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
-    start: (spec) =>
-      Promise.resolve(run({ kind: "start", sessionId: `ses-${calls.length + 1}`, spec, subject: subjectOf(spec.prompt) }, spec.cwd)),
-    resume: (ref, message) =>
-      Promise.resolve(run({ kind: "resume", sessionId: `ses-${calls.length + 1}`, subject: subjectOf(message) }, ref.cwd)),
-  };
-
-  const agents = createAgents({ store, defs, runtime });
-  const artifacts = createArtifacts({ store, dir });
-  const flows = createFlows({
-    store,
-    defs,
-    agents,
-    artifacts,
-    roles: (id) => {
-      const def = defs.resolve("role", id);
-      if (!def) return undefined;
-      const role = Role.parse(def.body);
-      return { modes: Object.fromEntries(Object.entries(role.modes).map(([name, m]) => [name, { outcomes: m.outcomes }])) };
-    },
-    workspaceOf: () => ({ path: "/work/tree", base: "main" }),
-    maxAgents: options.maxAgents,
-  });
-  cleanups.push(async () => {
-    await flows.close();
-    store.close();
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  defs.save({ kind: "role", slug: "dev", scope: "user", body: devRole("Eres dev v1."), source: "ui" });
-  defs.save({ kind: "profile", slug: "default", scope: "user", body: devProfile("sonnet"), source: "ui" });
-
-  const anyArgs = z.record(z.string(), z.unknown());
-  /** Registra una acción de prueba con los outcomes que da y lo que hace. */
-  function action(
-    name: string,
-    outcomes: string[],
-    fn: (args: Record<string, unknown>, ctx: ActionCtx) => Promise<ActionResult> | ActionResult = () => ({ outcome: "ok" }),
-  ) {
-    flows.registerAction({
-      name,
-      outcomes,
-      effects: "local",
-      args: anyArgs,
-      run: async (args, ctx) => fn(args, ctx),
-    });
-  }
-
-  function save(def: unknown) {
-    flows.save(FlowDef.parse(def));
-  }
-
-  const start = (flow: string, subject: SubjectRef = { type: "issue", id: "ENG-1" }, params?: Record<string, unknown>) =>
-    flows.start(flow, subject, params, { profile: "default" });
-
-  /** Resuelve cuando la corrida terminó o quedó estacionada. */
-  function finished(runId: RunId): Promise<void> {
-    const filter = { runId, types: ["run.finished" as const, "run.parked" as const] };
-    return new Promise((resolve) => {
-      if (store.events.since(0, filter).length > 0) return resolve();
-      const off = store.events.subscribe(() => {
-        off();
-        resolve();
-      }, filter);
-    });
-  }
-
-  const eventTypes = (runId: RunId) =>
-    store.events
-      .since(0, { runId })
-      .map((e) => e.type)
-      .filter((type) => /^(run|step|agent)\./.test(type));
-
-  const nodes = (runId: RunId) => flows.getRun(runId).steps.map((s) => s.nodeId);
-
-  return { store, defs, flows, artifacts, calls, action, save, start, finished, eventTypes, nodes };
+function harness(options: Parameters<typeof createHarness>[0] = {}) {
+  const h = createHarness(options);
+  cleanups.push(h.cleanup);
+  return h;
 }
 
 describe("un flujo action → agent → action", () => {

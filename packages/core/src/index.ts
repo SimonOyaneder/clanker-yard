@@ -53,6 +53,7 @@ export type {
   ActionCtx,
   ActionDef,
   ActionResult,
+  BranchResult,
   ConsolidatorDef,
   RetryPolicy,
   RoleInfo,

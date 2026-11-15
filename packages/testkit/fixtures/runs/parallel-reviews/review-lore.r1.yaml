@@ -1,0 +1,11 @@
+# Lore da ok con un ⚪ trivial: pasa el consolidador pero no pide cambios.
+match: { mode: review }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "1 nit trivial"
+    payload:
+      findings:
+        - { id: f1, severity: white, path: README.md, line: 1, claim: "Typo", fix: "Corregir", trivial: true }
+      previous: []

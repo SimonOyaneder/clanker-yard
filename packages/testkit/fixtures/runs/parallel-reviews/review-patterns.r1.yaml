@@ -1,0 +1,8 @@
+# Patterns da ok en la ronda 1: con rerun not-ok no corre en la 2 (no tiene guion r2).
+match: { mode: review }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Sin hallazgos"
+    payload: { findings: [], previous: [] }

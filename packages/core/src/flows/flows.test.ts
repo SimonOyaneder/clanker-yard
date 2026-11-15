@@ -63,12 +63,6 @@ function setup(): { defs: Defs; flows: Flows } {
   action("pr.reply", okOnly, "remote");
   flows.registerWait({ name: "pr.botReview", outcomes: ["lgtm", "findings"], args: anyArgs });
   flows.registerWait({ name: "pr.ci", outcomes: ["ok", "fail"], args: anyArgs });
-  flows.registerConsolidator({ name: "worst", outcomes: ["ok", "changes", "fail", "error"] });
-  flows.registerConsolidator({
-    name: "items.merge",
-    outcomes: ["ok", "changes"],
-    args: z.object({ items: z.string(), rank: z.string(), changesIf: z.array(z.string()) }),
-  });
   return { defs, flows };
 }
 
@@ -438,6 +432,7 @@ describe("flujos inválidos: una regla por caso, con su ruta", () => {
     ["un consolidador que no está registrado", { "nodes.par.join": "ghost" }, ["nodes.par.join"]],
     ["los args del consolidador no validan", { "nodes.par.join": { fn: "items.merge", args: { items: 3 } } }, ["nodes.par.join.args.items", "nodes.par.join.args.rank", "nodes.par.join.args.changesIf", "nodes.par.on.fail"]],
     ["falta el edge de un outcome del consolidador", { "nodes.par.on.fail": undefined }, ["nodes.par.on.fail"]],
+    ["rerun not-ok con un forEach", { "nodes.par.rerun": "not-ok", "nodes.par.branches": { forEach: "$check.items", branch: { type: "agent", role: "review-lore", mode: "review", brief: {} } }, "nodes.b1": undefined, "nodes.b2": undefined }, ["nodes.par.rerun"]],
     ["un forEach con una rama que usa el output de su parallel", { "nodes.par.branches": { forEach: "$check.items", branch: { type: "agent", role: "review-lore", mode: "review", brief: { x: "$par.out" } } }, "nodes.b1": undefined, "nodes.b2": undefined }, ["nodes.par.branches.branch.brief.x"]],
   ];
 

@@ -314,6 +314,9 @@ export function validateFlow(def: FlowDef, catalog: Catalog): Validation {
           }
         }
         if (!Array.isArray(node.branches)) {
+          if (node.rerun === "not-ok") {
+            fail([...path, "rerun"], "rerun not-ok no aplica a un forEach: sus ramas se identifican por posición y la lista cambia entre visitas");
+          }
           const branchPath = [...path, "branches", "branch"];
           checkRefsIn(node.branches.forEach, [...path, "branches", "forEach"], id, inline);
           checkNode(id, node.branches.branch, branchPath, true);

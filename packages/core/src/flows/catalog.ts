@@ -2,8 +2,8 @@ import type { FlowDef, RunId } from "@clanker/api";
 import type { infer as Infer, ZodType } from "zod";
 
 // Lo que otros módulos (Workspaces, CodeHost, Tracker, packs, Agents) registran en Flows: la
-// validación lee los nombres y outcomes, el motor ejecuta. `WaitDef` y `ConsolidatorDef` agregan
-// `key`, `match`, `probe` y la función del join cuando existan los nodos wait y parallel.
+// validación lee los nombres y outcomes, el motor ejecuta. `WaitDef` agrega `key`, `match` y
+// `probe` cuando exista el nodo wait.
 
 /** Cuántas veces se re-ejecuta tras una excepción y cuánto se espera: `backoffSec[n-1]` antes del reintento n, el último se repite. */
 export interface RetryPolicy {
@@ -58,11 +58,23 @@ export interface WaitDef {
   outcomes: string[];
 }
 
-export interface ConsolidatorDef {
+/** Lo que una rama del parallel dejó al cerrar: su outcome y su output. */
+export interface BranchResult {
+  outcome: string;
+  output: unknown;
+}
+
+export interface ConsolidatorDef<A extends ZodType = ZodType> {
   name: string;
-  /** Valida el `args` del `join`; sin esto no se validan. */
-  args?: ZodType;
+  /** Valida el `args` del `join` (ya con sus refs resueltos); sin esto no se validan. */
+  args?: A;
   outcomes: string[];
+  /**
+   * Junta las ramas en un outcome y un output. Corre dentro de la transacción que cierra la última
+   * rama: es síncrona y pura. Recibe solo las ramas que corrieron y no fallaron, por su id (en un
+   * `forEach`, por su posición). Si lanza, el parallel termina en `error`.
+   */
+  run(byBranch: Record<string, BranchResult>, args: Infer<A>): { outcome: string; output: unknown };
 }
 
 /** Un rol visto desde un flujo: qué modos tiene, qué outcomes da cada uno y qué forma lleva su brief. */

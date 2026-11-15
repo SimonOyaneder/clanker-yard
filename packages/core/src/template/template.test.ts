@@ -118,6 +118,7 @@ describe("calza con los flujos de la plantilla", () => {
     expect(payload.safeParse({ previous: [finding] }).success).toBe(true);
     expect(payload.safeParse({ previous: { findings: [finding], previous: [] }, ws: { path: "/w" } }).success).toBe(true);
     expect(payload.safeParse({}).success).toBe(true);
+    expect(payload.safeParse({ previous: null }).success).toBe(true);
     expect(payload.safeParse({ previous: "f1" }).success).toBe(false);
   });
 

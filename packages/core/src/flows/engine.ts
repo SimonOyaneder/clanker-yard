@@ -15,8 +15,17 @@ import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
 import { actionEffects, agentSessions, runs, stepRuns, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
-import type { ActionCtx, ActionDef, RetryPolicy } from "./catalog";
+import type { ActionCtx, ActionDef, ConsolidatorDef, RetryPolicy } from "./catalog";
 import { edgeFor, edgesOf, maxRoundsOf, takeEdge } from "./edges";
+import {
+  agentRolesOf,
+  branchIds,
+  joinStepId,
+  parallelOf,
+  parseInlineBranch,
+  stepNode,
+  type ParallelNode,
+} from "./parallel";
 import { isTruthy, navigate, refPath, resolveRefs } from "./refs";
 import { LANE_BY_TRIGGER } from "./validate";
 
@@ -87,6 +96,7 @@ export interface EngineDeps {
   agents: Agents;
   artifacts: Artifacts;
   actions: ReadonlyMap<string, ActionDef>;
+  consolidators: ReadonlyMap<string, ConsolidatorDef>;
   /** El worktree de la corrida (el que tiene tomado), donde corren sus agentes. */
   workspaceOf?: (runId: RunId) => { path: string; base: string } | undefined;
   /** Tope global de agentes a la vez. */
@@ -132,7 +142,9 @@ type Settled =
   /** Una excepción: se reintenta según `retry`. */
   | { kind: "failed"; error: string }
   /** Falló el entorno, no el paso: vuelve a pending sin gastar intento. */
-  | { kind: "deferred"; error: string; notBefore: number };
+  | { kind: "deferred"; error: string; notBefore: number }
+  /** Un parallel que abrió sus ramas: el padre espera y lo cierra la transacción de la última rama. */
+  | { kind: "waiting" };
 
 interface Job {
   run: RunRow;
@@ -140,10 +152,32 @@ interface Job {
   step: StepRow;
   flow: FlowDef;
   node: Node;
+  /** Si el paso es una rama de un parallel o su rol consolidador: el id del parallel. */
+  parallel?: { parent: string; role: "branch" | "join" };
+}
+
+/** Qué hacer con el parallel al cerrar un paso suyo. */
+type JoinPlan =
+  /** Quedan ramas corriendo. */
+  | { kind: "wait" }
+  /** El join es un rol: falta su paso de agente. */
+  | { kind: "agent" }
+  /** El parallel termina con este outcome. */
+  | { kind: "done"; outcome: string; outputHash?: ArtifactHash; error?: string };
+
+/** Cómo quedó una rama, o cómo quedará con el cierre que se está planeando. */
+interface BranchState {
+  /** El id de la rama; en un forEach, su posición. */
+  key: string;
+  stepId: StepRunId;
+  status: StepRow["status"];
+  outcome: string | null;
+  outputHash: ArtifactHash | null;
+  error: string | null;
 }
 
 export function createEngine(deps: EngineDeps): Engine {
-  const { store, defs, agents, artifacts, actions, workspaceOf, now = Date.now } = deps;
+  const { store, defs, agents, artifacts, actions, consolidators, workspaceOf, now = Date.now } = deps;
   const maxAgents = deps.maxAgents ?? DEFAULT_MAX_AGENTS;
   const bootId = deps.bootId ?? newId("boot");
   const flowCache = new Map<string, FlowDef>();
@@ -162,12 +196,6 @@ export function createEngine(deps: EngineDeps): Engine {
       flowCache.set(key, flow);
     }
     return flow;
-  }
-
-  function nodeOf(flow: FlowDef, id: string): Node {
-    const node = flow.nodes[id];
-    if (!node) throw new Error(`El flujo "${flow.id}" no tiene el nodo "${id}".`);
-    return node;
   }
 
   const scopeOf = (run: RunRow, stepRunId?: StepRunId) => ({
@@ -198,10 +226,14 @@ export function createEngine(deps: EngineDeps): Engine {
       if (live) return live.id;
 
       const flow = FlowDef.parse(def.body);
-      const unsupported = Object.entries(flow.nodes).filter(([, n]) => n.type !== "agent" && n.type !== "action");
+      const unsupported = Object.entries(flow.nodes).flatMap(([nodeId, n]) => {
+        const types: [string, string][] = [[nodeId, n.type]];
+        if (n.type === "parallel" && !Array.isArray(n.branches)) types.push([`${nodeId}.branch`, n.branches.branch.type]);
+        return types.filter(([, type]) => type !== "agent" && type !== "action" && type !== "parallel");
+      });
       if (unsupported.length > 0) {
-        const list = unsupported.map(([nodeId, n]) => `${nodeId} (${n.type})`).join(", ");
-        throw new RunStartError(`El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${list}. Solo agent y action.`);
+        const list = unsupported.map(([nodeId, type]) => `${nodeId} (${type})`).join(", ");
+        throw new RunStartError(`El flujo "${flowSlug}" usa nodos que el motor todavía no ejecuta: ${list}. Solo agent, action y parallel.`);
       }
       const params = effectiveParams(flow, given);
       try {
@@ -213,11 +245,11 @@ export function createEngine(deps: EngineDeps): Engine {
       }
 
       const roles: Record<string, DefPin> = {};
-      for (const node of Object.values(flow.nodes)) {
-        if (node.type !== "agent" || roles[node.role]) continue;
-        const role = defs.resolve("role", node.role, { repoId: opts.repoId });
-        if (!role) throw new RunStartError(`El flujo "${flowSlug}" usa el rol "${node.role}", que no existe.`);
-        roles[node.role] = { id: role.id, version: role.version };
+      for (const slug of agentRolesOf(flow)) {
+        if (roles[slug]) continue;
+        const role = defs.resolve("role", slug, { repoId: opts.repoId });
+        if (!role) throw new RunStartError(`El flujo "${flowSlug}" usa el rol "${slug}", que no existe.`);
+        roles[slug] = { id: role.id, version: role.version };
       }
       let profile: DefPin | undefined;
       if (opts.profile !== undefined) {
@@ -330,13 +362,15 @@ export function createEngine(deps: EngineDeps): Engine {
 
     for (const { step, run } of ready) {
       const flow = flowOf(run);
-      const node = nodeOf(flow, step.nodeId);
+      const target = stepNode(flow, step.nodeId);
+      const { node } = target;
       const isAgent = node.type === "agent";
       if (isAgent && activeAgents >= maxAgents) continue;
       const leased = lease(step);
       if (!leased) continue;
       if (isAgent) activeAgents++;
-      const job = execute({ run, step: leased, flow, node }).finally(() => {
+      const parallel = target.kind === "plain" ? undefined : { parent: target.parent, role: target.kind };
+      const job = execute({ run, step: leased, flow, node, parallel }).finally(() => {
         if (isAgent) activeAgents--;
         inFlight.delete(job);
         wake();
@@ -385,7 +419,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (error instanceof StaleStepError) throw error;
         settled = { kind: "failed", error: describe(error) };
       }
-      settle(job, settled);
+      if (settled.kind !== "waiting") settle(job, settled);
     } catch (error) {
       if (error instanceof StaleStepError) return;
       console.error(`No se pudo cerrar el paso ${job.step.id} (${job.step.nodeId}):`, error);
@@ -416,7 +450,12 @@ export function createEngine(deps: EngineDeps): Engine {
     if (node.when !== undefined && !isTruthy(resolveRefs(node.when, resolve))) {
       return { kind: "outcome", outcome: "skipped" };
     }
-    const input = resolveRefs(node.type === "agent" ? node.brief : node.type === "action" ? node.args : null, resolve);
+    if (node.type === "parallel") return openBranches(job, node);
+    // Lo que las ramas dejaron no pasa por `resolveRefs`: un texto que parezca un ref no se toca.
+    const input =
+      job.parallel?.role === "join"
+        ? branchOutputs(run.id, job.parallel.parent, job.flow)
+        : resolveRefs(node.type === "agent" ? node.brief : node.type === "action" ? node.args : null, resolve);
     const inputHash = artifacts.put(JSON.stringify(input), "brief", { mime: "application/json" });
     artifacts.ref(inputHash, { type: "step_run", id: step.id, role: "input" });
     markRunning(job, inputHash);
@@ -570,6 +609,11 @@ export function createEngine(deps: EngineDeps): Engine {
       case "prev":
         root = step.prevStepRunId === null ? null : outputOf(selectStep(step.prevStepRunId));
         break;
+      case "item": {
+        const inline = parseInlineBranch(step.nodeId);
+        root = inline && itemsOf(parallelStepOf(run.id, inline.parent))[inline.index];
+        break;
+      }
       case "self":
         root = outputOf(lastDone(run.id, step.nodeId, step.visit));
         break;
@@ -602,9 +646,13 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   function outputOf(step: StepRow | undefined): unknown {
-    if (!step?.outputHash) return undefined;
-    const artifact = artifacts.get(step.outputHash);
-    if (!artifact) throw new Error(`Falta el artefacto ${step.outputHash}, el output del paso ${step.id}.`);
+    return readArtifact(step?.outputHash);
+  }
+
+  function readArtifact(hash: ArtifactHash | null | undefined): unknown {
+    if (!hash) return undefined;
+    const artifact = artifacts.get(hash);
+    if (!artifact) throw new Error(`Falta el artefacto ${hash}.`);
     return JSON.parse(new TextDecoder().decode(artifact.content));
   }
 
@@ -672,82 +720,292 @@ export function createEngine(deps: EngineDeps): Engine {
    * La transición: cierra el paso, elige el edge por outcome, cuenta la ronda, crea el paso
    * siguiente en pending y escribe los eventos, todo en la misma transacción. Sin edge para el
    * outcome (un `error` que el nodo no maneja) la corrida queda parked en este paso.
+   *
+   * Una rama de un parallel no sigue edges: al cerrarse mira si era la última, y si lo era la
+   * misma transacción cierra el parallel con el edge de su outcome. El output del join se guarda
+   * antes, porque los artefactos abren su propia transacción.
    */
   function transition(job: Job, outcome: string, outputHash: ArtifactHash | undefined, error: string | undefined): void {
-    const { step, node } = job;
+    const { step, node, parallel } = job;
+    const failed = outcome === "error" || outcome === "timeout";
+    const parent = parallel && parallelStepOf(step.runId, parallel.parent);
+    const plan =
+      parallel?.role === "branch" && parent
+        ? planJoin(job, parent, { stepId: step.id, status: failed ? "failed" : "done", outcome, outputHash: outputHash ?? null, error: error ?? null })
+        : undefined;
+
     store.tx((tx) => {
       const run = tx.db.select().from(runs).where(eq(runs.id, step.runId)).get();
       if (!run) throw new Error(`Desapareció la corrida ${step.runId}.`);
-      const cost = Number(
-        tx.db.select({ total: sum(agentSessions.costMicros) }).from(agentSessions).where(eq(agentSessions.stepRunId, step.id)).get()?.total ?? 0,
-      );
-      const edge = edgeFor(node, outcome);
-      const taken = edge === undefined ? undefined : takeEdge(edge, `${step.nodeId}.${outcome}`, run.rounds, run.params);
-      const message = error ?? (taken ? undefined : `el nodo "${step.nodeId}" no tiene edge para el outcome "${outcome}"`);
+      if (!parallel || !parent) return advance(tx, run, step, node, outcome, outputHash, error);
 
-      const closed = tx.db
-        .update(stepRuns)
-        .set({
-          status: taken ? "done" : "failed",
-          outcome,
-          outputHash,
-          error: message ?? null,
-          costMicros: cost,
-          owner: null,
-          leaseUntil: null,
-          notBefore: null,
-        })
-        .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), inArray(stepRuns.status, ["leased", "running"])))
-        .returning({ id: stepRuns.id })
-        .get();
-      if (!closed) throw new StaleStepError(step.id);
-      tx.emit({
-        type: "step.finished",
-        origin: "core",
-        ...scopeOf(run, step.id),
-        payload: {
-          ...stepPayload(step),
-          outcome,
-          outputHash: outputHash ?? null,
-          costMicros: cost,
-          ...(message === undefined ? {} : { error: message }),
-          ...(taken?.note === undefined ? {} : { note: taken.note }),
-        },
-      });
-
-      const totals = { costMicros: run.costMicros + cost };
-      if (!taken) {
-        tx.db.update(runs).set({ ...totals, status: "parked", parkReason: "needs_human" }).where(eq(runs.id, run.id)).run();
-        tx.emit({ type: "run.parked", origin: "core", ...scopeOf(run, step.id), payload: { reason: "needs_human" } });
-        return;
+      closeStep(tx, run, step, { status: failed ? "failed" : "done", outcome, outputHash, message: error });
+      // El cierre sumó su costo a la corrida: `advance` parte de la fila al día.
+      const current = tx.db.select().from(runs).where(eq(runs.id, run.id)).get() ?? run;
+      const parentNode = parallelOf(job.flow, parallel.parent);
+      if (parallel.role === "join") {
+        // Un join que falla es un error del parallel; si no, su outcome es el del parallel.
+        return advance(tx, current, parent, parentNode, failed ? "error" : outcome, failed ? undefined : outputHash, error);
       }
-
-      const rounds = taken.counter ? { ...run.rounds, [taken.counter.key]: taken.counter.count } : run.rounds;
-      if (taken.to.startsWith("@")) {
-        const endedAt = now();
-        const result = taken.to.slice(1);
-        tx.db
-          .update(runs)
-          .set({ ...totals, rounds, status: result === "done" ? "done" : "failed", outcome: result, endedAt })
-          .where(eq(runs.id, run.id))
-          .run();
-        tx.emit({
-          type: "run.finished",
-          origin: "core",
-          ...scopeOf(run),
-          payload: { outcome: result, costMicros: totals.costMicros, minutes: (endedAt - run.startedAt) / 60_000 },
-        });
-        return;
-      }
-
-      tx.db.update(runs).set({ ...totals, rounds }).where(eq(runs.id, run.id)).run();
-      const last = tx.db
-        .select({ visit: max(stepRuns.visit) })
-        .from(stepRuns)
-        .where(and(eq(stepRuns.runId, run.id), eq(stepRuns.nodeId, taken.to)))
-        .get();
-      insertStep(tx, run, taken.to, { visit: (last?.visit ?? 0) + 1, round: taken.round, prev: step.id });
+      applyJoin(tx, current, parent, parentNode, plan ?? { kind: "wait" });
     });
+  }
+
+  /** Cierra `step` con el edge de su outcome y deja la corrida donde ese edge la lleve. */
+  function advance(
+    tx: Tx,
+    run: RunRow,
+    step: StepRow,
+    node: Node,
+    outcome: string,
+    outputHash: ArtifactHash | undefined,
+    error: string | undefined,
+  ): void {
+    const edge = edgeFor(node, outcome);
+    const taken = edge === undefined ? undefined : takeEdge(edge, `${step.nodeId}.${outcome}`, run.rounds, run.params);
+    const message = error ?? (taken ? undefined : `el nodo "${step.nodeId}" no tiene edge para el outcome "${outcome}"`);
+    const cost = closeStep(tx, run, step, {
+      status: taken ? "done" : "failed",
+      outcome,
+      outputHash,
+      message,
+      note: taken?.note,
+    });
+
+    if (!taken) {
+      tx.db.update(runs).set({ status: "parked", parkReason: "needs_human" }).where(eq(runs.id, run.id)).run();
+      tx.emit({ type: "run.parked", origin: "core", ...scopeOf(run, step.id), payload: { reason: "needs_human" } });
+      return;
+    }
+
+    const rounds = taken.counter ? { ...run.rounds, [taken.counter.key]: taken.counter.count } : run.rounds;
+    if (taken.to.startsWith("@")) {
+      const endedAt = now();
+      const result = taken.to.slice(1);
+      tx.db
+        .update(runs)
+        .set({ rounds, status: result === "done" ? "done" : "failed", outcome: result, endedAt })
+        .where(eq(runs.id, run.id))
+        .run();
+      tx.emit({
+        type: "run.finished",
+        origin: "core",
+        ...scopeOf(run),
+        payload: { outcome: result, costMicros: run.costMicros + cost, minutes: (endedAt - run.startedAt) / 60_000 },
+      });
+      return;
+    }
+
+    tx.db.update(runs).set({ rounds }).where(eq(runs.id, run.id)).run();
+    insertStep(tx, run, taken.to, { visit: nextVisit(tx, run.id, taken.to), round: taken.round, prev: step.id });
+  }
+
+  /** Marca el paso como cerrado, escribe `step.finished` y suma su costo a la corrida. Devuelve el costo. */
+  function closeStep(
+    tx: Tx,
+    run: RunRow,
+    step: StepRow,
+    closing: { status: "done" | "failed"; outcome: string; outputHash?: ArtifactHash; message?: string; note?: string },
+  ): number {
+    const cost = Number(
+      tx.db.select({ total: sum(agentSessions.costMicros) }).from(agentSessions).where(eq(agentSessions.stepRunId, step.id)).get()?.total ?? 0,
+    );
+    const closed = tx.db
+      .update(stepRuns)
+      .set({
+        status: closing.status,
+        outcome: closing.outcome,
+        outputHash: closing.outputHash,
+        error: closing.message ?? null,
+        costMicros: cost,
+        owner: null,
+        leaseUntil: null,
+        notBefore: null,
+      })
+      .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), inArray(stepRuns.status, ["leased", "running", "waiting"])))
+      .returning({ id: stepRuns.id })
+      .get();
+    if (!closed) throw new StaleStepError(step.id);
+    tx.emit({
+      type: "step.finished",
+      origin: "core",
+      ...scopeOf(run, step.id),
+      payload: {
+        ...stepPayload(step),
+        outcome: closing.outcome,
+        outputHash: closing.outputHash ?? null,
+        costMicros: cost,
+        ...(closing.message === undefined ? {} : { error: closing.message }),
+        ...(closing.note === undefined ? {} : { note: closing.note }),
+      },
+    });
+    if (cost > 0) {
+      tx.db.update(runs).set({ costMicros: sql`${runs.costMicros} + ${cost}` }).where(eq(runs.id, run.id)).run();
+    }
+    return cost;
+  }
+
+  function nextVisit(tx: Tx, runId: RunId, nodeId: string): number {
+    const last = tx.db
+      .select({ visit: max(stepRuns.visit) })
+      .from(stepRuns)
+      .where(and(eq(stepRuns.runId, runId), eq(stepRuns.nodeId, nodeId)))
+      .get();
+    return (last?.visit ?? 0) + 1;
+  }
+
+  // --- parallel --------------------------------------------------------------------------------
+
+  /**
+   * El parallel crea un paso por rama y queda waiting; el join lo evalúa la transacción que cierra
+   * la última. Con `rerun: "not-ok"`, al reentrar solo corren las ramas que no dieron ok: las demás
+   * aportan al join lo último que dejaron.
+   */
+  function openBranches(job: Job, node: ParallelNode): Settled {
+    const { run, step } = job;
+    let items: unknown[] | undefined;
+    if (!Array.isArray(node.branches)) {
+      const value = resolveRefs(node.branches.forEach, (ref) => resolveRef(run, step, ref));
+      if (!Array.isArray(value)) {
+        return permanent(`El forEach ${node.branches.forEach} del parallel "${step.nodeId}" no resolvió a una lista: ${JSON.stringify(value)}.`);
+      }
+      items = value;
+    }
+    const inputHash = artifacts.put(JSON.stringify(items ?? node.branches), "brief", { mime: "application/json" });
+    artifacts.ref(inputHash, { type: "step_run", id: step.id, role: "input" });
+    markRunning(job, inputHash);
+
+    const toRun = branchIds(step.nodeId, node, items?.length).filter(
+      (id) => node.rerun !== "not-ok" || !isOk(latestStep(run.id, id)),
+    );
+    const opened = { ...step, inputHash };
+    // Sin ramas que correr (una lista vacía, o todas ya dieron ok) el join se evalúa de inmediato.
+    const plan = toRun.length === 0 ? planJoin(job, opened, undefined) : undefined;
+
+    store.tx((tx) => {
+      const waiting = tx.db
+        .update(stepRuns)
+        .set({ status: "waiting", owner: null, leaseUntil: null })
+        .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), eq(stepRuns.status, "running")))
+        .returning()
+        .get();
+      if (!waiting) throw new StaleStepError(step.id);
+      for (const id of toRun) {
+        insertStep(tx, run, id, {
+          visit: nextVisit(tx, run.id, id),
+          round: step.round,
+          prev: step.prevStepRunId ?? undefined,
+        });
+      }
+      if (plan) applyJoin(tx, run, waiting, node, plan);
+    });
+    return { kind: "waiting" };
+  }
+
+  /** Lo que el join hace con el parallel `parent`, ya decidido por `planJoin`. */
+  function applyJoin(tx: Tx, run: RunRow, parent: StepRow, node: ParallelNode, plan: JoinPlan): void {
+    if (plan.kind === "wait") return;
+    if (plan.kind === "done") return advance(tx, run, parent, node, plan.outcome, plan.outputHash, plan.error);
+    insertStep(tx, run, joinStepId(parent.nodeId), {
+      visit: nextVisit(tx, run.id, joinStepId(parent.nodeId)),
+      round: parent.round,
+      prev: parent.prevStepRunId ?? undefined,
+    });
+  }
+
+  /**
+   * Decide qué pasa con `parent` cuando `closing` cierra una de sus ramas (o ahora mismo, sin
+   * `closing`). Corre antes de la transacción: el output del consolidador va a artifacts, que abren
+   * la suya. No hay un await entre este plan y la transacción que lo aplica, así que ninguna otra
+   * rama se cierra en medio.
+   */
+  function planJoin(job: Job, parent: StepRow, closing: Omit<BranchState, "key"> | undefined): JoinPlan {
+    const node = parallelOf(job.flow, parent.nodeId);
+    const states = branchStates(job.run.id, parent, node, closing);
+    if (states.some((s) => ["pending", "leased", "running", "waiting"].includes(s.status))) return { kind: "wait" };
+
+    const failed = states.filter((s) => s.status === "failed");
+    const ran = states.filter((s) => s.status === "done" && s.outcome !== "skipped");
+    // Con `ignore` el join sigue sin las ramas con error, salvo que ninguna haya salido bien.
+    if (failed.length > 0 && (node.onBranchError !== "ignore" || ran.length === 0)) {
+      const why = failed.map((s) => `${s.key}: ${s.error ?? s.outcome}`).join("; ");
+      return { kind: "done", outcome: "error", error: `Fallaron ramas de "${parent.nodeId}" (${why}).` };
+    }
+
+    const join = node.join ?? "worst";
+    if (typeof join === "object" && "role" in join) return { kind: "agent" };
+    const name = typeof join === "string" ? join : join.fn;
+    const consolidator = consolidators.get(name);
+    if (!consolidator) return { kind: "done", outcome: "error", error: `El consolidador "${name}" no está registrado.` };
+    try {
+      const rawArgs = typeof join === "string" ? {} : resolveRefs(join.args ?? {}, (ref) => resolveRef(job.run, parent, ref));
+      const args = consolidator.args ? consolidator.args.safeParse(rawArgs) : { success: true as const, data: rawArgs };
+      if (!args.success) return { kind: "done", outcome: "error", error: `Los args de "${name}" no son válidos: ${formatIssues(args.error)}` };
+      const byBranch = Object.fromEntries(ran.map((s) => [s.key, { outcome: s.outcome ?? "", output: readArtifact(s.outputHash) }]));
+      const result = consolidator.run(byBranch, args.data);
+      if (result.outcome !== "error" && !consolidator.outcomes.includes(result.outcome)) {
+        throw new Error(`devolvió el outcome "${result.outcome}", que no declara (${consolidator.outcomes.join(", ")})`);
+      }
+      const outputHash = artifacts.put(JSON.stringify(result.output), "report", { mime: "application/json" });
+      artifacts.ref(outputHash, { type: "step_run", id: parent.id, role: "output" });
+      return { kind: "done", outcome: result.outcome, outputHash };
+    } catch (error) {
+      return { kind: "done", outcome: "error", error: `El consolidador "${name}" falló: ${describe(error)}` };
+    }
+  }
+
+  /** El último paso de cada rama del parallel, con el cierre de `closing` aplicado si aún no se guardó. */
+  function branchStates(runId: RunId, parent: StepRow, node: ParallelNode, closing: Omit<BranchState, "key"> | undefined): BranchState[] {
+    const fixed = Array.isArray(node.branches);
+    return branchIds(parent.nodeId, node, fixed ? undefined : itemsOf(parent).length).flatMap((id, index) => {
+      const last = latestStep(runId, id);
+      if (!last) return [];
+      const key = fixed ? id : String(index);
+      if (closing?.stepId === last.id) return [{ key, ...closing }];
+      return [{ key, stepId: last.id, status: last.status, outcome: last.outcome, outputHash: last.outputHash, error: last.error }];
+    });
+  }
+
+  /** `{ rama: output }`: lo que recibe un rol consolidador. Sin las ramas con error ni las saltadas. */
+  function branchOutputs(runId: RunId, parentId: string, flow: FlowDef): Record<string, unknown> {
+    const parent = parallelStepOf(runId, parentId);
+    const states = branchStates(runId, parent, parallelOf(flow, parentId), undefined);
+    return Object.fromEntries(
+      states.filter((s) => s.status === "done" && s.outcome !== "skipped").map((s) => [s.key, readArtifact(s.outputHash)]),
+    );
+  }
+
+  /** La visita del parallel que espera a sus ramas. */
+  function parallelStepOf(runId: RunId, nodeId: string): StepRow {
+    const step = store.db
+      .select()
+      .from(stepRuns)
+      .where(and(eq(stepRuns.runId, runId), eq(stepRuns.nodeId, nodeId), eq(stepRuns.status, "waiting")))
+      .orderBy(desc(stepRuns.visit))
+      .limit(1)
+      .get();
+    if (!step) throw new Error(`El parallel "${nodeId}" de la corrida ${runId} no está esperando a sus ramas.`);
+    return step;
+  }
+
+  /** La lista que resolvió el forEach del parallel, guardada como su input. */
+  function itemsOf(parent: StepRow): unknown[] {
+    const list = readArtifact(parent.inputHash);
+    if (!Array.isArray(list)) throw new Error(`El parallel ${parent.id} no guardó la lista de su forEach.`);
+    return list;
+  }
+
+  /** Una rama que ya dio ok (o se saltó) no se relanza con `rerun: "not-ok"`. */
+  const isOk = (step: StepRow | undefined) => step?.status === "done" && (step.outcome === "ok" || step.outcome === "skipped");
+
+  function latestStep(runId: RunId, nodeId: string): StepRow | undefined {
+    return store.db
+      .select()
+      .from(stepRuns)
+      .where(and(eq(stepRuns.runId, runId), eq(stepRuns.nodeId, nodeId)))
+      .orderBy(desc(stepRuns.visit))
+      .limit(1)
+      .get();
   }
 
   // --- lectura ---------------------------------------------------------------------------------

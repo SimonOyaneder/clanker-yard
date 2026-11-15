@@ -1,0 +1,12 @@
+# Ronda 1 de bugs: un amarillo y un ⚪ sin trivial (que el consolidador descarta).
+match: { mode: review }
+result:
+  status: success
+  structured:
+    outcome: changes
+    summary: "1 amarillo y 1 nit"
+    payload:
+      findings:
+        - { id: f1, severity: yellow, path: app/models/transfer.rb, line: 42, claim: "Falta validar el monto", fix: "Agregar la validación" }
+        - { id: f2, severity: white, path: app/models/transfer.rb, line: 80, claim: "Nombre poco claro", fix: "Renombrar", trivial: false }
+      previous: []

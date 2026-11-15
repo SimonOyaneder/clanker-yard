@@ -82,11 +82,12 @@ export type ReviewReport = z.infer<typeof ReviewReport>;
 
 /**
  * `focus` es opcional: el rol ya lo fija con su rúbrica, y los flujos no lo arman. `previous` es
- * una lista de hallazgos o el reporte anterior completo, que es lo que `$self` resuelve en un flujo.
+ * una lista de hallazgos o el reporte anterior completo, que es lo que `$self` resuelve en un flujo;
+ * en la primera visita `$self` no apunta a nada y llega `null`.
  */
 export const ReviewBrief = z.object({
   focus: ReviewFocus.optional(),
-  previous: z.union([z.array(Finding), ReviewReport]).optional(),
+  previous: z.union([z.array(Finding), ReviewReport]).nullish(),
 });
 export type ReviewBrief = z.infer<typeof ReviewBrief>;
 

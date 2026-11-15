@@ -1,0 +1,11 @@
+# Ronda 1 de tests: un rojo en las mismas líneas que el amarillo de bugs (el mismo hallazgo, con más severidad).
+match: { mode: review }
+result:
+  status: success
+  structured:
+    outcome: changes
+    summary: "1 rojo"
+    payload:
+      findings:
+        - { id: f1, severity: red, path: app/models/transfer.rb, line: 44, claim: "El monto negativo no tiene test", fix: "Agregar el caso" }
+      previous: []
