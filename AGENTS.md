@@ -99,6 +99,7 @@ Un pack (`docs/design.html#packs`) es lo propio de una org (señales de PR, bot 
 - `packs.packFor({ githubOrg, trackerWorkspace, projectId })` lee los packs guardados y devuelve el primero (por id) cuyo `activate` cubre el alcance, o los defaults neutros con `id: null`. Para un repo se pasa su org de GitHub; para un proyecto, su id y el workspace de su tracker.
 - `defs.resolve` no conoce el alcance: un flujo o rol de un pack es visible para cualquier repo. Quien lance un flujo debe consultar `packFor` antes de ofrecer lo del pack.
 - El runtime `claude-sdk` sigue rechazando una fuente de contexto `pack` (las referencias `skill:`, `rule:` y `repo:` de `conventions.context` no se resuelven todavía).
+- `packs/acme/` es el pack de ejemplo: lo específico de Acme (riesgo del bot de review, `/review`, merge-queue y `/merge`, convenciones de PR) como datos, y nada de eso entra al core. Lo que declara se comporta como Clanker Control y `clanker-loop watch`, y `packages/core/src/packs/acme.test.ts` lo fija con copias literales de ese código: si cambias una regex o un texto del pack, ese test dice qué comportamiento de hoy rompes. Desvíos del diseño: los roles son `.json` (el cargador lo exige), `silentReviewBody` exige la palabra (el vigilante no trata `!!!` ni `.` como un LGTM) y `flows` lista solo `techlead-acme` (el de council llega con su plantilla). Sus roles `review-lore` y `triage` pisan a los de la plantilla (precedencia `pack` sobre `builtin`) y deben mantener sus modos, outcomes y esquemas: el test lo verifica.
 
 ## Git remoto (push y fetch)
 
