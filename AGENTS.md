@@ -27,6 +27,8 @@ npm test               # vitest desde la raíz (un proyecto por app y paquete)
 
 Los tres deben pasar antes de dar algo por listo; la CI corre los mismos en cada PR y en `main`. Un test de un paquete va junto a su código como `src/**/*.test.ts`.
 
+El core es un proceso largo: un callback de timer o de evento (`setInterval`, `.on(...)`) no lanza, porque un throw ahí tumba el core. Atrapa el error y conviértelo en un resultado (abortar un `AbortSignal`, emitir un evento).
+
 UI sola: `npm run dev -w packages/ui` abre la UI en el navegador (puerto 8890) con datos de ejemplo en memoria.
 
 Capturas de UI: todavía no hay captura automática. Cuando exista el E2E con Playwright `_electron` se documenta aquí; mientras tanto usa `chrome-devtools-mcp`.
@@ -54,6 +56,8 @@ El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run 
 Lo que ya define `@clanker/api` (ids con prefijo, `EventType`, `Origin`, `SubjectRef`, `Event`, `EventFilter`) se importa de ahí, no se redeclara en el core: en el schema con `.$type<...>()`, que no cambia la migración.
 
 Los ids de prueba salen de `newId("run")` o son ULIDs válidos (`run_00000000000000000000000001`): `run_1` pasa el tipo, pero el store rechaza el evento.
+
+Si una tx emite el inicio de algo (`lease.acquired`) y el paso que sigue falla, el camino de error emite el cierre (`lease.released`): la línea de tiempo no puede quedar con un lease que nunca se soltó.
 
 ## Secretos y conexiones
 
