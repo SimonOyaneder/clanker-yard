@@ -132,6 +132,12 @@ export interface Engine {
   getRun(runId: RunId): RunView;
   /** Las corridas más recientes primero, sin sus pasos. */
   listRuns(filter?: { projectId?: ProjectId; status?: readonly RunRow["status"][] }): Omit<RunView, "steps">[];
+  /**
+   * Al bootear, con las acciones y los waits ya registrados y antes de aceptar trabajo: despacha los
+   * pasos pending que dejó el core anterior (en backoff, o creados durante el drain) y sondea sus
+   * waits. Todavía no retoma lo que quedó leased o running.
+   */
+  recover(): void;
   /** Deja de despachar y espera a los pasos en curso. */
   close(): Promise<void>;
 }
@@ -1278,7 +1284,7 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(inFlight);
   }
 
-  return { start, signal, getRun, listRuns, close };
+  return { start, signal, getRun, listRuns, recover: wake, close };
 }
 
 class StepTimeout extends Error {

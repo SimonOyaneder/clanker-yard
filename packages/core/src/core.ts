@@ -64,6 +64,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
   installBuiltins({ defs, flows });
+  flows.recover();
 
   const server = await startServer({
     store,

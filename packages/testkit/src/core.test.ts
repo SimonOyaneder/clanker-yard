@@ -1,3 +1,4 @@
+import { renameSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
@@ -142,6 +143,28 @@ describe("arranque", () => {
     await boot();
 
     expect(store.events.since(0, { types: ["def.versioned"] })).toHaveLength(3);
+  });
+
+  test("al arrancar despacha los pasos pending que dejó el core anterior", async () => {
+    let client = await boot();
+    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const project = await createToyProject(client, { repo: repoId });
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
+    const nextRetry = await follow(client, project.id, ["step.retrying"]);
+    // Sin la carpeta del repo, workspace.acquire falla y el paso queda pending con su backoff.
+    renameSync(repo.dir, `${repo.dir}-away`);
+    const { id } = await client.runs.start({ projectId: project.id, issueId: issue.id });
+    await nextRetry();
+    await core?.close();
+    core = undefined;
+    renameSync(`${repo.dir}-away`, repo.dir);
+    // El backoff ya venció cuando arranca el core siguiente.
+    store.db.$client.exec(`UPDATE step_runs SET not_before = 0 WHERE run_id = '${id}'`);
+
+    client = await boot();
+    const nextFinished = await follow(client, project.id, ["run.finished"]);
+
+    expect(await nextFinished()).toMatchObject({ runId: id, payload: { outcome: "done" } });
   });
 
   test("CORE_RUNTIME que no está registrado hace fallar el arranque diciendo cuáles hay", async () => {
