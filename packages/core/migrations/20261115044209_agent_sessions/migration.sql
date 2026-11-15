@@ -1,0 +1,30 @@
+CREATE TABLE `agent_sessions` (
+	`id` text PRIMARY KEY,
+	`step_run_id` text,
+	`role_def_id` text NOT NULL,
+	`role_version` integer NOT NULL,
+	`runtime` text NOT NULL,
+	`session_ref` text NOT NULL,
+	`resumed_from` text,
+	`cwd` text NOT NULL,
+	`model` text NOT NULL,
+	`effort` text,
+	`status` text NOT NULL,
+	`report` text,
+	`error` text,
+	`turns` integer DEFAULT 0 NOT NULL,
+	`tokens_in` integer DEFAULT 0 NOT NULL,
+	`tokens_out` integer DEFAULT 0 NOT NULL,
+	`tokens_cache_read` integer DEFAULT 0 NOT NULL,
+	`tokens_cache_write` integer DEFAULT 0 NOT NULL,
+	`cost_micros` integer DEFAULT 0 NOT NULL,
+	`cost_source` text,
+	`transcript_path` text,
+	`started_at` integer NOT NULL,
+	`ended_at` integer,
+	CONSTRAINT `fk_agent_sessions_resumed_from_agent_sessions_id_fk` FOREIGN KEY (`resumed_from`) REFERENCES `agent_sessions`(`id`),
+	CONSTRAINT `fk_agent_sessions_role_def_id_role_version_def_versions_def_id_version_fk` FOREIGN KEY (`role_def_id`,`role_version`) REFERENCES `def_versions`(`def_id`,`version`),
+	CONSTRAINT "agent_sessions_report_json" CHECK("report" IS NULL OR json_valid("report"))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `agent_sessions_runtime_session_ref` ON `agent_sessions` (`runtime`,`session_ref`);
