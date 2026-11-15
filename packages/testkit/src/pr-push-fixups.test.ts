@@ -136,6 +136,14 @@ const subjects = (ref: string) => local("log", "--reverse", "--format=%s", `${le
 const shaOf = (subject: string) => local("log", "--format=%H", "--grep", `^${subject}$`, `${lease.baseSha}..HEAD`);
 const inCommit = (sha: string) => local("show", "--format=", sha);
 
+/** Un commit más de la branch, pusheado como lo dejaría una corrida. */
+async function commitAndPush(content: string, message: string) {
+  write("c.txt", content);
+  local("add", "c.txt");
+  local("commit", "--quiet", "--message", message);
+  await workspaces.push(args().ws);
+}
+
 type Route = { commits: { message: string; hunks: string[] }[] };
 
 function args(overrides: { items?: { id: string; path?: string; line?: number }[]; route?: Route } = {}) {
@@ -290,6 +298,34 @@ describe("pr.pushFixups", () => {
     const [older, newer] = shaOf("feat: top").split("\n").reverse();
     expect(inCommit(newer!)).toContain("+ten fixed");
     expect(inCommit(older!)).not.toContain("ten fixed");
+  });
+
+  test("un hunk que cambia líneas de dos commits va al más nuevo, donde el autosquash lo puede poner", async () => {
+    // `feat: pair` es dueño de dos de las tres líneas que cambian; `feat: twelve`, más nuevo, de la otra.
+    const pair = file(lines(30)).replace("l2\n", "top\n").replace("l28\n", "bottom\n").replace("l10\nl11\n", "ten\neleven\n");
+    await commitAndPush(pair, "feat: pair");
+    const twelve = pair.replace("l12\n", "twelve\n");
+    await commitAndPush(twelve, "feat: twelve");
+    write("c.txt", twelve.replace("ten\neleven\ntwelve\n", "ten fixed\neleven fixed\ntwelve fixed\n"));
+
+    const result = await pushFixups.run(args(), durableCtx());
+
+    expect(result.outcome).toBe("ok");
+    expect(subjects(remoteSha())).toEqual(["feat: top", "feat: bottom", "feat: pair", "feat: twelve"]);
+    expect(inCommit(shaOf("feat: twelve"))).toContain("+ten fixed");
+  });
+
+  test("un hunk pegado a una línea de un commit más nuevo que su destino va al committer", async () => {
+    // Arreglar la línea 2 (de `feat: top`) choca en el autosquash con la 3, que cambió `feat: three`.
+    const three = file(lines(30)).replace("l2\n", "top\n").replace("l28\n", "bottom\n").replace("l3\n", "three\n");
+    await commitAndPush(three, "feat: three");
+    const head = local("rev-parse", "HEAD");
+    write("c.txt", three.replace("top\n", "top fixed\n"));
+
+    const result = await pushFixups.run(args(), durableCtx());
+
+    expect(result).toEqual({ outcome: "route", output: { unrouted: ["h1"] } });
+    expect(local("rev-parse", "HEAD")).toBe(head);
   });
 
   test("sin cambios no hay nada que commitear y el push es noop", async () => {

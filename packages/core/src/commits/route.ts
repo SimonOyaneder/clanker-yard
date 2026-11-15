@@ -32,8 +32,11 @@ export interface HunkRoutes {
 /**
  * El destino de cada hunk sale de `git blame` sobre `HEAD`: las líneas que el hunk quita o cambia son
  * de algún commit, y el hunk va a un `fixup!` de ese. Un hunk que toca líneas de varios commits va al
- * que tiene más (a igualdad, el más nuevo). Sin destino: un hunk que solo agrega líneas, que cambia
- * líneas de la base o que no se parte en líneas (binario, modo, archivo vacío).
+ * más nuevo: el autosquash pone el `fixup!` justo después de su destino, y ahí las líneas de un commit
+ * posterior todavía no existen. Por lo mismo, si un commit posterior al destino es dueño de una línea
+ * pegada a un cambio del hunk, el rebase choca: ese hunk también queda sin destino. Sin destino: además,
+ * un hunk que solo agrega líneas, que cambia líneas de la base o que no se parte en líneas (binario,
+ * modo, archivo vacío).
  *
  * Un `fixup!` que ya está en la branch (un PR con council nunca los squashea) cuenta como su commit
  * original, que es el destino de un `fixup!` nuevo.
@@ -53,16 +56,15 @@ export async function routeHunks(
   const bySha = new Map<string, Hunk[]>();
   const unrouted: Hunk[] = [];
   for (const hunk of hunks) {
-    const lines = removedLines(hunk);
-    const counts = new Map<number, number>();
-    if (lines.length > 0) {
+    const { removed, adjacent } = touchedLines(hunk);
+    let target: number | undefined;
+    if (removed.length > 0) {
       const fileOwners = await blame(hunk.path);
-      for (const line of lines) {
-        const index = originalIndex(commits, fileOwners.get(line));
-        if (index !== undefined) counts.set(index, (counts.get(index) ?? 0) + 1);
-      }
+      const newest = (lines: number[]) =>
+        Math.max(-1, ...lines.map((line) => originalIndex(commits, fileOwners.get(line)) ?? -1));
+      target = newest(removed);
+      if (target === -1 || newest(adjacent) > target) target = undefined;
     }
-    const [target] = [...counts].sort(([ia, a], [ib, b]) => b - a || ib - ia)[0] ?? [];
     if (target === undefined) unrouted.push(hunk);
     else bySha.set(commits[target]!.sha, [...(bySha.get(commits[target]!.sha) ?? []), hunk]);
   }
@@ -102,17 +104,27 @@ async function blameLines(workspaces: Workspaces, ws: WorkspaceRef, path: string
   return lines;
 }
 
-/** Los números de línea (de `HEAD`) que el hunk quita o cambia. */
-function removedLines(hunk: Hunk): number[] {
+/**
+ * Las líneas (de `HEAD`) que el hunk quita o cambia, y las que quedan pegadas a cada cambio sin ser
+ * parte de él: la de antes y la de después de cada tramo de `-` y `+`.
+ */
+function touchedLines(hunk: Hunk): { removed: number[]; adjacent: number[] } {
   const start = /^@@ -(\d+)/.exec(hunk.header);
-  if (!start) return [];
+  if (!start) return { removed: [], adjacent: [] };
   const removed: number[] = [];
+  const adjacent: number[] = [];
   let line = Number(start[1]);
+  let changing = false;
   for (const text of hunk.body.split("\n").slice(1)) {
+    const change = text.startsWith("-") || text.startsWith("+");
+    if (change && !changing) adjacent.push(line - 1);
+    if (text.startsWith(" ") && changing) adjacent.push(line);
     if (text.startsWith("-")) removed.push(line++);
     else if (text.startsWith(" ")) line++;
+    if (change || text.startsWith(" ")) changing = change;
   }
-  return removed;
+  if (changing) adjacent.push(line);
+  return { removed, adjacent };
 }
 
 /** El rango de `path` en `HEAD` que cubre el hunk, para ligar un hallazgo del PR (que apunta a una línea de `HEAD`) con su arreglo. */
