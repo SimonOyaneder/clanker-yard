@@ -165,7 +165,7 @@ const runRewritten = (number: number, { from, to }: { from: string; to: string }
 type Output = {
   merge: { sha: string; squash: string };
   children: { pr: { number: number }; branch: string; status: string; reason?: string; files?: string[]; commits?: number }[];
-  changedDrafts: { number: number }[];
+  changedDrafts: { pr: { number: number }; branch: string; base: string }[];
   mergeable: { number: number; mergeable: boolean | null }[];
 };
 const outputOf = (result: { output?: unknown }) => result.output as Output;
@@ -220,7 +220,7 @@ describe("stack.restack", () => {
     const output = outputOf(result);
     expect(output.merge).toEqual({ sha: squash, squash: "same" });
     expect(output.children).toMatchObject([{ pr: { number: child }, branch: "cla-2", status: "restacked", commits: 1 }]);
-    expect(output.changedDrafts).toEqual([ref(child)]);
+    expect(output.changedDrafts).toEqual([{ pr: ref(child), branch: "cla-2", base: "main" }]);
     expect(output.mergeable).toEqual([{ number: child, mergeable: true }]);
     // La punta nueva es solo su commit propio sobre el squash: sin el merge ni lo que traía del padre.
     expect(remoteSha("cla-2")).not.toBe(before);
@@ -323,7 +323,10 @@ describe("stack.restack", () => {
       [child, "restacked"],
       [grandchild, "restacked"],
     ]);
-    expect(output.changedDrafts.map((p) => p.number)).toEqual([child, grandchild]);
+    expect(output.changedDrafts).toEqual([
+      { pr: ref(child), branch: "cla-2", base: "main" },
+      { pr: ref(grandchild), branch: "cla-3", base: "cla-2" },
+    ]);
     expect(remoteSha("cla-2")).not.toBe(oldChild);
     expect(remoteLog(`${squash}..cla-3`)).toBe("feat: cla-3\nfeat: cla-2");
     expect(remoteLog(`${remoteSha("cla-2")}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${remoteSha("cla-2")}`);
@@ -457,7 +460,7 @@ describe("stack.restackRewritten", () => {
     expect(result.outcome).toBe("ok");
     const output = outputOf(result);
     expect(output.children).toMatchObject([{ pr: { number: child }, branch: "cla-2", status: "restacked", commits: 1 }]);
-    expect(output.changedDrafts).toEqual([ref(child)]);
+    expect(output.changedDrafts).toEqual([{ pr: ref(child), branch: "cla-2", base: "cla-1" }]);
     expect(output.mergeable).toEqual([{ number: 1, mergeable: true }, { number: child, mergeable: true }]);
     // Un solo commit propio, directo sobre la punta nueva del padre y con el patch-id de antes.
     expect(remoteLog(`${rewritten.to}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${rewritten.to}`);

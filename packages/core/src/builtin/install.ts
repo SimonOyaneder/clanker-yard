@@ -20,6 +20,8 @@ const TEMPLATES: Template[] = [
       clankerLoopTemplate.flows["pr-feedback"]!,
       clankerLoopTemplate.flows["techlead-clasico"]!,
       clankerLoopTemplate.flows["rebase-conflicto"]!,
+      clankerLoopTemplate.flows["restack-feedback"]!,
+      clankerLoopTemplate.flows["restack"]!,
       clankerLoopTemplate.flows["restack-rewritten"]!,
     ],
   },

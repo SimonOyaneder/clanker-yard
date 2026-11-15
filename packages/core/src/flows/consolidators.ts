@@ -25,6 +25,29 @@ export const worst: ConsolidatorDef = {
   },
 };
 
+/** De mejor a peor: el `@end` de una corrida hija. */
+const FLOW_LADDER = ["done", "blocked", "failed"];
+
+/**
+ * El join de un forEach de subflujos: el peor `@end` entre las hijas (`done`, `blocked`, `failed`); sin hijas,
+ * `done`. `worst` no sirve ahí porque sus outcomes son los de los pasos, no los de un flujo.
+ */
+export const worstFlow: ConsolidatorDef = {
+  name: "flows.worst",
+  outcomes: FLOW_LADDER,
+  run(byBranch) {
+    let worstIndex = 0;
+    for (const [branch, { outcome }] of Object.entries(byBranch)) {
+      const index = FLOW_LADDER.indexOf(outcome);
+      if (index < 0) {
+        throw new Error(`flows.worst no conoce el outcome "${outcome}" de la rama "${branch}" (conoce: ${FLOW_LADDER.join(", ")}).`);
+      }
+      worstIndex = Math.max(worstIndex, index);
+    }
+    return { outcome: FLOW_LADDER[worstIndex] ?? "done", output: { branches: byBranch } };
+  },
+};
+
 const ItemsMergeArgs = z.strictObject({
   items: z.string().min(1).describe("Campo del output de cada rama con su lista de ítems."),
   rank: z.string().min(1).describe("Campo de cada ítem con su rango."),

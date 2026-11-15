@@ -76,6 +76,8 @@ export interface TechleadScenarioOptions {
   tracker?: "local" | "linear";
   /** Carpetas de guiones del runtime fake, además de `FIXTURES` (un test que corre otro flujo sobre el PR). */
   fixtures?: string[];
+  /** Enciende Watch (por defecto sí). Un test que emite los eventos de PR a mano lo apaga para que nada los repita. */
+  watch?: boolean;
 }
 
 /** La corrida con sus pasos, como la devuelve `runs.get`. */
@@ -166,7 +168,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
     linearEndpoint: linear?.endpoints.graphql,
     coreVersion: "0.0.0",
     onShutdown: () => {},
-    watch: true,
+    watch: options.watch ?? true,
   });
   const client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
 

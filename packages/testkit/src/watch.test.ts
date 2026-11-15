@@ -635,8 +635,18 @@ describe("dispara flujos", () => {
       effects: "remote",
       run: (args) => {
         restacked.push(args);
-        return Promise.resolve({ outcome: "ok" });
+        return Promise.resolve({ outcome: "ok", output: { changedDrafts: [] } });
       },
+    });
+    // Sin drafts cambiados no corre ninguna rama, pero el flujo que llaman tiene que existir.
+    flows.save({
+      schema: 1,
+      id: "restack-feedback",
+      name: "restack-feedback",
+      trigger: { type: "subflow" },
+      params: { pr: "PrRef", repo: "RepoRef", branch: "string", base: "string", externalRounds: "number" },
+      start: "work",
+      nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
     });
     flows.save(clankerLoopTemplate.flows["restack-rewritten"]!);
     const pr = sim.openPr({ head: "one" });
@@ -653,7 +663,7 @@ describe("dispara flujos", () => {
     await wake(31 * SECOND);
 
     expect(runsOf("restack-rewritten")).toEqual([
-      expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number), from, to } }),
+      expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number), repo: expect.any(String), externalRounds: 3, from, to } }),
     ]);
     await vi.waitFor(() => expect(restacked).toEqual([{ pr: ref(pr.number), from, to }]));
   });

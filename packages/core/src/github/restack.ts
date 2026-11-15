@@ -29,9 +29,12 @@ export interface StackRestackDeps {
 const RestackArgs = z.object({ pr: PrRef });
 const RestackRewrittenArgs = z.object({ pr: PrRef, from: z.string().min(1), to: z.string().min(1) });
 
-/** Qué pasó con un hijo (o nieto) del PR mergeado. */
+/** Un PR en draft que se pusheó: con su branch y su base, un flujo toma de ahí su worktree (`workspace.attach`). */
+export type ChangedDraft = { pr: PrRef; branch: string; base: string };
+
+/** Qué pasó con un hijo (o nieto) del PR mergeado. `base` es la branch sobre la que quedó. */
 export type ChildReport = { pr: PrRef; branch: string } & (
-  | { status: "restacked"; previousHead: string; head: string; commits: number; draft: boolean }
+  | { status: "restacked"; previousHead: string; head: string; commits: number; draft: boolean; base: string }
   | { status: "uptodate" }
   | { status: "conflict"; files: string[]; failures: string }
   | { status: "skipped"; reason: string }
@@ -74,7 +77,7 @@ const MERGEABLE_WAIT_MS = 10_000;
  *   que Watch verá.
  *
  * Outcomes: `ok` y `conflict` (algún hijo quedó para el flujo de rebase). Output: `merge`, `children`
- * (en orden de recorrido), `changedDrafts` (los PRs en draft que se pushearon: piden /review otra
+ * (en orden de recorrido), `changedDrafts` (los PRs en draft que se pushearon, cada uno como `{ pr, branch, base }`: piden /review otra
  * vez) y `mergeable`. Un PR que no está en `pull_requests` o no tiene hijos da `ok` sin nada.
  */
 export function stackRestackAction(deps: StackRestackDeps): ActionDef<typeof RestackArgs> {
@@ -165,7 +168,7 @@ async function restackChain(
   { row: parentRow, repoId, remote }: Found,
   first: Start,
   mergedBranch?: string,
-): Promise<{ outcome: "ok" | "conflict"; output: { children: ChildReport[]; changedDrafts: PrRef[]; mergeable: { number: number; mergeable: boolean | null }[] } }> {
+): Promise<{ outcome: "ok" | "conflict"; output: { children: ChildReport[]; changedDrafts: ChangedDraft[]; mergeable: { number: number; mergeable: boolean | null }[] } }> {
   const { store, workspaces, prs } = deps;
   const pause = deps.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const client = deps.connections.githubClient(remote.account);
@@ -209,7 +212,7 @@ async function restackChain(
       switch (result.outcome) {
         case "restacked":
           return {
-            report: { ...base, status: "restacked", previousHead: result.previousHead, head: result.head, commits: result.commits, draft: state.state === "draft" },
+            report: { ...base, status: "restacked", previousHead: result.previousHead, head: result.head, commits: result.commits, draft: state.state === "draft", base: start.base },
             next: { from: result.previousHead, onto: result.head, base: child.headRef },
           };
         case "uptodate":
@@ -280,7 +283,9 @@ async function restackChain(
 
   await restackChildren(parentRow, first, mergedBranch);
   const mergeable = await ctx.once("mergeable", () => github(() => readMergeable(client, { owner, repo: name }, pause)));
-  const changedDrafts = children.flatMap((child) => (child.status === "restacked" && child.draft ? [child.pr] : []));
+  const changedDrafts = children.flatMap((child) =>
+    child.status === "restacked" && child.draft ? [{ pr: child.pr, branch: child.branch, base: child.base }] : [],
+  );
   return { outcome: children.some((child) => child.status === "conflict") ? "conflict" : "ok", output: { children, changedDrafts, mergeable } };
 }
 

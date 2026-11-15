@@ -5,7 +5,7 @@ import type { Artifacts } from "../artifacts/artifacts";
 import type { DefScope, Defs } from "../defs/defs";
 import type { Store } from "../store/store";
 import type { ActionDef, Catalog, ConsolidatorDef, RoleInfo, WaitDef } from "./catalog";
-import { itemsMerge, worst } from "./consolidators";
+import { itemsMerge, worst, worstFlow } from "./consolidators";
 import { createEngine, type Engine, type EngineDeps } from "./engine";
 import { validateFlow } from "./validate";
 
@@ -70,6 +70,7 @@ export function createFlows({ roles, ...deps }: FlowsDeps): Flows {
   const actions = new Map<string, ActionDef>();
   const consolidators = new Map<string, ConsolidatorDef>([
     [worst.name, worst],
+    [worstFlow.name, worstFlow],
     [itemsMerge.name, itemsMerge],
   ]);
   const waits = new Map<string, WaitDef>();

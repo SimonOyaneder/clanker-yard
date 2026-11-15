@@ -1,4 +1,4 @@
-import type { FlowDef } from "@clanker/api";
+import type { FlowDef, Node } from "@clanker/api";
 
 // Las plantillas de flujo de "equipo clanker-loop" (`docs/design.html#d-flows`, "Plantillas incluidas"). Son
 // datos que usan los roles de esta plantilla; el core no las nombra. Las acciones y waits que citan los
@@ -405,10 +405,97 @@ export const REBASE_CONFLICTO: FlowDef = {
 };
 
 /**
+ * Le pide `/review` a cada draft que el restack pusheó (`stack.restack` y `stack.restackRewritten` dejan
+ * `changedDrafts` en el nodo `restack` de quien lo llama): una corrida de `restack-feedback` por PR, en
+ * paralelo, cada una con su propio worktree. Sin drafts cambiados la lista es vacía, no corre ninguna rama y no
+ * hay ningún agente. Un PR fuera de draft no entra en la lista: el restack no lo mueve de listo.
+ */
+const FEEDBACK_CHANGED_DRAFTS: Node = {
+  type: "parallel",
+  branches: {
+    forEach: "$restack.changedDrafts",
+    branch: {
+      type: "flow",
+      flow: "restack-feedback",
+      params: {
+        pr: "$item.pr",
+        repo: "$run.params.repo",
+        branch: "$item.branch",
+        base: "$item.base",
+        externalRounds: "$run.params.externalRounds",
+      },
+    },
+  },
+  join: "flows.worst",
+  on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+};
+
+/**
+ * Subflujo de `restack` y `restack-rewritten`: un draft que el restack pusheó vuelve a pasar por `pr-feedback`
+ * (que pide `/review`). `pr-feedback` necesita un worktree y el forEach de quien lo llama es un solo nodo,
+ * así que el `workspace.attach` de cada PR vive aquí. `branch` y `base` son los del `changedDrafts`.
+ */
+export const RESTACK_FEEDBACK: FlowDef = {
+  schema: 1,
+  id: "restack-feedback",
+  name: "Feedback de un PR restackeado",
+  trigger: { type: "subflow" },
+  params: {
+    pr: "PrRef",
+    repo: "RepoRef",
+    branch: "string",
+    base: "string",
+    externalRounds: { type: "number", default: 3 },
+  },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.attach",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "feedback" },
+    },
+    feedback: {
+      type: "flow",
+      flow: "pr-feedback",
+      params: { ws: "$ws", pr: "$run.params.pr", externalRounds: "$run.params.externalRounds" },
+      on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+    },
+  },
+};
+
+/**
+ * "Restack": se mergeó un PR del sistema (`pr.merged`) y los que iban encima tienen que quedar sobre la base
+ * donde se mergeó. Corre en mantenimiento. `stack.restack` rebasea la cadena sin agentes; un hijo que choca no
+ * frena a los demás, anota su `pr.conflict` y lo resuelve `rebase-conflicto`, por lo que el conflicto también
+ * sigue a `feedback`: los hijos que sí se restackearon lo necesitan. Los que quedaron en draft piden `/review`
+ * otra vez (la regla del clanker-loop); el resto no pasa por ningún agente.
+ */
+export const RESTACK: FlowDef = {
+  schema: 1,
+  id: "restack",
+  name: "Restack",
+  trigger: { type: "pr.merged" },
+  lane: "maintenance",
+  params: { pr: "PrRef", repo: "RepoRef", externalRounds: { type: "number", default: 3 } },
+  limits: { maxCostUsd: null, maxSteps: 50 },
+  start: "restack",
+  nodes: {
+    restack: {
+      type: "action",
+      action: "stack.restack",
+      args: { pr: "$run.params.pr" },
+      on: { ok: "feedback", conflict: { to: "feedback", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
+    },
+    feedback: FEEDBACK_CHANGED_DRAFTS,
+  },
+};
+
+/**
  * "Restack por base reescrita": la branch de un PR del sistema se reescribió (`pr.base_rewritten`, el
  * `from` y el `to` del evento son su punta vieja y la nueva) y sus hijos tienen que seguirla. Corre en
  * mantenimiento. Un hijo que choca no frena a los demás: `stack.restackRewritten` anota su `pr.conflict` y
- * lo resuelve `rebase-conflicto`, por lo que aquí el conflicto también termina en `@done`.
+ * lo resuelve `rebase-conflicto`, por lo que aquí el conflicto también sigue a `feedback`, igual que en `restack`.
  */
 export const RESTACK_REWRITTEN: FlowDef = {
   schema: 1,
@@ -416,16 +503,17 @@ export const RESTACK_REWRITTEN: FlowDef = {
   name: "Restack por base reescrita",
   trigger: { type: "pr.base_rewritten" },
   lane: "maintenance",
-  params: { pr: "PrRef", from: "string", to: "string" },
-  limits: { maxCostUsd: null, maxSteps: 10 },
+  params: { pr: "PrRef", repo: "RepoRef", from: "string", to: "string", externalRounds: { type: "number", default: 3 } },
+  limits: { maxCostUsd: null, maxSteps: 50 },
   start: "restack",
   nodes: {
     restack: {
       type: "action",
       action: "stack.restackRewritten",
       args: { pr: "$run.params.pr", from: "$run.params.from", to: "$run.params.to" },
-      on: { ok: "@done", conflict: { to: "@done", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
+      on: { ok: "feedback", conflict: { to: "feedback", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
     },
+    feedback: FEEDBACK_CHANGED_DRAFTS,
   },
 };
 
@@ -433,5 +521,7 @@ export const flows: Record<string, FlowDef> = {
   "techlead-clasico": TECHLEAD_CLASICO,
   "pr-feedback": PR_FEEDBACK,
   "rebase-conflicto": REBASE_CONFLICTO,
+  "restack-feedback": RESTACK_FEEDBACK,
+  restack: RESTACK,
   "restack-rewritten": RESTACK_REWRITTEN,
 };

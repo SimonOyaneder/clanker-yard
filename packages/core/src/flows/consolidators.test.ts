@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { BranchResult } from "./catalog";
-import { itemsMerge, worst } from "./consolidators";
+import { itemsMerge, worst, worstFlow } from "./consolidators";
 
 const branch = (outcome: string, output: unknown = {}): BranchResult => ({ outcome, output });
 const args = { items: "findings", rank: "severity", changesIf: ["red", "yellow"] } as const;
@@ -31,6 +31,18 @@ describe("worst", () => {
 
   test("un outcome que no conoce es un error con la rama", () => {
     expect(() => worst.run({ a: branch("reply") }, {})).toThrow(/outcome "reply" de la rama "a"/);
+  });
+});
+
+describe("flows.worst", () => {
+  test("elige failed > blocked > done entre los @end de las hijas, y sin hijas da done", () => {
+    expect(worstFlow.run({}, {}).outcome).toBe("done");
+    expect(worstFlow.run({ a: branch("done"), b: branch("blocked") }, {}).outcome).toBe("blocked");
+    expect(worstFlow.run({ a: branch("blocked"), b: branch("failed"), c: branch("done") }, {}).outcome).toBe("failed");
+  });
+
+  test("un outcome que no es de un flujo es un error con la rama", () => {
+    expect(() => worstFlow.run({ a: branch("ok") }, {})).toThrow(/outcome "ok" de la rama "a"/);
   });
 });
 
