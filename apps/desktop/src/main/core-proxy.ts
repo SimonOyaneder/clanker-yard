@@ -1,4 +1,5 @@
 import type { CoreState as WindowCoreState } from "@clanker/ui";
+import { UI_KEY_HEADER } from "@clanker/api";
 import type { CoreState } from "./core-supervisor";
 
 /** Esquema por el que la ventana habla con el core: `clanker-core://core/rpc` es el `url` de `createClient`. */
@@ -30,10 +31,10 @@ const text = (request: Request, status: number, message: string) =>
 /**
  * Lleva las llamadas de la ventana al core local. La ventana no habla con `127.0.0.1:<puerto>` directo:
  * el core no sirve CORS y cada arranque tiene otro puerto y otro token, así que el token se queda en el
- * main (el renderer nunca lo ve) y el puerto se lee del estado del core en cada llamada. Los streams de
+ * main (el renderer nunca lo ve) junto con la llave de la app, y el puerto se lee del estado del core en cada llamada. Los streams de
  * eventos pasan tal cual y abortar la llamada cierra la conexión con el core.
  */
-export function createCoreProxy(opts: { endpoint(): CoreEndpoint | undefined; fetch?: typeof fetch }): (request: Request) => Promise<Response> {
+export function createCoreProxy(opts: { endpoint(): CoreEndpoint | undefined; uiKey: string; fetch?: typeof fetch }): (request: Request) => Promise<Response> {
   const send = opts.fetch ?? fetch;
 
   return async (request) => {
@@ -43,7 +44,8 @@ export function createCoreProxy(opts: { endpoint(): CoreEndpoint | undefined; fe
     if (!endpoint) return text(request, 503, "El core no está disponible: la app lo está levantando o cayó.");
 
     const incoming = new URL(request.url);
-    const headers = new Headers({ authorization: `Bearer ${endpoint.token}` });
+    // La llave de la app solo la agrega este proxy: lo que la ventana mande con ese nombre se descarta (FORWARDED no lo incluye).
+    const headers = new Headers({ authorization: `Bearer ${endpoint.token}`, [UI_KEY_HEADER]: opts.uiKey });
     for (const name of FORWARDED) {
       const value = request.headers.get(name);
       if (value !== null) headers.set(name, value);

@@ -25,6 +25,7 @@ const router = os.router({
       schemaVersion: 1,
       bootId: "boot",
       activeRuns: 0,
+      uiKey: false,
     })),
     info: os.system.info.handler(() => ({
       pid: 1,

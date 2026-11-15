@@ -33,7 +33,7 @@ describe("tools", () => {
 
     expect(tools.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations }))).toMatchSnapshot();
     expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name)).toEqual(["list", "get"]);
-    expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name)).toEqual(["delete", "cancel_run", "interrupt_run"]);
+    expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name)).toEqual(["delete", "cancel_run", "interrupt_run", "resolve_decision"]);
   });
 
   test("list y get de los kinds de defs: los builtin del core", async () => {

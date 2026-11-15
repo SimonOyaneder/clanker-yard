@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { API_MAJOR, type Event, FlowDef, Role, contract, createClient } from "@clanker/api";
+import { hashUiKey } from "@clanker/api/node";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
@@ -46,6 +47,9 @@ afterEach(async () => {
   dataDir = "/tmp/clanker";
 });
 
+/** La llave de la app: la tiene el cliente de la ventana, no un proceso que solo lee `core.json`. */
+const UI_KEY = "llave-de-la-app";
+
 async function start(allowedOrigins?: string[], deps = apiDeps(store, dataDir)): Promise<CoreServer> {
   server = await startServer({
     store,
@@ -56,6 +60,7 @@ async function start(allowedOrigins?: string[], deps = apiDeps(store, dataDir)):
     dataDir,
     onShutdown,
     allowedOrigins,
+    uiKeyHash: hashUiKey(UI_KEY),
   });
   return server;
 }
@@ -130,6 +135,31 @@ describe("auth", () => {
     expect((await rawHealth(core, { ...headers, "x-clanker-origin": "watch" })).status).toBe(400);
   });
 
+  test("el origin ui exige la llave de la app: con solo el token de core.json es 403", async () => {
+    const core = await start();
+    const headers = { ...valid(core), "x-clanker-origin": "ui" };
+    expect((await rawHealth(core, headers)).status).toBe(403);
+    expect((await rawHealth(core, { ...headers, "x-clanker-ui-key": "otra-llave" })).status).toBe(403);
+    expect((await rawHealth(core, { ...headers, "x-clanker-ui-key": UI_KEY })).status).toBe(200);
+    // Presentar la llave sin declararse ui tampoco cambia nada: cli sigue siendo cli.
+    expect((await rawHealth(core, { ...valid(core), "x-clanker-ui-key": UI_KEY })).status).toBe(200);
+  });
+
+  test("un core sin llave configurada rechaza cualquier ui, aunque traiga una", async () => {
+    server = await startServer({ store, connections, issues: createIssues(store), ...apiDeps(store, dataDir), coreVersion: "1.2.3", dataDir, onShutdown });
+    const headers = { ...valid(server), "x-clanker-origin": "ui", "x-clanker-ui-key": UI_KEY };
+    expect((await rawHealth(server, headers)).status).toBe(403);
+  });
+
+  test("system.health dice si la llave presentada es la de la app", async () => {
+    const core = await start();
+    const url = core.url;
+    const token = core.token;
+    expect((await createClient({ url, token, origin: "cli" }).system.health()).uiKey).toBe(false);
+    expect((await createClient({ url, token, origin: "cli", uiKey: "otra-llave" }).system.health()).uiKey).toBe(false);
+    expect((await createClient({ url, token, origin: "cli", uiKey: UI_KEY }).system.health()).uiKey).toBe(true);
+  });
+
   test("el puerto es aleatorio y el token cambia en cada arranque", async () => {
     const first = await start();
     const { token } = first;
@@ -149,7 +179,7 @@ describe("connections", () => {
       "ui",
     );
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     const listed = await client.connections.list();
 
@@ -193,7 +223,7 @@ describe("connections", () => {
     });
     try {
       const core = await start();
-      const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+      const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
       const status = await client.connections.testClaude({});
 
@@ -213,7 +243,7 @@ describe("connections", () => {
 
   test("testClaude con api-key sin una key guardada es BAD_REQUEST", async () => {
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     await expect(client.connections.testClaude({ mode: "api-key" })).rejects.toMatchObject({
       code: "BAD_REQUEST",
@@ -223,7 +253,7 @@ describe("connections", () => {
 
   test("linearAuth sin client_id es BAD_REQUEST con el paso a seguir", async () => {
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     await expect(client.connections.linearAuth()).rejects.toMatchObject({
       code: "BAD_REQUEST",
@@ -238,7 +268,7 @@ describe("connections", () => {
         linear: { clientId: "test-client-id", redirectPort: 0, endpoints: linear.endpoints },
       });
       const core = await start();
-      const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+      const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
       const { url } = await client.connections.linearAuth();
       const authorize = await fetch(url, { redirect: "manual" });
@@ -255,13 +285,14 @@ describe("connections", () => {
 describe("system", () => {
   test("health informa versión, schema y bootId", async () => {
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
     expect(await client.system.health()).toEqual({
       coreVersion: "1.2.3",
       apiMajor: API_MAJOR,
       schemaVersion: readSchemaVersion(store.db.$client),
       bootId: core.bootId,
       activeRuns: 0,
+      uiKey: false,
     });
     expect((await client.system.info()).pid).toBe(process.pid);
   });
@@ -284,7 +315,7 @@ describe("artifacts", () => {
     const small = artifacts.put("plan: hacer X", "brief");
     const big = artifacts.put("l".repeat(INLINE_MAX_BYTES + 1), "log_excerpt");
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     const smallGot = await client.artifacts.get({ hash: small });
     expect(smallGot).toMatchObject({ hash: small, kind: "brief", size: 13 });
@@ -296,7 +327,7 @@ describe("artifacts", () => {
 
   test("un hash que no existe es NOT_FOUND y uno mal formado, BAD_REQUEST", async () => {
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     await expect(client.artifacts.get({ hash: "0".repeat(64) })).rejects.toMatchObject({
       code: "NOT_FOUND",
@@ -325,7 +356,7 @@ describe("runs.transcript", () => {
     dataDir = mkdtempSync(join(tmpdir(), "clanker-core-"));
     seedSession();
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     expect(await client.runs.transcript({ sessionId })).toEqual({ entries: [], next: 0, hasMore: false });
 
@@ -343,7 +374,7 @@ describe("runs.transcript", () => {
 
   test("una sesión o un paso que no existen son NOT_FOUND", async () => {
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     await expect(client.runs.transcript({ sessionId })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(client.runs.step({ id: "stp_01J0000000000000000000000A" })).rejects.toMatchObject({ code: "NOT_FOUND" });
@@ -353,7 +384,7 @@ describe("runs.transcript", () => {
 describe("decisions", () => {
   test("list filtra por kind y status, get trae una y un id desconocido es NOT_FOUND", async () => {
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
     const [review, note] = store.tx((tx) => [
       openDecision(tx, { kind: "review_note", title: "Quedan 🟡", body: "tras 3 rondas" }),
       openDecision(tx, { kind: "note", title: "Desvío ya hecho", body: "x" }),
@@ -388,7 +419,7 @@ describe("decisions", () => {
       }),
     );
     const core = await start(undefined, deps);
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "ui", uiKey: UI_KEY });
 
     const runId = deps.flows.start("ask", { type: "issue", id: "CLA-1" });
     const [gate] = await client.decisions.list({ runId, kind: ["gate"] });
@@ -405,9 +436,22 @@ describe("decisions", () => {
     await expect(client.decisions.resolve({ id: gate.id, option: "go" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
+  test("quien solo tiene el token no resuelve como ui; lo que resuelve como cli queda cli y la app queda ui", async () => {
+    const core = await start();
+    const forged = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const asCli = createClient({ url: core.url, token: core.token, origin: "cli" });
+    const app = createClient({ url: core.url, token: core.token, origin: "ui", uiKey: UI_KEY });
+    const [first, second] = store.tx((tx) => [1, 2].map((n) => openDecision(tx, { kind: "question", title: `Comentar /merge ${n}`, body: "x", options: ["ok"] })));
+
+    await expect(forged.decisions.resolve({ id: first!.id, option: "ok" })).rejects.toThrow();
+    expect(await app.decisions.get({ id: first!.id })).toMatchObject({ status: "pending" });
+    expect(await asCli.decisions.resolve({ id: first!.id, option: "ok" })).toMatchObject({ resolvedBy: "cli" });
+    expect(await app.decisions.resolve({ id: second!.id, option: "ok" })).toMatchObject({ resolvedBy: "ui" });
+  });
+
   test("resolve de una nota la cierra con lo respondido; una decisión que no existe es NOT_FOUND y una resuelta, BAD_REQUEST", async () => {
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "ui", uiKey: UI_KEY });
     const note = store.tx((tx) => openDecision(tx, { kind: "note", title: "Desvío", body: "x" }));
 
     expect(await client.decisions.resolve({ id: note.id, option: "ok" })).toMatchObject({ status: "answered", resolution: { option: "ok" }, resolvedBy: "ui" });
@@ -419,7 +463,7 @@ describe("decisions", () => {
 describe("metrics", () => {
   test("sin corridas cerradas todo viene vacío, y el resumen de un proyecto inexistente es NOT_FOUND", async () => {
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
     const project = await client.projects.create({ slug: "demo", name: "Demo", tracker: "local" });
 
     expect(await client.metrics.byRole()).toEqual([]);
@@ -471,7 +515,7 @@ describe("events", () => {
         payload: {},
       }),
     );
-    const client = createClient({ url: core.url, token: core.token, origin: "ui" });
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     const started = await client.events.list({ after: 1, limit: 1 });
     expect(started.map((e) => e.seq)).toEqual([2]);
@@ -487,7 +531,7 @@ describe("events", () => {
       url: core.url,
       headers: {
         authorization: `Bearer ${core.token}`,
-        "x-clanker-origin": "ui",
+        "x-clanker-origin": "cli",
         ...(lastEventId === undefined ? {} : { "last-event-id": lastEventId }),
       },
     });

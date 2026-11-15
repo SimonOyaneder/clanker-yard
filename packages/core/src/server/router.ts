@@ -37,6 +37,8 @@ import { eventsAfter } from "./event-stream";
 /** Lo que cada llamada trae consigo, venga por HTTP o en proceso (`createRouterClient`, MCP). */
 export interface CoreContext {
   origin: ClientOrigin;
+  /** La request trajo la llave de la app (el servidor ya la verificó). Solo `system.health` lo informa. */
+  uiKey?: boolean;
 }
 
 export interface RouterDeps {
@@ -123,12 +125,13 @@ export function createRouter(deps: RouterDeps) {
 
   return os.router({
     system: {
-      health: os.system.health.handler(() => ({
+      health: os.system.health.handler(({ context }) => ({
         coreVersion: deps.coreVersion,
         apiMajor: API_MAJOR,
         schemaVersion,
         bootId: deps.bootId,
         activeRuns: flows.listRuns({ status: ["queued", "running", "waiting"] }).length,
+        uiKey: context.uiKey === true,
       })),
       info: os.system.info.handler(() => ({
         pid: process.pid,

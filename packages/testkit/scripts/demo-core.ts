@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
-import { removeCoreJson, writeCoreJson } from "@clanker/api/node";
+import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startCore, startFakeLinear } from "@clanker/core";
 import { createFakeClaude, createFakeRuntime, type FakeClaudeScenario, seedLanes, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
@@ -80,6 +80,8 @@ const core = await startCore({
   // La demo deja las issues en la cola para lanzarlas a mano desde la UI.
   scheduler: false,
   coreVersion: "0.0.0-demo",
+  // La app con `CLANKER_HOME` usa esta misma llave, así que se conecta a la demo en vez de reemplazarla.
+  uiKeyHash: hashUiKey(isolatedUiKey(home)),
   onShutdown: () => void stop(),
 });
 

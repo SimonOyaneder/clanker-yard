@@ -37,7 +37,7 @@ describe("generateMcp sobre el contrato real", () => {
       interrupt_run: destructive,
       retry_step: { ...safe, idempotentHint: false },
       steer_step: { ...safe, idempotentHint: false },
-      resolve_decision: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      resolve_decision: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
     });
   });
 

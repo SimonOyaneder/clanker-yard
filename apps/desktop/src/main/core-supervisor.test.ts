@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createClient } from "@clanker/api";
 import { connectToCore, ensureCore, isPidAlive, readCoreJson } from "@clanker/api/node";
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { createCoreSupervisor, type CoreState, type CoreSupervisor } from "./core-supervisor";
@@ -13,6 +14,7 @@ let buildDir: string;
 let entry: string;
 let homes: string[] = [];
 let supervisors: CoreSupervisor[] = [];
+const UI_KEY = "llave-de-la-app";
 
 beforeAll(() => {
   buildDir = mkdtempSync(join(tmpdir(), "clanker-desktop-build-"));
@@ -42,7 +44,7 @@ function supervise(overrides: { entry?: string } = {}) {
   const home = mkdtempSync(join(tmpdir(), "clanker-desktop-"));
   homes.push(home);
   vi.stubEnv("CLANKER_HOME", home);
-  const supervisor = createCoreSupervisor({ dataDir: home, logDir: join(home, "logs"), entry, pollMs: 50, ...overrides });
+  const supervisor = createCoreSupervisor({ dataDir: home, logDir: join(home, "logs"), entry, uiKey: UI_KEY, pollMs: 50, ...overrides });
   supervisors.push(supervisor);
   const states: CoreState["status"][] = [];
   supervisor.onChange((s) => states.push(s.status));
@@ -90,6 +92,42 @@ describe("createCoreSupervisor", () => {
     // Lo levanta otro (por ejemplo la CLI) sobre el mismo directorio de datos.
     await ensureCore({ dataDir: home, logDir: join(home, "logs"), entry, origin: "cli" });
 
+    await vi.waitFor(() => expect(supervisor.state().status).toBe("live"), { timeout: 5_000 });
+  }, 30_000);
+
+  test("el core solo acepta ui con la llave de la app, no con el token de core.json", async () => {
+    const { home, supervisor } = supervise();
+    await supervisor.start();
+    const { port, token } = readCoreJson(home)!;
+    const url = `http://127.0.0.1:${port}/rpc`;
+
+    await expect(createClient({ url, token, origin: "ui" }).system.health()).rejects.toThrow();
+    await expect(createClient({ url, token, origin: "ui", uiKey: "otra" }).system.health()).rejects.toThrow();
+    expect(await createClient({ url, token, origin: "ui", uiKey: UI_KEY }).system.health()).toMatchObject({ uiKey: true });
+  }, 30_000);
+
+  test("un core que lanzó la CLI antes que la app se reemplaza para que reconozca la llave", async () => {
+    const { home, supervisor } = supervise();
+    const bare = await ensureCore({ dataDir: home, logDir: join(home, "logs"), entry, origin: "cli" });
+    expect(bare.health.uiKey).toBe(false);
+
+    await supervisor.start();
+
+    const live = liveInfo(supervisor);
+    expect(live.bootId).not.toBe(bare.info.bootId);
+    expect((await connectToCore(home, "ui", UI_KEY))?.health.uiKey).toBe(true);
+  }, 120_000);
+
+  test("el core que la CLI relanza después sigue reconociendo la llave, sin reemplazarlo", async () => {
+    const { home, supervisor } = supervise();
+    await supervisor.start();
+    process.kill(readCoreJson(home)!.pid, "SIGKILL");
+    await vi.waitFor(() => expect(supervisor.state().status).toBe("down"), { timeout: 5_000 });
+
+    const relaunched = await ensureCore({ dataDir: home, logDir: join(home, "logs"), entry, origin: "cli" });
+
+    expect(relaunched.health.uiKey).toBe(false);
+    expect((await connectToCore(home, "ui", UI_KEY))?.health.uiKey).toBe(true);
     await vi.waitFor(() => expect(supervisor.state().status).toBe("live"), { timeout: 5_000 });
   }, 30_000);
 

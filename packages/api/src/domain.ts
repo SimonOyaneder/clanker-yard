@@ -54,6 +54,12 @@ export type SubjectRef = z.infer<typeof SubjectRef>;
 export const Origin = z.enum(["core", "ui", "cli", "mcp", "watch", "import"]);
 export type Origin = z.infer<typeof Origin>;
 
+/**
+ * Header con la llave de la app. `x-clanker-origin` es autodeclarado, así que el core solo acepta `ui` con
+ * esta llave (que solo conoce el main de la app, no `core.json`); ver "Origin `ui`" en AGENTS.md.
+ */
+export const UI_KEY_HEADER = "x-clanker-ui-key";
+
 /** Quién puede declararse en `x-clanker-origin`: los clientes de la API. */
 export const ClientOrigin = Origin.extract(["ui", "cli", "mcp"]);
 export type ClientOrigin = z.infer<typeof ClientOrigin>;

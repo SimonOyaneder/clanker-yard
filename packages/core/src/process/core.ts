@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { API_MAJOR } from "@clanker/api";
 import { removeCoreJson, writeCoreJson } from "@clanker/api/node";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import pkg from "../../package.json" with { type: "json" };
 import { startCore } from "../core";
 import { createClaudeRuntime } from "../agents/claude/claude-runtime";
@@ -18,6 +18,8 @@ import { acquireCoreLock } from "./lock";
 import { readCoreConfig } from "./config";
 import { openCoreLog, routeConsoleTo } from "./logger";
 
+const UI_KEY_HASH = "ui_key_hash";
+
 export interface RunCoreOptions {
   dataDir: string;
   logDir: string;
@@ -25,6 +27,12 @@ export interface RunCoreOptions {
   migrationsFolder: string;
   /** Con `CLANKER_HOME` el core no toca el Keychain: los secretos van a un archivo en `dataDir`. */
   isolated: boolean;
+  /**
+   * SHA-256 de la llave de la app, que la app entrega por stdin al lanzar el core (`ensureCore`). Se guarda
+   * en `meta` para que un core que lance la CLI después siga reconociendo a la app; sin ella ni nada guardado,
+   * nadie puede declararse `ui`.
+   */
+  uiKeyHash?: string;
 }
 
 /**
@@ -75,6 +83,15 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
       })();
     };
 
+    const uiKeyHash = opts.uiKeyHash ?? store.db.select().from(meta).where(eq(meta.key, UI_KEY_HASH)).get()?.value;
+    if (opts.uiKeyHash) {
+      store.db
+        .insert(meta)
+        .values({ key: UI_KEY_HASH, value: opts.uiKeyHash })
+        .onConflictDoUpdate({ target: meta.key, set: { value: sql`excluded.value` } })
+        .run();
+    }
+
     const connections = createConnections(store, secretsFor(opts), readCoreConfig(opts.dataDir));
     // Los procesos de los agentes se registran en `procs` desde el runtime, que se arma antes que el core.
     const procs = createProcs({ store, bootId: newId("boot") });
@@ -85,6 +102,7 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
       procs,
       runtimes: [createClaudeRuntime({ credentials: connections.claudeCredentials, home: opts.dataDir, procs })],
       coreVersion: pkg.version,
+      uiKeyHash,
       onShutdown: ({ drain }) => setImmediate(() => shutdown("system.shutdown", { drain })),
       watch: true,
     });

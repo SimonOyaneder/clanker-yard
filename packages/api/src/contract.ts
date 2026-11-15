@@ -53,6 +53,8 @@ const system = {
       schemaVersion: z.int().nonnegative(),
       bootId: z.string(),
       activeRuns: z.int().nonnegative(),
+      /** La request trajo la llave de la app y el core la reconoce: quien llama puede declararse `ui`. */
+      uiKey: z.boolean(),
     }),
   ),
   /** Datos del proceso del core; `health` solo lleva lo que necesita el handshake. */
@@ -482,7 +484,7 @@ const decisions = {
         action: "resolve_decision",
         description: "Resuelve una decisión pendiente con una de sus `options` (`get` o `list` de kind `decision` las muestran); la corrida estacionada sigue. Una decisión resuelta no se puede resolver otra vez.",
         // Un gate guarda justo los pasos que publican (merge, push): elegir su outcome los deja correr.
-        annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        annotations: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
       },
     })
     .input(z.object({ id: DecisionId, option: z.string().min(1) }))

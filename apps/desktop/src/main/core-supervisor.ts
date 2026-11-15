@@ -12,6 +12,8 @@ export interface CoreSupervisorOptions {
   logDir: string;
   /** `core/main.js` empaquetado. */
   entry: string;
+  /** La llave de la app (`ui-key.ts`): el core solo acepta el origin `ui` con ella. */
+  uiKey: string;
   /** Cada cuánto comprueba que el core sigue vivo, por defecto 2 s. */
   pollMs?: number;
 }
@@ -64,7 +66,7 @@ export function createCoreSupervisor(opts: CoreSupervisorOptions): CoreSuperviso
       if (!existsSync(opts.entry)) {
         throw new Error(`No existe ${opts.entry}. Corre npm run build -w @clanker/core.`);
       }
-      live(await ensureCore({ dataDir: opts.dataDir, logDir: opts.logDir, entry: opts.entry, origin: "ui" }));
+      live(await ensureCore({ dataDir: opts.dataDir, logDir: opts.logDir, entry: opts.entry, origin: "ui", uiKey: opts.uiKey }));
     } catch (error) {
       setState({ status: "down", reason: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -76,9 +78,13 @@ export function createCoreSupervisor(opts: CoreSupervisorOptions): CoreSuperviso
     if (launching || checking) return;
     checking = true;
     try {
-      const core = await connectToCore(opts.dataDir, "ui");
+      const core = await connectToCore(opts.dataDir, "ui", opts.uiKey);
       if (launching) return;
-      if (core) live(core);
+      if (core && !core.health.uiKey) {
+        // Lo relanzó alguien sin la llave y no quedó guardada: la ventana ya no podría llamar al core como `ui`.
+        connection = undefined;
+        setState({ status: "down", reason: "El core no reconoce la llave de la app. Reintentar lo relanza." });
+      } else if (core) live(core);
       else if (state.status === "live") {
         connection = undefined;
         setState({

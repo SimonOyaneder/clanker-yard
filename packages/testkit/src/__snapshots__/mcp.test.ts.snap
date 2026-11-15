@@ -466,7 +466,7 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
   },
   {
     "annotations": {
-      "destructiveHint": false,
+      "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": true,
     },

@@ -1,7 +1,8 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { ClientOrigin } from "@clanker/api";
+import { ClientOrigin, UI_KEY_HEADER } from "@clanker/api";
+import { hashUiKey } from "@clanker/api/node";
 import { ORPCError, onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
 import { newId } from "../store/conventions";
@@ -36,6 +37,12 @@ export interface StartServerOptions extends Pick<
   bootId?: string;
   /** Origins de navegador que pueden llamar a la API (la ventana de la app). Cualquier otro Origin se rechaza. */
   allowedOrigins?: readonly string[];
+  /**
+   * SHA-256 (hex) de la llave de la app. Sin ella, o con otra, ninguna llamada puede declararse `ui`:
+   * `x-clanker-origin` lo escribe quien llama y el token está en `core.json`, así que solo la llave
+   * (que `core.json` no tiene) distingue a la app de un agente.
+   */
+  uiKeyHash?: string;
 }
 
 export interface CoreServer {
@@ -54,7 +61,7 @@ export interface CoreServer {
  * Sirve la API por HTTP en 127.0.0.1 con puerto aleatorio: `/rpc` (oRPC) y `/mcp` (MCP). Antes de
  * cualquiera, cada request debe traer el token y su Host y su Origin deben ser los esperados (contra DNS
  * rebinding: una página ajena que apunte su dominio a 127.0.0.1 manda otro Host u Origin). `/rpc` además
- * pide un `x-clanker-origin` válido; `/mcp` es siempre origin `mcp`.
+ * pide un `x-clanker-origin` válido, y `ui` solo con la llave de la app (`uiKeyHash`); `/mcp` es siempre origin `mcp`.
  */
 export async function startServer(opts: StartServerOptions): Promise<CoreServer> {
   const token = randomBytes(32).toString("base64url");
@@ -80,7 +87,11 @@ export async function startServer(opts: StartServerOptions): Promise<CoreServer>
     if (!origin.success) {
       return reject(res, { status: 400, message: "Falta x-clanker-origin: debe ser ui, cli o mcp." });
     }
-    const { matched } = await handler.handle(req, res, { prefix: "/rpc", context: { origin: origin.data } satisfies CoreContext });
+    const uiKey = hasUiKey(req.headers[UI_KEY_HEADER], opts.uiKeyHash);
+    if (origin.data === "ui" && !uiKey) {
+      return reject(res, { status: 403, message: "El origin ui exige la llave de la app: solo la app puede declararse ui; usa cli o mcp." });
+    }
+    const { matched } = await handler.handle(req, res, { prefix: "/rpc", context: { origin: origin.data, uiKey } satisfies CoreContext });
     if (!matched) res.writeHead(404).end();
   });
 
@@ -131,6 +142,13 @@ function authorize(
       message: "Falta el token: envía Authorization: Bearer <token> (está en core.json).",
     };
   }
+}
+
+function hasUiKey(header: string | string[] | undefined, expectedHash: string | undefined): boolean {
+  if (expectedHash === undefined || typeof header !== "string") return false;
+  const given = Buffer.from(hashUiKey(header));
+  const wanted = Buffer.from(expectedHash);
+  return given.length === wanted.length && timingSafeEqual(given, wanted);
 }
 
 function hasBearer(header: string | undefined, token: string): boolean {

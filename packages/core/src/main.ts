@@ -1,12 +1,13 @@
 // Entrada del proceso del core (`docs/design.html#d-data`, "Proceso del core"). Se empaqueta como
 // `dist/main.js` (`npm run build -w @clanker/core`) y la app lo lanza con `ensureCore`.
 import { fileURLToPath } from "node:url";
+import { text } from "node:stream/consumers";
 import { parseArgs } from "node:util";
 import { clankerDirs } from "@clanker/api/node";
 import { runCore } from "./process/core";
 
 const { values } = parseArgs({
-  options: { "data-dir": { type: "string" }, "log-dir": { type: "string" } },
+  options: { "data-dir": { type: "string" }, "log-dir": { type: "string" }, "ui-key-stdin": { type: "boolean" } },
   strict: true,
 });
 
@@ -17,7 +18,15 @@ if (!dataDir) {
   process.exit(2);
 }
 
+// El hash de la llave de la app llega por stdin (`ensureCore`), nunca por argv ni env, que otro proceso puede leer.
+const uiKeyHash = values["ui-key-stdin"] ? (await text(process.stdin)).trim() : undefined;
+if (uiKeyHash !== undefined && !/^[0-9a-f]{64}$/.test(uiKeyHash)) {
+  console.error("--ui-key-stdin espera por stdin el SHA-256 de la llave de la app, en hex.");
+  process.exit(2);
+}
+
 const result = await runCore({
+  uiKeyHash,
   dataDir,
   logDir: values["log-dir"] ?? clankerDirs().logDir,
   migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),

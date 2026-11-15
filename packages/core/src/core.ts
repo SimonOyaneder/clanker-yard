@@ -78,7 +78,7 @@ const WATCH_SAFETY_PROBE_SEC = 600;
 /** Autor y committer de lo que el core hace con git en un worktree. */
 const GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
 
-export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion" | "onShutdown" | "allowedOrigins"> {
+export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion" | "onShutdown" | "allowedOrigins" | "uiKeyHash"> {
   store: Store;
   dataDir: string;
   /** Quien arma los runtimes la comparte: `claude-sdk` pide a `claudeCredentials` su credencial en cada run. */
@@ -313,6 +313,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     dataDir,
     onShutdown: opts.onShutdown,
     allowedOrigins: opts.allowedOrigins,
+    uiKeyHash: opts.uiKeyHash,
   });
   if (opts.scheduler !== false) scheduler.start();
 

@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { clankerDirs } from "@clanker/api/node";
+import { clankerDirs, isolatedUiKey } from "@clanker/api/node";
 import type { MenuAction, Theme } from "@clanker/ui";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, safeStorage, shell } from "electron";
 import { CORE_SCHEME, createCoreProxy, windowCoreState } from "./core-proxy";
-import { createCoreSupervisor } from "./core-supervisor";
+import { createCoreSupervisor, type CoreSupervisor } from "./core-supervisor";
 import { registerHostIpc } from "./host-ipc";
 import { buildMenu } from "./menu";
 import { createPrefs } from "./prefs";
+import { loadUiKey } from "./ui-key";
 import { createMainWindow } from "./window";
 
 const devUrl = process.env.ELECTRON_RENDERER_URL;
@@ -20,12 +21,9 @@ app.setPath("userData", path.join(dirs.dataDir, "desktop"));
 
 const prefs = createPrefs(path.join(app.getPath("userData"), "prefs.json"));
 
-// El core se lanza como proceso (nunca se importa): en desarrollo es el bundle que deja `npm run build -w @clanker/core`.
-const supervisor = createCoreSupervisor({
-  dataDir: dirs.dataDir,
-  logDir: dirs.logDir,
-  entry: path.resolve(app.getAppPath(), "../../packages/core/dist/main.js"),
-});
+// Se arman al estar `ready`: `safeStorage` (la llave de la app) no está antes.
+let supervisor: CoreSupervisor;
+let uiKey: string;
 
 // La ventana llama a la API del core por `clanker-core://`: el proxy pone el token y el puerto vigentes.
 // El esquema se declara antes de `ready`.
@@ -83,12 +81,22 @@ function openMainWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  // Con `CLANKER_HOME` no se toca el llavero.
+  uiKey = process.env.CLANKER_HOME ? isolatedUiKey(process.env.CLANKER_HOME) : loadUiKey(path.join(app.getPath("userData"), "ui-key"), safeStorage);
+  // El core se lanza como proceso (nunca se importa): en desarrollo es el bundle que deja `npm run build -w @clanker/core`.
+  supervisor = createCoreSupervisor({
+    dataDir: dirs.dataDir,
+    logDir: dirs.logDir,
+    entry: path.resolve(app.getAppPath(), "../../packages/core/dist/main.js"),
+    uiKey,
+  });
   nativeTheme.themeSource = getTheme();
   nativeTheme.on("updated", () => mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#111114" : "#fcfcfd"));
 
   protocol.handle(
     CORE_SCHEME,
     createCoreProxy({
+      uiKey,
       endpoint: () => {
         const state = supervisor.state();
         return state.status === "live" ? { port: state.port, token: state.token } : undefined;
@@ -99,6 +107,7 @@ void app.whenReady().then(() => {
   ipcMain.on("core:retry", () => void supervisor.start());
   ipcMain.on("core:open-logs", openLogs);
   supervisor.onChange((state) => send("core:state", windowCoreState(state)));
+  app.on("before-quit", () => supervisor.close());
   registerHostIpc({ getWindow: () => mainWindow, setTheme });
 
   refreshMenu();
@@ -115,7 +124,6 @@ void app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-app.on("before-quit", () => supervisor.close());
 
 // La UI no navega fuera de la app ni abre ventanas: los links pasan por `Host.openExternal`.
 app.on("web-contents-created", (_event, contents) => {

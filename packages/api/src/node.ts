@@ -1,6 +1,7 @@
 // Subpath `@clanker/api/node`: paths por SO, `core.json` y `ensureCore` (`docs/design.html#d-data`).
 // Solo Node; la UI no lo importa.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -96,6 +97,18 @@ export function readCoreJson(dataDir: string): CoreJson | undefined {
   return parsed.data;
 }
 
+/**
+ * Lo único de la llave de la app que llega al core: su SHA-256 en hex. La llave misma (32 bytes
+ * aleatorios) nunca sale del main; el core compara el hash de lo que le presentan.
+ */
+export const hashUiKey = (key: string): string => createHash("sha256").update(key).digest("hex");
+
+/**
+ * La llave de la app con `CLANKER_HOME` (tests, demo, e2e): no hay llavero ni secreto, y la app y un core de
+ * demo que ya corre tienen que ponerse de acuerdo sin pasarse nada. Sin valor de seguridad: no es la del usuario real.
+ */
+export const isolatedUiKey = (home: string): string => `isolated:${home}`;
+
 export function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -124,19 +137,21 @@ type CoreHealth = Awaited<ReturnType<Client["system"]["health"]>>;
 export async function connectToCore(
   dataDir: string,
   origin: ClientOrigin,
+  uiKey?: string,
 ): Promise<CoreConnection | undefined> {
   const info = readCoreJson(dataDir);
   if (!info || !isPidAlive(info.pid)) return undefined;
-  const client = createClient({
-    url: `http://127.0.0.1:${info.port}/rpc`,
-    token: info.token,
-    origin,
-  });
+  const url = `http://127.0.0.1:${info.port}/rpc`;
   try {
-    const health = await client.system.health(undefined, {
+    // El sondeo no se declara `ui`: un core que no reconoce la llave rechazaría ese origin en vez de responder.
+    const probe = createClient({ url, token: info.token, origin: "cli", uiKey });
+    const health = await probe.system.health(undefined, {
       signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
     });
-    return health.bootId === info.bootId ? { info, client, health } : undefined;
+    if (health.bootId !== info.bootId) return undefined;
+    // Con ese mismo core `ui` tampoco sirve para pedirle que se apague (`ensureCore` lo reemplaza): va como `cli`.
+    const client = createClient({ url, token: info.token, origin: origin === "ui" && !health.uiKey ? "cli" : origin, uiKey });
+    return { info, client, health };
   } catch {
     // Sin respuesta: el core murió, está arrancando o el puerto lo tomó otro proceso.
     return undefined;
@@ -151,6 +166,11 @@ export interface EnsureCoreOptions {
   /** `core/main.js` empaquetado: lo lanza `process.execPath` con `ELECTRON_RUN_AS_NODE=1`. */
   entry: string;
   origin: ClientOrigin;
+  /**
+   * La llave de la app (solo el main de Electron la pasa). El core nuevo recibe su hash por stdin, que
+   * ningún otro proceso puede leer, y un core vivo que no la reconoce se reemplaza como uno de otro `apiMajor`.
+   */
+  uiKey?: string;
   /** El `apiMajor` de quien llama; un core con otro se reemplaza. Por defecto el `API_MAJOR` de este paquete. */
   apiMajor?: number;
   /** Cuánto esperar a un core nuevo, por defecto 15 s. */
@@ -164,33 +184,34 @@ const SHUTDOWN_TIMEOUT_MS = 90_000;
 const POLL_MS = 50;
 
 /**
- * Devuelve la conexión a un core sano de este `apiMajor`, lanzándolo si hace falta. Si el que corre
- * tiene otro `apiMajor` (pasa al actualizar la app) le pide `system.shutdown({ drain: true })` y
+ * Devuelve la conexión a un core sano de este `apiMajor` (y, con `uiKey`, que la reconozca), lanzándolo si
+ * hace falta. Si el que corre tiene otro `apiMajor` (pasa al actualizar la app) le pide `system.shutdown({ drain: true })` y
  * lanza el nuevo. Varias llamadas concurrentes terminan con un solo core: los sobrantes salen solos
  * al ver `core.lock` (ver `packages/core/src/process/lock.ts`).
  */
 export async function ensureCore(opts: EnsureCoreOptions): Promise<CoreConnection> {
   const { dataDir, origin } = opts;
   const apiMajor = opts.apiMajor ?? API_MAJOR;
+  const fits = (core: CoreConnection) => core.health.apiMajor === apiMajor && (opts.uiKey === undefined || core.health.uiKey);
   // Una vuelta de más: otra app (de otro `apiMajor`) pudo haber lanzado su core entre nuestro apagado y nuestro lanzamiento.
   let foreign: CoreConnection | undefined;
   for (let round = 0; round < 2; round++) {
-    const running = await connectToCore(dataDir, origin);
-    if (running?.health.apiMajor === apiMajor) return running;
+    const running = await connectToCore(dataDir, origin, opts.uiKey);
+    if (running && fits(running)) return running;
     if (running) {
       await running.client.system.shutdown({ drain: true });
       await waitUntil(
         () => !isPidAlive(running.info.pid),
         opts.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS,
-        `El core ${running.info.pid} (apiMajor ${running.health.apiMajor}) no terminó de apagarse`,
+        `El core ${running.info.pid} (apiMajor ${running.health.apiMajor}, llave ${running.health.uiKey ? "reconocida" : "desconocida"}) no terminó de apagarse`,
       );
     }
     const launched = await launchCore(opts, (running ?? foreign)?.info.bootId);
-    if (!launched.foreign || launched.core.health.apiMajor === apiMajor) return launched.core;
+    if (!launched.foreign || fits(launched.core)) return launched.core;
     foreign = launched.core;
   }
   throw new Error(
-    `El core que quedó corriendo en ${dataDir} tiene apiMajor ${foreign?.health.apiMajor} y este cliente espera ${apiMajor}: ` +
+    `El core que quedó corriendo en ${dataDir} tiene apiMajor ${foreign?.health.apiMajor} y este cliente espera ${apiMajor}${opts.uiKey === undefined ? "" : " (con la llave de la app)"}: ` +
       "otra versión de la app lo vuelve a lanzar. Ciérrala o detén ese core.",
   );
 }
@@ -205,12 +226,16 @@ async function launchCore(opts: EnsureCoreOptions, previousBootId?: string): Pro
   mkdirSync(dataDir, { recursive: true });
   const args = [opts.entry, "--data-dir", dataDir];
   if (opts.logDir) args.push("--log-dir", opts.logDir);
+  if (opts.uiKey !== undefined) args.push("--ui-key-stdin");
 
   const child = spawn(process.execPath, args, {
     detached: true,
-    stdio: "ignore",
+    stdio: [opts.uiKey === undefined ? "ignore" : "pipe", "ignore", "ignore"],
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   });
+  // Por stdin y no por env ni argv: cualquier proceso del usuario puede leer esos con `ps`; un pipe no.
+  child.stdin?.on("error", () => {}); // Si el core ya murió, `exit` informa el motivo.
+  if (opts.uiKey !== undefined) child.stdin?.end(hashUiKey(opts.uiKey));
   let launchError: Error | undefined;
   child.once("error", (error) => (launchError = error));
   child.once("exit", (code) => {
@@ -223,7 +248,7 @@ async function launchCore(opts: EnsureCoreOptions, previousBootId?: string): Pro
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (launchError) throw coreStartError(opts, launchError.message);
-    const core = await connectToCore(dataDir, origin);
+    const core = await connectToCore(dataDir, origin, opts.uiKey);
     if (core && core.info.bootId !== previousBootId) return { core, foreign: core.info.pid !== child.pid };
     await sleep(POLL_MS);
   }

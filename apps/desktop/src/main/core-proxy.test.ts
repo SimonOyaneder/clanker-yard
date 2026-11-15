@@ -37,12 +37,12 @@ const request = (path: string, init: RequestInit = {}) => new Request(`clanker-c
 describe("createCoreProxy", () => {
   test("agrega el token, el origin de la UI y la ruta, y descarta el Origin del navegador", async () => {
     const { port, seen } = await fakeCore((res) => res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}'));
-    const proxy = createCoreProxy({ endpoint: () => ({ port, token: "tok" }) });
+    const proxy = createCoreProxy({ endpoint: () => ({ port, token: "tok" }), uiKey: "llave" });
 
     const res = await proxy(
       request("/rpc/runs/get?x=1", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-clanker-origin": "ui", authorization: "Bearer falso", origin: "http://localhost:8890" },
+        headers: { "content-type": "application/json", "x-clanker-origin": "ui", authorization: "Bearer falso", "x-clanker-ui-key": "inventada", origin: "http://localhost:8890" },
         body: '{"json":{"id":"run_1"}}',
       }),
     );
@@ -51,13 +51,13 @@ describe("createCoreProxy", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ method: "POST", url: "/rpc/runs/get?x=1", body: '{"json":{"id":"run_1"}}' });
-    expect(seen[0]!.headers).toMatchObject({ authorization: "Bearer tok", "x-clanker-origin": "ui", "content-type": "application/json" });
+    expect(seen[0]!.headers).toMatchObject({ authorization: "Bearer tok", "x-clanker-ui-key": "llave", "x-clanker-origin": "ui", "content-type": "application/json" });
     expect(seen[0]!.headers.origin).toBeUndefined();
   });
 
   test("contesta el preflight sin tocar el core", async () => {
     const { port, seen } = await fakeCore((res) => res.end());
-    const proxy = createCoreProxy({ endpoint: () => ({ port, token: "tok" }) });
+    const proxy = createCoreProxy({ endpoint: () => ({ port, token: "tok" }), uiKey: "llave" });
 
     const res = await proxy(request("/rpc/projects/list", { method: "OPTIONS", headers: { "access-control-request-headers": "authorization, x-clanker-origin" } }));
 
@@ -67,13 +67,13 @@ describe("createCoreProxy", () => {
   });
 
   test("con el core caído responde 503 con un mensaje, y 502 si el puerto ya no escucha", async () => {
-    const down = await createCoreProxy({ endpoint: () => undefined })(request("/rpc/projects/list", { method: "POST" }));
+    const down = await createCoreProxy({ endpoint: () => undefined, uiKey: "llave" })(request("/rpc/projects/list", { method: "POST" }));
     expect(down.status).toBe(503);
     expect(await down.text()).toMatch(/core no está disponible/);
 
     const { port } = await fakeCore((res) => res.end());
     server!.close();
-    const gone = await createCoreProxy({ endpoint: () => ({ port, token: "tok" }) })(request("/rpc/projects/list", { method: "POST" }));
+    const gone = await createCoreProxy({ endpoint: () => ({ port, token: "tok" }), uiKey: "llave" })(request("/rpc/projects/list", { method: "POST" }));
     expect(gone.status).toBe(502);
   });
 
@@ -85,7 +85,7 @@ describe("createCoreProxy", () => {
       res.write("data: uno\n\n");
       res.on("close", closed);
     });
-    const proxy = createCoreProxy({ endpoint: () => ({ port, token: "tok" }) });
+    const proxy = createCoreProxy({ endpoint: () => ({ port, token: "tok" }), uiKey: "llave" });
     const abort = new AbortController();
 
     const res = await proxy(request("/rpc/events/stream", { method: "POST", signal: abort.signal }));
