@@ -11,6 +11,7 @@ import {
   createWorkspaces,
   newId,
   openStore,
+  PermanentActionError,
   type ActionCtx,
   type Briefs,
   type Store,
@@ -291,7 +292,18 @@ describe("un plan que no se puede aplicar da replan", () => {
     git("add", "b.txt");
     git("commit", "-m", "feat: ya commiteado");
 
+    await expect(run([{ message: "feat: uno", hunks: [id!] }])).rejects.toThrow(PermanentActionError);
     await expect(run([{ message: "feat: uno", hunks: [id!] }])).rejects.toThrow(/ya está en/);
+  });
+
+  test("con una receta inválida lanza sin reintentos y no toca nada", async () => {
+    await setup({}, { version: 1, commands: { test: "sh {{nope}}" }, checks: [] });
+    write("b.txt", "b2\n");
+    const [id] = Object.values(await hunkIds());
+
+    await expect(run([{ message: "feat: b", hunks: [id!] }])).rejects.toThrow(PermanentActionError);
+    expect(git("rev-parse", "HEAD")).toBe(base);
+    expect(verifyWorktrees()).toEqual([]);
   });
 });
 

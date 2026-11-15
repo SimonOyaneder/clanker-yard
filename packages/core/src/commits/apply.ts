@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as z from "zod";
-import type { ActionCtx, ActionDef, ActionResult } from "../flows/catalog";
+import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../flows/catalog";
 import { GitError, tryGit } from "../git/git";
 import { diffBetween, listHunks, snapshotTree, type Hunk } from "../git/tree";
 import type { Recipes } from "../recipe/recipe";
@@ -57,7 +57,7 @@ const ApplyArgs = z.object({
  * deja el worktree como estaba; los commits sueltos los recoge el gc de git.
  *
  * Parte de la base del lease: un worktree con commits propios lanza, porque `hunks.json` lo planificó
- * contra la base.
+ * contra la base. Eso y una receta inválida son `PermanentActionError`: el paso falla sin reintentos.
  */
 export function commitsApplyAction({
   workspaces,
@@ -71,8 +71,9 @@ export function commitsApplyAction({
     ctx: ActionCtx,
   ): Promise<ActionResult> {
     const head = await workspaces.git(ws, "rev-parse", "HEAD");
+    // Reintentar no mueve la branch de vuelta a la base.
     if (head !== ws.baseSha) {
-      throw new Error(
+      throw new PermanentActionError(
         `commits.apply parte de la base ${ws.baseSha.slice(0, 9)}, pero ${ws.branch} ya está en ${head.slice(0, 9)}: ` +
           `el plan se hizo sobre hunks.json, que es el diff contra esa base.`,
       );
@@ -84,7 +85,13 @@ export function commitsApplyAction({
     const problems = planProblems(plan.commits, messages, hunks, messagePattern);
     if (problems.length > 0) return { outcome: "replan", output: { failures: problems.join("\n") } };
 
-    const recipe = recipes.read(ws.path);
+    let recipe;
+    try {
+      recipe = recipes.read(ws.path);
+    } catch (error) {
+      // Una receta mal escrita no se arregla reintentando.
+      throw new PermanentActionError(error instanceof Error ? error.message : String(error), { cause: error });
+    }
     const dir = mkdtempSync(join(tmpdir(), "clanker-verify-"));
     const verify: WorkspaceRef = { ...ws, path: join(dir, "worktree") };
     try {
