@@ -154,7 +154,14 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const local = createLocalTracker(store);
   const issues = createIssues(store, local);
   const projects = createProjects(store, defs);
-  const trackers = { local, linear: createLinearTracker({ connections: opts.connections, endpoint: opts.linearEndpoint }) };
+  const trackers = {
+    local,
+    linear: createLinearTracker({
+      connections: opts.connections,
+      endpoint: opts.linearEndpoint,
+      statusMapping: (ref) => projects.list().find((p) => p.tracker === "linear" && p.trackerRef === ref)?.statusMapping,
+    }),
+  };
   const lanes = createLaneSettings(store);
   const breakers = createBreakers({
     store,

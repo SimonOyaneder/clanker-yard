@@ -1,6 +1,6 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type IssueId, type PrRef, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefRecord, type IssueId, type PrRef, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
-import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
+import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildOpenPrs } from "@/seed-prs"
 import { aggregate, seedClosedRuns } from "@/seed-metrics"
 import { seedStep, transcriptPage, type StepSeed } from "@/seed-steps"
@@ -29,6 +29,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       conventions: {},
       parallel: 1,
       stackOn: "ci_green",
+      statusMapping: {},
       status: "active",
       flowParams: {},
       maxCostUsd: null,
@@ -46,6 +47,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       conventions: {},
       parallel: 2,
       stackOn: "ci_green",
+      statusMapping: {},
       status: "paused",
       flowParams: {},
       maxCostUsd: null,
@@ -278,6 +280,22 @@ export function createMemoryAppData(now = Date.now()): AppData {
     else connections.push(c)
     return c
   }
+  const def = (kind: DefRecord["kind"], slug: string, body: unknown): DefRecord => ({
+    id: id("def", nextId++),
+    kind,
+    slug,
+    scope: "builtin",
+    repoId: null,
+    archivedAt: null,
+    currentVersion: 1,
+    version: 1,
+    body,
+    source: "builtin",
+    createdAt: min(600),
+  })
+  const flowDefs = [SEED_TECHLEAD, SEED_TOY, SEED_REBASE].map((flow) => def("flow", flow.id, flow))
+  const profileDefs = ["medio", "juguete"].map((slug) => def("profile", slug, { name: slug }))
+
   const repoRows: RepoRow[] = (
     [
       ["api", { status: "found" }, { ok: true, at: min(90) }],
@@ -345,6 +363,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
         conventions: input.conventions ?? {},
         parallel: input.parallel ?? 1,
         stackOn: input.stackOn ?? "ci_green",
+        statusMapping: input.statusMapping ?? {},
         status: "active",
         flowParams: input.flowParams ?? {},
         maxCostUsd: input.maxCostUsd ?? null,
@@ -531,6 +550,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       const at = connections.findIndex((c) => c.provider === provider && c.account === account)
       if (at >= 0) connections.splice(at, 1)
     },
+    defs: async (kind) => (kind === "flow" ? flowDefs : profileDefs).map((d) => ({ ...d })),
     repos: async () => repoRows.map((r) => ({ ...r })),
     testRecipe: async (repoId) => {
       const row = repoRows.find((r) => r.repo.id === repoId)

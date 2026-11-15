@@ -42,6 +42,8 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
       ["Pausar o reanudar el proyecto", "⇧⌘Y"],
       ["Operación del proyecto", "⇧⌘1"],
       ["Resumen del proyecto", "⇧⌘2"],
+      ["Ajustes del proyecto", "⇧⌘3"],
+      ["Guardar los ajustes (con cambios)", "⌘S"],
     ],
   },
   {

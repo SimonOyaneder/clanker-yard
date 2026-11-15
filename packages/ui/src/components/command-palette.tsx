@@ -1,5 +1,5 @@
 import type { CachedIssue, ClankerProject, Decision, DecisionId, QueueEntry, Run, RunId } from "@clanker/api"
-import { BarChart3, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, ScrollText, Square, Table2, Undo2, X } from "lucide-react"
+import { BarChart3, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, Table2, Undo2, X } from "lucide-react"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs"
 import { repoNameOf } from "@/lib/prs"
@@ -23,6 +23,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { useState } from "react"
+import type { SettingsControls } from "@/components/project/settings-view"
 import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { useHost } from "@/host"
 import { useAppActions } from "@/lib/app-context"
@@ -58,6 +59,8 @@ interface Props {
   onDecision: { decision: Decision; onResolve: (decision: Decision, option: string) => void; onRespond: () => void } | null
   /** Con un proyecto a la vista: la pestaña actual y cómo cambiarla. */
   projectTab: { tab: ProjectTab; onTab: (tab: ProjectTab) => void } | null
+  /** Solo con Ajustes a la vista: guardar o descartar lo editado. */
+  settings: SettingsControls | null
   /** Solo con el Resumen a la vista: sus filtros y su vista son acciones de la paleta. */
   summary: SummaryControls | null
   /** Solo con una corrida abierta: cambia entre su grafo y su línea de tiempo. */
@@ -69,7 +72,7 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, prsActive, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, projectTab, summary, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, prsActive, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
   const prCommands = usePrCommands()
@@ -217,6 +220,25 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <CommandItem value="ir a resumen del proyecto gasto" onSelect={run(() => projectTab.onTab("summary"))}>
               <BarChart3 /> Resumen de {current.name}
               <CommandShortcut>⇧⌘2</CommandShortcut>
+            </CommandItem>
+            <CommandItem value="ir a ajustes del proyecto repos filtros convenciones parámetros" onSelect={run(() => projectTab.onTab("settings"))}>
+              <Settings2 /> Ajustes de {current.name}
+              <CommandShortcut>⇧⌘3</CommandShortcut>
+            </CommandItem>
+            <CommandItem value="editar filtros de la cola del proyecto" onSelect={run(actions.editQueueFilters)}>
+              <Filter /> Filtros de la cola de {current.name}
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
+
+        {settings?.dirty ? (
+          <CommandGroup heading="Ajustes del proyecto">
+            <CommandItem value="guardar ajustes del proyecto cambios" disabled={settings.blocked} onSelect={run(settings.save)}>
+              <Save /> {settings.blocked ? "Guardar los ajustes (corrige antes los campos marcados)" : "Guardar los ajustes"}
+              <CommandShortcut>⌘S</CommandShortcut>
+            </CommandItem>
+            <CommandItem value="descartar cambios de los ajustes del proyecto" onSelect={run(settings.discard)}>
+              <Undo2 /> Descartar los cambios sin guardar
             </CommandItem>
           </CommandGroup>
         ) : null}

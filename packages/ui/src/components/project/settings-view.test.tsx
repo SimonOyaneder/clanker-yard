@@ -1,0 +1,169 @@
+// @vitest-environment jsdom
+import type { ClankerProject } from "@clanker/api"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { toast } from "sonner"
+import { afterEach, beforeAll, expect, test, vi } from "vitest"
+import { AppDataProvider, type AppData } from "@/app-data"
+import { type SettingsControls, ProjectSettingsTab } from "@/components/project/settings-view"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { AppActionsContext, type AppActions } from "@/lib/app-context"
+import { createMemoryAppData } from "@/memory-app-data"
+
+vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }))
+
+const NOW = Date.parse("2026-11-15T12:00:00Z")
+
+beforeAll(() => {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Element.prototype.scrollIntoView = () => {}
+  Element.prototype.hasPointerCapture = () => false
+})
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
+
+async function setup(overrides: Partial<ClankerProject> = {}, which = 0) {
+  const data = createMemoryAppData(NOW)
+  const project = { ...(await data.projects())[which]!, ...overrides }
+  const update = vi.fn<AppData["updateProject"]>((id, patch) => data.updateProject(id, patch))
+  const controls: { current: SettingsControls | null } = { current: null }
+  const actions = { goConnections: vi.fn(), editQueueFilters: vi.fn() }
+  const ui = (p: ClankerProject) => (
+    <AppDataProvider value={{ ...data, updateProject: update }}>
+      <AppActionsContext.Provider value={actions as unknown as AppActions}>
+        <TooltipProvider>
+          <ProjectSettingsTab project={p} focus={null} onFocused={() => {}} onControls={(c) => (controls.current = c)} />
+        </TooltipProvider>
+      </AppActionsContext.Provider>
+    </AppDataProvider>
+  )
+  const view = render(ui(project))
+  // Los datos del core llegan async: el formulario aparece cuando están.
+  await screen.findByRole("region", { name: "Repos" })
+  return { data, project, update, controls, actions, rerender: (p: ClankerProject) => view.rerender(ui(p)) }
+}
+
+const field = (name: string) => screen.getByRole("textbox", { name })
+const save = () => fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/ }))
+
+test("cambiar reviewRounds y guardar manda solo flowParams, con un toast que lo deshace", async () => {
+  const { project, update } = await setup({ flowParams: { repo: "repo_x" } })
+  // El default del flujo se ve como placeholder, y vacío es "usar el default".
+  const rounds = screen.getByLabelText("Rondas de review")
+  expect(rounds.getAttribute("placeholder")).toBe("3")
+
+  fireEvent.change(rounds, { target: { value: "5" } })
+  save()
+
+  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { flowParams: { repo: "repo_x", reviewRounds: 5 } }))
+  const [message, options] = vi.mocked(toast).mock.calls[0]!
+  expect(message).toContain("parámetros del flujo")
+  const action = options?.action
+  if (!action || typeof action !== "object" || !("onClick" in action)) throw new Error("el toast no ofrece Deshacer")
+  action.onClick({} as never)
+  await waitFor(() => expect(update).toHaveBeenLastCalledWith(project.id, { flowParams: { repo: "repo_x" } }))
+})
+
+test("un valor inválido dice qué escribir y no deja guardar", async () => {
+  const { update } = await setup()
+
+  fireEvent.change(screen.getByLabelText("Rondas de review"), { target: { value: "0" } })
+
+  expect((await screen.findByRole("alert")).textContent).toContain("Escribe un entero de 1 en adelante (el flujo usa 3)")
+  expect((screen.getByRole("button", { name: /Guardar cambios/ }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.getByRole("region", { name: "Cambios sin guardar" }).textContent).toContain("necesita corrección")
+  expect(update).not.toHaveBeenCalled()
+})
+
+test("la ayuda de un parámetro avisa que otro flujo lo lee con otro default", async () => {
+  await setup()
+
+  expect(screen.getByText(/También lo lee: rebase-conflicto \(default 2\)/)).toBeTruthy()
+})
+
+test("Enter agrega un label a los filtros de la cola, la X lo quita y Descartar deja todo como estaba", async () => {
+  const { update } = await setup()
+  const labels = field("Labels que debe tener")
+
+  fireEvent.change(labels, { target: { value: "clanker" } })
+  fireEvent.keyDown(labels, { key: "Enter" })
+
+  expect(screen.getByRole("button", { name: "Quitar clanker" })).toBeTruthy()
+  expect(screen.getByRole("region", { name: "Cambios sin guardar" }).textContent).toContain("filtros de la cola")
+  fireEvent.click(screen.getByRole("button", { name: "Descartar" }))
+  expect(screen.queryByRole("button", { name: "Quitar clanker" })).toBeNull()
+  expect(screen.queryByRole("region", { name: "Cambios sin guardar" })).toBeNull()
+  expect(update).not.toHaveBeenCalled()
+})
+
+test("un label en los pedidos y en los excluidos avisa que la cola quedaría vacía", async () => {
+  await setup()
+  for (const [name, value] of [["Labels que debe tener", "clanker"], ["Labels que la sacan de la cola", "clanker"]] as const) {
+    const input = field(name)
+    fireEvent.change(input, { target: { value } })
+    fireEvent.keyDown(input, { key: "Enter" })
+  }
+
+  expect((await screen.findByRole("alert")).textContent).toContain("la cola quedaría vacía")
+})
+
+test("quitar un repo y hacer otro el de por defecto reordena la lista que se guarda", async () => {
+  const data = createMemoryAppData(NOW)
+  const [api, web] = (await data.repos()).map((r) => r.repo.id)
+  const { project, update } = await setup({ repos: [{ repoId: api!, labels: [] }, { repoId: web!, labels: ["web"] }] })
+
+  fireEvent.contextMenu(screen.getByText("web", { selector: "span.font-medium" }))
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Hacer repo por defecto" }))
+  save()
+
+  await waitFor(() =>
+    expect(update).toHaveBeenCalledWith(project.id, { repos: [{ repoId: web, labels: ["web"] }, { repoId: api, labels: [] }] }),
+  )
+})
+
+test("con tracker local el mapeo de estados explica que no hay nada que mapear", async () => {
+  await setup({}, 1)
+
+  expect(within(screen.getByRole("region", { name: "Mapeo de estados" })).getByText(/El tracker local ya usa las categorías/)).toBeTruthy()
+})
+
+test("⌘S guarda y la paleta recibe los controles mientras hay cambios", async () => {
+  const { project, update, controls } = await setup()
+  expect(controls.current).toMatchObject({ dirty: false, blocked: false })
+
+  fireEvent.change(field("Tope de gasto por corrida (USD)"), { target: { value: "4.5" } })
+  expect(controls.current).toMatchObject({ dirty: true, blocked: false })
+  fireEvent.keyDown(window, { key: "s", code: "KeyS", metaKey: true })
+
+  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { maxCostUsd: 4.5 }))
+})
+
+test("mientras se edita, que el proyecto llegue con otros datos no pisa lo escrito", async () => {
+  const { project, rerender } = await setup()
+  fireEvent.change(field("Tope de gasto por corrida (USD)"), { target: { value: "9" } })
+
+  rerender({ ...project, parallel: 3 })
+
+  expect((field("Tope de gasto por corrida (USD)") as HTMLInputElement).value).toBe("9")
+})
+
+test("el mapeo de estados lista los estados de las issues con su categoría de hoy y guarda el que se ajusta", async () => {
+  const { project, update } = await setup()
+  const region = screen.getByRole("region", { name: "Mapeo de estados" })
+  expect(within(region).getByText("in_progress")).toBeTruthy()
+  expect(within(region).getByText("hoy: En progreso")).toBeTruthy()
+
+  // Un estado que ninguna issue trae todavía se agrega con su nombre exacto y parte automático.
+  fireEvent.change(within(region).getByLabelText("Nombre de un estado del tracker"), { target: { value: "In Staging" } })
+  fireEvent.click(within(region).getByRole("button", { name: "Agregar estado" }))
+  fireEvent.keyDown(within(region).getByRole("combobox", { name: "Categoría de In Staging" }), { key: "Enter" })
+  fireEvent.click(await screen.findByRole("option", { name: "En review" }))
+  save()
+
+  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { statusMapping: { "In Staging": "in_review" } }))
+})

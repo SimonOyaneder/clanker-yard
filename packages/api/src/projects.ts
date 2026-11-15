@@ -1,7 +1,7 @@
 import * as z from "zod";
 import { ProjectId, RepoId } from "./domain";
 import { Conventions } from "./pack";
-import { IssueFilter, TrackerId } from "./tracker";
+import { IssueFilter, StatusCategory, TrackerId } from "./tracker";
 
 export const ProjectStatus = z.enum(["active", "paused", "archived"]);
 export type ProjectStatus = z.infer<typeof ProjectStatus>;
@@ -24,6 +24,13 @@ export type ProjectRepo = z.infer<typeof ProjectRepo>;
  */
 export const StackOn = z.enum(["ready", "ci_green", "any_open"]);
 export type StackOn = z.infer<typeof StackOn>;
+
+/**
+ * Los estados del tracker (`rawStatus`, por nombre) a los que el proyecto les cambia la categoría. Un estado que
+ * no nombra sigue el mapeo por defecto del adapter. Hoy lo aplica el adapter de Linear.
+ */
+export const StatusMapping = z.record(z.string().min(1), StatusCategory);
+export type StatusMapping = z.infer<typeof StatusMapping>;
 
 const ProjectRepos = z.array(ProjectRepo);
 const MaxCostUsd = z.number().positive().nullable();
@@ -55,6 +62,8 @@ export const ClankerProject = z.object({
   parallel: z.int().positive(),
   /** Cuándo una issue se apila sobre el PR de su bloqueante. */
   stackOn: StackOn,
+  /** Categorías que el proyecto ajusta a mano sobre las del adapter. */
+  statusMapping: StatusMapping,
   status: ProjectStatus,
   /** Pisa los defaults de `params` del flujo (por ejemplo `reviewRounds`) sin crear una versión del flujo. */
   flowParams: z.record(z.string(), z.unknown()),
@@ -81,6 +90,7 @@ export const NewProject = z
     conventions: Conventions.default({}),
     parallel: z.int().positive().default(1),
     stackOn: StackOn.default("ci_green"),
+    statusMapping: StatusMapping.default({}),
     flowParams: z.record(z.string(), z.unknown()).default({}),
     maxCostUsd: MaxCostUsd.default(null),
   })
@@ -114,6 +124,8 @@ export const ProjectPatch = z.object({
   conventions: Conventions.optional(),
   parallel: z.int().positive().optional(),
   stackOn: StackOn.optional(),
+  /** Reemplaza el mapeo entero; cambiarlo hace que la próxima sincronización relea todas las issues del proyecto. */
+  statusMapping: StatusMapping.optional(),
   status: ProjectStatus.optional(),
   flowParams: z.record(z.string(), z.unknown()).optional(),
   maxCostUsd: MaxCostUsd.optional(),

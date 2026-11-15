@@ -22,6 +22,7 @@ import type {
   RunId,
   StackOn,
   StatusCategory,
+  StatusMapping,
   StepRunId,
   SubjectRef,
   TrackerId,
@@ -314,6 +315,8 @@ export const projects = sqliteTable(
     conventions: text({ mode: "json" }).$type<Conventions>().notNull().default({}),
     /** `null` es sin tope. */
     maxCostUsd: real("max_cost_usd"),
+    /** Estados del tracker que el proyecto cambia de categoría (`StatusMapping`). */
+    statusMapping: text("status_mapping", { mode: "json" }).$type<StatusMapping>().notNull().default({}),
   },
   (t) => [
     uniqueIndex("projects_slug").on(t.slug),

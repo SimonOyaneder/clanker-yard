@@ -20,6 +20,7 @@ const project = ClankerProject.parse({
   conventions: {},
   parallel: 2,
   stackOn: "ci_green",
+  statusMapping: {},
   status: "active",
   flowParams: {},
   maxCostUsd: null,

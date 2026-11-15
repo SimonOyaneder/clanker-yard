@@ -50,13 +50,16 @@ export interface Issues {
   ): Promise<CachedIssue>;
 }
 
+/** La clave del cursor de `sync` de un proyecto del tracker (`ProjectRef.id`). */
+export const issuesCursorKey = (tracker: string, projectRef: string) => `issues:${tracker}:${projectRef}`;
+
 export function createIssues(
   store: Store,
   local: LocalTracker = createLocalTracker(store),
 ): Issues {
   const { db } = store;
 
-  const cursorKeyOf = (tracker: Tracker, project: ProjectRef) => `issues:${tracker.id}:${project.id}`;
+  const cursorKeyOf = (tracker: Tracker, project: ProjectRef) => issuesCursorKey(tracker.id, project.id);
   const savedCursor = (key: string) => db.select().from(syncCursors).where(eq(syncCursors.key, key)).get()?.cursor;
 
   const self: Issues = {

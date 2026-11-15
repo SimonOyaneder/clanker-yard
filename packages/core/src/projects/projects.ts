@@ -4,7 +4,8 @@ import { isDeepStrictEqual } from "node:util";
 import type * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
-import { projectRepos, projects, repos } from "../store/schema";
+import { projectRepos, projects, repos, syncCursors } from "../store/schema";
+import { issuesCursorKey } from "../tracker/issues";
 import type { Store, Tx } from "../store/store";
 
 type ProjectRow = typeof projects.$inferSelect;
@@ -139,6 +140,7 @@ export function createProjects(store: Store, defs: Defs): Projects {
           defaultProfileId: input.defaultProfileId ?? null,
           parallel: input.parallel,
           stackOn: input.stackOn,
+          statusMapping: input.statusMapping,
           status: "active",
           flowParams: input.flowParams,
           queueFilter: input.queueFilter,
@@ -171,6 +173,10 @@ export function createProjects(store: Store, defs: Defs): Projects {
         if (newRepos !== undefined && reposChanged) {
           assertRepos(tx, newRepos);
           setRepos(tx, id, newRepos);
+        }
+        // Las categorías del caché salen del mapeo al sincronizar: sin cursor, el próximo sync relee todo el proyecto.
+        if (changes.statusMapping !== undefined) {
+          tx.db.delete(syncCursors).where(eq(syncCursors.key, issuesCursorKey(current.tracker, current.trackerRef))).run();
         }
         const row =
           Object.keys(changes).length === 0

@@ -10,6 +10,7 @@ import type {
   Connection,
   ConnectionProvider,
   DayMetrics,
+  DefRecord,
   Decision,
   DecisionFilter,
   DecisionId,
@@ -152,6 +153,8 @@ export interface AppData {
   /** La prueba antes de guardar: una key rechazada no queda guardada. */
   setClaudeApiKey(key: string): Promise<Connection>
   disconnect(provider: ConnectionProvider, account: string): Promise<void>
+  /** Los flujos o perfiles vigentes, con su versión vigente: de ahí salen los parámetros con default y las opciones de Ajustes. */
+  defs(kind: "flow" | "profile"): Promise<DefRecord[]>
   repos(): Promise<RepoRow[]>
   /** Corre la receta del repo en un worktree desechable y vuelve al terminar; la salida llega mientras tanto como eventos `recipe.test_output`. */
   testRecipe(repoId: RepoId): Promise<RecipeTestResult>

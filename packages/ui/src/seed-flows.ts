@@ -8,7 +8,13 @@ export const SEED_TECHLEAD: FlowDef = {
   name: "Techlead clásico",
   trigger: { type: "issue.queued" },
   lane: "dev",
-  params: { repo: "RepoRef", base: "string", reviewRounds: { type: "number", default: 3 }, checkRounds: { type: "number", default: 3 } },
+  params: {
+    repo: "RepoRef",
+    base: "string",
+    reviewRounds: { type: "number", default: 3 },
+    checkRounds: { type: "number", default: 3 },
+    externalRounds: { type: "number", default: 3 },
+  },
   start: "ws",
   nodes: {
     ws: { type: "action", action: "workspace.acquire", args: {}, on: { ok: "plan" } },
@@ -51,5 +57,25 @@ export const SEED_TOY: FlowDef = {
     acquire: { type: "action", action: "workspace.acquire", args: {}, on: { ok: "saludar" } },
     saludar: { type: "agent", role: "juguete", mode: "saludar", brief: {}, on: { ok: "release" } },
     release: { type: "action", action: "workspace.release", args: {}, on: { ok: "@done" } },
+  },
+}
+
+// El flujo que rebasea un PR en conflicto: se dispara solo y lee `checkRounds` y `externalRounds` igual que el flujo por defecto.
+export const SEED_REBASE: FlowDef = {
+  schema: 1,
+  id: "rebase-conflicto",
+  name: "Rebase de un PR en conflicto",
+  trigger: { type: "pr.conflict" },
+  lane: "maintenance",
+  params: {
+    pr: "PrRef",
+    rebaseNonDraft: { type: "string", default: "auto" },
+    conflictRounds: { type: "number", default: 20 },
+    checkRounds: { type: "number", default: 2 },
+    externalRounds: { type: "number", default: 3 },
+  },
+  start: "rebase",
+  nodes: {
+    rebase: { type: "action", action: "workspace.rebase", args: {}, on: { ok: "@done" } },
   },
 }

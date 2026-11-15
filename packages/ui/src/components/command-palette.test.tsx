@@ -7,6 +7,7 @@ import { AppDataProvider } from "@/app-data"
 import { CommandPalette } from "@/components/command-palette"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { RunCommandsProvider } from "@/components/project/run-commands"
+import type { SettingsControls } from "@/components/project/settings-view"
 import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { HostProvider, type Host } from "@/host"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
@@ -25,7 +26,7 @@ beforeAll(() => {
 })
 afterEach(cleanup)
 
-async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>["projectTab"]; summary?: SummaryControls } = {}) {
+async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>["projectTab"]; settings?: SettingsControls; summary?: SummaryControls } = {}) {
   const data = createMemoryAppData(NOW)
   const [project] = await data.projects()
   const issues = await data.issues(project!.id)
@@ -60,6 +61,7 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
               onUndoDecision={null}
               onDecision={null}
               projectTab={extra.projectTab ?? null}
+              settings={extra.settings ?? null}
               summary={extra.summary ?? null}
               onRunTab={null}
               runCaps={null}

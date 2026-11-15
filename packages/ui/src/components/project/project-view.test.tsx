@@ -35,6 +35,7 @@ async function setup({ entries = () => [], queueError, runs = () => [], decision
     skipIssue: vi.fn(() => Promise.resolve()),
     boostIssue: vi.fn(() => Promise.resolve()),
     refresh: () => {},
+    editQueueFilters: vi.fn(),
     openRun: vi.fn(),
     openExternal: vi.fn(),
   }
@@ -91,10 +92,12 @@ test("las bloqueadas van en su grupo, cada una con su motivo a la vista", async 
   expect(within(screen.getByRole("heading", { name: /En cola/ }).closest("section")!).queryByText(/bloqueada por ENG-9183/)).toBeNull()
 })
 
-test("una cola vacía dice qué filtro la dejó vacía", async () => {
-  await setup({ runs: (runs) => runs, project: { queueFilter: { status: ["todo"], excludeLabels: ["no-clanker"] } } })
+test("una cola vacía dice qué filtro la dejó vacía y ofrece editarlos", async () => {
+  const { actions } = await setup({ runs: (runs) => runs, project: { queueFilter: { status: ["todo"], excludeLabels: ["no-clanker"] } } })
 
   expect(screen.getByText(/0 issues en todo sin el label no-clanker/)).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Editar filtros" }))
+  expect(actions.editQueueFilters).toHaveBeenCalledOnce()
 })
 
 test("una cola que el core no pudo calcular dice por qué y deja ver el resto de la operación", async () => {

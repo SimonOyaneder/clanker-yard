@@ -19,7 +19,7 @@ const QUEUE_STATE = {
 
 interface QueueProps {
   title: string
-  /** Lo que dice la sección cuando no hay nada, con qué hacer. */
+  /** Lo que dice la sección cuando no hay nada, con qué hacer; con él ofrece editar los filtros de la cola. */
   empty?: string
   entries: readonly QueueEntry[]
   project: ClankerProject
@@ -27,6 +27,7 @@ interface QueueProps {
 
 // Issues de la cola, cada una con su motivo a la vista. La cola ya viene ordenada por el core.
 export function QueueList({ title, empty, entries, project }: QueueProps) {
+  const actions = useAppActions()
   if (!entries.length && !empty) return null
   return (
     <section className="flex flex-col gap-2">
@@ -38,7 +39,12 @@ export function QueueList({ title, empty, entries, project }: QueueProps) {
           ))}
         </ul>
       ) : (
-        <p className="rounded-lg border border-dashed px-3 py-4 text-muted-foreground">{empty}</p>
+        <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed px-3 py-4">
+          <p className="text-muted-foreground">{empty}</p>
+          <Button size="sm" variant="outline" onClick={actions.editQueueFilters}>
+            Editar filtros
+          </Button>
+        </div>
       )}
     </section>
   )

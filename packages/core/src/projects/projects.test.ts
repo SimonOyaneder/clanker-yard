@@ -1,4 +1,4 @@
-import { type ClankerProject, NewProject, type Origin, type ProjectId, type RepoId } from "@clanker/api";
+import { type ClankerProject, NewProject, type Origin, ProjectPatch, type ProjectId, type RepoId } from "@clanker/api";
 import { createRouterClient, ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
@@ -6,6 +6,7 @@ import { createDefs, type Defs } from "../defs/defs";
 import { createRouter } from "../server/router";
 import { apiDeps } from "../server/testing";
 import { newId } from "../store/conventions";
+import { syncCursors } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { createRepos } from "../workspaces/repos";
@@ -50,6 +51,7 @@ describe("create", () => {
       conventions: {},
       parallel: 1,
       stackOn: "ci_green",
+      statusMapping: {},
       status: "active",
       flowParams: {},
       maxCostUsd: null,
@@ -167,6 +169,38 @@ describe("repos, cola, convenciones y tope", () => {
       InvalidProjectError,
     );
     expect(projects.get(project.id)!.repos).toEqual([{ repoId: web, labels: ["frontend"] }]);
+  });
+});
+
+describe("statusMapping", () => {
+  const cursorKey = (project: ClankerProject) => `issues:linear:${project.trackerRef}`;
+  const cursors = () => store.db.select().from(syncCursors).all().map((c) => c.key);
+
+  test("se guarda con el proyecto y cambiarlo borra el cursor de sync para que el próximo relea todas las issues", () => {
+    const project = create({ slug: "ba", name: "BA", tracker: "linear", trackerRef: "boundaries" }, "ui");
+    store.db.insert(syncCursors).values({ key: cursorKey(project), cursor: "2026-11-15T00:00:00.000Z", checkedAt: 1 }).run();
+    store.db.insert(syncCursors).values({ key: "issues:linear:otro", cursor: "2026-11-15T00:00:00.000Z", checkedAt: 1 }).run();
+
+    const updated = projects.update(project.id, { statusMapping: { "In Staging": "in_review" } }, "ui");
+
+    expect(updated.statusMapping).toEqual({ "In Staging": "in_review" });
+    expect(projects.get(project.id)!.statusMapping).toEqual({ "In Staging": "in_review" });
+    expect(cursors()).toEqual(["issues:linear:otro"]);
+    expect(events("project.updated")).toMatchObject([{ payload: { fields: ["statusMapping"] } }]);
+  });
+
+  test("el mismo mapeo no toca el cursor", () => {
+    const project = create({ slug: "ba", name: "BA", tracker: "linear", trackerRef: "boundaries", statusMapping: { Todo: "backlog" } }, "ui");
+    store.db.insert(syncCursors).values({ key: cursorKey(project), cursor: "2026-11-15T00:00:00.000Z", checkedAt: 1 }).run();
+
+    projects.update(project.id, { statusMapping: { Todo: "backlog" } }, "ui");
+
+    expect(cursors()).toEqual([cursorKey(project)]);
+  });
+
+  test("el contrato rechaza una categoría que no existe", () => {
+    expect(ProjectPatch.safeParse({ statusMapping: { Todo: "listo" } }).success).toBe(false);
+    expect(ProjectPatch.safeParse({ statusMapping: { Todo: "in_review" } }).success).toBe(true);
   });
 });
 

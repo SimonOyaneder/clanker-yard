@@ -16,6 +16,8 @@ export interface AppActions {
   skipIssue: (project: ClankerProject, issue: CachedIssue, skipped: boolean) => Promise<void>
   /** La sube al principio de la cola; el toast permite deshacerlo. */
   boostIssue: (project: ClankerProject, issue: CachedIssue) => Promise<void>
+  /** Abre Ajustes del proyecto en la sección de filtros de la cola. */
+  editQueueFilters: () => void
   openExternal: (url: string) => void
   refresh: () => void
   goConnections: () => void

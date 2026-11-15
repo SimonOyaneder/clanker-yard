@@ -10,6 +10,7 @@ import { ConnectionsView } from "@/components/connections/connections-view"
 import { InboxView } from "@/components/inbox/inbox-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { PROJECT_TABS, type ProjectTab, ProjectFrame, ProjectView, issuesById } from "@/components/project/project-view"
+import { ProjectSettingsTab, type SettingsControls } from "@/components/project/settings-view"
 import { ProjectSummaryTab } from "@/components/project/summary-view"
 import { RunCommandsProvider, useRunCommands } from "@/components/project/run-commands"
 import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
@@ -39,6 +40,7 @@ import { openPrsOf } from "@/lib/prs"
 import { runCaps } from "@/lib/run-commands"
 import { shapeOf } from "@/lib/run-graph"
 import { readPref, writePref } from "@/lib/prefs"
+import { messageOf, undoable } from "@/lib/undoable"
 import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 import { Hint } from "./components/common"
@@ -62,17 +64,8 @@ const NO_ISSUE_KEYS: ReadonlyMap<string, string> = new Map()
 
 const LIVE_STATUSES: RunStatus[] = ["queued", "running", "waiting", "parked", "paused"]
 
-const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
-
-// Lo reversible se hace directo y avisa con un toast que lo deshace; un fallo se muestra tal cual.
-async function undoable(message: string, apply: () => Promise<unknown>, undo: () => Promise<unknown>): Promise<void> {
-  try {
-    await apply()
-    toast(message, { action: { label: "Deshacer", onClick: () => void undo().catch((e: unknown) => toast.error(messageOf(e))) } })
-  } catch (e) {
-    toast.error(messageOf(e))
-  }
-}
+// Las acciones de `AppActions` no devuelven nada: el fallo ya salió en el toast.
+const reversible = async (...args: Parameters<typeof undoable>): Promise<void> => void (await undoable(...args))
 
 // La UI no sabe de dónde vienen los datos ni quién la aloja: `appData` y `host` se los da quien la monta.
 export function App({ appData, host }: { appData: AppData; host: Host }) {
@@ -143,6 +136,10 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  // Ajustes del proyecto: la sección a la que llevar al abrir y lo que la pestaña deja guardar o descartar a la paleta.
+  const [settingsFocus, setSettingsFocus] = useState<string | null>(null)
+  const [settingsControls, setSettingsControls] = useState<SettingsControls | null>(null)
+  const clearSettingsFocus = useCallback(() => setSettingsFocus(null), [])
 
   // El proyecto guardado puede ya no existir: se cae al primero de la barra.
   const project = projects.find((p) => p.slug === slug) ?? barProjects(projects)[0] ?? projects[0] ?? null
@@ -355,12 +352,12 @@ function Shell() {
     }
   }, [goConnections, goInbox, connectLinear, probeClaude])
 
-  // ⇧⌘1 y ⇧⌘2: Operación y Resumen del proyecto (también desde una corrida: vuelve al proyecto).
+  // ⇧⌘1, ⇧⌘2 y ⇧⌘3: Operación, Resumen y Ajustes del proyecto (también desde una corrida: vuelve al proyecto).
   const goTab = useCallback((to: ProjectTab) => go({ module: "projects", runId: null, tab: to }), [go])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey || !e.shiftKey || e.altKey || e.ctrlKey) return
-      const target = e.code === "Digit1" ? PROJECT_TABS[0] : e.code === "Digit2" ? PROJECT_TABS[1] : undefined
+      const target = { Digit1: PROJECT_TABS[0], Digit2: PROJECT_TABS[1], Digit3: PROJECT_TABS[2] }[e.code]
       if (!target) return
       e.preventDefault()
       goTab(target)
@@ -399,23 +396,27 @@ function Shell() {
         }
       },
       setParallel: (p, parallel) =>
-        undoable(
+        reversible(
           `${p.name}: ${parallel} ${parallel === 1 ? "corrida" : "corridas"} a la vez en dev`,
           () => appData.updateProject(p.id, { parallel }),
           () => appData.updateProject(p.id, { parallel: p.parallel }),
         ),
       skipIssue: (p, issue, skipped) =>
-        undoable(
+        reversible(
           skipped ? `No tomaré ${issueKey(issue)}` : `${issueKey(issue)} vuelve a la cola`,
           () => appData.skipIssue(p.id, issue.id, skipped),
           () => appData.skipIssue(p.id, issue.id, !skipped),
         ),
       boostIssue: (p, issue) =>
-        undoable(
+        reversible(
           `${issueKey(issue)} sube al principio de la cola`,
           () => appData.boostIssue(p.id, issue.id, true),
           () => appData.boostIssue(p.id, issue.id, false),
         ),
+      editQueueFilters: () => {
+        setSettingsFocus("queue")
+        go({ module: "projects", runId: null, tab: "settings" })
+      },
       openExternal: host.openExternal,
       refresh,
     }),
@@ -658,6 +659,8 @@ function Shell() {
                   <ProjectFrame project={project} tab={tab} onTab={goTab}>
                     {tab === "summary" ? (
                       <ProjectSummaryTab project={project} controls={summaryControls} onOpenOperation={() => goTab("operation")} />
+                    ) : tab === "settings" ? (
+                      <ProjectSettingsTab project={project} focus={settingsFocus} onFocused={clearSettingsFocus} onControls={setSettingsControls} />
                     ) : detail ? (
                       <ProjectView project={project} {...detail} />
                     ) : projectData.error ? (
@@ -692,6 +695,7 @@ function Shell() {
         onUndoDecision={resolver.canUndo ? () => void undo() : null}
         onDecision={module === "inbox" && inbox.current?.status === "pending" ? { decision: inbox.current, onResolve: resolveDecision, onRespond: () => inbox.setResponding(true) } : null}
         projectTab={project && module === "projects" ? { tab, onTab: goTab } : null}
+        settings={module === "projects" && !runId && tab === "settings" ? settingsControls : null}
         summary={summaryVisible ? summaryControls : null}
         onRunTab={runId && module === "projects" ? setRunTab : null}
         runCaps={runId && module === "projects" && openRunDetail ? { id: openRunDetail.id, caps: caps! } : null}

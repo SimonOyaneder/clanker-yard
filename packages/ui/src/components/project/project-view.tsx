@@ -1,6 +1,6 @@
 import type { Breaker, CachedIssue, CachedPr, ClankerProject, Decision, Lanes, QueueEntry, Run } from "@clanker/api"
 import { Copy, Ellipsis, Pause, Play } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useRef } from "react"
 import { BreakerStrip } from "@/components/project/breaker-strip"
 import { Ago, Hint, Pill, SectionTitle, StatBar } from "@/components/common"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -10,7 +10,7 @@ import { useRunCommands } from "@/components/project/run-commands"
 import { RunStatusIcon, RunStatusPill, isLive } from "@/components/project/status"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useNow } from "@/hooks/use-now"
 import { useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
@@ -24,8 +24,8 @@ const PROJECT_STATUS = {
   archived: { label: "archivado", tone: tone.neutral, hint: "Fuera de la barra lateral. No lanza corridas." },
 } as const
 
-/** Las pestañas del proyecto que existen hoy; Ajustes llega con su propia issue. */
-export const PROJECT_TABS = ["operation", "summary"] as const
+/** Las pestañas del proyecto, en el orden de ⇧⌘1, ⇧⌘2 y ⇧⌘3. */
+export const PROJECT_TABS = ["operation", "summary", "settings"] as const
 export type ProjectTab = (typeof PROJECT_TABS)[number]
 
 /** Los paralelismos que ofrecen el menú y ⌘K. */
@@ -86,6 +86,9 @@ export function ProjectFrame({ project, tab, onTab, children }: { project: Clank
           </Hint>
           <Hint label="Cuánto gastó el proyecto y cuántas vueltas dieron sus issues" keys="⇧⌘2">
             <TabsTrigger value="summary">Resumen</TabsTrigger>
+          </Hint>
+          <Hint label="Repos, filtros de la cola, convenciones, mapeo de estados y parámetros del flujo" keys="⇧⌘3">
+            <TabsTrigger value="settings">Ajustes</TabsTrigger>
           </Hint>
         </TabsList>
       </Tabs>
@@ -161,6 +164,8 @@ function emptyQueue(project: ClankerProject): string {
 function ProjectActions({ project }: { project: ClankerProject }) {
   const actions = useAppActions()
   const commands = useRunCommands()
+  // Una acción que lleva a otra vista deja el foco allá: el menú no se lo devuelve a su botón al cerrarse.
+  const leaving = useRef(false)
   if (project.status === "archived") return null
   const pausing = project.status === "active"
   return (
@@ -179,7 +184,20 @@ function ProjectActions({ project }: { project: ClankerProject }) {
             </Button>
           </DropdownMenuTrigger>
         </Hint>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={(e) => {
+            if (!leaving.current) return
+            leaving.current = false
+            e.preventDefault()
+          }}
+        >
+          <DropdownMenuItem
+            onSelect={() => {
+              leaving.current = true
+              actions.editQueueFilters()
+            }}
+          >
+            Filtros de la cola
+          </DropdownMenuItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>Cambiar paralelismo</DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
