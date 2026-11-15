@@ -1,10 +1,25 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { ArtifactKind, Brief, IssueDetail, IssueRef, Report } from "@clanker/api";
+import { Brief, type ArtifactKind, type IssueDetail, type IssueRef, type Report } from "@clanker/api";
 import type { Artifacts } from "../artifacts/artifacts";
 import { git } from "../git/git";
 import { diffBetween, listHunks, snapshotTree } from "../git/tree";
 import type { WorkspaceLease, WorkspaceRef, Workspaces } from "../workspaces/workspaces";
+
+/**
+ * El brief que el core puso al final del mensaje de un agente (`promptFor`: tras una línea en blanco; el
+ * `JSON.stringify` con sangría nunca genera una), o `undefined` si el mensaje no lo trae.
+ */
+export function briefOfMessage(message: string): Brief | undefined {
+  const start = message.lastIndexOf("\n\n{");
+  if (start === -1) return undefined;
+  try {
+    const parsed = Brief.safeParse(JSON.parse(message.slice(start + 2)));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Carpeta de los artefactos dentro del worktree; el brief los cita con rutas relativas a él. */
 export const RUN_DIR = ".clanker-run";

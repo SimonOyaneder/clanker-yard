@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { API_MAJOR } from "@clanker/api";
 import { removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { eq, sql } from "drizzle-orm";
@@ -100,7 +100,15 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
       dataDir: opts.dataDir,
       connections,
       procs,
-      runtimes: [createClaudeRuntime({ credentials: connections.claudeCredentials, home: opts.dataDir, procs })],
+      runtimes: [
+        createClaudeRuntime({
+          credentials: connections.claudeCredentials,
+          home: opts.dataDir,
+          procs,
+          // Con `CLANKER_RECORD=<carpeta>` cada run deja su guion del runtime fake ahí.
+          record: process.env.CLANKER_RECORD ? resolve(process.env.CLANKER_RECORD) : undefined,
+        }),
+      ],
       coreVersion: pkg.version,
       uiKeyHash,
       onShutdown: ({ drain }) => setImmediate(() => shutdown("system.shutdown", { drain })),

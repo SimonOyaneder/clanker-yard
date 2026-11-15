@@ -35,7 +35,14 @@ const ScriptResult = z.discriminatedUnion("status", [
   Outcome.extend({ status: z.literal("success") }),
   Outcome.extend({ status: z.literal("error_max_turns"), message: z.string().optional() }),
   Outcome.extend({ status: z.literal("error_max_budget_usd"), message: z.string().optional() }),
-  z.strictObject({ status: z.literal("crash"), at: z.number().nonnegative() }),
+  /** El proceso murió sin `result`: el run rechaza con `message` (el error real trae la cola del stderr de claude). */
+  z.strictObject({ status: z.literal("crash"), at: z.number().nonnegative(), message: z.string().optional() }),
+  /** Fallos que el runtime reporta como resultado (no rechaza), con el texto accionable que dio. */
+  Outcome.extend({
+    status: z.enum(["error", "login_expired", "quota_exhausted"]),
+    message: z.string().optional(),
+    resetsAt: z.number().optional(),
+  }),
 ]);
 export type ScriptResult = z.infer<typeof ScriptResult>;
 

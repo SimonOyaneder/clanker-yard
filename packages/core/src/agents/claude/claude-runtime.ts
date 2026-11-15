@@ -26,6 +26,7 @@ import { userConfigDir } from "../context";
 import { createEventQueue } from "./event-queue";
 import { agentEnv, toOptions } from "./options";
 import { credentialMismatch, noteSignals, outcomeOf, type Signals } from "./outcome";
+import { startRecording } from "./record";
 import { skillDirs, watchDirs } from "./skills-watch";
 import { transcriptFile } from "./transcript";
 
@@ -58,6 +59,11 @@ export interface ClaudeRuntimeOptions {
   procs?: Procs;
   /** Cuánto tarda en caer con SIGKILL el grupo de un proceso que siguió vivo tras su SIGTERM (cancelar, pausar, interrumpir). Por defecto `KILL_GROUP_AFTER_MS`. */
   killAfterMs?: number;
+  /**
+   * `CLANKER_RECORD`: una carpeta donde dejar el guion del runtime fake de cada run (`record.ts`).
+   * Sin ella no se graba nada.
+   */
+  record?: string;
 }
 
 /** Tras bajar el grupo de un agente con SIGTERM, lo que siga vivo a los 10 s cae con SIGKILL (`docs/design.html#d-flows`, "Cancelar"). */
@@ -180,6 +186,21 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       return {};
     };
 
+    const recording =
+      options.record === undefined
+        ? undefined
+        : await startRecording({
+            dir: options.record,
+            spec,
+            prompt,
+            home,
+            secrets: Object.values(credentials.env()),
+          });
+    const emitUsage = (event: Extract<AgentEvent, { type: "usage" | "usage_remainder" }>) => {
+      events.push(event);
+      recording?.usage(event);
+    };
+
     const stderr = createStderrTail();
     const stream = runQuery({
       prompt,
@@ -241,7 +262,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       emitted.set(model, sumTokens([emitted.get(model) ?? NO_TOKENS, usage]));
       const cacheWrite1hTokens = sdkUsage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
       emittedWrite1h += cacheWrite1hTokens;
-      events.push({ type: "usage", turn: tally.turns, usage, model, cacheWrite1hTokens });
+      emitUsage({ type: "usage", turn: tally.turns, usage, model, cacheWrite1hTokens });
     };
 
     // El uso de cada `assistant` no es final (su salida llega recién en el total) y el total también
@@ -259,7 +280,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
           tokensCacheWrite: Math.max(0, rest.tokensCacheWrite),
         };
         if (Object.values(remainder).every((n) => n === 0)) continue;
-        events.push({
+        emitUsage({
           type: "usage_remainder",
           model,
           tokens: remainder,
@@ -317,6 +338,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
           const id = message.session_id ?? sessionId;
           if (id === undefined) throw new Error("Claude mandó un mensaje sin sesión antes de iniciarla.");
           transcript.append(id, message);
+          recording?.message(message);
           onMessage(message);
         }
       } catch (error) {
@@ -326,27 +348,42 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       if (final !== undefined) flushRemainders(final);
       await transcript.flush();
 
-      // Tras un `result` con error el SDK lanza "Claude Code returned an error result": el estado sale del `result`.
-      const explained = final !== undefined || signals.loginFailed || signals.quota !== undefined;
-      if (stopReason === undefined && crash !== undefined && !explained) throw withStderr(crash, stderr.text());
-      if (sessionId === undefined) throw new Error("Claude terminó sin iniciar la sesión.");
+      const conclude = (): RunResult => {
+        // Tras un `result` con error el SDK lanza "Claude Code returned an error result": el estado sale del `result`.
+        const explained = final !== undefined || signals.loginFailed || signals.quota !== undefined;
+        if (stopReason === undefined && crash !== undefined && !explained) throw withStderr(crash, stderr.text());
+        if (sessionId === undefined) throw new Error("Claude terminó sin iniciar la sesión.");
 
-      if (stopReason !== undefined) {
-        return { status: "error", text: "", usage: tally, message: stopReason };
-      }
-      const outcome = outcomeOf(final, signals, credentials.mode);
-      return {
-        status: outcome.status,
-        text: final?.subtype === "success" ? final.result : "",
-        ...(final?.subtype === "success" && final.structured_output !== undefined
-          ? { structured: final.structured_output }
-          : outcome.status === "error_max_budget_usd" && deliveredReport !== undefined
-            ? { structured: deliveredReport }
-            : {}),
-        usage: final === undefined ? tally : spentThisRun(final, previous, tally, credentials),
-        ...(outcome.message === undefined ? {} : { message: outcome.message }),
-        ...(outcome.resetsAt === undefined ? {} : { resetsAt: outcome.resetsAt }),
+        if (stopReason !== undefined) {
+          return { status: "error", text: "", usage: tally, message: stopReason };
+        }
+        const outcome = outcomeOf(final, signals, credentials.mode);
+        return {
+          status: outcome.status,
+          text: final?.subtype === "success" ? final.result : "",
+          ...(final?.subtype === "success" && final.structured_output !== undefined
+            ? { structured: final.structured_output }
+            : outcome.status === "error_max_budget_usd" && deliveredReport !== undefined
+              ? { structured: deliveredReport }
+              : {}),
+          usage: final === undefined ? tally : spentThisRun(final, previous, tally, credentials),
+          ...(outcome.message === undefined ? {} : { message: outcome.message }),
+          ...(outcome.resetsAt === undefined ? {} : { resetsAt: outcome.resetsAt }),
+        };
       };
+      let settled: { result: RunResult } | { crash: unknown };
+      try {
+        settled = { result: conclude() };
+      } catch (error) {
+        settled = { crash: error };
+      }
+      // Una grabación que falla no pierde el run (ya gastó): se avisa como evento.
+      await recording?.finish(settled).catch((error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        events.push({ type: "error", kind: "other", message: `No se pudo grabar el guion del rol "${spec.role}": ${reason}` });
+      });
+      if ("crash" in settled) throw settled.crash;
+      return settled.result;
     })().finally(() => {
       stopWatching();
       events.close();

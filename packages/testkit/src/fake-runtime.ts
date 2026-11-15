@@ -3,8 +3,9 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { Brief, compileJsonSchema, type JsonSchema } from "@clanker/api";
+import { compileJsonSchema, type Brief, type JsonSchema } from "@clanker/api";
 import {
+  briefOfMessage,
   usdToMicros,
   type AgentEvent,
   type AgentRun,
@@ -67,7 +68,7 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
     message: string,
     outputSchema: JsonSchema,
   ): Promise<AgentRun> {
-    const brief = briefOf(message);
+    const brief = briefOfMessage(message);
     if (!brief) {
       throw new Error(
         `El fake necesita el brief en JSON al final del mensaje para elegir el guion (sesión ${sessionId}).`,
@@ -156,7 +157,7 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
 
     if (result.status === "crash") {
       await waitUntil(result.at);
-      throw new Error(`El guion ${script.file} simula una caída a los ${result.at} ms.`);
+      throw new Error(result.message ?? `El guion ${script.file} simula una caída a los ${result.at} ms.`);
     }
 
     for (const patch of script.patches) await applyPatch(patch, cwd);
@@ -181,6 +182,7 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
       ...(result.status === "success"
         ? {}
         : { message: result.message ?? `El guion ${script.file} termina con ${result.status}.` }),
+      ...("resetsAt" in result && result.resetsAt !== undefined ? { resetsAt: result.resetsAt } : {}),
     };
   }
 
@@ -221,18 +223,6 @@ function transcriptWriter(dir: string, sessionId: string): (message: Record<stri
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${sessionId}.jsonl`);
   return (message) => appendFileSync(file, `${JSON.stringify({ ...message, session_id: sessionId })}\n`);
-}
-
-/** El core pone el brief al final del mensaje, tras una línea en blanco; `JSON.stringify` con sangría nunca genera una. */
-function briefOf(message: string): Brief | undefined {
-  const start = message.lastIndexOf("\n\n{");
-  if (start === -1) return undefined;
-  try {
-    const parsed = Brief.safeParse(JSON.parse(message.slice(start + 2)));
-    return parsed.success ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**

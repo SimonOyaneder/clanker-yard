@@ -29,7 +29,7 @@ export type {
   ResumeRequest,
   RunRequest,
 } from "./agents/agents";
-export { acceptanceCriteria, createBriefs, RUN_DIR } from "./agents/brief";
+export { acceptanceCriteria, briefOfMessage, createBriefs, RUN_DIR } from "./agents/brief";
 export { createStepBriefs } from "./agents/step-brief";
 export type { BriefRequest, Briefs, PreparedBrief, PreviousReport } from "./agents/brief";
 export { listHunks } from "./git/tree";
