@@ -53,6 +53,11 @@ describe("toOptions", () => {
     });
   });
 
+  test("el reporte va sin el $schema que declara zod: Claude Code no lo resuelve", () => {
+    const outputSchema = { $schema: "https://json-schema.org/draft/2020-12/schema", type: "object" };
+    expect(toOptions({ ...spec, outputSchema }, ctx()).outputFormat).toEqual({ type: "json_schema", schema: { type: "object" } });
+  });
+
   test("un rol con hooks los activa", () => {
     expect(toOptions({ ...spec, hooks: true }, ctx()).settings).toEqual({ disableAllHooks: false });
   });

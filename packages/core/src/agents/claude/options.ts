@@ -54,6 +54,16 @@ export function agentEnv({
   };
 }
 
+/**
+ * Claude Code valida `--json-schema` sin el meta-esquema 2020-12 que `z.toJSONSchema` declara en `$schema`:
+ * con él sale con "no schema with key or ref" y el run muere antes de empezar.
+ */
+function forClaude(schema: RunSpec["outputSchema"]): RunSpec["outputSchema"] {
+  const rest = { ...schema };
+  delete rest.$schema;
+  return rest;
+}
+
 export interface RunCtx {
   env: Record<string, string>;
   executable: string | undefined;
@@ -99,7 +109,7 @@ export function toOptions(spec: RunSpec, ctx: RunCtx): Options {
     // Gana sobre los hooks de user y de project, pero no sobre los de este objeto `hooks`.
     settings: { disableAllHooks: !spec.hooks },
     hooks: { PreCompact: [{ hooks: [ctx.logCompaction] }] },
-    outputFormat: { type: "json_schema", schema: spec.outputSchema },
+    outputFormat: { type: "json_schema", schema: forClaude(spec.outputSchema) },
     ...(spec.maxTurns === undefined ? {} : { maxTurns: spec.maxTurns }),
     ...(spec.maxBudgetUsd === undefined ? {} : { maxBudgetUsd: spec.maxBudgetUsd }),
     ...(ctx.resume === undefined ? {} : { resume: ctx.resume }),

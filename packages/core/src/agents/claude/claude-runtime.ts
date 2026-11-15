@@ -91,11 +91,12 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
   };
 
   /** Lo que el SDK llama para lanzar `claude`: el mismo `spawn` de siempre, pero con grupo propio y en `procs`. */
-  function spawnIn(procs: Procs, stepRunId: string | undefined): Options["spawnClaudeCodeProcess"] {
+  function spawnIn(procs: Procs, stepRunId: string | undefined, stderr: StderrTail): Options["spawnClaudeCodeProcess"] {
     return ({ command, args, cwd, env, signal }) => {
       // Sin `signal` en `spawn`: Node solo mataría al líder. Cuando el SDK se rinde con su cierre
       // ordenado, se baja el grupo completo (`bash` de las tools incluido) y, si no cierra, a los 10 s con SIGKILL.
-      const child = spawn(command, args, { cwd, env, detached: true, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+      const child = spawn(command, args, { cwd, env, detached: true, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk.toString()));
       procs.track(child, { kind: "agent", stepRunId });
       signal.addEventListener(
         "abort",
@@ -176,6 +177,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       return {};
     };
 
+    const stderr = createStderrTail();
     const stream = runQuery({
       prompt,
       options: toOptions(spec, {
@@ -190,7 +192,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         abort,
         resume: resumeId,
         logCompaction,
-        spawn: options.procs && spawnIn(options.procs, spec.stepRunId),
+        spawn: options.procs && spawnIn(options.procs, spec.stepRunId, stderr),
       }),
     });
 
@@ -296,7 +298,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
 
       // Tras un `result` con error el SDK lanza "Claude Code returned an error result": el estado sale del `result`.
       const explained = final !== undefined || signals.loginFailed || signals.quota !== undefined;
-      if (stopReason === undefined && crash !== undefined && !explained) throw crash;
+      if (stopReason === undefined && crash !== undefined && !explained) throw withStderr(crash, stderr.text());
       if (sessionId === undefined) throw new Error("Claude terminó sin iniciar la sesión.");
 
       if (stopReason !== undefined) {
@@ -347,6 +349,29 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       return launch(spec, message, ref.sessionId);
     },
   };
+}
+
+/** Lo último que `claude` escribió en stderr: el SDK solo dice "exited with code 1", y la causa está ahí. */
+interface StderrTail {
+  push(chunk: string): void;
+  text(): string;
+}
+
+const STDERR_TAIL_CHARS = 2000;
+
+function createStderrTail(): StderrTail {
+  let tail = "";
+  return {
+    push: (chunk) => {
+      tail = (tail + chunk).slice(-STDERR_TAIL_CHARS);
+    },
+    text: () => tail.trim(),
+  };
+}
+
+function withStderr(error: unknown, stderr: string): unknown {
+  if (stderr === "" || !(error instanceof Error)) return error;
+  return new Error(`${error.message}\nstderr de claude: ${stderr}`, { cause: error });
 }
 
 async function readStored(file: string, sessionId: string): Promise<StoredSession> {

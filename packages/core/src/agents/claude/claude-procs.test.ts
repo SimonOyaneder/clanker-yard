@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -154,4 +155,33 @@ test("sin procs deja el lanzamiento al SDK", async () => {
   await run.result.catch(() => {});
 
   expect(seen?.spawnClaudeCodeProcess).toBeUndefined();
+});
+
+test("si Claude Code muere, el error trae la cola de su stderr", async () => {
+  const procs = createProcs({ store, bootId: "boot_now" });
+  const query: QueryFn = ({ options }: { options: Options }) =>
+    (async function* () {
+      const child = options.spawnClaudeCodeProcess!({
+        command: "sh",
+        args: ["-c", "echo 'json-schema invalido' >&2; exit 1"],
+        cwd: home,
+        env: {},
+        signal: new AbortController().signal,
+      });
+      yield init;
+      // El stderr llega por su pipe, a veces después del exit: el error sale cuando ya se leyó entero.
+      const { stderr } = child as unknown as ChildProcess;
+      await new Promise((resolve) => stderr!.once("end", resolve));
+      throw new Error("Claude Code process exited with code 1");
+    })();
+  const runtime = createClaudeRuntime({
+    credentials: async () => subscriptionCredentials({ executable: "/bin/claude" }),
+    home,
+    procs,
+    query,
+  });
+
+  const run = await runtime.start(spec({ stepRunId: "stp_1" }));
+
+  await expect(run.result).rejects.toThrow(/exited with code 1\nstderr de claude: json-schema invalido/);
 });
