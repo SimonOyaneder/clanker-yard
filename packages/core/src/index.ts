@@ -196,7 +196,7 @@ export {
   workspaceRebaseAction,
 } from "./github/rebase-pr";
 export type { RebasePrDeps } from "./github/rebase-pr";
-export { stackRestackAction } from "./github/restack";
+export { stackRestackAction, stackRestackRewrittenAction } from "./github/restack";
 export type { ChildReport, StackRestackDeps } from "./github/restack";
 export type { PrPushFixupsDeps } from "./github/push-fixups";
 export { prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";

@@ -404,8 +404,34 @@ export const REBASE_CONFLICTO: FlowDef = {
   },
 };
 
+/**
+ * "Restack por base reescrita": la branch de un PR del sistema se reescribió (`pr.base_rewritten`, el
+ * `from` y el `to` del evento son su punta vieja y la nueva) y sus hijos tienen que seguirla. Corre en
+ * mantenimiento. Un hijo que choca no frena a los demás: `stack.restackRewritten` anota su `pr.conflict` y
+ * lo resuelve `rebase-conflicto`, por lo que aquí el conflicto también termina en `@done`.
+ */
+export const RESTACK_REWRITTEN: FlowDef = {
+  schema: 1,
+  id: "restack-rewritten",
+  name: "Restack por base reescrita",
+  trigger: { type: "pr.base_rewritten" },
+  lane: "maintenance",
+  params: { pr: "PrRef", from: "string", to: "string" },
+  limits: { maxCostUsd: null, maxSteps: 10 },
+  start: "restack",
+  nodes: {
+    restack: {
+      type: "action",
+      action: "stack.restackRewritten",
+      args: { pr: "$run.params.pr", from: "$run.params.from", to: "$run.params.to" },
+      on: { ok: "@done", conflict: { to: "@done", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
+    },
+  },
+};
+
 export const flows: Record<string, FlowDef> = {
   "techlead-clasico": TECHLEAD_CLASICO,
   "pr-feedback": PR_FEEDBACK,
   "rebase-conflicto": REBASE_CONFLICTO,
+  "restack-rewritten": RESTACK_REWRITTEN,
 };

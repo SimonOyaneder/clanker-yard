@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type EventType, type FlowDef, type PrRef } from "@clanker/api";
+import { PrRef, type EventType, type FlowDef } from "@clanker/api";
 import {
+  clankerLoopTemplate,
   createAgents,
   createArtifacts,
   createAskpass,
@@ -605,6 +606,39 @@ describe("dispara flujos", () => {
     await wake(31 * SECOND);
 
     expect(runsOf("restack")).toEqual([expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number) } })]);
+  });
+
+  test("reescribir la branch de un PR del sistema arranca restack-rewritten con su punta vieja y la nueva", async () => {
+    // El flujo de la plantilla tal cual; la acción real tiene su propio test (`pr-restack.test.ts`).
+    const restacked: unknown[] = [];
+    flows.registerAction({
+      name: "stack.restackRewritten",
+      args: z.object({ pr: PrRef, from: z.string(), to: z.string() }),
+      outcomes: ["ok", "conflict"],
+      effects: "remote",
+      run: (args) => {
+        restacked.push(args);
+        return Promise.resolve({ outcome: "ok" });
+      },
+    });
+    flows.save(clankerLoopTemplate.flows["restack-rewritten"]!);
+    const pr = sim.openPr({ head: "one" });
+    await wake();
+    own(pr.number);
+    const from = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
+
+    origin.git("checkout", "one");
+    origin.git("commit", "--amend", "--allow-empty", "--message", "feat: one, reescrito");
+    origin.git("push", "--force", "origin", "one");
+    const to = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
+    await wake(31 * SECOND);
+    await wake(21 * SECOND);
+    await wake(31 * SECOND);
+
+    expect(runsOf("restack-rewritten")).toEqual([
+      expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number), from, to } }),
+    ]);
+    await vi.waitFor(() => expect(restacked).toEqual([{ pr: ref(pr.number), from, to }]));
   });
 
   test("un conflicto arranca el flujo de rebase, salvo que el PR tenga threads de council", async () => {

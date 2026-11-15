@@ -16,7 +16,12 @@ const TEMPLATES: Template[] = [
   {
     roles: clankerLoopTemplate.roles,
     profiles: clankerLoopTemplate.profiles,
-    flows: [clankerLoopTemplate.flows["pr-feedback"]!, clankerLoopTemplate.flows["techlead-clasico"]!, clankerLoopTemplate.flows["rebase-conflicto"]!],
+    flows: [
+      clankerLoopTemplate.flows["pr-feedback"]!,
+      clankerLoopTemplate.flows["techlead-clasico"]!,
+      clankerLoopTemplate.flows["rebase-conflicto"]!,
+      clankerLoopTemplate.flows["restack-rewritten"]!,
+    ],
   },
 ];
 

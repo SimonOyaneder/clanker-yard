@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -18,6 +19,7 @@ import {
   PermanentActionError,
   prPublishAction,
   stackRestackAction,
+  stackRestackRewrittenAction,
   type ActionCtx,
   type Askpass,
   type Store,
@@ -27,8 +29,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
-// `stack.restack` sobre repos git reales, un remoto bare y el GitHub simulado: cadenas de 2 y 3 PRs con
-// el padre squasheado (el commit del merge no es la punta de su branch).
+// `stack.restack` y `stack.restackRewritten` sobre repos git reales, un remoto bare y el GitHub simulado:
+// cadenas de 2 y 3 PRs con el padre squasheado (el commit del merge no es la punta de su branch) o reescrito.
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -44,6 +46,7 @@ let askpass: Askpass;
 let workspaces: Workspaces;
 let github: GitHubSim;
 let restack: ReturnType<typeof stackRestackAction>;
+let restackRewritten: ReturnType<typeof stackRestackRewrittenAction>;
 let publish: ReturnType<typeof prPublishAction>;
 
 beforeEach(async () => {
@@ -79,7 +82,9 @@ beforeEach(async () => {
   const recipes = createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) });
   const prs = createPrs({ connections, packs });
   publish = prPublishAction({ store, workspaces, recipes, repos, connections, packs });
-  restack = stackRestackAction({ store, workspaces, repos, prs, connections, pause: () => Promise.resolve() });
+  const restackDeps = { store, workspaces, repos, prs, connections, pause: () => Promise.resolve() };
+  restack = stackRestackAction(restackDeps);
+  restackRewritten = stackRestackRewrittenAction(restackDeps);
 });
 
 afterEach(async () => {
@@ -155,6 +160,8 @@ const remoteLog = (range: string, format = "%s") => repo.git("--git-dir", repo.r
 const sql = <T>(query: string) => store.db.$client.prepare(query).all() as T[];
 const ref = (number: number) => ({ account: ACCOUNT, repo: REPO, number });
 const run = (number: number) => restack.run(restack.args.parse({ pr: ref(number) }), ctx());
+const runRewritten = (number: number, { from, to }: { from: string; to: string }) =>
+  restackRewritten.run(restackRewritten.args.parse({ pr: ref(number), from, to }), ctx());
 type Output = {
   merge: { sha: string; squash: string };
   children: { pr: { number: number }; branch: string; status: string; reason?: string; files?: string[]; commits?: number }[];
@@ -162,6 +169,23 @@ type Output = {
   mergeable: { number: number; mergeable: boolean | null }[];
 };
 const outputOf = (result: { output?: unknown }) => result.output as Output;
+
+/** Otra persona reescribe `branch` en el remoto (amend con `files` y force push): su punta vieja y la nueva. */
+function rewrite(branch: string, files: Record<string, string>): { from: string; to: string } {
+  const from = remoteSha(branch);
+  elsewhere((git, dir) => {
+    git("checkout", "--quiet", branch);
+    write(dir, files);
+    git("add", "--all");
+    git("commit", "--quiet", "--amend", "--message", `feat: ${branch} (reescrito)`);
+    git("push", "--quiet", "--force", "origin", branch);
+  });
+  return { from, to: remoteSha(branch) };
+}
+
+/** El patch-id del commit `sha` del remoto: lo que debe conservar un commit propio al restackearse. */
+const patchId = (sha: string) =>
+  execFileSync("sh", ["-c", `git --git-dir=${JSON.stringify(repo.remoteDir)} show ${sha} | git patch-id --stable`], { encoding: "utf8" }).split(" ")[0];
 
 /** Quita el worktree y el workspace de una branch: queda solo en el remoto, como la de otra persona. */
 function dropWorkspace(branch: string) {
@@ -416,5 +440,147 @@ describe("stack.restack", () => {
 
     expect(result.outcome).toBe("ok");
     expect(outputOf(result).children).toEqual([]);
+  });
+});
+
+describe("stack.restackRewritten", () => {
+  test("padre reescrito: el hijo queda sobre la nueva punta con el mismo patch-id y sigue colgando de él", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const before = remoteSha("cla-2");
+    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
+    const patches = () => github.requests.filter((r) => r.method === "PATCH").length;
+    const patchesBefore = patches();
+
+    const result = await runRewritten(1, rewritten);
+
+    expect(result.outcome).toBe("ok");
+    const output = outputOf(result);
+    expect(output.children).toMatchObject([{ pr: { number: child }, branch: "cla-2", status: "restacked", commits: 1 }]);
+    expect(output.changedDrafts).toEqual([ref(child)]);
+    expect(output.mergeable).toEqual([{ number: 1, mergeable: true }, { number: child, mergeable: true }]);
+    // Un solo commit propio, directo sobre la punta nueva del padre y con el patch-id de antes.
+    expect(remoteLog(`${rewritten.to}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${rewritten.to}`);
+    expect(patchId(remoteSha("cla-2"))).toBe(patchId(before));
+    // Su base no cambia: sigue colgando de la branch del padre.
+    expect(github.pulls().find((p) => p.number === child)?.base.ref).toBe("cla-1");
+    expect(patches()).toBe(patchesBefore);
+    expect(sql(`SELECT * FROM pr_parents`)).toHaveLength(1);
+    expect(sql(`SELECT base_ref, head_sha FROM pull_requests WHERE number = ${child}`)).toEqual([{ base_ref: "cla-1", head_sha: remoteSha("cla-2") }]);
+    expect(sql<{ state: string; remote_sha: string; base_ref: string }>(`SELECT state, remote_sha, base_ref FROM workspaces WHERE branch = 'cla-2'`)).toEqual([
+      { state: "idle", remote_sha: remoteSha("cla-2"), base_ref: "cla-1" },
+    ]);
+  });
+
+  test("cadena de 3: el nieto parte de la punta vieja de su padre y de la nueva", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
+    const [oldChild, oldGrandchild] = [remoteSha("cla-2"), remoteSha("cla-3")];
+    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
+
+    const output = outputOf(await runRewritten(1, rewritten));
+
+    expect(output.children.map((c) => [c.pr.number, c.status])).toEqual([
+      [child, "restacked"],
+      [grandchild, "restacked"],
+    ]);
+    expect(remoteLog(`${rewritten.to}..cla-3`)).toBe("feat: cla-3\nfeat: cla-2");
+    expect(remoteLog(`${remoteSha("cla-2")}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${remoteSha("cla-2")}`);
+    expect(patchId(remoteSha("cla-2"))).toBe(patchId(oldChild));
+    expect(patchId(remoteSha("cla-3"))).toBe(patchId(oldGrandchild));
+    expect(github.pulls().find((p) => p.number === grandchild)?.base.ref).toBe("cla-2");
+    expect(sql(`SELECT * FROM pr_parents`)).toHaveLength(2);
+  });
+
+  test("repetirlo no cambia nada: el hijo ya está sobre la punta nueva", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
+    await runRewritten(1, rewritten);
+    const restacked = remoteSha("cla-2");
+
+    const again = await runRewritten(1, rewritten);
+
+    expect(outputOf(again).children).toMatchObject([{ pr: { number: child }, status: "uptodate" }]);
+    expect(outputOf(again).changedDrafts).toEqual([]);
+    expect(remoteSha("cla-2")).toBe(restacked);
+  });
+
+  test("conflicto: la branch del hijo queda como estaba y se emite el evento para el flujo de rebase", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const child = await openPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
+    const before = remoteSha("cla-2");
+    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3 v2\n" });
+
+    const result = await runRewritten(1, rewritten);
+
+    expect(result.outcome).toBe("conflict");
+    expect(outputOf(result).children).toMatchObject([{ pr: { number: child }, status: "conflict", files: ["a.txt"] }]);
+    expect(remoteSha("cla-2")).toBe(before);
+    expect(store.events.since(0, { types: ["pr.conflict"] }).map((e) => e.payload)).toEqual([
+      { repo: REPO, number: child, sha: before, base: "cla-1", from: rewritten.from, onto: rewritten.to, files: ["a.txt"] },
+    ]);
+  });
+
+  test("los hijos de un hijo que quedó en conflicto se restackean cuando alguien lo resuelve y pushea", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const child = await openPr("cla-2", "cla-1", { "a.txt": "a1\nchild\na3\n" });
+    const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
+    const [oldChild, oldGrandchild] = [remoteSha("cla-2"), remoteSha("cla-3")];
+    const squash = squashOnMain("cla-1", { "a.txt": "a1\nmanual\na3\n" });
+    github.pr(1).merge({ sha: squash });
+    const stuck = await run(1);
+    expect(outputOf(stuck).children).toMatchObject([{ pr: { number: child }, status: "conflict" }]);
+    expect(remoteSha("cla-3")).toBe(oldGrandchild);
+
+    // Lo que hace el flujo de rebase: el hijo queda sobre la base con el conflicto resuelto.
+    elsewhere((git, dir) => {
+      git("checkout", "--quiet", "-B", "cla-2", squash);
+      write(dir, { "a.txt": "a1\nmanual y child\na3\n" });
+      git("add", "--all");
+      git("commit", "--quiet", "--message", "feat: cla-2");
+      git("push", "--quiet", "--force", "origin", "cla-2");
+    });
+    const rebased = { from: oldChild, to: remoteSha("cla-2") };
+
+    const result = await runRewritten(child, rebased);
+
+    expect(result.outcome).toBe("ok");
+    expect(outputOf(result).children).toMatchObject([{ pr: { number: grandchild }, status: "restacked", commits: 1 }]);
+    expect(remoteLog(`${rebased.to}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${rebased.to}`);
+    expect(patchId(remoteSha("cla-3"))).toBe(patchId(oldGrandchild));
+    expect(github.pulls().find((p) => p.number === grandchild)?.base.ref).toBe("cla-2");
+  });
+
+  test("un PR sin hijos no hace nada, ni siquiera fetch", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
+    const requests = github.requests.length;
+
+    const result = await runRewritten(1, rewritten);
+
+    expect(result.outcome).toBe("ok");
+    expect(outputOf(result).children).toEqual([]);
+    expect(github.requests.length).toBe(requests);
+  });
+
+  test("un PR que ya se mergeó no restackea a sus hijos sobre su branch reescrita", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
+    github.pr(1).merge({ sha: squashOnMain("cla-1") });
+
+    await expect(runRewritten(1, rewritten)).rejects.toThrow(PermanentActionError);
+    await expect(runRewritten(1, rewritten)).rejects.toThrow(/ya está mergeado/);
+  });
+
+  test("una punta vieja que no está en el repo local no se puede restackear", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const { to } = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
+
+    await expect(runRewritten(1, { from: "0".repeat(40), to })).rejects.toThrow(PermanentActionError);
+    await expect(runRewritten(1, { from: "0".repeat(40), to })).rejects.toThrow(/no está en el repo local/);
   });
 });

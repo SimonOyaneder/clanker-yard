@@ -22,7 +22,7 @@ import { createPrCache, type PrRow } from "./github/pr-cache";
 import { prWaits, signalPr } from "./github/pr-waits";
 import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/publish";
-import { stackRestackAction } from "./github/restack";
+import { stackRestackAction, stackRestackRewrittenAction } from "./github/restack";
 import { prPushFixupsAction } from "./github/push-fixups";
 import {
   prPushLeaseAction,
@@ -209,7 +209,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(prRebaseApprovalAction(rebasePr));
   flows.registerAction(workspaceCommitAfterRebaseAction(rebasePr));
   flows.registerAction(workspaceRebaseAbortAction(rebasePr));
-  flows.registerAction(stackRestackAction({ store, workspaces, repos: repos.config, prs, connections: opts.connections }));
+  const restackDeps = { store, workspaces, repos: repos.config, prs, connections: opts.connections };
+  flows.registerAction(stackRestackAction(restackDeps));
+  flows.registerAction(stackRestackRewrittenAction(restackDeps));
   const feedback = { connections: opts.connections, packs };
   for (const action of [prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction]) flows.registerAction(action(feedback));
   for (const wait of Object.values(prWaits(prs))) flows.registerWait(wait);

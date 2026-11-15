@@ -295,6 +295,7 @@ describe("arranque", () => {
       { slug: "juguete" },
       { slug: "pr-feedback" },
       { slug: "rebase-conflicto" },
+      { slug: "restack-rewritten" },
       { slug: "techlead-clasico" },
     ]);
   });
