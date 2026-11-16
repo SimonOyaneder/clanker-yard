@@ -37,7 +37,7 @@ import type { RouterDeps } from "./router";
 
 const noRuntime: AgentRuntime = {
   id: "fake",
-  capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+  capabilities: { costPerTurn: true },
   start: () => Promise.reject(new Error("este test no corre agentes")),
   resume: () => Promise.reject(new Error("este test no corre agentes")),
 };

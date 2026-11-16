@@ -7,6 +7,33 @@ import type { Store } from "../store/store";
 /** Cuánto espera `stop` tras SIGKILL a que el SO entregue el cierre de lo que mató. */
 const KILLED_WAIT_MS = 2_000;
 
+/** Tras SIGTERM al grupo de un proceso del core, lo que siga vivo cae con SIGKILL a los 10 s (`docs/design.html#d-flows`, "Cancelar"). */
+export const KILL_GROUP_AFTER_MS = 10_000;
+
+/**
+ * Baja el grupo de `child`, que se lanzó con `detached: true` (su pid es su grupo): SIGTERM y, si a los `killAfterMs`
+ * no cerró, SIGKILL. Así caen también sus hijos (el `bash` de las tools de un agente). No hace nada si ya terminó.
+ */
+export function killGroup(child: ChildProcess, killAfterMs = KILL_GROUP_AFTER_MS): void {
+  const pid = child.pid;
+  if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    // Terminó entre medio.
+    return;
+  }
+  const hardKill = setTimeout(() => {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Terminó entre medio.
+    }
+  }, killAfterMs);
+  hardKill.unref();
+  child.once("close", () => clearTimeout(hardKill));
+}
+
 export interface Procs {
   /** El `boot_id` de este core: el que llevan sus filas. */
   readonly bootId: string;

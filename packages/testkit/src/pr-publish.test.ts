@@ -394,7 +394,7 @@ describe("en un flujo", () => {
   function flowWith(publishNode: object): Flows {
     const unused = {
       id: "fake" as const,
-      capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+      capabilities: { costPerTurn: true },
       start: () => Promise.reject(new Error("no se usa")),
       resume: () => Promise.reject(new Error("no se usa")),
     };

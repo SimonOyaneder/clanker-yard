@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { pickEnv } from "../procs/env";
 
 const execFileAsync = promisify(execFile);
 
@@ -28,16 +29,6 @@ const INHERITED_ENV = ["PATH", "HOME", "USER", "LANG", "TMPDIR", "SHELL"];
 
 /** Lo que el `fetch` de `origin` con las credenciales del usuario necesita además (agente SSH y proxies). */
 export const USER_REMOTE_ENV = ["SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"];
-
-/** Las variables `keys` del entorno del core que están definidas. */
-export function pickEnv(keys: readonly string[]): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of keys) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
-}
 
 /**
  * Corre `git` en `cwd` y devuelve stdout tal cual: a un patch sin su salto final `git apply` lo rechaza.

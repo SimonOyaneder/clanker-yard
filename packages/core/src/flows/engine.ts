@@ -2,6 +2,7 @@ import {
   FlowDef,
   Profile,
   Role,
+  type AgentRuntimeId,
   type ArtifactHash,
   type Brief,
   type DecisionId,
@@ -220,7 +221,7 @@ export interface EngineDeps extends SubjectsDeps {
    * `runtime:<id>`). Un paso cuyo ámbito está abierto no se despacha; un error de entorno abre el de su causa.
    * `runtimeOf` dice qué runtime corre una entrada de perfil que pide `requested` (`ProfileRole.runtime`).
    */
-  environment?: { breakers: Pick<Breakers, "openReason" | "trip">; runtimeOf(requested: string | undefined): string };
+  environment?: { breakers: Pick<Breakers, "openReason" | "trip">; runtimeOf(requested: AgentRuntimeId | undefined): string };
   /** Tope global de agentes a la vez. */
   maxAgents?: number;
   tickMs?: number;

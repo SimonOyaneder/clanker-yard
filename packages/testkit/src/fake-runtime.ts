@@ -5,7 +5,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { compileJsonSchema, type Brief, type JsonSchema } from "@clanker/api";
 import {
+  addUsage,
   briefOfMessage,
+  detailOf,
+  emptyUsage,
   usdToMicros,
   type AgentEvent,
   type AgentRun,
@@ -113,7 +116,7 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
     record?: (message: Record<string, unknown>) => void,
   ): Promise<RunResult> {
     const crashAt = script.result.status === "crash" ? script.result.at : Infinity;
-    const usage = emptyUsage();
+    const usage = emptyUsage("estimate");
     let clock = 0;
     let messages = 0;
     let tools = 0;
@@ -150,7 +153,7 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
           costMicros: usdToMicros(event.usage.costUsd),
           costSource: "estimate",
         } satisfies Usage;
-        add(usage, turn);
+        addUsage(usage, turn);
         emit({ type: "usage", turn: usage.turns, usage: turn });
       }
     }
@@ -188,7 +191,7 @@ export function createFakeRuntime(options: FakeRuntimeOptions): FakeRuntime {
 
   return {
     id: "fake",
-    capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+    capabilities: { costPerTurn: true },
 
     async start(spec) {
       const sessionId = `fake-${++started}`;
@@ -268,36 +271,6 @@ async function applyPatch(patch: string, cwd: string): Promise<void> {
       cause: error,
     });
   }
-}
-
-/** Lo más útil para mostrar en la UI de lo que recibió la herramienta. */
-function detailOf(input: Record<string, unknown> | undefined): string | undefined {
-  for (const key of ["file_path", "path", "command", "pattern", "url"]) {
-    const value = input?.[key];
-    if (typeof value === "string") return value;
-  }
-  return undefined;
-}
-
-function emptyUsage(): Usage {
-  return {
-    turns: 0,
-    tokensIn: 0,
-    tokensOut: 0,
-    tokensCacheRead: 0,
-    tokensCacheWrite: 0,
-    costMicros: 0,
-    costSource: "estimate",
-  };
-}
-
-function add(total: Usage, turn: Usage): void {
-  total.turns += turn.turns;
-  total.tokensIn += turn.tokensIn;
-  total.tokensOut += turn.tokensOut;
-  total.tokensCacheRead += turn.tokensCacheRead;
-  total.tokensCacheWrite += turn.tokensCacheWrite;
-  total.costMicros += turn.costMicros;
 }
 
 function interrupted(usage: Usage): RunResult {

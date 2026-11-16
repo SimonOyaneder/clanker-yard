@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Document } from "yaml";
+import { messageOf } from "../../errors/format";
 import { diffBetween, snapshotTree } from "../../git/tree";
 import { briefOfMessage } from "../brief";
 import type { AgentEvent, RunResult, RunSpec } from "../runtime";
@@ -147,7 +148,7 @@ export async function startRecording(options: RecordingOptions): Promise<Recordi
         events: entries.map((entry) => ("usage" in entry ? { at: entry.at, usage: withoutZeroCost(entry.usage) } : entry)),
         effects: patch === "" ? [] : [{ apply: `patches/${name}.patch` }],
         result: crashed
-          ? { status: "crash", at, message: outcome.crash instanceof Error ? outcome.crash.message : String(outcome.crash) }
+          ? { status: "crash", at, message: messageOf(outcome.crash) }
           : resultOf(outcome.result),
       };
       const doc = new Document(mapStrings(script, scrub));

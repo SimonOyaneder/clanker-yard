@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pickEnv } from "../procs/env";
 
 /** Donde Workspaces deja los logs de los comandos si no se le da otra carpeta. */
 export const defaultLogDir = (dataDir: string) => join(dataDir, "logs");
@@ -46,7 +47,7 @@ export async function execLogged({ cwd, command, env, logPath, signal, onSpawn }
   try {
     writeSync(fd, `$ ${command}\n`);
     const outputStart = fstatSync(fd).size;
-    const { code, killedBy } = await run(command, cwd, { ...inheritedEnv(), ...env }, fd, signal, onSpawn);
+    const { code, killedBy } = await spawnShell(command, cwd, { ...pickEnv(INHERITED_ENV), ...env }, fd, signal, onSpawn);
     const outputEnd = fstatSync(fd).size;
     const extract = excerpt(...readTail(fd, outputStart, outputEnd));
     writeSync(fd, `${killedBy ? `[terminó por ${killedBy}]` : `[exit ${code}]`}\n\n`);
@@ -74,63 +75,39 @@ const STREAM_KEEP_CHARS = 64 * 1024;
 
 /**
  * Como `execLogged`, pero la salida pasa por `onOutput` en vivo en lugar de ir a un log, y vuelve en
- * `output` (stdout y stderr entrelazados, solo la cola). Un `signal` abortado mata el grupo de procesos
- * del comando; el resultado es su exit, sin lanzar.
+ * `output` (stdout y stderr entrelazados, solo la cola). Nunca lanza por `signal`: abortado (antes o durante) mata el
+ * grupo de procesos del comando y el resultado lo dice con `aborted`.
  */
-export async function execStreaming({ cwd, command, env, onOutput, signal, onSpawn }: StreamRequest): Promise<{ exitCode: number; output: string }> {
-  signal.throwIfAborted();
+export async function execStreaming({ cwd, command, env, onOutput, signal, onSpawn }: StreamRequest): Promise<{ exitCode: number; output: string; aborted: boolean }> {
+  if (signal.aborted) return { exitCode: 1, output: "", aborted: true };
   let output = "";
-  const { code } = await new Promise<{ code: number | null }>((resolve, reject) => {
-    const child = spawn("sh", ["-c", command], { cwd, env: { ...inheritedEnv(), ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const take = (chunk: Buffer) => {
+    const text = chunk.toString("utf8");
+    output = (output + text).slice(-STREAM_KEEP_CHARS);
+    onOutput(text);
+  };
+  const { code } = await spawnShell(command, cwd, { ...pickEnv(INHERITED_ENV), ...env }, "pipe", signal, (child) => {
     onSpawn?.(child);
-    const abort = () => {
-      try {
-        process.kill(-child.pid!, "SIGKILL");
-      } catch {
-        // El grupo ya terminó.
-      }
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    const take = (chunk: Buffer) => {
-      const text = chunk.toString("utf8");
-      output = (output + text).slice(-STREAM_KEEP_CHARS);
-      onOutput(text);
-    };
-    child.stdout.on("data", take);
-    child.stderr.on("data", take);
-    child.once("error", (error) => {
-      signal.removeEventListener("abort", abort);
-      reject(new Error(`No se pudo lanzar "${command}" en ${cwd}: ${error.message}`, { cause: error }));
-    });
-    // `close` y no `exit`: espera a que los pipes se vacíen.
-    child.once("close", (code) => {
-      signal.removeEventListener("abort", abort);
-      resolve({ code });
-    });
+    child.stdout?.on("data", take);
+    child.stderr?.on("data", take);
   });
-  return { exitCode: code ?? 1, output };
+  return { exitCode: code ?? 1, output, aborted: signal.aborted };
 }
 
-function inheritedEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of INHERITED_ENV) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
-}
-
-function run(
+/**
+ * `sh -c command` en su propio grupo de procesos (`detached`: matar solo el `sh` dejaría vivos a sus hijos). Un
+ * `signal` abortado mata el grupo con SIGKILL. Resuelve en `close`, no en `exit`: espera a que los pipes se vacíen.
+ */
+function spawnShell(
   command: string,
   cwd: string,
   env: Record<string, string>,
-  fd: number,
+  output: number | "pipe",
   signal: AbortSignal,
   onSpawn: ((child: ChildProcess) => void) | undefined,
 ): Promise<{ code: number | null; killedBy: NodeJS.Signals | null }> {
   return new Promise((resolve, reject) => {
-    // `detached` da su propio grupo de procesos: matar solo el `sh` dejaría vivos a sus hijos.
-    const child = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", fd, fd], detached: true });
+    const child = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", output, output], detached: true });
     onSpawn?.(child);
     const abort = () => {
       try {

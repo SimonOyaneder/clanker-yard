@@ -6,7 +6,8 @@ import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-or
 import * as z from "zod";
 import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/catalog";
 import type { GitIdentity, GitIdentityOf } from "../git/identity";
-import { git, GitError, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
+import { git, GitError, isAncestor, tryGit, USER_REMOTE_ENV } from "../git/git";
+import { pickEnv } from "../procs/env";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { diffBetween, snapshotTree } from "../git/tree";
 import { defaultLogDir, excerpt, execLogged, stepLogPath, type ExecResult } from "./exec";

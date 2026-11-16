@@ -1,7 +1,7 @@
 import { DEFAULT_AGENT_RUNTIME, type AgentRuntimeId, type Effort, type JsonSchema, type RuntimeOptions, type ToolPolicy } from "@clanker/api";
 
-/** Los que un perfil puede pedir (`AgentRuntimeId`), más `fake` (tests y demo) y `acp` (reservado). */
-export type RuntimeId = AgentRuntimeId | "acp" | "fake";
+/** Los que un perfil puede pedir (`AgentRuntimeId`), más `fake` (tests y demo). */
+export type RuntimeId = AgentRuntimeId | "fake";
 
 /**
  * Lo que el core guarda para retomar una sesión. Con `cwd` porque la caché y el historial de
@@ -13,12 +13,10 @@ export interface SessionRef {
   cwd: string;
 }
 
+/** Lo que el core hace distinto según el runtime. Un flag nuevo entra cuando el core lo lee. */
 export interface RuntimeCapabilities {
-  structuredOutput: boolean;
+  /** El runtime dice el costo de cada turno; sin esto el core lo estima con `model_prices`. */
   costPerTurn: boolean;
-  resume: boolean;
-  fork: boolean;
-  steer: boolean;
 }
 
 /** Lo que Claude Code carga por su cuenta, siempre del disco al iniciar la sesión (`settingSources` y `skills`). */
@@ -91,6 +89,46 @@ export interface Usage {
   /** `estimate` con suscripción: el equivalente a precio de lista. */
   costSource: "runtime" | "estimate";
 }
+
+/** Los tokens de un uso, sin turnos ni costo. */
+export type TokenCounts = Pick<Usage, "tokensIn" | "tokensOut" | "tokensCacheRead" | "tokensCacheWrite">;
+
+export const NO_TOKENS: TokenCounts = { tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0 };
+
+/** Un uso en cero, para ir sumándole turnos. */
+export const emptyUsage = (costSource: Usage["costSource"] = "runtime"): Usage => ({ turns: 0, ...NO_TOKENS, costMicros: 0, costSource });
+
+/** Suma a `into` los turnos, tokens y costo de `usage`. */
+export function addUsage(into: Usage, usage: Omit<Usage, "costSource">): void {
+  into.turns += usage.turns;
+  Object.assign(into, sumTokens([into, usage]));
+  into.costMicros += usage.costMicros;
+}
+
+/** Los tokens de `counts`, sumados campo a campo. */
+export function sumTokens(counts: Iterable<TokenCounts>): TokenCounts {
+  const sum = { ...NO_TOKENS };
+  for (const c of counts) {
+    sum.tokensIn += c.tokensIn;
+    sum.tokensOut += c.tokensOut;
+    sum.tokensCacheRead += c.tokensCacheRead;
+    sum.tokensCacheWrite += c.tokensCacheWrite;
+  }
+  return sum;
+}
+
+/** `a - b`, campo a campo. */
+export function subtractTokens(a: TokenCounts, b: TokenCounts = NO_TOKENS): TokenCounts {
+  return {
+    tokensIn: a.tokensIn - b.tokensIn,
+    tokensOut: a.tokensOut - b.tokensOut,
+    tokensCacheRead: a.tokensCacheRead - b.tokensCacheRead,
+    tokensCacheWrite: a.tokensCacheWrite - b.tokensCacheWrite,
+  };
+}
+
+/** Todos los tokens de un uso: entrada, salida y caché. */
+export const totalTokens = (u: TokenCounts): number => u.tokensIn + u.tokensOut + u.tokensCacheRead + u.tokensCacheWrite;
 
 /**
  * `login_expired` y `quota_exhausted` son distintos a propósito: el primero lo arregla una
@@ -202,9 +240,9 @@ export interface RuntimeRegistry {
   forced: AgentRuntime | undefined;
   all: readonly AgentRuntime[];
   /** El id que corre una entrada de perfil que pide `requested` (sin él, el default). No lanza: el breaker usa el id aunque falte. */
-  idFor(requested: string | undefined): RuntimeId;
+  idFor(requested: AgentRuntimeId | undefined): RuntimeId;
   /** El runtime de una entrada de perfil. Lanza `RuntimeUnavailableError` si este core no lo tiene. */
-  get(requested: string | undefined): AgentRuntime;
+  get(requested: AgentRuntimeId | undefined): AgentRuntime;
 }
 
 /** Arma el registro; `CORE_RUNTIME` debe ser uno de los registrados. */
@@ -220,7 +258,7 @@ export function createRuntimeRegistry(
   }
   const fallback = forced ?? runtimes.find((r) => r.id === DEFAULT_RUNTIME) ?? runtimes[0];
   if (!fallback) throw new Error("El core necesita al menos un runtime de agentes.");
-  const idFor = (requested: string | undefined): RuntimeId => (forced?.id ?? (requested as RuntimeId | undefined) ?? fallback.id);
+  const idFor = (requested: AgentRuntimeId | undefined): RuntimeId => forced?.id ?? requested ?? fallback.id;
   return {
     default: fallback,
     forced,

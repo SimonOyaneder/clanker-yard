@@ -5,7 +5,8 @@ import type { Connections } from "../connections/connections";
 import type { Repos } from "../repos/repos";
 import { execStreaming } from "../workspaces/exec";
 import type { AgentRuntime } from "../agents/runtime";
-import { CLAUDE_RUNTIME, GITHUB_SCOPE, REPO_SCOPE_PREFIX, runtimeScope } from "./breakers";
+import { CLAUDE_RUNTIME_ID } from "../agents/claude/models";
+import { GITHUB_SCOPE, REPO_SCOPE_PREFIX, runtimeScope } from "./breakers";
 import { messageOf } from "../errors/format";
 
 /** Una prueba de `requires` que se cuelga es una causa que sigue: no puede dejar al breaker sin reintentar. */
@@ -67,7 +68,7 @@ export function environmentProbe({ connections, repos, runtimes }: ProbeDeps): (
 
   return (scope) => {
     if (scope === GITHUB_SCOPE) return github();
-    if (scope === runtimeScope(CLAUDE_RUNTIME) && runtimes.some((r) => r.id === CLAUDE_RUNTIME)) return claude();
+    if (scope === runtimeScope(CLAUDE_RUNTIME_ID) && runtimes.some((r) => r.id === CLAUDE_RUNTIME_ID)) return claude();
     const runtime = runtimes.find((r) => scope === runtimeScope(r.id));
     if (runtime?.probe) return runtime.probe();
     if (scope.startsWith(REPO_SCOPE_PREFIX)) return repo(scope.slice(REPO_SCOPE_PREFIX.length) as RepoId);

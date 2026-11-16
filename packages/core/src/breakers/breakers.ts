@@ -1,4 +1,5 @@
 import { BreakerCause, DecisionId, type RepoId } from "@clanker/api";
+import { CLAUDE_RUNTIME_ID } from "../agents/claude/models";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import { meta } from "../store/schema";
@@ -15,9 +16,6 @@ export const GITHUB_SCOPE = "github";
 export const REPO_SCOPE_PREFIX = "repo:";
 export const repoScope = (repoId: RepoId): string => `${REPO_SCOPE_PREFIX}${repoId}`;
 export const runtimeScope = (runtime: string): string => `runtime:${runtime}`;
-
-/** El runtime que depende de la conexión `claude`. */
-export const CLAUDE_RUNTIME = "claude-sdk";
 
 export type { BreakerCause };
 
@@ -97,7 +95,7 @@ export function createBreakers({ store, runtimes, probe, label = (scope) => scop
 
   /** La conexión de la que depende cada ámbito global. */
   const scopeOfProvider = (provider: unknown): string | undefined =>
-    provider === "github" ? GITHUB_SCOPE : provider === "claude" && runtimes.includes(CLAUDE_RUNTIME) ? runtimeScope(CLAUDE_RUNTIME) : undefined;
+    provider === "github" ? GITHUB_SCOPE : provider === "claude" && runtimes.includes(CLAUDE_RUNTIME_ID) ? runtimeScope(CLAUDE_RUNTIME_ID) : undefined;
 
   /** Guarda lo que sobrevive a un corte, en la misma transacción que el cambio. */
   function persist(tx: Tx): void {

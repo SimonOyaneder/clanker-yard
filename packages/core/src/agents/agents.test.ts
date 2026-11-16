@@ -140,7 +140,7 @@ function stubRuntime(steps: Step[], id: AgentRuntime["id"] = "fake") {
   };
   const runtime: AgentRuntime = {
     id,
-    capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+    capabilities: { costPerTurn: true },
     async start(spec) {
       calls.starts.push(spec);
       return next(spec.cwd);
@@ -473,7 +473,7 @@ describe("resume", () => {
   test("una sesión de otro runtime no se retoma con el actual", async () => {
     const { store, agents, calls } = setup([{ result: { structured: validReport } }]);
     const first = await agents.run(request());
-    store.db.update(agentSessions).set({ runtime: "acp" }).run();
+    store.db.update(agentSessions).set({ runtime: "opencode" }).run();
 
     await expect(
       agents.resume({
@@ -482,7 +482,7 @@ describe("resume", () => {
         mode: "followup",
         brief: brief("followup"),
       }),
-    ).rejects.toThrow(`La sesión ${first.sessionId} es del runtime "acp"`);
+    ).rejects.toThrow(`La sesión ${first.sessionId} es del runtime "opencode"`);
     expect(calls.resumes).toEqual([]);
   });
 

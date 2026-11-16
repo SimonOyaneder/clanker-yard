@@ -10,7 +10,8 @@ import { createArtifacts } from "./artifacts/artifacts";
 import { installBuiltins, type BuiltinTemplate } from "./builtin/install";
 import { commitsApplyAction } from "./commits/apply";
 import type { Connections } from "./connections/connections";
-import { CLAUDE_RUNTIME, createBreakers, runtimeScope } from "./breakers/breakers";
+import { CLAUDE_RUNTIME_ID } from "./agents/claude/models";
+import { createBreakers, runtimeScope } from "./breakers/breakers";
 import { environmentProbe } from "./breakers/probes";
 import { createDecisions } from "./decisions/decisions";
 import { createLearnings } from "./learnings/learnings";
@@ -41,7 +42,7 @@ import { createPacks } from "./packs/packs";
 import { createLinearTracker } from "./linear/tracker";
 import { createTrackers } from "./tracker/trackers";
 import { createTrackerProjects } from "./tracker/tracker-projects";
-import { createProcs, type Procs } from "./procs/procs";
+import { createProcs, KILL_GROUP_AFTER_MS, type Procs } from "./procs/procs";
 import { createProjectConfigs } from "./projects/config";
 import { createProjects } from "./projects/projects";
 import { createRepoConfigExporter } from "./repo-config/export";
@@ -78,8 +79,6 @@ import {
 
 /** Cuánto espera un apagado con `drain` a las acciones en curso antes de abortarlas (`docs/design.html#d-data`). */
 const DRAIN_MS = 60_000;
-/** De SIGTERM a SIGKILL sobre los procesos que lanzó el core. */
-const KILL_AFTER_MS = 10_000;
 /** Lo que tarda en soltarse un paso después de SIGKILL; pasado esto se deja atrás y el próximo arranque lo recupera. */
 const SETTLE_MS = 5_000;
 
@@ -201,12 +200,12 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   // Un run real que encuentra el login de Claude vencido deja la cuenta `claude` en rojo, como un `testClaude`.
   const stopMarkingLogin = store.events.subscribe(
     ({ payload }) => {
-      if (payload.scope === runtimeScope(CLAUDE_RUNTIME) && payload.cause === "login_expired") opts.connections.markClaudeLoginLost("core");
+      if (payload.scope === runtimeScope(CLAUDE_RUNTIME_ID) && payload.cause === "login_expired") opts.connections.markClaudeLoginLost("core");
     },
     { types: ["breaker.opened"] },
   );
   // El filtro de learnings pide un modelo barato de Claude: corre en `claude-sdk` salvo que `CORE_RUNTIME` fuerce otro.
-  const learnings = createLearnings({ store, runtime: runtimes.forced ?? runtimes.all.find((r) => r.id === CLAUDE_RUNTIME) ?? runtimes.default });
+  const learnings = createLearnings({ store, runtime: runtimes.forced ?? runtimes.all.find((r) => r.id === CLAUDE_RUNTIME_ID) ?? runtimes.default });
   const flows = createFlows({
     store,
     environment: { breakers, runtimeOf: runtimes.idFor },
@@ -392,7 +391,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       const stopped = flows.close({ graceMs });
       // Con `drain`, hasta que las acciones terminen solas; sin él, el SIGTERM sale de inmediato.
       await Promise.race([stopped, delay(graceMs, undefined, { ref: false })]);
-      await procs.stop(KILL_AFTER_MS);
+      await procs.stop(KILL_GROUP_AFTER_MS);
       await Promise.race([stopped, delay(SETTLE_MS, undefined, { ref: false })]);
       await server.close();
       stopReleasing();

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TRANSCRIPT_TEXT_MAX_CHARS } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { entriesOf, readTranscript, transcriptFile } from "./transcript";
+import { entriesOf, readTranscript, transcriptFile } from "./transcripts";
 
 let home: string;
 let path: string;

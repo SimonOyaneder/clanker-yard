@@ -1,11 +1,8 @@
 import { spawn } from "node:child_process";
-import type { Procs } from "../../procs/procs";
+import { killGroup, type Procs } from "../../procs/procs";
 
 /** Lo que tarda `opencode serve` en decir dónde escucha; carga plugins y MCP del usuario, así que puede tardar. */
 export const SERVE_START_TIMEOUT_MS = 30_000;
-
-/** Tras SIGTERM, lo que siga vivo del grupo cae con SIGKILL a los 10 s, como el proceso de Claude Code. */
-export const KILL_GROUP_AFTER_MS = 10_000;
 
 /** opencode 1 decía "opencode server listening on", opencode 2 "server listening on". */
 const LISTENING = /listening on (https?:\/\/\S+)/i;
@@ -35,7 +32,7 @@ export interface OpencodeServer {
 /** Lanza un servidor de opencode para un run, en su propio grupo de procesos (`detached`), y espera a que escuche. */
 export type LaunchServer = (input: LaunchInput) => Promise<OpencodeServer>;
 
-export const launchOpencodeServer: LaunchServer = ({ executable, args, env, cwd, procs, stepRunId, killAfterMs = KILL_GROUP_AFTER_MS }) => {
+export const launchOpencodeServer: LaunchServer = ({ executable, args, env, cwd, procs, stepRunId, killAfterMs }) => {
   const child = spawn(executable, args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   procs?.track(child, { kind: "agent", stepRunId });
   let output = "";
@@ -51,23 +48,9 @@ export const launchOpencodeServer: LaunchServer = ({ executable, args, env, cwd,
   });
 
   const close = () => {
-    if (closing || child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+    if (closing) return;
     closing = true;
-    const pid = child.pid;
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
-      return;
-    }
-    const hardKill = setTimeout(() => {
-      try {
-        process.kill(-pid, "SIGKILL");
-      } catch {
-        // Terminó entre medio.
-      }
-    }, killAfterMs);
-    hardKill.unref();
-    child.once("close", () => clearTimeout(hardKill));
+    killGroup(child, killAfterMs);
   };
 
   return new Promise<OpencodeServer>((resolve, reject) => {

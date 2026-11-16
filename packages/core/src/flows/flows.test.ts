@@ -18,7 +18,7 @@ afterEach(() => {
 /** Estas pruebas solo validan y guardan: ningún paso corre, así que el runtime nunca se usa. */
 const unusedRuntime: AgentRuntime = {
   id: "fake",
-  capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+  capabilities: { costPerTurn: true },
   start: () => Promise.reject(new Error("no se usa")),
   resume: () => Promise.reject(new Error("no se usa")),
 };

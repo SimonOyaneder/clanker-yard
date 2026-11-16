@@ -39,7 +39,8 @@ export { createOpencodeRuntime } from "./agents/opencode/opencode-runtime";
 export type { ClaudeRuntimeOptions, QueryFn } from "./agents/claude/claude-runtime";
 export { apiKeyCredentials, subscriptionCredentials } from "./agents/claude/credentials";
 export type { ClaudeCredentials, SubscriptionOptions } from "./agents/claude/credentials";
-export { createRuntimeRegistry, DEFAULT_RUNTIME, RuntimeUnavailableError, type RuntimeRegistry } from "./agents/runtime";
+export { addUsage, createRuntimeRegistry, DEFAULT_RUNTIME, emptyUsage, RuntimeUnavailableError, type RuntimeRegistry } from "./agents/runtime";
+export { detailOf } from "./agents/transcripts";
 export type {
   AgentEvent,
   AgentRun,

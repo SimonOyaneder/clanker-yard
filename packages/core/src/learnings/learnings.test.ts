@@ -177,7 +177,7 @@ describe("screen", () => {
     const usage = { turns: 1, tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0, costMicros: 0, costSource: "estimate" } as const;
     const runtime: AgentRuntime = {
       id: "fake",
-      capabilities: { structuredOutput: true, costPerTurn: false, resume: false, fork: false, steer: false },
+      capabilities: { costPerTurn: false },
       start: (spec) => {
         specs.push(spec);
         return Promise.resolve({

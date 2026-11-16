@@ -117,7 +117,7 @@ export function harness(
   };
   const runtime: AgentRuntime = {
     id: "fake",
-    capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+    capabilities: { costPerTurn: true },
     start: (spec) =>
       Promise.resolve(run({ kind: "start", sessionId: `${bootPrefix}ses-${calls.length + 1}`, spec, subject: subjectOf(spec.prompt), prompt: spec.prompt }, spec.cwd)),
     resume: (ref, message) =>

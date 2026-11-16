@@ -1,11 +1,12 @@
 import { AgentRuntimeId, type AgentOptions, type RuntimeOptions } from "@clanker/api";
-import { CLAUDE_OPTIONS } from "./claude/models";
+import { CLAUDE_OPTIONS, CLAUDE_RUNTIME_ID } from "./claude/models";
+import { messageOf } from "../errors/format";
 import type { RuntimeRegistry } from "./runtime";
 
 /** Lo que se ofrece de un runtime que este core no registró: el de Claude conserva su lista fija para editar perfiles. */
 function unregistered(id: AgentRuntimeId): RuntimeOptions {
   const message = `Este core no tiene el runtime ${id}.`;
-  if (id === "claude-sdk") return { ...CLAUDE_OPTIONS, available: false, message };
+  if (id === CLAUDE_RUNTIME_ID) return { ...CLAUDE_OPTIONS, available: false, message };
   return {
     id,
     label: "opencode",
@@ -29,7 +30,7 @@ export async function describeRuntimes(registry: Pick<RuntimeRegistry, "all">): 
       try {
         return await runtime.describe();
       } catch (error) {
-        return { ...unregistered(id), message: `No pude leer las opciones de ${id}: ${error instanceof Error ? error.message : String(error)}` };
+        return { ...unregistered(id), message: `No pude leer las opciones de ${id}: ${messageOf(error)}` };
       }
     }),
   );

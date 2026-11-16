@@ -111,9 +111,9 @@ async function runRecipe(
   const signal = AbortSignal.timeout(RECIPE_TEST_TIMEOUT_MS);
   const steps: RecipeTestStep[] = [];
 
-  async function run(phase: RecipeTestPhase, name: string, command: string, expect?: string): Promise<boolean> {
+  async function runStep(phase: RecipeTestPhase, name: string, command: string, expect?: string): Promise<boolean> {
     const pump = createOutputPump((text) => onOutput(phase, text));
-    const { exitCode, output } = await execStreaming({
+    const { exitCode, output, aborted: timedOut } = await execStreaming({
       cwd: worktree,
       command,
       env,
@@ -122,7 +122,6 @@ async function runRecipe(
       onSpawn: procs && ((child) => procs.track(child, { kind: "recipe" })),
     });
     pump.finish();
-    const timedOut = signal.aborted;
     const mismatch = exitCode === 0 && expect !== undefined && output.trim() !== expect;
     const extract = timedOut
       ? `se pasó de ${RECIPE_TEST_TIMEOUT_MS / 60_000} min y se mató\n${excerpt(output)}`
@@ -137,23 +136,23 @@ async function runRecipe(
 
   // `requires` se prueba entero: así se ve de una vez qué servicios faltan. El setup solo tiene sentido si están todos.
   let requiresOk = true;
-  for (const { name, check } of recipe.requires) requiresOk = (await run("requires", name, render(check, true))) && requiresOk;
+  for (const { name, check } of recipe.requires) requiresOk = (await runStep("requires", name, render(check, true))) && requiresOk;
   if (!requiresOk) return { ok: false, steps };
 
   // El orden de una corrida real: `setup.worktree` al crear el worktree, y al tomar el slot el guard y después `setup.slot`.
   const { setup } = recipe;
   for (const template of setup?.worktree ?? []) {
     const command = wrapped(template);
-    if (!(await run("setup.worktree", command, command))) return { ok: false, steps };
+    if (!(await runStep("setup.worktree", command, command))) return { ok: false, steps };
   }
   if (setup?.guard) {
     const command = wrapped(setup.guard.run);
-    if (!(await run("guard", command, command, render(setup.guard.expect, false)))) return { ok: false, steps };
+    if (!(await runStep("guard", command, command, render(setup.guard.expect, false)))) return { ok: false, steps };
   }
   if (slot && (setup?.slot.length ?? 0) > 0) slot.slots.startSetup(slot.lease);
   for (const template of setup?.slot ?? []) {
     const command = wrapped(template);
-    if (!(await run("setup.slot", command, command))) return { ok: false, steps };
+    if (!(await runStep("setup.slot", command, command))) return { ok: false, steps };
   }
   // El slot ya no es de ningún worktree real: el próximo que lo tome corre `setup.slot` de nuevo.
   if (slot && (setup?.slot.length ?? 0) > 0) slot.slots.finishSetup(slot.lease, { workspaceId: null, setupHash: null, env });
