@@ -6,6 +6,15 @@ export const isBlocking = (d: Pick<Decision, "kind">) => d.kind === "gate" || d.
 /** Pendiente y bloqueante: hay una corrida estacionada que espera a una persona. */
 export const parksRun = (d: Pick<Decision, "kind" | "status">) => d.status === "pending" && isBlocking(d)
 
+/**
+ * Lo único que entra a la Bandeja: lo que espera una respuesta o una acción de una persona. Las notas
+ * (`review_note`, `note`) son contexto del trabajo del agente: no se pierden, pero se leen en su corrida y en su PR.
+ */
+export const ACTIONABLE_KINDS: DecisionKind[] = ["gate", "question", "needs_human", "alert"]
+
+/** Las notas que dejan los agentes y el sistema: no esperan nada de nadie. */
+export const NOTE_KINDS: DecisionKind[] = ["review_note", "note"]
+
 /** La opción con la que se marca vista una decisión que no bloquea y no trae opciones propias. */
 export const SEEN = "seen"
 

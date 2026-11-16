@@ -1,4 +1,4 @@
-import type { Repo } from "@clanker/api"
+import type { Decision, Repo } from "@clanker/api"
 import { ChevronDown, LayoutList, Network, RefreshCw, Repeat2, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -25,6 +25,7 @@ import { Ago, Hint, Pill } from "../common"
 import { CIBadge, CombinedBaseChip, MergePill, PRStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 import { PR_KEYS, PrContextMenu } from "./pr-menu"
+import { PrNotes, PrNotesContext } from "./pr-notes"
 import { StackGraph } from "./stack-graph"
 
 type Filter = "all" | "stacked" | "solo" | "draft" | "ready" | "mergeable" | "hold" | "approved" | "pending" | "changes" | "owned"
@@ -78,11 +79,15 @@ interface Props {
   error: string | null
   /** Los repos registrados: Watch solo descubre PRs en ellos. */
   registered: readonly Repo[]
+  /** Las notas de los agentes: cada PR muestra cuántas son suyas. */
+  notes?: readonly Decision[]
   onOpenConnections: () => void
   onRefresh: () => void
 }
 
-export function PrsView({ prs, unread, issueKeys, loaded, error, registered, onOpenConnections, onRefresh }: Props) {
+const NO_NOTES: readonly Decision[] = []
+
+export function PrsView({ prs, unread, issueKeys, loaded, error, registered, notes = NO_NOTES, onOpenConnections, onRefresh }: Props) {
   const [filter, setFilterState] = useState<Filter>(() => readPref<Filter>("prs.filter", "all"))
   const [mode, setModeState] = useState<Mode>(() => readPref<Mode>("prs.mode", "graph"))
   const [hiddenRepos, setHiddenRepos] = useState<string[]>(() => readPref<string[]>("prs.hiddenRepos", []))
@@ -182,6 +187,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, onO
   }
 
   return (
+    <PrNotesContext.Provider value={notes}>
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-col gap-3 border-b px-6 pt-5 pb-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -323,6 +329,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, onO
         </div>
       )}
     </div>
+    </PrNotesContext.Provider>
   )
 }
 
@@ -433,6 +440,7 @@ function PRRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
             </Pill>
           ) : null}
           {combined ? <CombinedBaseChip parents={combined} /> : null}
+          <PrNotes pr={pr} />
           {mark ? <MergePill pr={pr} /> : review !== "none" ? <ReviewPill pr={pr} review={review} /> : null}
           <span className="flex flex-none items-center gap-1.5">
             {state.reviewers.map((r) => (

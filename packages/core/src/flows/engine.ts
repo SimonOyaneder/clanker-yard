@@ -1604,7 +1604,7 @@ export function createEngine(deps: EngineDeps): Engine {
         ...(closing.note === undefined ? {} : { note: closing.note }),
       },
     });
-    // Notas que no bloquean: la corrida sigue por su edge, el humano las ve en la bandeja.
+    // Notas que no bloquean: la corrida sigue por su edge, no entran a la bandeja: se leen en la corrida y en su PR.
     const scope = scopeOf(run, step.id);
     if (closing.note !== undefined) openEdgeNote(tx, run, step, closing.outcome, closing.note);
     for (const note of closing.reported?.notes ?? []) openDecision(tx, { ...scope, kind: "review_note", ...note });

@@ -5,6 +5,7 @@ import { Hint, Pill, SectionTitle, StatBar } from "@/components/common"
 import { useRunCommands } from "@/components/project/run-commands"
 import { RunGraph } from "@/components/project/run-graph"
 import { ParkedCallout } from "@/components/project/run-decisions"
+import { RunNotes } from "@/components/project/run-notes"
 import { RunStatusPill, isLive, stepLook } from "@/components/project/status"
 import { StepPanel, type StepTab, useCopySessionId } from "@/components/project/step-panel"
 import { Button } from "@/components/ui/button"
@@ -95,6 +96,8 @@ export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, step
       </header>
 
       <ParkedCallout run={run} />
+
+      <RunNotes run={run} />
 
       {failure ? (
         <div role="alert" className={cn("rounded-lg px-3 py-2 text-[13px]", tone.red)}>

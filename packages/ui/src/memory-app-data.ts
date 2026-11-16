@@ -235,6 +235,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       body: "🔴 `rv-bugs`: el scope por organización no cubre el caso sin modelo.\n🟡 `rv-patterns`: el nombre del helper no sigue el de los engines vecinos.",
       createdAt: min(75),
       ...on(2),
+      stepRunId: runs[1]!.steps[0]?.id ?? null,
     }),
     decision(4, {
       kind: "alert",
@@ -260,6 +261,13 @@ export function createMemoryAppData(now = Date.now()): AppData {
       resolvedBy: "ui",
       createdAt: min(200),
       resolvedAt: min(190),
+      ...on(2),
+    }),
+    decision(7, {
+      kind: "question",
+      title: "¿El helper va en el engine o en el core?",
+      body: "El agente dejó dos opciones y siguió con la más conservadora.",
+      createdAt: min(90),
       ...on(2),
     }),
   ]

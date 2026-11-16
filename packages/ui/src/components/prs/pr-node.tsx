@@ -9,6 +9,7 @@ import { Hint, Pill } from "../common"
 import { CIBadge, CombinedBaseChip, Labels, MergePill, mergeRing, PRStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 import { PrContextMenu } from "./pr-menu"
+import { PrNotes } from "./pr-notes"
 
 export interface PRNodeData extends Record<string, unknown> {
   pr: OpenPr
@@ -82,6 +83,7 @@ export function PRNode({ data }: NodeProps & { data: PRNodeData }) {
         <div className="flex min-h-5 flex-wrap items-center gap-2">
           {ring ? <MergePill pr={pr} /> : review !== "none" ? <ReviewPill pr={pr} review={review} /> : null}
           {combined ? <CombinedBaseChip parents={combined} /> : null}
+          <PrNotes pr={pr} />
           {state.reviewers.length ? (
             <span className="flex items-center gap-1.5">
               {state.reviewers.map((r) => (

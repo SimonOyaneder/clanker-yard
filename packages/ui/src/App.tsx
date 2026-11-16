@@ -39,7 +39,7 @@ import { type Host, HostProvider, useHost } from "@/host"
 import { type AppActions, AppActionsContext } from "@/lib/app-context"
 import { needsAttention } from "@/lib/connections"
 import { useCoreState } from "@/lib/core-status"
-import { parksRun } from "@/lib/decisions"
+import { ACTIONABLE_KINDS, NOTE_KINDS, parksRun } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
 import { reviewStatus } from "@/lib/pr-status"
 import { openPrsOf } from "@/lib/prs"
@@ -63,7 +63,7 @@ const sameLoc = (a: Loc, b: Loc) =>
 
 const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox", "learnings", "flows", "settings"]
 
-// Estas decisiones avisan con una notificación nativa: alguien las tiene que atender. Las notas esperan en la bandeja.
+// Estas decisiones avisan con una notificación nativa: alguien las tiene que atender. Las notas no entran a la bandeja: viven en su corrida y su PR.
 const NOTIFY_KINDS = new Set(["gate", "needs_human", "alert"])
 
 const MAX_HISTORY = 50
@@ -118,7 +118,7 @@ function Shell() {
   const connectionsQuery = useLiveQuery("connections", () => appData.connections())
   const connections = useMemo(() => connectionsQuery.data ?? [], [connectionsQuery.data])
   const [decisionId, setDecisionId] = useState<DecisionId | null>(null)
-  const decisionsQuery = useLiveQuery("decisions", () => appData.decisions())
+  const decisionsQuery = useLiveQuery("decisions", () => appData.decisions({ kind: ACTIONABLE_KINDS }))
   const decisions = useMemo(() => decisionsQuery.data ?? [], [decisionsQuery.data])
   const resolver = useDecisionResolver(decisions, decisionsQuery.reload)
   const { undo, resolve: resolveNow } = resolver
@@ -172,7 +172,7 @@ function Shell() {
         (entries) => ({ queue: entries }),
         (e: unknown) => ({ queue: [], queueError: messageOf(e) }),
       ),
-      appData.decisions({ projectId: project.id, status: ["pending"] }),
+      appData.decisions({ projectId: project.id, status: ["pending"], kind: ACTIONABLE_KINDS }),
       appData.lanes(),
       appData.breakers(),
       appData.openPrs(),
@@ -182,6 +182,7 @@ function Shell() {
 
   // Los PRs vienen del caché del core (`prs.list`) y se releen con cada `pr.changed`: nada de polling en la UI.
   const prsQuery = useLiveQuery("prs", () => appData.openPrs())
+  const notesQuery = useLiveQuery("agent-notes", () => appData.decisions({ kind: NOTE_KINDS }))
   const reposQuery = useLiveQuery("repos", () => appData.repos())
   const reloadPrs = prsQuery.reload
   useEffect(() => {
@@ -710,7 +711,7 @@ function Shell() {
             </main>
           ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} onOpenConnections={goConnections} onRefresh={refresh} />
+              <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />
             </main>
           ) : module === "flows" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>

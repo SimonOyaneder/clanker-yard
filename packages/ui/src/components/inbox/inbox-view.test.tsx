@@ -46,10 +46,19 @@ const key = (k: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(docum
 test("el badge de la barra cuenta las pendientes y se pone ámbar si alguna estaciona una corrida", async () => {
   const { sidebarItem } = await openInbox()
 
-  expect(sidebarItem.getAttribute("title")).toMatch(/5 decisiones pendientes, alguna estaciona su corrida/)
+  expect(sidebarItem.getAttribute("title")).toMatch(/4 decisiones pendientes, alguna estaciona su corrida/)
   const badge = sidebarItem.parentElement!.querySelector("[data-sidebar=menu-badge]")!
-  expect(badge.textContent).toBe("5")
+  expect(badge.textContent).toBe("4")
   expect(badge.className).toMatch(/amber/)
+})
+
+test("la bandeja solo trae lo accionable: las notas del agente no están ni en la lista ni en el contador", async () => {
+  await openInbox()
+
+  expect(titles()).toEqual(["¿Publico el PR de ENG-9190 como draft?", "La corrida llegó a su tope", "¿El helper va en el engine o en el core?", "La conexión de Linear venció"])
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Resueltas" }), { button: 0 })
+  fireEvent.click(screen.getByRole("tab", { name: "Resueltas" }))
+  expect(titles()).not.toContain("Quedan 🔴/🟡 tras las rondas de review")
 })
 
 test("las que estacionan una corrida van primero y la primera está a la vista con sus opciones numeradas", async () => {
@@ -104,21 +113,21 @@ test("Z devuelve la decisión a las pendientes y no se manda nunca", async () =>
   expect(resolve).not.toHaveBeenCalled()
 })
 
-test("R abre el texto libre de una nota y ⌘⏎ la responde; un gate no deja responder con texto", async () => {
+test("R abre el texto libre de una pregunta y ⌘⏎ la responde; un gate no deja responder con texto", async () => {
   const { data } = await openInbox()
   key("r")
   expect(screen.queryByRole("textbox", { name: "Tu respuesta" })).toBeNull()
 
-  // la nota de revisión es la tercera de la lista
+  // la pregunta es la tercera de la lista
   fireEvent.click(within(rows()[2]!).getByRole("button"))
-  expect(screen.getByRole("article", { name: "Quedan 🔴/🟡 tras las rondas de review" })).toBeTruthy()
+  expect(screen.getByRole("article", { name: "¿El helper va en el engine o en el core?" })).toBeTruthy()
   key("r")
   const box = screen.getByRole("textbox", { name: "Tu respuesta" })
-  fireEvent.change(box, { target: { value: "ya lo vi, el 🔴 es un falso positivo" } })
+  fireEvent.change(box, { target: { value: "va en el engine" } })
   fireEvent.keyDown(box, { key: "Enter", metaKey: true })
   await act(() => vi.advanceTimersByTimeAsync(UNDO_MS + 10))
 
-  expect((await data.decisions({ status: ["answered"] })).map((d) => d.resolution)).toContainEqual({ option: "ya lo vi, el 🔴 es un falso positivo" })
+  expect((await data.decisions({ status: ["answered"] })).map((d) => d.resolution)).toContainEqual({ option: "va en el engine" })
 })
 
 test("una alerta no tiene botones para resolver: se cierra sola y lleva a Conexiones", async () => {
@@ -142,7 +151,8 @@ test("sin pendientes dice qué pasa y cuántas se resolvieron hoy, y ofrece ver 
   for (const d of closed) await data.resolveDecision(d.id, d.options[0] ?? "seen")
   await openInbox(data)
 
-  expect(screen.getByText("Nada pendiente. Las corridas siguen solas.")).toBeTruthy()
+  expect(screen.getByText("No hay nada esperando tu decisión.")).toBeTruthy()
+  expect(screen.getByText(/Las notas de los agentes están en cada corrida y en su PR\./)).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Ver las resueltas" }))
   expect(screen.getByRole("list", { name: "Decisiones resueltas" })).toBeTruthy()
 })

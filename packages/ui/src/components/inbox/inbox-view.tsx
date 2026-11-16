@@ -13,12 +13,11 @@ import { useLiveQuery } from "@/hooks/use-live"
 import type { Inbox } from "@/hooks/use-inbox"
 import { useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
-import { KIND_LABEL, optionLabel, optionsOf, parksRun, resolutionText, resolvedToday, takesText } from "@/lib/decisions"
+import { ACTIONABLE_KINDS, KIND_LABEL, optionLabel, optionsOf, parksRun, resolutionText, resolvedToday, takesText } from "@/lib/decisions"
 import { tone } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const ALL = "all"
-const KINDS = Object.keys(KIND_LABEL) as DecisionKind[]
 
 interface Props {
   inbox: Inbox
@@ -119,7 +118,7 @@ export function InboxView({ inbox, decisions, projects, onSelect, onResolve }: P
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL}>Todos los tipos</SelectItem>
-            {KINDS.map((kind) => (
+            {ACTIONABLE_KINDS.map((kind) => (
               <SelectItem key={kind} value={kind}>
                 {KIND_LABEL[kind]}
               </SelectItem>
@@ -258,9 +257,9 @@ function Empty({ inbox, resolvedToday: resolved }: { inbox: Inbox; resolvedToday
     return <EmptyBlock title="Todavía no resolviste ninguna decisión">Las que respondas aparecen aquí, con lo que elegiste.</EmptyBlock>
   }
   return (
-    <EmptyBlock title="Nada pendiente. Las corridas siguen solas.">
+    <EmptyBlock title="No hay nada esperando tu decisión.">
       {resolved ? `Hoy resolviste ${resolved} decisión${resolved === 1 ? "" : "es"}. ` : ""}
-      Cuando una corrida necesite a una persona, o el sistema deje una nota para ti, aparece aquí. Mientras tanto no hay nada que hacer.
+      Las notas de los agentes están en cada corrida y en su PR.
       <Button size="sm" variant="secondary" className="mt-1" onClick={() => inbox.setTab("resolved")}>
         Ver las resueltas
       </Button>
