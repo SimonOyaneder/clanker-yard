@@ -273,7 +273,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
   }
 
   /** Un trabajo que falla no tumba el despertar: un 401 ya dejó la conexión revocada (el cliente) y lo demás se anota una vez. */
-  async function attempt(account: string, scope: string, work: () => Promise<void>) {
+  async function attempt(scope: string, work: () => Promise<void>) {
     try {
       await work();
       errors.clear(scope);
@@ -308,7 +308,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
       .sort((a, b) => Number(b.waited) - Number(a.waited) || (lastVisit.get(keyOf(a.ref)) ?? 0) - (lastVisit.get(keyOf(b.ref)) ?? 0));
     for (const t of due) {
       if (stopping) break;
-      await attempt(t.ref.account, keyOf(t.ref), () => visit(t, at));
+      await attempt(keyOf(t.ref), () => visit(t, at));
     }
 
     // Descubrir PRs no depende de que ya haya alguno vigilado: la búsqueda corre por cada cuenta con repos registrados.
@@ -317,10 +317,10 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
       const { level } = throttle(account);
       const every = level === "normal" ? SEARCH_EVERY_MS : SEARCH_EVERY_MS * SLOW_FACTOR;
       if (stopping || level === "waits-only" || level === "exhausted" || at - (lastSearch.get(account) ?? Number.NEGATIVE_INFINITY) < every) continue;
-      await attempt(account, `${account} search`, async () => {
+      await attempt(`${account} search`, async () => {
         for (const t of await discover(account, at)) {
           if (stopping) break;
-          await attempt(account, keyOf(t.ref), () => visit(t, at));
+          await attempt(keyOf(t.ref), () => visit(t, at));
         }
       });
     }
