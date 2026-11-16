@@ -1,15 +1,16 @@
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { Role, type PrRef, type PrState } from "@clanker/api";
+import { Profile, Role, type PrRef, type PrState } from "@clanker/api";
 import { createAgents } from "./agents/agents";
 import { createBriefs } from "./agents/brief";
 import { createStepBriefs } from "./agents/step-brief";
-import { type AgentRuntime, selectRuntime } from "./agents/runtime";
+import { type AgentRuntime, createRuntimeRegistry, type RuntimeRegistry } from "./agents/runtime";
+import { describeRuntimes } from "./agents/runtime-options";
 import { createArtifacts } from "./artifacts/artifacts";
 import { installBuiltins, type BuiltinTemplate } from "./builtin/install";
 import { commitsApplyAction } from "./commits/apply";
 import type { Connections } from "./connections/connections";
-import { createBreakers } from "./breakers/breakers";
+import { CLAUDE_RUNTIME, createBreakers, runtimeScope } from "./breakers/breakers";
 import { environmentProbe } from "./breakers/probes";
 import { createDecisions } from "./decisions/decisions";
 import { createLearnings } from "./learnings/learnings";
@@ -90,7 +91,7 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   dataDir: string;
   /** Quien arma los runtimes la comparte: `claude-sdk` pide a `claudeCredentials` su credencial en cada run. */
   connections: Connections;
-  /** Los runtimes de agentes que este core conoce; `CORE_RUNTIME` elige entre ellos. */
+  /** Los runtimes de agentes que este core conoce: cada entrada de perfil elige el suyo y `CORE_RUNTIME` los fuerza a uno. */
   runtimes: readonly AgentRuntime[];
   /** Plantillas extra como builtin, solo para demos y tests (p. ej. `JUGUETE_TEMPLATE`): producción no pasa ninguna. */
   builtins?: readonly BuiltinTemplate[];
@@ -146,12 +147,12 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const { store, dataDir } = opts;
   const procs = opts.procs ?? createProcs({ store, bootId: newId("boot") });
   const { bootId } = procs;
-  const runtime = selectRuntime(opts.runtimes, opts.env);
+  const runtimes = createRuntimeRegistry(opts.runtimes, opts.env);
   const defs = createDefs(store);
   const packs = createPacks({ defs, installedDir: opts.packsDir ?? join(dataDir, "packs"), factoryDir: opts.factoryPacksDir });
   const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
   const identityOf = createGitIdentityOf({ repoConfig: repos.config, connections: opts.connections });
-  const agents = createAgents({ store, defs, runtime, packs, remoteOf: (repoId) => repos.get(repoId)?.remote, identityOf });
+  const agents = createAgents({ store, defs, runtimes, packs, remoteOf: (repoId) => repos.get(repoId)?.remote, identityOf });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const slots = createSlots({ store });
   const askpass = createAskpass();
@@ -190,8 +191,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const breakers = createBreakers({
     store,
     errors: reporter,
-    runtime: runtime.id,
-    probe: environmentProbe({ connections: opts.connections, repos, runtime: runtime.id }),
+    runtimes: runtimes.all.map((r) => r.id),
+    probe: environmentProbe({ connections: opts.connections, repos, runtimes: runtimes.all }),
     ...(opts.breakerBackoffMs && { backoffMs: opts.breakerBackoffMs }),
     label: (scope) => (scope.startsWith("repo:") ? `repo ${repos.get(scope.slice("repo:".length))?.name ?? scope}` : scope),
   });
@@ -200,14 +201,15 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   // Un run real que encuentra el login de Claude vencido deja la cuenta `claude` en rojo, como un `testClaude`.
   const stopMarkingLogin = store.events.subscribe(
     ({ payload }) => {
-      if (runtime.id === "claude-sdk" && payload.cause === "login_expired") opts.connections.markClaudeLoginLost("core");
+      if (payload.scope === runtimeScope(CLAUDE_RUNTIME) && payload.cause === "login_expired") opts.connections.markClaudeLoginLost("core");
     },
     { types: ["breaker.opened"] },
   );
-  const learnings = createLearnings({ store, runtime });
+  // El filtro de learnings pide un modelo barato de Claude: corre en `claude-sdk` salvo que `CORE_RUNTIME` fuerce otro.
+  const learnings = createLearnings({ store, runtime: runtimes.forced ?? runtimes.all.find((r) => r.id === CLAUDE_RUNTIME) ?? runtimes.default });
   const flows = createFlows({
     store,
-    environment: { breakers, runtime: runtime.id },
+    environment: { breakers, runtimeOf: runtimes.idFor },
     laneCapacity: lanes.capacity,
     defs,
     agents,
@@ -234,7 +236,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     if (state.state === "merged" || state.state === "closed") cleanup.request();
   };
   const prCache = createPrCache({ store, repos, packs, prs, onChange: onPrChange });
-  const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtime) ? runtime : undefined });
+  const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtimes.default) ? runtimes.default : undefined });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceAttachAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
@@ -313,7 +315,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     queue: createProjectQueue({ store, projects, issues, repos, trackers, prs }),
     workspaces,
     lanes,
-    runtime: runtime.id,
+    runtimesOf: (project) => profileRuntimes(defs, runtimes, project.defaultProfileId),
     breakers,
     errors: reporter,
   });
@@ -361,6 +363,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     decisions: createDecisions(store),
     learnings,
     defs,
+    agentOptions: () => describeRuntimes(runtimes),
     legacyImport: createLegacyImporter({ store, defs, artifacts }),
     republisher: createPrRepublisher({ store, repos, issues, projects, flows, connections: opts.connections, prs, fetchRepo: workspaces.fetch }),
     bootId,
@@ -412,6 +415,17 @@ function roleInfoOf(defs: Defs) {
 }
 
 /** El runtime `fake` entrega los resultados de la receta desde su guion; los demás no tienen `nextRecipeResult`. */
+/**
+ * Los runtimes que usan los agentes del perfil por defecto de un proyecto (su breaker pausa sus lanzamientos). Sin
+ * perfil, o uno que no se lee, el runtime por defecto.
+ */
+function profileRuntimes(defs: Defs, runtimes: RuntimeRegistry, profileSlug: string | null): string[] {
+  const body = profileSlug === null ? undefined : defs.resolve("profile", profileSlug)?.body;
+  const profile = Profile.safeParse(body);
+  if (!profile.success) return [runtimes.idFor(undefined)];
+  return [...new Set(Object.values(profile.data.roles).map((entry) => runtimes.idFor(entry.runtime)))];
+}
+
 function isScripted(runtime: AgentRuntime): runtime is AgentRuntime & ScriptedRecipe {
   return "nextRecipeResult" in runtime && typeof runtime.nextRecipeResult === "function";
 }

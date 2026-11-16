@@ -193,6 +193,19 @@ test("cambiar un campo del panel cambia el mismo JSON", async () => {
   await showCanvas()
 })
 
+test("un agente puede correr con otra entrada del perfil, y vaciarla vuelve a la del rol", async () => {
+  await openCanvas()
+  const panel = await openStep("plan")
+  fireEvent.change(within(panel).getByLabelText("Entrada del perfil"), { target: { value: "dev-opencode" } })
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("1 cambio por guardar"))
+  const area = await showJson()
+  expect((JSON.parse(area.value) as { nodes: { plan: { profileRole?: string } } }).nodes.plan.profileRole).toBe("dev-opencode")
+
+  await showCanvas()
+  fireEvent.change(within(await openStep("plan")).getByLabelText("Entrada del perfil"), { target: { value: "" } })
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Sin cambios"))
+})
+
 test("un problema del core se marca en el nodo y en la lista, y lleva al paso", async () => {
   const area = await openEditor()
   const flow = JSON.parse(area.value) as { nodes: Record<string, { role?: string }> }
@@ -226,7 +239,7 @@ test("un perfil se explica en una línea y su resumen sale de sus roles", async 
   await openTab(/Perfiles/, "medio")
   expect(screen.getAllByText(/más potente = mejor, pero más caro/).length).toBeGreaterThan(0)
   fireEvent.click(within(rowOf("medio")).getByRole("button"))
-  expect(await screen.findByText("dev sonnet medium · reviews sonnet/haiku")).toBeTruthy()
+  expect(await screen.findByText("dev sonnet medium · reviews sonnet, haiku")).toBeTruthy()
 })
 
 test("crear un perfil propio con el dev en opus y los reviews en haiku, y verlo antes de guardar", async () => {
@@ -255,6 +268,30 @@ test("crear un perfil propio con el dev en opus y los reviews en haiku, y verlo 
   expect(await screen.findByText("versión 2", { selector: "span.text-xs" })).toBeTruthy()
   const saved = (await data.defs("profile")).find((d) => d.slug === "dev-opus")!
   expect(saved.body).toMatchObject({ roles: { dev: { model: "opus", effort: "medium" }, "review-bugs": { model: "haiku" }, "review-tests": { model: "haiku" } } })
+})
+
+test("pasar un rol a opencode cambia sus modelos a los de opencode y guarda el runtime solo donde no es Claude", async () => {
+  const data = await openFlows()
+  await openTab(/Perfiles/, "medio")
+  fireEvent.click(screen.getByRole("button", { name: /Nuevo perfil/ }))
+  const dialog = await screen.findByRole("dialog")
+  fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "mixto" } })
+  fireEvent.click(within(dialog).getByRole("button", { name: "Crear perfil" }))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+  fireEvent.click(await screen.findByRole("button", { name: /^Editar$/ }))
+  fireEvent.change(await screen.findByLabelText("Runtime de review-bugs"), { target: { value: "opencode" } })
+  const model = screen.getByLabelText("Modelo de review-bugs") as HTMLSelectElement
+  expect(model.value).toBe("openai/gpt-6.1-terra")
+  expect([...model.options].map((o) => o.value)).toEqual(["openai/gpt-6-luna", "openai/gpt-6.1-terra", "openai/gpt-6.1-sol", "opencode/big-pickle"])
+  fireEvent.change(model, { target: { value: "opencode/big-pickle" } })
+
+  fireEvent.click(screen.getByRole("button", { name: /^Guardar…/ }))
+  fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Guardar versión nueva" }))
+  expect(await screen.findByText("versión 2", { selector: "span.text-xs" })).toBeTruthy()
+  const saved = (await data.defs("profile")).find((d) => d.slug === "mixto")!.body as { roles: Record<string, { runtime?: string; model: string }> }
+  expect(saved.roles["review-bugs"]).toMatchObject({ runtime: "opencode", model: "opencode/big-pickle" })
+  expect(saved.roles.dev?.runtime).toBeUndefined()
 })
 
 test("el nombre de un perfil nuevo no puede repetir uno existente", async () => {

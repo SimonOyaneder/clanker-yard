@@ -1,3 +1,4 @@
+import { createRuntimeRegistry } from "../agents/runtime";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -123,7 +124,7 @@ export function harness(
       Promise.resolve(run({ kind: "resume", sessionId: options.resumeKeepsSession ? ref.sessionId : `${bootPrefix}ses-${calls.length + 1}`, subject: subjectOf(message), prompt: message }, ref.cwd)),
   };
 
-  const agents = createAgents({ store, defs, runtime });
+  const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([runtime], {}) });
   const artifacts = createArtifacts({ store, dir });
   const flows = createFlows({
     store,

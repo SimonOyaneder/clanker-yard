@@ -85,7 +85,7 @@ test("cada perfil dice qué modelos usa", async () => {
   fireEvent.keyDown(await screen.findByRole("combobox", { name: "Perfil por defecto" }), { key: "Enter" })
 
   expect(await screen.findByRole("option", { name: /eco/ })).toBeTruthy()
-  expect(screen.getByText("dev sonnet high · reviews sonnet/haiku")).toBeTruthy()
+  expect(screen.getByText("dev sonnet high · reviews sonnet, haiku")).toBeTruthy()
 })
 
 test("sin flujos ni perfiles lo dice y el proyecto se crea sin defaults", async () => {

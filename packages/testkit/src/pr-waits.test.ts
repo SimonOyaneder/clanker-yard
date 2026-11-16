@@ -23,6 +23,7 @@ import {
   type PrCache,
   type Packs,
   type Store,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
@@ -95,7 +96,7 @@ beforeEach(async () => {
   flows = createFlows({
     store,
     defs,
-    agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures: [], speed: Infinity }) }),
+    agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([createFakeRuntime({ fixtures: [], speed: Infinity })], {}) }),
     artifacts: createArtifacts({ store, dir: join(dir, "artifacts") }),
     roles: () => undefined,
     workspaceOf: () => ({ path: dir, base: "main" }),

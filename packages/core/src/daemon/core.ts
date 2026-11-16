@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import pkg from "../../package.json" with { type: "json" };
 import { startCore } from "../core";
 import { createClaudeRuntime } from "../agents/claude/claude-runtime";
+import { createOpencodeRuntime } from "../agents/opencode/opencode-runtime";
 import { createConnections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createKeychainSecrets } from "../secrets/keychain";
@@ -111,6 +112,8 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
           // Con `CLANKER_RECORD=<carpeta>` cada run deja su guion del runtime fake ahí.
           record: process.env.CLANKER_RECORD ? resolve(process.env.CLANKER_RECORD) : undefined,
         }),
+        // Las entradas de perfil con `runtime: "opencode"`; si opencode no está instalado, su breaker lo dice al primer agente.
+        createOpencodeRuntime({ home: opts.dataDir, procs }),
       ],
       coreVersion: pkg.version,
       uiKeyHash,

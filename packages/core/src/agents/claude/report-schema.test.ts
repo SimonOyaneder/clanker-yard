@@ -4,7 +4,7 @@ import { createDefs, DefValidationError } from "../../defs/defs";
 import { openStore, type Store } from "../../store/store";
 import { roles } from "../../template/roles";
 import { createAgents, outputSchemaFor } from "../agents";
-import type { AgentRuntime } from "../runtime";
+import { createRuntimeRegistry, type AgentRuntime } from "../runtime";
 import { claudeSchemaError } from "./report-schema";
 
 // Claude Code compila `outputFormat.schema` al arrancar y, si no puede, sale con código 1 antes del primer turno
@@ -34,7 +34,7 @@ describe("guardar un rol", () => {
     const store = openStore({ path: ":memory:" });
     stores.push(store);
     const defs = createDefs(store);
-    createAgents({ store, defs, runtime: {} as AgentRuntime });
+    createAgents({ store, defs, runtimes: createRuntimeRegistry([{ id: "claude-sdk" } as AgentRuntime], {}) });
     const role = Role.parse(roles.dev);
     const [name, mode] = Object.entries(role.modes)[0]!;
     const broken = { ...role, modes: { ...role.modes, [name]: { ...mode, report: { type: "object", properties: { pair: { type: "array", prefixItems: [{ type: "string" }] } } } } } };

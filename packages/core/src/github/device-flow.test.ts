@@ -327,7 +327,7 @@ describe("refresh", () => {
 
   test("refresh token vencido: la cuenta queda revoked, abre el breaker github y no vuelve a llamar a GitHub", async () => {
     await connectApp();
-    const breakers = createBreakers({ store, runtime: "claude-sdk", probe: () => Promise.resolve("sigue caído") });
+    const breakers = createBreakers({ store, runtimes: ["claude-sdk"], probe: () => Promise.resolve("sigue caído") });
     breakers.start();
     try {
       oauth.expireRefreshTokens();

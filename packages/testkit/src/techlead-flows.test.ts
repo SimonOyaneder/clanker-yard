@@ -26,6 +26,7 @@ import {
   type Flows,
   type RunView,
   type Store,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { afterEach, describe, expect, test } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -88,7 +89,7 @@ async function setup(options: SetupOptions = {}) {
   const pr = sim.openPr({ head: "cla-1", draft: true });
 
   const runtime = createFakeRuntime({ fixtures: options.fixtures ?? [], speed: Infinity });
-  const agents = createAgents({ store, defs, runtime });
+  const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([runtime], {}) });
   for (const [slug, body] of Object.entries(clankerLoopTemplate.roles)) {
     defs.save({ kind: "role", slug, scope: "builtin", body, source: "import" });
   }

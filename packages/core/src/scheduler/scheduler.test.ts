@@ -13,7 +13,7 @@ import { newId } from "../store/conventions";
 import type { CombineRequest, CombineResult, Workspaces } from "../workspaces/workspaces";
 import { createLaneSettings } from "./lanes";
 import { createProjectQueue, type ProjectQueue } from "./project-queue";
-import { createScheduler, SCHEDULER_TICK_MS, type Breakers } from "./scheduler";
+import { createScheduler, SCHEDULER_TICK_MS, type Breakers, type SchedulerDeps } from "./scheduler";
 
 /** `vi.waitFor` con holgura: la suite entera corre en paralelo y un tick puede tardar más de 1 s. */
 const until = (check: () => unknown) => vi.waitFor(check, { timeout: 10_000 });
@@ -34,13 +34,15 @@ interface Options {
   dependsOn?: string[];
   /** Lo que arma las bases combinadas; sin él, ninguna issue de estos tests tiene una. */
   workspaces?: Pick<Workspaces, "combineBase" | "dissolveBase">;
+  /** Los runtimes del perfil de cada proyecto; por defecto solo `fake`. */
+  runtimesOf?: SchedulerDeps["runtimesOf"];
 }
 
 /**
  * El Scheduler sobre el motor de flujos real, un tracker local y acciones que esperan a que el test las suelte.
  * Cada issue corre `dev`: `check` estaciona (gate) las issues de `parkFirst` y `work` espera a `release`.
  */
-function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn, workspaces }: Options = {}) {
+function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn, workspaces, runtimesOf = () => ["fake"] }: Options = {}) {
   const h = createHarness({ persist: true, reopen, laneCapacity: () => lanes.capacity() });
   cleanups.push(h.cleanup);
   const lanes = createLaneSettings(h.store);
@@ -103,7 +105,7 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
     queue,
     workspaces: workspaces ?? { combineBase: () => Promise.reject(new Error("no se esperaba armar una base combinada")), dissolveBase: () => Promise.resolve() },
     lanes,
-    runtime: "fake",
+    runtimesOf,
     breakers,
   });
   cleanups.push(() => scheduler.close());
@@ -282,6 +284,23 @@ describe("lanzar issues por carril", () => {
     paused.clear();
     await vi.advanceTimersByTimeAsync(SCHEDULER_TICK_MS);
     expect(h.status(issue)).toBe("running");
+  });
+
+  test("solo pausa el breaker de un runtime que usa el perfil del proyecto", async () => {
+    const paused = (scope: string) => (scope === "runtime:opencode" ? "opencode no está instalado" : undefined);
+    const free = setup({ parallel: 1, breakers: { openReason: paused } });
+    const issue = await free.create("a");
+    await free.scheduler.tick();
+    expect(free.status(issue)).toBe("running");
+  });
+
+  test("un proyecto cuyo perfil usa un runtime en pausa no lanza", async () => {
+    const paused = (scope: string) => (scope === "runtime:opencode" ? "opencode no está instalado" : undefined);
+    const h = setup({ parallel: 1, breakers: { openReason: paused }, runtimesOf: () => ["fake", "opencode"] });
+    const issue = await h.create("a");
+    await h.scheduler.tick();
+    expect(h.status(issue)).toBeUndefined();
+    expect(await h.scheduler.queue.of(h.projectId)).toMatchObject([{ state: "waiting", reason: "runtime:opencode en pausa: opencode no está instalado" }]);
   });
 
   test("el breaker github no frena el lanzamiento: solo frena a quien publica", async () => {

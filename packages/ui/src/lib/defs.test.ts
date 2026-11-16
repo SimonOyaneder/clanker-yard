@@ -20,7 +20,7 @@ const profile = (slug: string, roles: Record<string, [string, string?]>) =>
 
 test("un perfil se resume con el modelo del dev y los de los reviews, sin repetir", () => {
   const eco = profile("eco", { dev: ["sonnet", "high"], "review-bugs": ["sonnet"], "review-tests": ["haiku"], "review-lore": ["haiku"], committer: ["opus"] })
-  expect(defSummary(eco)).toBe("dev sonnet high · reviews sonnet/haiku")
+  expect(defSummary(eco)).toBe("dev sonnet high · reviews sonnet, haiku")
   expect(defSummary(profile("solo", { dev: ["opus"] }))).toBe("dev opus")
   expect(defSummary(profile("vacio", {}))).toBeUndefined()
 })

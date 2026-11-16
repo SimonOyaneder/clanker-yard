@@ -1,3 +1,4 @@
+import { createRuntimeRegistry } from "../runtime";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -84,7 +85,7 @@ async function runPlan(withDefs: (defs: Defs) => void = () => {}) {
     query,
     baseEnv: { PATH: "/usr/bin", HOME: root, USER: "x" },
   });
-  const agents = createAgents({ store, defs, runtime, userDir });
+  const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([runtime], {}), userDir });
   defs.save({ kind: "role", slug: "committer", scope: "user", body: role, source: "ui" });
   defs.save({ kind: "profile", slug: "default", scope: "user", body: profile, source: "ui" });
   withDefs(defs);

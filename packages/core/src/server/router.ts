@@ -1,4 +1,4 @@
-import { API_MAJOR, type ClientOrigin, contract, type PrRef, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
+import { API_MAJOR, type AgentOptions, type ClientOrigin, contract, type PrRef, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubAuthError } from "../github/device-flow";
 import { GitHubPatError, githubPatForm } from "../github/pat";
@@ -9,7 +9,6 @@ import type { Prs } from "../github/prs";
 import type { PrRepublisher } from "../github/actions/republisher";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
-import { CLAUDE_OPTIONS } from "../agents/claude/models";
 import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
 import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
@@ -86,6 +85,8 @@ export interface RouterDeps {
   decisions: Decisions;
   learnings: Learnings;
   defs: Defs;
+  /** `defs.agentOptions`: lo que cada runtime ofrece a un perfil (`describeRuntimes`). */
+  agentOptions(): Promise<AgentOptions>;
   /** `imports.legacy`. */
   legacyImport: LegacyImporter;
   /** `prs.republish`. */
@@ -401,7 +402,7 @@ export function createRouter(deps: RouterDeps) {
       create: os.defs.create.handler(({ input, context }) => asApiError(() => defWriter.create(input, context.origin))),
       update: os.defs.update.handler(({ input, context }) => asApiError(() => defWriter.update(input, context.origin))),
       archive: os.defs.archive.handler(({ input, context }) => asApiError(() => defWriter.archive(input.kind, input.id, context.origin))),
-      agentOptions: os.defs.agentOptions.handler(() => CLAUDE_OPTIONS),
+      agentOptions: os.defs.agentOptions.handler(() => deps.agentOptions()),
       exportToRepo: os.defs.exportToRepo.handler(({ input }) => asApiErrorAsync(() => deps.repoConfigExport.exportDef(input))),
       restore: os.defs.restore.handler(({ input, context }) => asApiError(() => defWriter.restore(input.kind, input.id, context.origin))),
     },

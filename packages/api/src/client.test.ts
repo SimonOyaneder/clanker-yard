@@ -238,7 +238,7 @@ const router = os.router({
     restore: os.defs.restore.handler(() => {
       throw new Error("no se usa en este test");
     }),
-    agentOptions: os.defs.agentOptions.handler(() => ({ models: [], efforts: [] })),
+    agentOptions: os.defs.agentOptions.handler(() => ({ runtimes: [] })),
     exportToRepo: os.defs.exportToRepo.handler(() => {
       throw new Error("no se usa en este test");
     }),

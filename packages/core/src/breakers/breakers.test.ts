@@ -26,7 +26,7 @@ afterEach(() => {
 function breakers(runtime = "claude-sdk", onProbe?: (scope: string) => void): Breakers {
   const created = createBreakers({
     store,
-    runtime,
+    runtimes: [runtime],
     probe: (scope) => {
       probes.push({ scope, at: Date.now() });
       onProbe?.(scope);
@@ -97,7 +97,7 @@ describe("backoff y cierre", () => {
     failing.add(repoScope("repo_a"));
     const created = createBreakers({
       store,
-      runtime: "fake",
+      runtimes: ["fake"],
       backoffMs: [100, 300],
       probe: (scope) => {
         probes.push({ scope, at: Date.now() });
@@ -129,7 +129,7 @@ describe("backoff y cierre", () => {
   });
 
   test("una prueba que lanza cuenta como fallida y sigue el backoff", async () => {
-    const created = createBreakers({ store, runtime: "fake", probe: () => Promise.reject(new Error("pg_isready no existe")) });
+    const created = createBreakers({ store, runtimes: ["fake"], probe: () => Promise.reject(new Error("pg_isready no existe")) });
     created.start();
     open.push(created);
     created.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "caído" });

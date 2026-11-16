@@ -45,7 +45,7 @@ const LABEL: Record<StepTab, { label: string; hint: string; keys: string }> = {
 
 export const effectiveTab = (tab: StepTab, kind: GraphNodeKind): StepTab => (tabsOf(kind).includes(tab) ? tab : tabsOf(kind)[0]!)
 
-/** Copia el id de la sesión de agente (el del runtime, el que `claude --resume` entiende) de la última visita de un paso. */
+/** Copia el id de la sesión de agente (el de su runtime: el que entiende `claude --resume` u `opencode --session`) de la última visita de un paso. */
 export function useCopySessionId(): (stepId: StepRunId) => void {
   const appData = useAppData()
   return useCallback(

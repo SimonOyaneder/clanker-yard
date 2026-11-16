@@ -9,11 +9,11 @@ import {
   createDefs,
   newId,
   openStore,
-  selectRuntime,
   type AgentEvent,
   type AgentRun,
   type RunSpec,
   type Store,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { createFakeRuntime, type FakeRuntimeOptions } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
@@ -419,10 +419,8 @@ describe("con el módulo Agents", () => {
     const store = openStore({ path: ":memory:" });
     open.push(store);
     const defs = createDefs(store);
-    const runtime = selectRuntime([createFakeRuntime({ fixtures: fixturesDir, speed: Infinity })], {
-      CORE_RUNTIME: "fake",
-    });
-    const agents = createAgents({ store, defs, runtime });
+    const runtimes = createRuntimeRegistry([createFakeRuntime({ fixtures: fixturesDir, speed: Infinity })], { CORE_RUNTIME: "fake" });
+    const agents = createAgents({ store, defs, runtimes });
     defs.save({ kind: "role", slug: "review-bugs", scope: "user", body: role, source: "ui" });
     defs.save({ kind: "profile", slug: "default", scope: "user", body: profile, source: "ui" });
     return agents;

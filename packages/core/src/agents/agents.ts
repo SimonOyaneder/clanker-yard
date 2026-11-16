@@ -21,7 +21,7 @@ import { LEARNING_PROMPT } from "../learnings/criteria";
 import { claudeSchemaError } from "./claude/report-schema";
 import { createContextResolver, type ContextResolver } from "./context";
 import { estimateCostMicros, minUsefulBudgetMicros, PREFIX_TOKENS, type TurnTokens } from "./pricing";
-import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
+import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, RuntimeId, RuntimeRegistry, Usage } from "./runtime";
 import { issuesInline, messageOf } from "../errors/format";
 
 /** Una diferencia mayor a este porcentaje entre la suma de los turnos y el total del runtime queda como evento `error`. */
@@ -101,6 +101,8 @@ export type AgentResult =
       sessionId: string;
       message: string;
       resetsAt?: number;
+      /** El runtime que falló: con `login_expired` o `quota_exhausted` es el breaker que se abre. */
+      runtime?: RuntimeId;
     };
 
 export interface Agents {
@@ -116,7 +118,8 @@ export interface Agents {
 export interface AgentsOptions {
   store: Store;
   defs: Defs;
-  runtime: AgentRuntime;
+  /** Cada sesión corre con el runtime de su entrada de perfil (`ProfileRole.runtime`). */
+  runtimes: RuntimeRegistry;
   now?: () => number;
   /** Para `conventions.context` del pack de la org del repo; sin él no hay convenciones. */
   packs?: Packs;
@@ -146,7 +149,7 @@ const RoleForClaude = Role.superRefine((role, ctx) => {
   }
 });
 
-export function createAgents({ store, defs, runtime, now = Date.now, packs, remoteOf, userDir, identityOf, prefixWaitMs = PREFIX_WAIT_MS }: AgentsOptions): Agents {
+export function createAgents({ store, defs, runtimes, now = Date.now, packs, remoteOf, userDir, identityOf, prefixWaitMs = PREFIX_WAIT_MS }: AgentsOptions): Agents {
   defs.register("role", RoleForClaude);
   defs.register("profile", Profile);
   const context: ContextResolver = createContextResolver({ defs, packs, remoteOf, userDir });
@@ -157,6 +160,8 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
 
   /** Todo lo que se necesita para llevar una sesión desde que parte hasta que entrega su reporte. */
   interface Conversation {
+    /** El runtime de la sesión: el reintento por un reporte inválido la retoma ahí mismo. */
+    runtime: AgentRuntime;
     roleDefId: string;
     roleVersion: number;
     roleSlug: string;
@@ -301,9 +306,9 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     return repoId === undefined ? undefined : identityOf?.(repoId);
   }
 
-  async function claimPrefix(spec: RunSpec, signal: AbortSignal | undefined): Promise<() => void> {
+  async function claimPrefix(runtimeId: RuntimeId, spec: RunSpec, signal: AbortSignal | undefined): Promise<() => void> {
     const key = createHash("sha256")
-      .update(JSON.stringify([spec.model, spec.cacheTtl ?? "5m", spec.tools, spec.native, spec.systemPrompt]))
+      .update(JSON.stringify([runtimeId, spec.model, spec.cacheTtl ?? "5m", spec.tools, spec.native, spec.systemPrompt]))
       .digest("hex");
     const writing = writingPrefix.get(key);
     if (writing) {
@@ -358,11 +363,13 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     const proposes = mode.learnings === true;
     const profileRole = resolveProfileRole(req, req.profileRole ?? req.role);
     const settings = settingsOf(mode, profileRole);
+    const runtime = runtimes.get(profileRole.runtime);
 
     let notice = req.notice;
     if (req.resumeFrom !== undefined && mode.session !== "new") {
       const prior = sessionOf(req.resumeFrom);
-      const reason = whyCold(prior, mode.session, profileRole.cacheTtl ?? "5m");
+      // Una sesión de otro runtime no se retoma: el historial vive en el runtime que la abrió.
+      const reason = prior.runtime === runtime.id ? whyCold(prior, mode.session, profileRole.cacheTtl ?? "5m") : `corrió con el runtime "${prior.runtime}" y esta entrada del perfil usa "${runtime.id}"`;
       if (reason === undefined) return resume({ ...req, sessionId: prior.id });
       const handoff = await handoffFor(prior, reason, req);
       notice = notice === undefined ? handoff : `${notice}\n\n${handoff}`;
@@ -384,12 +391,13 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       stepRunId: req.stepRunId,
       gitIdentity: await gitIdentityFor(req.repoId),
     };
-    const prefixWarmed = await claimPrefix(spec, req.signal);
+    const prefixWarmed = await claimPrefix(runtime.id, spec, req.signal);
     try {
       const agentRun = await runtime.start(spec);
       interruptOnAbort(req.signal, agentRun);
       return await converse(
         {
+          runtime,
           roleDefId: roleDef.id,
           roleVersion: roleDef.version,
           roleSlug: req.role,
@@ -414,9 +422,12 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
 
   async function resume(req: ResumeRequest): Promise<AgentResult> {
     const session = sessionOf(req.sessionId);
-    if (session.runtime !== runtime.id) {
+    const runtime = runtimes.all.find((r) => r.id === session.runtime);
+    if (!runtime || (runtimes.forced && runtimes.forced !== runtime)) {
       throw new Error(
-        `La sesión ${req.sessionId} es del runtime "${session.runtime}" y el core corre con "${runtime.id}" (CORE_RUNTIME): abre una sesión nueva.`,
+        runtime
+          ? `La sesión ${req.sessionId} es del runtime "${session.runtime}" y el core corre todo con "${runtimes.forced?.id}" (CORE_RUNTIME): abre una sesión nueva.`
+          : `La sesión ${req.sessionId} es del runtime "${session.runtime}" y este core no lo tiene: abre una sesión nueva.`,
       );
     }
     const roleDef = defs.get("role", session.roleDefId, session.roleVersion);
@@ -435,6 +446,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     interruptOnAbort(req.signal, agentRun);
     return converse(
       {
+        runtime,
         roleDefId: session.roleDefId,
         roleVersion: session.roleVersion,
         roleSlug: roleDef.slug,
@@ -463,7 +475,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     const attempt = await settle(conversation, first, resumedFrom);
     if (attempt.kind !== "invalid") return attempt.result;
 
-    const retry = await runtime.resume(
+    const retry = await conversation.runtime.resume(
       first.ref,
       `tu reporte no cumple el esquema: ${attempt.problem}`,
       {
@@ -527,6 +539,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
           status: result.status,
           sessionId,
           message,
+          runtime: c.runtime.id,
           ...(result.resetsAt === undefined ? {} : { resetsAt: result.resetsAt }),
         },
       };
@@ -698,7 +711,8 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     // Un resume que reusa la sesión sigue la cuenta: la fila ya cuenta los turnos de antes.
     const seq = session.turns + 1;
 
-    const costMicros = runtime.capabilities.costPerTurn ? usage.costMicros : estimateOrWarn(tx, c, sessionId, model, seq, ts, tokens);
+    const { costPerTurn } = c.runtime.capabilities;
+    const costMicros = costPerTurn ? usage.costMicros : estimateOrWarn(tx, c, sessionId, model, seq, ts, tokens);
 
     tx.db.insert(agentTurns).values({ sessionId, seq, ts, model, ...tokens, costMicros }).run();
     addStepUsage(tx, c, sessionId, tokens.tokensIn + tokens.tokensOut + tokens.tokensCacheRead + tokens.tokensCacheWrite, costMicros);
@@ -711,7 +725,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
         tokensCacheRead: session.tokensCacheRead + tokens.tokensCacheRead,
         tokensCacheWrite: session.tokensCacheWrite + tokens.tokensCacheWrite,
         costMicros: session.costMicros + costMicros,
-        costSource: runtime.capabilities.costPerTurn ? usage.costSource : "estimate",
+        costSource: costPerTurn ? usage.costSource : "estimate",
       })
       .where(eq(agentSessions.id, sessionId))
       .run();

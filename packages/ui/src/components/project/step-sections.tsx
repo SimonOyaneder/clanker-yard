@@ -35,6 +35,9 @@ export function BriefSection({ detail, session, step }: { detail: StepDetail; se
           <Field label="Rol">
             <span className="font-mono text-[12.5px]">{session.role}</span>
           </Field>
+          <Field label="Runtime">
+            <span className="font-mono text-[12.5px]">{session.runtime}</span>
+          </Field>
           <Field label="Modelo">
             {session.model}
             {session.effort ? ` · effort ${session.effort}` : ""}

@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -24,7 +23,9 @@ import type {
 } from "../runtime";
 import type { ClaudeCredentials } from "./credentials";
 import { userConfigDir } from "../context";
-import { createEventQueue } from "./event-queue";
+import { writeGitConfig } from "../agent-env";
+import { createEventQueue } from "../event-queue";
+import { CLAUDE_OPTIONS } from "./models";
 import { agentEnv, toOptions } from "./options";
 import { credentialMismatch, noteSignals, outcomeOf, type Signals } from "./outcome";
 import { startRecording } from "./record";
@@ -359,6 +360,8 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     id: "claude-sdk",
     capabilities: { structuredOutput: true, costPerTurn: false, resume: true, fork: false, steer: false },
 
+    describe: () => Promise.resolve(CLAUDE_OPTIONS),
+
     async start(spec) {
       await prepare();
       const run = await launch(spec, spec.prompt, undefined);
@@ -408,19 +411,6 @@ async function readStored(file: string, sessionId: string): Promise<StoredSessio
       `No hay registro de la sesión ${sessionId} en ${file}: el runtime claude-sdk solo retoma las sesiones que él inició.`,
     );
   }
-}
-
-/**
- * El `GIT_CONFIG_GLOBAL` del agente: la identidad del usuario en el repo y ningún credential helper. Un archivo por
- * identidad (y no uno compartido) porque runs de repos distintos corren a la vez. Sin identidad no hay `[user]`.
- */
-async function writeGitConfig(dir: string, identity: RunSpec["gitIdentity"]): Promise<string> {
-  const quote = (value: string) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-  const user = identity ? `[user]\n\tname = ${quote(identity.name)}\n\temail = ${quote(identity.email)}\n` : "";
-  const content = `${user}[credential]\n\thelper =\n`;
-  const file = join(dir, createHash("sha256").update(content).digest("hex").slice(0, 16));
-  await writeFile(file, content);
-  return file;
 }
 
 type SDKUsage = Extract<SDKMessage, { type: "assistant" }>["message"]["usage"];

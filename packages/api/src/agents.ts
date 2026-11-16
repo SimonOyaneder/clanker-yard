@@ -114,8 +114,21 @@ export const Role = z.object({
 });
 export type Role = z.infer<typeof Role>;
 
-/** Lo que el perfil decide de un rol: modelo, effort y topes. */
+/**
+ * Con qué corre un agente: `claude-sdk` (Claude Code con el Agent SDK) u `opencode` (`opencode serve`, cualquier
+ * proveedor que opencode tenga conectado). El modelo de un perfil es del formato de su runtime.
+ */
+export const AgentRuntimeId = z.enum(["claude-sdk", "opencode"]);
+export type AgentRuntimeId = z.infer<typeof AgentRuntimeId>;
+
+/** El runtime de una entrada de perfil que no lo dice. */
+export const DEFAULT_AGENT_RUNTIME: AgentRuntimeId = "claude-sdk";
+
+/** Lo que el perfil decide de un rol: runtime, modelo, effort y topes. */
 export const ProfileRole = z.object({
+  /** Sin él, `claude-sdk`. */
+  runtime: AgentRuntimeId.optional(),
+  /** Del formato del runtime: un alias de Claude (`sonnet`) o `proveedor/modelo` en opencode (`openai/gpt-6.1-terra`). */
   model: z.string().min(1),
   effort: Effort.optional(),
   cacheTtl: z.enum(["5m", "1h"]).optional(),
@@ -141,10 +154,25 @@ export type ModelOption = z.infer<typeof ModelOption>;
 export const EffortOption = z.object({ id: Effort, about: z.string().min(1) });
 export type EffortOption = z.infer<typeof EffortOption>;
 
-/** Los valores que un perfil puede elegir para un rol: los da el runtime, la UI no los lista. */
-export const AgentOptions = z.object({
+/** Lo que un runtime ofrece a una entrada de perfil: sus modelos y esfuerzos, y si este core puede usarlo. */
+export const RuntimeOptions = z.object({
+  id: AgentRuntimeId,
+  label: z.string().min(1),
+  /** Una línea para quien elige: qué es y qué necesita. */
+  about: z.string().min(1),
+  /** `false` si este core no puede lanzar agentes con él ahora (no está instalado o es muy viejo); `message` dice qué hacer. */
+  available: z.boolean(),
+  message: z.string().optional(),
   models: z.array(ModelOption),
+  /** El modelo que toma una entrada de perfil al pasarse a este runtime; sin él, el primero de `models`. */
+  defaultModel: z.string().optional(),
   efforts: z.array(EffortOption),
+});
+export type RuntimeOptions = z.infer<typeof RuntimeOptions>;
+
+/** Los valores que un perfil puede elegir para un rol, por runtime: los dan los runtimes, la UI no los lista. */
+export const AgentOptions = z.object({
+  runtimes: z.array(RuntimeOptions),
 });
 export type AgentOptions = z.infer<typeof AgentOptions>;
 

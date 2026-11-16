@@ -29,6 +29,7 @@ import {
   type Store,
   type WorkspaceLease,
   type Workspaces,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
@@ -400,7 +401,7 @@ describe("en un flujo", () => {
     flows = createFlows({
       store,
       defs,
-      agents: createAgents({ store, defs, runtime: unused }),
+      agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([unused], {}) }),
       artifacts: createArtifacts({ store, dir: join(dataDir, "flow-artifacts") }),
       roles: () => undefined,
       workspaceOf: workspaces.held,
