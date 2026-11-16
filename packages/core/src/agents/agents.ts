@@ -20,6 +20,7 @@ import { agentSessions, agentTurns, stepUsage, type DefPin } from "../store/sche
 import type { GitIdentityOf } from "../git/identity";
 import type { Store, Tx } from "../store/store";
 import { LEARNING_PROMPT } from "../learnings/criteria";
+import { claudeSchemaError } from "./claude/report-schema";
 import { createContextResolver, type ContextResolver } from "./context";
 import { estimateCostMicros, minUsefulBudgetMicros, PREFIX_TOKENS, type TurnTokens } from "./pricing";
 import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
@@ -133,8 +134,21 @@ export interface AgentsOptions {
 /** El mismo esquema que valida el reporte, hecho JSON Schema; el outcome y el payload los pone el modo. */
 const reportEnvelope = z.toJSONSchema(Report) as JsonSchema & { properties: Record<string, unknown> };
 
+/**
+ * Un rol se valida también contra lo que Claude Code acepta: el reporte de cada modo tiene que compilar como su
+ * `--json-schema`, o la sesión sale antes del primer turno. Vale para todo rol que se guarda (pack, repo o usuario).
+ */
+const RoleForClaude = Role.superRefine((role, ctx) => {
+  for (const [name, mode] of Object.entries(role.modes)) {
+    const problem = claudeSchemaError(outputSchemaFor(mode, true));
+    if (problem !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["modes", name, "report"], message: `Claude Code no puede compilar el reporte de este modo: ${problem}` });
+    }
+  }
+});
+
 export function createAgents({ store, defs, runtime, now = Date.now, packs, remoteOf, userDir, identityOf, prefixWaitMs = PREFIX_WAIT_MS }: AgentsOptions): Agents {
-  defs.register("role", Role);
+  defs.register("role", RoleForClaude);
   defs.register("profile", Profile);
   const context: ContextResolver = createContextResolver({ defs, packs, remoteOf, userDir });
 

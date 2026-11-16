@@ -116,6 +116,7 @@ Un pack (`docs/design.html#packs`) es lo propio de una org (señales de PR, bot 
 - `defs.resolve` no conoce el alcance: un flujo o rol de un pack es visible para cualquier repo. Quien lance un flujo debe consultar `packFor` antes de ofrecer lo del pack.
 - `conventions.context` (`{ <rol o *>: ["skill:commit", "rule:git-safety", "repo:AGENTS.md"] }`) lo resuelve Agents con las fuentes del rol, para el pack de la org del repo del workspace (ver Contexto de los roles).
 - `packs/` (los de fábrica) está vacío: el pack de una organización vive en su propio repo y se instala desde Ajustes > Packs o copiándolo a `<datos>/packs/<id>`. `packages/testkit/fixtures/packs/example` es el pack de ejemplo que usan los tests y el core de demo: bot de review (`review-bot`, `/review`), merge por comentario (`/merge`) con la cola `merge-queue`, y la señal de riesgo por label.
+- Un pack no trae tests: lo valida el core al cargarlo. Además del esquema, todo rol que se guarda (de pack, de repo o de usuario) tiene que tener un reporte que Claude Code compile (`claudeSchemaError`, `agents/claude/report-schema.ts`, en el validador de `role` de `createAgents`), y un rol de pack con el slug de uno de la plantilla tiene que mantener cada modo de ese rol con sus outcomes, sesión, payload y reporte (`checkOverride` en `packs.ts`): los flujos de la plantilla dependen de eso.
 
 ## Contexto de los roles
 

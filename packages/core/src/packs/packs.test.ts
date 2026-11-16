@@ -270,6 +270,47 @@ describe("load", () => {
     expect(error.message).toContain('el role "review-lore" ya lo trae otro pack (pack:acme@1)');
     expect(defs.list("pack").map((d) => d.slug)).toEqual(["acme"]);
   });
+
+  describe("un rol que pisa uno de la plantilla", () => {
+    const builtin: RoleType = {
+      ...role,
+      modes: {
+        review: { instructions: "Revisa.", report: { type: "object" }, outcomes: ["clean", "changes"], session: "new" },
+        "re-review": { instructions: "Revisa otra vez.", report: { type: "object" }, outcomes: ["clean"], session: "resume" },
+      },
+    };
+    const withBuiltin = () => {
+      const ctx = setup();
+      ctx.defs.save({ kind: "role", slug: "review-lore", scope: "builtin", body: builtin, source: "template:test" });
+      return ctx;
+    };
+
+    test("carga si mantiene cada modo con sus outcomes, sesión, payload y reporte, aunque cambie el prompt y sume modos", async () => {
+      const { defs, packs } = withBuiltin();
+      const ours: RoleType = {
+        ...builtin,
+        prompt: "Revisas contra las reglas de la org.",
+        modes: { ...builtin.modes, extra: { instructions: "Otro.", report: { type: "object" }, outcomes: ["ok"], session: "new" } },
+      };
+
+      await packs.load(packDir({ ...acme(), "roles/review-lore.json": ours }));
+
+      expect(defs.resolve("role", "review-lore")?.scope).toBe("pack");
+    });
+
+    test("se rechaza si le falta un modo o cambia sus outcomes, y no se guarda nada", async () => {
+      const { defs, packs } = withBuiltin();
+      const ours: RoleType = { ...builtin, modes: { review: { ...builtin.modes.review!, outcomes: ["clean"] } } };
+
+      const error = await loadError(packs, packDir({ ...acme(), "roles/review-lore.json": ours }));
+
+      expect(error.file).toBe("roles/review-lore.json");
+      expect(error.issues.map((i) => i.path.join("."))).toEqual(["modes.review.outcomes", "modes.re-review"]);
+      expect(error.message).toContain('distinto del rol "review-lore" de la plantilla');
+      expect(defs.list("pack")).toEqual([]);
+      expect(defs.resolve("role", "review-lore")?.scope).toBe("builtin");
+    });
+  });
 });
 
 describe("reload", () => {

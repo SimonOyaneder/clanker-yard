@@ -1,6 +1,7 @@
 import { cp, readdir, readFile, rm } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
-import { NodeId, Pack, PackSettings, type DefKind, type PackInfo, type PackOrigin, type PackScope, type ResolvedPack } from "@clanker/api";
+import { isDeepStrictEqual } from "node:util";
+import { NodeId, Pack, PackSettings, Role, type DefKind, type PackInfo, type PackOrigin, type PackScope, type ResolvedPack } from "@clanker/api";
 import * as z from "zod";
 import { DefValidationError, type DefIssue, type Defs } from "../defs/defs";
 
@@ -136,6 +137,34 @@ export function createPacks({ defs, factoryDir, installedDir }: { defs: Defs; fa
     return out;
   }
 
+  /**
+   * Un rol del pack con el slug de uno de la plantilla (`builtin`) lo pisa en todos los flujos que lo usan, así que
+   * tiene que traer cada modo de ese rol con los mismos outcomes, sesión, payload y reporte (puede sumar modos).
+   */
+  function checkOverride(dir: string, def: PackedDef): void {
+    if (def.kind !== "role") return;
+    const builtin = defs.list("role").find((d) => d.slug === def.slug && d.scope === "builtin");
+    if (builtin === undefined) return;
+    const ours = Role.parse(def.body).modes;
+    const issues: DefIssue[] = [];
+    for (const [name, theirs] of Object.entries(Role.parse(builtin.body).modes)) {
+      const mode = ours[name];
+      if (mode === undefined) {
+        issues.push({ path: ["modes", name], message: `falta: el rol "${def.slug}" de la plantilla lo tiene y sus flujos lo usan` });
+        continue;
+      }
+      for (const field of ["outcomes", "session", "payload", "report"] as const) {
+        if (!isDeepStrictEqual(mode[field], theirs[field])) {
+          issues.push({
+            path: ["modes", name, field],
+            message: `distinto del rol "${def.slug}" de la plantilla, que este pisa: los flujos de la plantilla dependen de él`,
+          });
+        }
+      }
+    }
+    if (issues.length > 0) throw new PackLoadError(dir, def.file, issues);
+  }
+
   /** Lee y valida el pack de `dir` entero (manifiesto y archivos) sin escribir nada. */
   async function read(dir: string) {
     const manifest = await readJson(dir, "pack.json");
@@ -164,6 +193,8 @@ export function createPacks({ defs, factoryDir, installedDir }: { defs: Defs; fa
       const { pack, manifest, packed } = await read(dir);
       const source = `pack:${pack.id}@${pack.version}`;
       const mine = (existingSource: string) => existingSource.startsWith(`pack:${pack.id}@`);
+
+      for (const def of packed) checkOverride(dir, def);
 
       const existing = PACKED_KINDS.flatMap((kind) =>
         defs.list(kind, { includeArchived: true }).filter((d) => d.scope === "pack"),
