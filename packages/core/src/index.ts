@@ -214,7 +214,7 @@ export { createRecipeTester, RecipeTestError } from "./recipe/recipe-test";
 export type { RecipeTester, RecipeTesterOptions } from "./recipe/recipe-test";
 
 export { commitsApplyAction } from "./commits/apply";
-export { prOfWaitKey, prWaits, signalPr } from "./github/pr-waits";
+export { NO_CI_GRACE_MS, prOfWaitKey, prWaits, signalPr } from "./github/pr-waits";
 export { prPublishAction } from "./github/publish";
 export type { PrPublishDeps } from "./github/publish";
 export { prPushFixupsAction } from "./github/push-fixups";

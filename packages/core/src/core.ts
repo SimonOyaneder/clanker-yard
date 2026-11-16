@@ -232,7 +232,12 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(stackRestackRewrittenAction(restackDeps));
   const feedback = { connections: opts.connections, packs };
   for (const action of [councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction]) flows.registerAction(action(feedback));
-  for (const wait of Object.values(prWaits(prs))) flows.registerWait(wait);
+  const headSeen = ({ repo, number }: PrRef) => {
+    const registered = repos.byRemote(repo);
+    const row = registered && prCache.row(registered.id, number);
+    return row?.headSha && row.headChangedAt != null ? { sha: row.headSha, at: row.headChangedAt } : undefined;
+  };
+  for (const wait of Object.values(prWaits(prs, { headSeen }))) flows.registerWait(wait);
   installBuiltins({ defs, flows });
   // Los flujos de un pack citan acciones y waits, así que se cargan con todo registrado. Un pack roto no tumba el arranque.
   const { errors } = await packs.loadAll(opts.packsDir ?? join(dataDir, "packs"));

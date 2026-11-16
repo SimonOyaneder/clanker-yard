@@ -12,6 +12,28 @@ const PrEvent = z.object({ pr: PrRef, state: PrState });
 
 const sameRepoPr = (a: PrRef, b: PrRef) => a.repo === b.repo && a.number === b.number;
 
+/**
+ * Cuánto espera `pr.ci` a que aparezca el primer check de un head antes de dar por hecho que el repo no
+ * tiene CI. GitHub registra los checks de un push en segundos, pero un CI externo puede tardar un par de
+ * minutos en enterarse.
+ */
+export const NO_CI_GRACE_MS = 5 * 60_000;
+
+/** Cuándo vio Watch (o `pr.publish`) por primera vez el head de un PR. `sha` es ese head; `at`, ms. */
+export interface HeadSeen {
+  sha: string;
+  at: number;
+}
+
+export interface PrWaitsOptions {
+  /**
+   * El head que el caché de PRs tiene de `pr` y desde cuándo; `undefined` si no lo conoce. Sin esto un PR
+   * sin checks nunca cuenta como "sin CI": `pr.ci` espera hasta su plazo.
+   */
+  headSeen?(pr: PrRef): HeadSeen | undefined;
+  now?: () => number;
+}
+
 /** Los tipos de evento que cierran estos waits: el `name` de cada uno. */
 const PR_EVENT_TYPES = ["pr.botReview", "pr.ci", "pr.merged"] as const;
 
@@ -79,11 +101,15 @@ interface TriageItem {
  *   con `items` para triage. Sin bot en el pack nunca resuelve: el flujo no lo espera porque
  *   `review.requestBot` da `none`.
  * - `pr.ci { pr }`: `ok` con el CI verde, `fail` con `failures` apenas un check que cuenta falla (sin
- *   esperar a los pendientes). Con los checks pendientes o todavía sin registrarse sigue esperando.
- *   Cada falla trae `flaky: true` si el pack la declara flaky conocida.
+ *   esperar a los pendientes). Con los checks pendientes sigue esperando. Cada falla trae `flaky: true` si
+ *   el pack la declara flaky conocida. Un head sin ningún check que cuente (`ci.state === "none"`) también
+ *   es `ok`, como en `ciGreen` del vigilante, pero solo cuando el caché lo conoce (`headSeen`, con ese mismo
+ *   sha) desde hace `NO_CI_GRACE_MS`: antes puede ser un CI que aún no registra sus checks. Un PR que
+ *   el caché no conoce, o con un head distinto del leído, sigue esperando. Watch solo avisa por `signal` los
+ *   cambios del PR, y el tiempo sin checks no lo es: este caso lo cierra el sondeo del wait.
  * - `pr.merged { pr }`: `merged` (con `sha` del merge) o `closed` si lo cerraron sin mergear.
  */
-export function prWaits(prs: Pick<Prs, "get">) {
+export function prWaits(prs: Pick<Prs, "get">, { headSeen, now = Date.now }: PrWaitsOptions = {}) {
   const prArgs = z.object({ pr: PrRef });
   return {
     botReview: prWait({
@@ -105,8 +131,12 @@ export function prWaits(prs: Pick<Prs, "get">) {
       outcomes: ["ok", "fail"],
       key: "ci",
       prs,
-      decide({ ci }) {
+      decide({ ci }, { pr }) {
         if (ci.state === "green") return { outcome: "ok", output: { sha: ci.sha } };
+        if (ci.state === "none") {
+          const seen = headSeen?.(pr);
+          return seen?.sha === ci.sha && now() - seen.at >= NO_CI_GRACE_MS ? { outcome: "ok", output: { sha: ci.sha } } : undefined;
+        }
         if (ci.state !== "red") return undefined;
         const failures = ci.failing.map(
           (name): TriageItem => ({

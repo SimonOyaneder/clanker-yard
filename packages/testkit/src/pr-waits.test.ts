@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PrRef, type FlowDef } from "@clanker/api";
+import { PrRef, type FlowDef, type RepoId } from "@clanker/api";
 import {
   createAgents,
   createArtifacts,
@@ -10,13 +10,17 @@ import {
   createFileSecrets,
   createFlows,
   createPacks,
+  createPrCache,
   createPrs,
+  createRepos,
+  NO_CI_GRACE_MS,
   openStore,
   prOfWaitKey,
   prWaits,
   reviewRequestBotAction,
   type Connections,
   type Flows,
+  type PrCache,
   type Packs,
   type Store,
 } from "@clanker/core";
@@ -45,6 +49,10 @@ let connections: Connections;
 let packs: Packs;
 let flows: Flows;
 let pr: SimPr;
+let cache: PrCache;
+let repoId: RepoId;
+/** El reloj de `pr.ci` y del caché de PRs: lo mueve cada test. */
+let clock: number;
 /** Lo que cada nodo `capture` recibió, en orden. */
 let captured: Record<string, unknown>[];
 /** Lo que el bot "hace" en cada punto del flujo (`sim.script`): lo guiona cada test. */
@@ -95,7 +103,16 @@ beforeEach(async () => {
     tickMs: 20,
     probeEverySec: 0.01,
   });
-  for (const wait of Object.values(prWaits(createPrs({ connections, packs })))) flows.registerWait(wait);
+  clock = Date.UTC(2026, 10, 15);
+  const repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  repoId = repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
+  const prs = createPrs({ connections, packs });
+  cache = createPrCache({ store, repos, packs, prs, now: () => clock });
+  const headSeen = ({ number }: PrRef) => {
+    const row = cache.row(repoId, number);
+    return row && { sha: row.headSha!, at: row.headChangedAt! };
+  };
+  for (const wait of Object.values(prWaits(prs, { headSeen, now: () => clock }))) flows.registerWait(wait);
   flows.registerAction(reviewRequestBotAction({ connections, packs }));
   captured = [];
   flows.registerAction({
@@ -309,6 +326,53 @@ describe("pr.ci", () => {
 
     expect(result).toMatchObject({ status: "failed" });
     expect(result.steps).toEqual([["ci", "timeout"]]);
+  });
+
+  describe("sin checks que cuenten (un repo sin CI)", () => {
+    /** Watch ve el head del PR a la hora del reloj; `sha` es el que cree que tiene. */
+    const watchSees = (sha = pr.headSha()) =>
+      cache.saveRest(repoId, { number: PR.number, node_id: "PR_1", state: "open", draft: false, merged: false, head: { ref: BRANCH, sha }, base: { ref: "main" } });
+
+    test("ok pasado el margen desde que Watch vio el head, aunque el único check sea uno ignorado", async () => {
+      pr.check("merge-queue", "failure");
+      watchSees();
+      clock += NO_CI_GRACE_MS;
+
+      const result = await run(ciFlow());
+
+      expect(result).toMatchObject({ status: "done", steps: [["ci", "ok"], ["capture", "ok"]] });
+      expect(captured).toEqual([{ out: { sha: pr.headSha() } }]);
+    });
+
+    test("antes del margen espera: puede ser un CI que aún no registra sus checks, y lo cierra el sondeo al cumplirse", async () => {
+      watchSees();
+      clock += NO_CI_GRACE_MS - 1;
+      whenWaiting(() => {
+        clock += 1;
+      });
+
+      const result = await run(ciFlow());
+
+      expect(result.steps[0]).toEqual(["ci", "ok"]);
+    });
+
+    test("si aparece un check, manda el check: el margen no lo salta", async () => {
+      watchSees();
+      clock += NO_CI_GRACE_MS;
+      pr.check("unit", "failure", { required: true });
+
+      const result = await run(ciFlow());
+
+      expect(result.steps[0]).toEqual(["ci", "fail"]);
+    });
+
+    test("un PR que el caché no conoce, o con otro head del que se lee, sigue esperando", async () => {
+      clock += NO_CI_GRACE_MS * 10;
+      expect((await run(ciFlow(0.3))).steps).toEqual([["ci", "timeout"]]);
+
+      watchSees("0".repeat(40));
+      expect((await run(ciFlow(0.3))).steps).toEqual([["ci", "timeout"]]);
+    });
   });
 
   test("el CI de un commit nuevo empieza de cero: lo verde del anterior no vale", async () => {

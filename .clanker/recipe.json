@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "requires": [
+    { "name": "Node 24", "check": "node -e \"process.exit(Number(process.versions.node.split('.')[0]) >= 24 ? 0 : 1)\"" },
+    { "name": "npm", "check": "npm --version" }
+  ],
+  "setup": {
+    "worktree": ["npm ci --silent"]
+  },
+  "commands": {
+    "typecheck": "npm run -s typecheck",
+    "lint": "npm run -s lint",
+    "test:related": "npx vitest related --run --passWithNoTests {{files}}",
+    "test": "npm test"
+  },
+  "checks": ["typecheck", "lint", "test:related", "test"]
+}
