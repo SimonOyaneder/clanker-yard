@@ -2,8 +2,9 @@ import type { ProjectId, RunId } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { projects, runs } from "../store/schema";
+import { PermanentActionError } from "./catalog";
 import { DecisionResolveError } from "./engine";
-import { harness as createHarness, okReport, subjectOf, type AgentScript } from "./harness";
+import { harness as createHarness, okReport, subjectOf, type AgentScript, WAIT } from "./harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -97,7 +98,7 @@ describe("gate", () => {
     await h.finished(runId);
     const [decision] = h.pending(runId);
     h.flows.resolveGate(decision?.id as never, "go", "ui");
-    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"), WAIT);
 
     expect(h.stepStatuses(runId)).toEqual([
       ["prep", "done", "ok"],
@@ -144,13 +145,13 @@ describe("gate", () => {
     const old = h.startIn("gated", "ENG-1");
     await h.finished(old);
     const holder = h.startIn("agent-only", "ENG-2");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1), WAIT);
     const fresh = h.startIn("agent-only", "ENG-3");
     h.flows.resolveGate(h.pending(old)[0]?.id as never, "go", "ui");
     expect(h.calls).toHaveLength(1);
 
     releases.get("ENG-2")?.();
-    await vi.waitFor(() => expect(h.flows.getRun(fresh).status).toBe("done"));
+    await vi.waitFor(() => expect(h.flows.getRun(fresh).status).toBe("done"), WAIT);
 
     expect(h.calls.map((c) => c.subject)).toEqual(["ENG-2", "ENG-1", "ENG-3"]);
     expect(h.flows.getRun(old).status).toBe("done");
@@ -221,7 +222,7 @@ describe("gate", () => {
 
     const runId = h.startIn("gated", "ENG-1");
     await h.finished(runId);
-    h.flows.control(runId, "cancel", { by: "ui" });
+    h.flows.control(runId, "cancel", "ui");
 
     expect(h.flows.getRun(runId)).toMatchObject({ status: "canceled", parkReason: null });
     expect(h.stepStatuses(runId)[1]).toEqual(["ask", "canceled", null]);
@@ -241,11 +242,11 @@ describe("gate", () => {
     });
 
     const parent = h.startIn("parent", "ENG-1");
-    await vi.waitFor(() => expect(h.flows.listRuns().some((r) => r.parentRunId === parent && r.status === "parked")).toBe(true));
+    await vi.waitFor(() => expect(h.flows.listRuns().some((r) => r.parentRunId === parent && r.status === "parked")).toBe(true), WAIT);
     const child = h.flows.listRuns().find((r) => r.parentRunId === parent);
     h.flows.resolveGate(h.pending(child?.id as RunId)[0]?.id as never, "go", "ui");
 
-    await vi.waitFor(() => expect(h.flows.getRun(parent)).toMatchObject({ status: "done", outcome: "done" }));
+    await vi.waitFor(() => expect(h.flows.getRun(parent)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
   });
 });
 
@@ -271,7 +272,7 @@ describe("paso con error sin edge", () => {
   });
   const failing: AgentScript = () => Promise.resolve({ status: "error", message: "se cayó" });
 
-  test("un reintento y después parked needs_human con una decisión que ofrece reintentar, forzar y cancelar", async () => {
+  test("un reintento y después parked needs_human con una decisión que ofrece reintentar y cancelar (un agente no se fuerza)", async () => {
     const h = harness({ script: failing });
     h.save(planner());
 
@@ -285,7 +286,7 @@ describe("paso con error sin edge", () => {
       kind: "needs_human",
       title: 'El paso "plan" no puede seguir',
       body: "se cayó",
-      options: ["retry", "retry:latest-profile", "force:ok", "force:changes", "cancel"],
+      options: ["retry", "retry:latest-profile", "cancel"],
       stepRunId: h.flows.getRun(runId).steps[0]?.id,
     });
     expect(h.eventsOf(runId, "run.parked")[0]?.payload).toEqual({ reason: "needs_human", decisionId: decision?.id });
@@ -300,7 +301,7 @@ describe("paso con error sin edge", () => {
     await h.finished(runId);
     broken = false;
     h.flows.resolveGate(h.pending(runId)[0]?.id as never, "retry", "ui");
-    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"), WAIT);
 
     expect(h.flows.getRun(runId).steps.map((s) => [s.nodeId, s.visit, s.status])).toEqual([
       ["plan", 1, "failed"],
@@ -328,7 +329,7 @@ describe("paso con error sin edge", () => {
       raiseProfile(h);
       broken = false;
       h.flows.resolveGate(h.pending(runId)[0]?.id as never, "retry:latest-profile", "ui");
-      await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+      await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"), WAIT);
 
       expect(profileOf(h, runId)).toBe(2);
       expect(h.calls.map((c) => c.spec?.model)).toEqual(["sonnet", "sonnet", "opus"]);
@@ -345,25 +346,55 @@ describe("paso con error sin edge", () => {
       raiseProfile(h);
       broken = false;
       h.flows.resolveGate(h.pending(runId)[0]?.id as never, "retry", "ui");
-      await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+      await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"), WAIT);
 
       expect(profileOf(h, runId)).toBe(1);
       expect(h.calls.map((c) => c.spec?.model)).toEqual(["sonnet", "sonnet", "sonnet"]);
     });
   });
 
-  test("force:<outcome> sigue el edge de ese outcome sin ejecutar el paso", async () => {
-    const h = harness({ script: failing });
-    h.save(planner());
+  const checker = {
+    schema: 1,
+    id: "checker",
+    name: "Checker",
+    trigger: { type: "manual" },
+    start: "check",
+    nodes: {
+      check: { type: "action", action: "check", args: {}, on: { ok: "@done", changes: "after" } },
+      after: { type: "action", action: "after", args: {}, on: { ok: "@done" } },
+    },
+  };
 
-    const runId = h.startIn("planner", "ENG-1");
+  test("un action que falla sin edge de error ofrece además forzar cada outcome que declara", async () => {
+    const h = harness();
+    h.action("check", ["ok", "changes"], () => {
+      throw new PermanentActionError("se cayó");
+    });
+    h.save(checker);
+
+    const runId = h.startIn("checker", "ENG-1");
+    await h.finished(runId);
+
+    expect(h.pending(runId)[0]).toMatchObject({ kind: "needs_human", options: ["retry", "retry:latest-profile", "force:ok", "force:changes", "cancel"] });
+  });
+
+  test("force:<outcome> sigue el edge de ese outcome sin ejecutar el paso", async () => {
+    const h = harness();
+    let calls = 0;
+    h.action("check", ["ok", "changes"], () => {
+      calls += 1;
+      throw new PermanentActionError("se cayó");
+    });
+    h.save(checker);
+
+    const runId = h.startIn("checker", "ENG-1");
     await h.finished(runId);
     h.flows.resolveGate(h.pending(runId)[0]?.id as never, "force:changes", "mcp");
-    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"), { timeout: 10_000 });
 
-    expect(h.calls).toHaveLength(2);
+    expect(calls).toBe(1);
     expect(h.flows.getRun(runId).steps.map((s) => [s.nodeId, s.status])).toEqual([
-      ["plan", "failed"],
+      ["check", "failed"],
       ["after", "done"],
     ]);
     expect(h.decisionsOf(runId)[0]).toMatchObject({ status: "answered", resolution: { option: "force:changes" }, resolvedBy: "mcp" });
@@ -437,7 +468,7 @@ describe("escalar al pasarse del tope del paso", () => {
     h.save(escalating);
 
     const runId = h.startIn("escalating", "ENG-1");
-    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"), WAIT);
 
     expect(h.calls.map((c) => [c.kind, c.spec?.model])).toEqual([
       ["start", "sonnet"],
@@ -514,12 +545,12 @@ describe("tope de la corrida", () => {
     const runId = h.startIn("chain", "ENG-1");
     await h.finished(runId);
     h.flows.resolveGate(h.pending(runId)[0]?.id as never, "continue", "ui");
-    await vi.waitFor(() => expect(h.decisionsOf(runId)).toHaveLength(2));
+    await vi.waitFor(() => expect(h.decisionsOf(runId)).toHaveLength(2), WAIT);
 
     // Con 2 × USD 0,0004 caben dos pasos de 500 micros: el tercero vuelve a estacionar.
     expect(h.flows.getRun(runId)).toMatchObject({ status: "parked", parkReason: "limit", costMicros: 1000 });
     h.flows.resolveGate(h.pending(runId)[0]?.id as never, "continue", "ui");
-    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"), WAIT);
     expect(h.eventsOf(runId, "run.requeued")).toHaveLength(2);
   });
 
@@ -531,7 +562,7 @@ describe("tope de la corrida", () => {
     await h.finished(runId);
     h.defs.save({ kind: "profile", slug: "default", scope: "user", body: { roles: { dev: { model: "opus" } } }, source: "ui" });
     h.flows.resolveGate(h.pending(runId)[0]?.id as never, "continue:latest-profile", "ui");
-    await vi.waitFor(() => expect(h.decisionsOf(runId)).toHaveLength(2));
+    await vi.waitFor(() => expect(h.decisionsOf(runId)).toHaveLength(2), WAIT);
 
     // Cuenta como `continue`: con 2 × el tope caben dos pasos y el tercero vuelve a estacionar, ya con el perfil nuevo.
     expect(h.flows.getRun(runId)).toMatchObject({ status: "parked", parkReason: "limit", costMicros: 1000 });
@@ -579,6 +610,6 @@ describe("tope de la corrida", () => {
     h.save(chain({}));
 
     const runId = h.startIn("chain", "ENG-1");
-    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"));
+    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("done"), WAIT);
   });
 });

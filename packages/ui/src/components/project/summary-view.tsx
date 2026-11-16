@@ -31,6 +31,7 @@ import {
   stepRows,
   summaryTiles,
 } from "@/lib/summary"
+import { PageLoadError } from "@/components/page-load-error"
 
 const ORIGIN_HINTS: Record<Origin, string> = {
   all: "Las corridas de Yard y las que trajo la importación del clanker-loop.",
@@ -57,13 +58,7 @@ export function ProjectSummaryTab({ project, controls, onOpenOperation }: TabPro
       {query.data ? (
         <SummaryView metrics={query.data} issues={issues.data ?? []} controls={controls} onOpenOperation={onOpenOperation} />
       ) : query.error ? (
-        <div role="alert" className="mx-auto mt-16 flex max-w-md flex-col items-center gap-3 text-center">
-          <h2 className="text-base font-semibold">No pude leer las métricas</h2>
-          <p className="text-muted-foreground">{query.error}</p>
-          <Button size="sm" onClick={query.reload}>
-            Reintentar
-          </Button>
-        </div>
+        <PageLoadError title="No pude leer las métricas" message={query.error} onRetry={query.reload} />
       ) : (
         <div className="flex flex-col gap-4">
           <Skeleton className="h-16 w-full" />

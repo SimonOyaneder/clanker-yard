@@ -6,6 +6,9 @@ import { openStore, type Store } from "../store/store";
 import { createDevRouter, type DevTools } from "./dev-router";
 import { apiDeps } from "./testing";
 
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
+
 // El router `dev` sobre un motor real con una acción que espera hasta que se la aborta.
 
 let store: Store;
@@ -42,7 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  for (const { id } of deps.flows.listRuns({ status: ["running", "paused"] })) deps.flows.control(id, "cancel", { by: "core" });
+  for (const { id } of deps.flows.listRuns({ status: ["running", "paused"] })) deps.flows.control(id, "cancel", "core");
   await deps.flows.close();
   store.close();
 });
@@ -60,7 +63,7 @@ const code = (expected: string, message?: RegExp) => (e: unknown) => e instanceo
 test("injectStepResult cierra el paso en marcha con el outcome y la corrida sigue su edge", async () => {
   const client = api();
   const id: RunId = deps.flows.start("slow", { type: "issue", id: "ENG-1" });
-  await vi.waitFor(() => expect(started).toHaveLength(1));
+  await vi.waitFor(() => expect(started).toHaveLength(1), WAIT);
   const stepId = started[0] as StepRunId;
 
   await expect(client.injectStepResult({ stepId, outcome: "nope" })).rejects.toSatisfy(code("BAD_REQUEST", /no declara el outcome "nope": ok, fail/));

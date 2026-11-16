@@ -11,7 +11,7 @@ import type { SettingsControls } from "@/components/project/settings-view"
 import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { HostProvider, type Host } from "@/host"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 
@@ -50,16 +50,10 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
               runs={[]}
               issues={issues}
               queue={queue}
-              onToggleSidebar={() => {}}
-              onOpenShortcuts={() => {}}
               prs={[]}
               prsActive={false}
-              onGoPrs={() => {}}
-              onGoInbox={() => {}}
-              onGoLearnings={() => {}}
               learnings={null}
               pendingDecisions={[]}
-              onOpenDecision={() => {}}
               onUndoDecision={null}
               onDecision={null}
               projectTab={extra.projectTab ?? null}

@@ -144,6 +144,6 @@ describe("los comandos contra un core con runtime fake", () => {
     expect(detail).toContain(`Sujeto:   issue ${issue!.id}`);
 
     const events = await cli("events", "tail", "--run", started.id, "--type", "run.started");
-    expect(events).toMatch(new RegExp(`run\\.started +core +${started.id}`));
+    expect(events).toMatch(new RegExp(`run\\.started +cli +${started.id}`));
   }, 60_000);
 });

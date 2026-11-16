@@ -25,7 +25,7 @@ export function RoleForm({ def, onSaved, onCancel }: Props) {
   const set = (patch: Partial<RoleDraft>) => setDraft({ ...draft, ...patch })
   // Los paquetes que el rol ya pide siguen visibles aunque ya no exista su def: así se pueden quitar.
   const choices = [...new Set([...(packages.data ?? []).map((d) => d.slug), ...draft.packs])].toSorted()
-  const describe = (slug: string) => {
+  const packageSummary = (slug: string) => {
     const pack = ContextPackage.safeParse((packages.data ?? []).find((d) => d.slug === slug)?.body)
     return pack.success ? (pack.data.description ?? pack.data.refs.join(", ")) : "No existe un paquete con este nombre."
   }
@@ -78,7 +78,7 @@ export function RoleForm({ def, onSaved, onCancel }: Props) {
               <Checkbox id={`pack-${slug}`} checked={draft.packs.includes(slug)} onCheckedChange={(v) => set({ packs: v === true ? [...draft.packs, slug] : draft.packs.filter((p) => p !== slug) })} />
               <Label htmlFor={`pack-${slug}`} className="flex flex-col items-start gap-0 text-[13px] font-normal">
                 <span className="font-mono text-xs">{slug}</span>
-                <span className="text-xs text-muted-foreground">{describe(slug)}</span>
+                <span className="text-xs text-muted-foreground">{packageSummary(slug)}</span>
               </Label>
             </li>
           ))}

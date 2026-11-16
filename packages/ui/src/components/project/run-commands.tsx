@@ -1,12 +1,11 @@
 import type { ClankerProject, RunId, StepRunId } from "@clanker/api"
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { createContext, type ReactNode, useContext, useMemo, useState } from "react"
 import { useAppData } from "@/app-data"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { useLive } from "@/hooks/use-live"
+import { usePerform } from "@/hooks/use-perform"
 
 // Lo que una persona le pide a una corrida, a un paso o a un proyecto. Cada comando le habla al core, avisa el
 // resultado con un toast y hace releer lo que se ve. Lo irreversible o que corta trabajo (cancelar, interrumpir,
@@ -46,27 +45,13 @@ interface Confirm {
   done: string
 }
 
-const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export function RunCommandsProvider({ children }: { children: ReactNode }) {
   const appData = useAppData()
-  const live = useLive()
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [steer, setSteer] = useState<{ stepId: StepRunId; label: string } | null>(null)
 
-  const perform = useCallback(
-    async (work: () => Promise<unknown>, done: string) => {
-      try {
-        await work()
-        toast.success(done)
-      } catch (e) {
-        toast.error(messageOf(e))
-      }
-      // Los eventos del core también hacen releer; esto cubre a un core que no los manda (los datos de ejemplo).
-      live.refresh()
-    },
-    [live],
-  )
+  const perform = usePerform()
 
   const commands = useMemo<RunCommands>(
     () => ({

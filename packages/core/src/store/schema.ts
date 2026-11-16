@@ -79,7 +79,7 @@ export const defs = sqliteTable(
     kind: text().$type<DefKind>().notNull(),
     slug: text().notNull(),
     scope: text({ enum: DEF_SCOPES }).notNull(),
-    repoId: text("repo_id"),
+    repoId: text("repo_id").$type<RepoId>(),
     currentVersion: integer("current_version").notNull(),
     archivedAt: integer("archived_at"),
   },
@@ -273,7 +273,7 @@ export const workspaces = sqliteTable(
   "workspaces",
   {
     id: text().primaryKey(),
-    repoId: text("repo_id").notNull(),
+    repoId: text("repo_id").$type<RepoId>().notNull(),
     path: text().notNull(),
     branch: text().notNull(),
     /** La base normalizada: `main`, nunca `origin/main`. */
@@ -319,9 +319,9 @@ export interface CombinedBaseParent {
 export const combinedBases = sqliteTable(
   "combined_bases",
   {
-    repoId: text("repo_id").notNull(),
+    repoId: text("repo_id").$type<RepoId>().notNull(),
     branch: text().notNull(),
-    issueId: text("issue_id")
+    issueId: text("issue_id").$type<IssueId>()
       .notNull()
       .references(() => issues.id),
     defaultSha: text("default_sha").notNull(),
@@ -401,7 +401,7 @@ export const projectRepos = sqliteTable(
       .$type<ProjectId>()
       .notNull()
       .references(() => projects.id),
-    repoId: text("repo_id")
+    repoId: text("repo_id").$type<RepoId>()
       .$type<RepoId>()
       .notNull()
       .references(() => repos.id),
@@ -610,7 +610,7 @@ export const LANES = ["dev", "maintenance"] as const;
 export const slots = sqliteTable(
   "slots",
   {
-    repoId: text("repo_id").notNull(),
+    repoId: text("repo_id").$type<RepoId>().notNull(),
     idx: integer().notNull(),
     /** El entorno de receta con `{{slot}}` ya sustituido, como lo dejó el último `setup.slot`. */
     env: text({ mode: "json" }).$type<Record<string, string>>().notNull(),
@@ -890,7 +890,7 @@ export const pullRequests = sqliteTable(
   "pull_requests",
   {
     id: text().primaryKey(),
-    repoId: text("repo_id").notNull(),
+    repoId: text("repo_id").$type<RepoId>().notNull(),
     number: integer().notNull(),
     nodeId: text("node_id").notNull(),
     headRef: text("head_ref").notNull(),
@@ -898,7 +898,7 @@ export const pullRequests = sqliteTable(
     headSha: text("head_sha").notNull(),
     state: text({ enum: PR_STATES }).notNull(),
     isDraft: integer("is_draft", { mode: "boolean" }).notNull(),
-    issueId: text("issue_id"),
+    issueId: text("issue_id").$type<IssueId>(),
     runId: text("run_id").$type<RunId>(),
     owned: integer({ mode: "boolean" }).notNull().default(false),
     detail: text({ mode: "json" }).$type<PrState>(),

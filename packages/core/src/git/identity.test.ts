@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createConnections } from "../connections/connections";
-import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "../github/fake-github";
+import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { openStore, type Store } from "../store/store";
 import type { RepoConfig } from "../workspaces/workspaces";
@@ -48,7 +48,7 @@ async function identities(path: string, remote?: RepoConfig["remote"]) {
   const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: github.baseUrl } });
   await connections.setPat("github_pat_UNIQUE-0123456789", "ui");
   const repos = vi.fn((): RepoConfig => ({ path, defaultBranch: "main", remote }));
-  return { identityOf: createGitIdentityOf({ repos, connections }), repos };
+  return { identityOf: createGitIdentityOf({ repoConfig: repos, connections }), repos };
 }
 
 const REMOTE = { url: "https://github.com/octocat/demo.git", repo: "octocat/demo", account: "octocat" };
@@ -58,7 +58,7 @@ describe("createGitIdentityOf", () => {
     const { identityOf } = await identities(checkout({ "user.name": "Ana Pérez", "user.email": "ana@example.com" }), REMOTE);
     const before = github!.requests.length;
 
-    expect(await identityOf("r1")).toEqual({ name: "Ana Pérez", email: "ana@example.com" });
+    expect(await identityOf("repo_r1")).toEqual({ name: "Ana Pérez", email: "ana@example.com" });
     expect(github!.requests).toHaveLength(before);
   });
 
@@ -66,32 +66,32 @@ describe("createGitIdentityOf", () => {
     writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Beto Soto\n\temail = beto@example.com\n");
     const { identityOf } = await identities(checkout(), REMOTE);
 
-    expect(await identityOf("r1")).toEqual({ name: "Beto Soto", email: "beto@example.com" });
+    expect(await identityOf("repo_r1")).toEqual({ name: "Beto Soto", email: "beto@example.com" });
   });
 
   test("sin email usa el noreply de la cuenta de GitHub conectada y el nombre configurado", async () => {
     const { identityOf } = await identities(checkout({ "user.name": "Ana Pérez" }), REMOTE);
 
-    expect(await identityOf("r1")).toEqual({ name: "Ana Pérez", email: "583231+octocat@users.noreply.github.com" });
+    expect(await identityOf("repo_r1")).toEqual({ name: "Ana Pérez", email: "583231+octocat@users.noreply.github.com" });
   });
 
   test("sin nada configurado usa el nombre del perfil de GitHub", async () => {
     const { identityOf } = await identities(checkout(), REMOTE);
 
-    expect(await identityOf("r1")).toEqual({ name: "The Octocat", email: "583231+octocat@users.noreply.github.com" });
+    expect(await identityOf("repo_r1")).toEqual({ name: "The Octocat", email: "583231+octocat@users.noreply.github.com" });
   });
 
   test("sin email ni cuenta de GitHub falla diciendo qué configurar, no inventa una identidad", async () => {
     const { identityOf } = await identities(checkout());
 
-    await expect(identityOf("r1")).rejects.toThrow(/configura user\.name y user\.email/);
+    await expect(identityOf("repo_r1")).rejects.toThrow(/configura user\.name y user\.email/);
   });
 
   test("se resuelve una vez por repo", async () => {
     const { identityOf, repos } = await identities(checkout({ "user.name": "Ana Pérez", "user.email": "ana@example.com" }));
 
-    await identityOf("r1");
-    await identityOf("r1");
+    await identityOf("repo_r1");
+    await identityOf("repo_r1");
 
     expect(repos).toHaveBeenCalledTimes(1);
   });

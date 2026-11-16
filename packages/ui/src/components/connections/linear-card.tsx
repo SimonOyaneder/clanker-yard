@@ -11,6 +11,7 @@ import { useHost } from "@/host"
 import { copy } from "@/lib/clipboard"
 import { expiryLabel, statusLook } from "@/lib/connections"
 import { tone } from "@/lib/format"
+import { messageOf } from "@/lib/utils"
 
 interface Props {
   /** Un workspace de Linear por conexión. */
@@ -56,7 +57,7 @@ function WorkspaceCard({ connection, login, projects, accounts, onChanged }: { c
       onChanged()
       toast.success(`Linear desconectado de ${connection.account}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      toast.error(messageOf(e))
     }
   }
 

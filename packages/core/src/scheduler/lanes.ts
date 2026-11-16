@@ -1,12 +1,16 @@
 import type { Lanes, LanesPatch } from "@clanker/api";
-import { eq } from "drizzle-orm";
 import { activeRuns } from "../flows/lanes";
 import type { LaneCapacity } from "../flows/lanes";
 import { meta } from "../store/schema";
+import { readMetaJson } from "../store/meta-json";
 import type { Store } from "../store/store";
+import * as z from "zod";
 
 /** Mantenimiento: 2 por máquina. Dev: el tope global de la máquina, que cada proyecto acota con su `parallel`. */
 export const DEFAULT_LANE_CAPACITY: LaneCapacity = { dev: 4, maintenance: 2 };
+
+/** Lo guardado en `meta`: cada carril que se cambió alguna vez. */
+const SavedCapacity = z.object({ dev: z.int().positive(), maintenance: z.int().positive() }).partial();
 
 const META_KEY = "lanes";
 
@@ -24,8 +28,7 @@ export function createLaneSettings(store: Store): LaneSettings {
 
   function capacity(): LaneCapacity {
     if (current === undefined) {
-      const saved = store.db.select().from(meta).where(eq(meta.key, META_KEY)).get();
-      current = { ...DEFAULT_LANE_CAPACITY, ...(saved && (JSON.parse(saved.value) as Partial<LaneCapacity>)) };
+      current = { ...DEFAULT_LANE_CAPACITY, ...readMetaJson(store.db, META_KEY, SavedCapacity) };
     }
     return current;
   }

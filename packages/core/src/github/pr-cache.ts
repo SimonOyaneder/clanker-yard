@@ -1,11 +1,11 @@
-import type { CachedPr, PrFilter, PrRef, PrState } from "@clanker/api";
+import type { CachedPr, PrFilter, PrRef, PrState, RepoId } from "@clanker/api";
 import { and, asc, eq } from "drizzle-orm";
 import * as z from "zod";
 import { newId } from "../store/conventions";
 import type { Packs } from "../packs/packs";
 import { prParents, pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import type { Prs } from "./prs";
 
 /** Lo que Watch lee de un PR de la API REST (`GET /repos/{owner}/{repo}/pulls/{n}`). */
@@ -28,7 +28,10 @@ export type PrRow = typeof pullRequests.$inferSelect;
  * `prs.list`.
  */
 export interface PrCache {
-  /** Los PRs del caché, sin ir a GitHub: los que abrió el sistema y los que descubrió Watch. */
+  /**
+   * Los PRs del caché, sin ir a GitHub: los que abrió el sistema y los que descubrió Watch. Omite los
+   * de repos sin remoto de GitHub con una cuenta conectada (`RepoConfig.remote`): sin cuenta no hay `PrRef`.
+   */
   list(filter?: PrFilter): CachedPr[];
   /**
    * `prs.get` y además deja el estado en el caché. Si cambió respecto de lo que había, llama a
@@ -36,7 +39,7 @@ export interface PrCache {
    * REST) se lee igual pero no entra al caché.
    */
   refresh(ref: PrRef): Promise<PrState>;
-  row(repoId: string, number: number): PrRow | undefined;
+  row(repoId: RepoId, number: number): PrRow | undefined;
   /**
    * Marca o desmarca "no mergear nunca" (`pull_requests.hold`) y relee el PR con `refresh`, así su `merge`
    * (y el evento `pr.mergeReady` si vuelve a estar listo) ya cuenta con el cambio. Lanza si el core no
@@ -49,7 +52,7 @@ export interface PrCache {
    * Deja lo que dice la REST: crea la fila si no estaba (un PR que el sistema no abrió) y, si el head se
    * movió, anota cuándo. Devuelve la fila ya al día.
    */
-  saveRest(repoId: string, pull: RestPull, at?: number): PrRow;
+  saveRest(repoId: RepoId, pull: RestPull, at?: number): PrRow;
 }
 
 export interface PrCacheDeps {
@@ -67,7 +70,7 @@ export interface PrCacheDeps {
 const restState = ({ state, merged }: RestPull): PrRow["state"] => (merged ? "merged" : state);
 
 export function createPrCache({ store, repos, packs, prs, onChange, now = Date.now }: PrCacheDeps): PrCache {
-  const find = (repoId: string, number: number) =>
+  const find = (repoId: RepoId, number: number) =>
     store.db
       .select()
       .from(pullRequests)
@@ -75,7 +78,7 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
       .get();
 
   /** Guarda el `PrState` leído de GraphQL. Devuelve el anterior (`null` si nunca se había leído) y la fila ya al día, o `undefined` si el PR no está. */
-  function saveDetail(repoId: string, number: number, state: PrState): { previous: PrState | null; row: PrRow } | undefined {
+  function saveDetail(repoId: RepoId, number: number, state: PrState): { previous: PrState | null; row: PrRow } | undefined {
     return store.tx(({ db, emit }) => {
       const current = find(repoId, number);
       if (!current) return undefined;

@@ -6,7 +6,7 @@ import { App } from "@/App"
 import type { AppData } from "@/app-data"
 import { browserHost } from "@/browser-host"
 import { UNDO_MS } from "@/hooks/use-decision-resolver"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 

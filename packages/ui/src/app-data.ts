@@ -44,10 +44,10 @@ import type {
   ProjectPatch,
   ProjectSummary,
   QueueEntry,
-  RecipeStatus,
   RecipeTestResult,
   Repo,
   RepoConfigSync,
+  RepoOverview,
   RepoId,
   Run,
   RunDetail,
@@ -63,12 +63,8 @@ import type {
 } from "@clanker/api"
 import { createContext, useContext } from "react"
 
-/** Un repo registrado con lo que hay de su receta y cómo salió su última prueba (`null` si nunca se probó). */
-export interface RepoRow {
-  repo: Repo
-  recipe: RecipeStatus
-  lastTest: { ok: boolean; at: number } | null
-}
+/** Un repo registrado con lo que hay de su receta y cómo salió su última prueba: `repos.overview` del core. */
+export type RepoRow = RepoOverview
 
 /** El rango (ms epoch, `to` exclusivo) y el origen que acotan las métricas de un proyecto: los de `MetricsFilter`. */
 export interface MetricsRange {

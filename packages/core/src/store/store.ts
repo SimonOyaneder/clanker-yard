@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import { Event, type EventFilter } from "@clanker/api";
+import { Event, type EventFilter, type EventOf, type EventType, type PayloadOf } from "@clanker/api";
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { drizzle, type NodeSQLiteDatabase } from "drizzle-orm/node-sqlite";
 import * as z from "zod";
@@ -9,8 +9,11 @@ import { events } from "./schema";
 
 export type StoreDb = NodeSQLiteDatabase & { $client: DatabaseSync };
 
-/** Un evento por escribir: `seq` y `ts` los pone el store y `payload` vale `{}` si no viene. */
-export type NewEvent = Omit<Event, "seq" | "ts" | "payload"> & Partial<Pick<Event, "payload">>;
+/**
+ * Un evento por escribir: `seq` y `ts` los pone el store y `payload` vale `{}` si no viene. El payload de los
+ * eventos de `EventPayloads` se revisa contra su declaración.
+ */
+export type NewEvent<T extends EventType = EventType> = Omit<Event, "seq" | "ts" | "payload" | "type"> & { type: T; payload?: PayloadOf<T> };
 
 /**
  * `events` es append-only y la API valida lo que responde: un evento que no cumple `Event` (un
@@ -22,7 +25,7 @@ export interface Tx {
   /** La misma conexión y la misma transacción: se confirma o se deshace junto con los eventos. */
   db: StoreDb;
   /** Escribe el evento en la tx; los suscriptores lo reciben recién después del commit. */
-  emit(event: NewEvent): Event;
+  emit<T extends EventType>(event: NewEvent<T>): Event;
 }
 
 export interface Store {
@@ -37,7 +40,7 @@ export interface Store {
     /** Eventos con `seq` mayor que `seq`, en orden; con `limit`, solo los primeros. */
     since(seq: number, filter?: EventFilter, limit?: number): Event[];
     /** Llama a `listener` por cada evento confirmado que cumpla el filtro. Devuelve cómo cancelar. */
-    subscribe(listener: (event: Event) => void, filter?: EventFilter): () => void;
+    subscribe<T extends EventType = EventType>(listener: (event: EventOf<T>) => void, filter?: Omit<EventFilter, "types"> & { types?: T[] }): () => void;
   };
   close(): void;
 }
@@ -158,7 +161,8 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
         return (limit === undefined ? query : query.limit(limit)).all().map(toEvent);
       },
       subscribe(listener, filter = {}) {
-        const entry = { listener, filter };
+        // El filtro deja pasar solo eventos de tipo `T`: el payload es el que declara `EventPayloads` (lo revisa `emit`).
+        const entry = { listener: listener as (event: Event) => void, filter: filter as EventFilter };
         listeners.add(entry);
         return () => listeners.delete(entry);
       },

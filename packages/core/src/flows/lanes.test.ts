@@ -51,7 +51,7 @@ function setup(initial: LaneCapacity) {
     },
     "ask",
   );
-  const project = createProjects(h.store, h.defs).create({ slug: "demo", name: "Demo", tracker: "local", parallel: 1, repos: [], queueFilter: {}, conventions: {}, stackOn: "ci_green", statusMapping: {}, flowParams: {}, maxCostUsd: null }, "cli");
+  const project = createProjects({ store: h.store, defs: h.defs }).create({ slug: "demo", name: "Demo", tracker: "local", parallel: 1, repos: [], queueFilter: {}, conventions: {}, stackOn: "ci_green", statusMapping: {}, flowParams: {}, maxCostUsd: null }, "cli");
   const startDev = (flowId: string, n: number) => h.flows.start(flowId, issue(n), {}, { profile: "default", projectId: project.id });
   const status = (id: RunId) => h.flows.getRun(id).status;
   const requeued = (id: RunId) => h.store.events.since(0, { runId: id, types: ["run.requeued"] });

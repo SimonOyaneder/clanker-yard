@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { repos, workspaces } from "../store/schema";
-import { harness as createHarness, okReport } from "./harness";
+import { harness as createHarness, okReport, WAIT } from "./harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -52,7 +52,7 @@ describe("getRun: lo que hace falta para dibujar la corrida", () => {
     h.save(FLOW);
 
     const runId = h.start("con-agente");
-    await vi.waitFor(() => expect(h.flows.getRun(runId).steps.some((s) => s.nodeId === "plan" && s.status === "running")).toBe(true));
+    await vi.waitFor(() => expect(h.flows.getRun(runId).steps.some((s) => s.nodeId === "plan" && s.status === "running")).toBe(true), WAIT);
 
     const plan = h.flows.getRun(runId).steps.find((s) => s.nodeId === "plan");
     expect(plan).toMatchObject({ endedAt: null });

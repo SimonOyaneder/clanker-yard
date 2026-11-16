@@ -44,6 +44,28 @@ const files: Record<string, string> = {
   "packages/testkit/src/bad-ui.ts": 'import { ui } from "@clanker/ui"; export const x = ui;',
   "apps/desktop/src/bad-css.ts": 'import "../../../packages/ui/src/styles/other.css";',
   "packages/ui/src/bad-internal.ts": 'import { contract } from "../../api/src/contract"; export const x = contract;',
+
+  // Paquetes de npm: `dev-only` es devDependency de core y `undeclared` no lo declara nadie.
+  "node_modules/dev-only/package.json": JSON.stringify({ name: "dev-only", main: "index.js" }),
+  "node_modules/dev-only/index.js": "module.exports = 1;",
+  "node_modules/undeclared/package.json": JSON.stringify({ name: "undeclared", main: "index.js" }),
+  "node_modules/undeclared/index.js": "module.exports = 1;",
+  "packages/core/src/bad-dev-dep.ts": 'import devOnly from "dev-only"; export const x = devOnly;',
+  "packages/core/src/dev-dep.test.ts": 'import devOnly from "dev-only"; export const x = devOnly;',
+  "packages/core/src/bad-undeclared.ts": 'import undeclared from "undeclared"; export const x = undeclared;',
+  "packages/core/src/testing.ts": "export const fake = 1;",
+  "packages/core/src/bad-testing.ts": 'import { fake } from "./testing"; export const x = fake;',
+  "packages/core/src/testing.test.ts": 'import { fake } from "./testing"; export const x = fake;',
+  "packages/testkit/src/fakes.ts": 'import { fake } from "@clanker/core/testing"; export const x = fake;',
+};
+
+/** Lo que cada paquete declara en su package.json: los del repo que importa y, core, `dev-only` como devDependency. */
+const manifests: Record<string, { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }> = {
+  "@clanker/core": { dependencies: { "@clanker/api": "*" }, devDependencies: { "dev-only": "*" } },
+  "@clanker/ui": { dependencies: { "@clanker/api": "*" } },
+  "@clanker/testkit": { devDependencies: { "@clanker/core": "*", "@clanker/api": "*" } },
+  "@clanker/desktop": { dependencies: { "@clanker/ui": "*", "@clanker/api": "*" } },
+  "@clanker/cli": { dependencies: { "@clanker/api": "*" } },
 };
 
 type Violation = { rule: { name: string }; from: string; to: string };
@@ -63,8 +85,10 @@ beforeAll(() => {
         ? { ".": "./src/index.ts", "./node": "./src/node.ts" }
         : name === "@clanker/ui"
           ? { ".": "./src/index.ts", "./styles.css": "./src/styles/globals.css" }
-          : { ".": "./src/index.ts" };
-    write(`${dir}/package.json`, JSON.stringify({ name, type: "module", exports }));
+          : name === "@clanker/core"
+            ? { ".": "./src/index.ts", "./testing": "./src/testing.ts" }
+            : { ".": "./src/index.ts" };
+    write(`${dir}/package.json`, JSON.stringify({ name, type: "module", exports, ...manifests[name] }));
     symlinkSync(join(fixture, dir), join(fixture, "node_modules", name));
   }
   write("tsconfig.base.json", JSON.stringify({ compilerOptions: { module: "ESNext", moduleResolution: "Bundler" } }));
@@ -97,6 +121,9 @@ describe("límites entre paquetes (.dependency-cruiser.mjs)", () => {
         "ui-no-api-node: packages/ui/src/bad-api-node.ts -> packages/api/src/node.ts",
         "ui-no-core: packages/ui/src/bad-core-relative.ts -> packages/core/src/index.ts",
         "ui-no-core: packages/ui/src/bad-core.ts -> packages/core/src/index.ts",
+        "not-to-dev-dep: packages/core/src/bad-dev-dep.ts -> node_modules/dev-only/index.js",
+        "no-non-package-json: packages/core/src/bad-undeclared.ts -> node_modules/undeclared/index.js",
+        "core-testing-only-in-tests: packages/core/src/bad-testing.ts -> packages/core/src/testing.ts",
       ].sort(),
     );
   });

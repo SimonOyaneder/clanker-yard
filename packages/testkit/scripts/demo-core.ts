@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanker/api/node";
-import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core";
+import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, openDecision, openStore } from "@clanker/core";
+import { JUGUETE_FLOW, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core/testing";
 import { startCore } from "../src/start-core";
 import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedLearnings, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
@@ -101,13 +102,20 @@ const control = (): {
 const CLOCK_START = Date.UTC(2026, 10, 15, 12);
 // El demo es el core de desarrollo: monta el router `dev` y sus tools MCP (`inject_step_result`, `load_fixture`,
 // `advance_clock`). Su reloj es el de las conexiones: `clockDays` de `demo-control.json` y lo que adelanta `advance_clock`.
-const devKit = createDevKit({ store, api: () => client, clockStart: CLOCK_START, clockOffset: () => (control().clockDays ?? 0) * 86_400_000 });
-const githubDoubles = setInterval(() => {
-  const { githubDeny, githubRefresh, githubInstalled } = control();
-  if (githubDeny) githubOAuth.deny();
-  if (githubRefresh === "rejected") githubOAuth.expireRefreshTokens();
-  github.setAppInstalled(githubInstalled !== false);
-}, 200);
+/**
+ * Lo que GitHub hace del otro lado según `demo-control.json`. Se aplica cada vez que se lee el reloj, además del
+ * tick: así un `clockDays` y un `githubRefresh` escritos juntos rigen a la vez, y el core nunca ve el reloj nuevo
+ * con el refresh token todavía válido.
+ */
+const applyControl = () => {
+  const current = control();
+  if (current.githubDeny) githubOAuth.deny();
+  if (current.githubRefresh === "rejected") githubOAuth.expireRefreshTokens();
+  github.setAppInstalled(current.githubInstalled !== false);
+  return current;
+};
+const devKit = createDevKit({ store, api: () => client, clockStart: CLOCK_START, clockOffset: () => (applyControl().clockDays ?? 0) * 86_400_000 });
+const githubDoubles = setInterval(applyControl, 200);
 githubDoubles.unref();
 const claude = createFakeClaude({ scenario: () => control().claude ?? "ready" });
 const core = await startCore({

@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { ContextPackage, type ContextSource } from "@clanker/api";
+import { ContextPackage, type ContextSource, type RepoId } from "@clanker/api";
 import type { Defs } from "../defs/defs";
 import type { Packs } from "../packs/packs";
 import type { ContextReference, NativeContext } from "./runtime";
@@ -18,7 +18,7 @@ export interface ContextRequest {
   /** El worktree: de él se leen los `repo:` y contra él se resuelven los `file:` relativos. */
   cwd: string;
   /** Con él se resuelven los paquetes con scope repo y el pack de la org del repo. */
-  repoId?: string;
+  repoId?: RepoId;
 }
 
 export interface ResolvedContext {
@@ -42,7 +42,7 @@ export interface ContextResolverOptions {
   /** Sin él no hay `conventions.context`. */
   packs?: Packs;
   /** El `owner/name` de GitHub de un repo; su org elige el pack. */
-  remoteOf?: (repoId: string) => string | null | undefined;
+  remoteOf?: (repoId: RepoId) => string | null | undefined;
   userDir?: string;
 }
 
@@ -98,7 +98,7 @@ export function createContextResolver({ defs, packs, remoteOf, userDir = userCon
   }
 
   /** `conventions.context` del pack de la org del repo: las de `*` y las del rol. */
-  function conventionsFor(role: string, repoId: string | undefined): string[] {
+  function conventionsFor(role: string, repoId: RepoId | undefined): string[] {
     const remote = repoId === undefined ? undefined : remoteOf?.(repoId);
     const githubOrg = remote?.split("/")[0];
     if (!packs || !githubOrg) return [];

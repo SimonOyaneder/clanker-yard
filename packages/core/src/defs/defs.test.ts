@@ -1,3 +1,4 @@
+import type { RepoId } from "@clanker/api";
 import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { openStore, type Store } from "../store/store";
@@ -149,7 +150,7 @@ describe("resolve", () => {
     for (const scope of ["builtin", "pack", "user"] as const) {
       defs.save({ ...flow, scope, body: { ...body, name: scope } });
     }
-    for (const repoId of ["repo_a", "repo_b"]) {
+    for (const repoId of ["repo_a", "repo_b"] as const) {
       defs.save({ ...flow, scope: "repo", repoId, body: { ...body, name: repoId } });
     }
   }
@@ -158,7 +159,7 @@ describe("resolve", () => {
   test("gana user, luego repo, luego pack, luego builtin", () => {
     const { defs } = setup();
     saveInEveryScope(defs);
-    const resolve = (repoId?: string) => nameOf(defs.resolve("flow", "dev", { repoId }));
+    const resolve = (repoId?: RepoId) => nameOf(defs.resolve("flow", "dev", { repoId }));
     const archive = (scope: string) => {
       const target = defs.list("flow").find((d) => d.scope === scope)!;
       defs.archive("flow", target.id, "ui");

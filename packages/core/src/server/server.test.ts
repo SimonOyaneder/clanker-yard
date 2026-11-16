@@ -20,10 +20,10 @@ import { readSchemaVersion } from "../store/migrate";
 import { agentSessions } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
-import { startFakeGitHubOAuth } from "../github/fake-github-oauth";
-import { startFakeLinear } from "../linear/fake-linear";
+import { startFakeGitHubOAuth } from "../testing/github/fake-github-oauth";
+import { startFakeLinear } from "../testing/linear/fake-linear";
 import { startServer, type CoreServer } from "./server";
-import { apiDeps } from "./testing";
+import { apiDeps, withPrs } from "./testing";
 
 let store: Store;
 let connections: Connections;
@@ -52,7 +52,7 @@ afterEach(async () => {
 const UI_KEY = "llave-de-la-app";
 
 async function start(allowedOrigins?: string[], deps = apiDeps(store, dataDir)): Promise<CoreServer> {
-  server = await startServer({
+  server = await startServer(withPrs({
     store,
     connections,
     issues: createIssues(store),
@@ -62,7 +62,7 @@ async function start(allowedOrigins?: string[], deps = apiDeps(store, dataDir)):
     onShutdown,
     allowedOrigins,
     uiKeyHash: hashUiKey(UI_KEY),
-  });
+  }));
   return server;
 }
 
@@ -147,7 +147,7 @@ describe("auth", () => {
   });
 
   test("un core sin llave configurada rechaza cualquier ui, aunque traiga una", async () => {
-    server = await startServer({ store, connections, issues: createIssues(store), ...apiDeps(store, dataDir), coreVersion: "1.2.3", dataDir, onShutdown });
+    server = await startServer(withPrs({ store, connections, issues: createIssues(store), ...apiDeps(store, dataDir), coreVersion: "1.2.3", dataDir, onShutdown }));
     const headers = { ...valid(server), "x-clanker-origin": "ui", "x-clanker-ui-key": UI_KEY };
     expect((await rawHealth(server, headers)).status).toBe(403);
   });

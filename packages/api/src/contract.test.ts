@@ -28,10 +28,10 @@ describe("contrato", () => {
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);
     expect(Object.keys(contract.issues).sort()).toEqual(["createLocal", "get", "list"]);
     expect(Object.keys(contract.trackers)).toEqual(["projects"]);
-    expect(Object.keys(contract.projects).sort()).toEqual(["boostIssue", "create", "defaults", "exportConfig", "get", "importConfig", "list", "pause", "queue", "resume", "setDefaults", "setParallel", "skipIssue", "summary", "update"]);
+    expect(Object.keys(contract.projects).sort()).toEqual(["boostIssue", "create", "defaults", "exportConfig", "get", "importConfig", "list", "pause", "queue", "resume", "setDefaults", "skipIssue", "summary", "update"]);
     expect(Object.keys(contract.packs)).toEqual(["list", "install", "remove"]);
     expect(Object.keys(contract.prs)).toEqual(["get", "list", "refresh", "setHold", "merge", "requestReview", "rebase", "republish"]);
-    expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "syncConfig", "testRecipe"]);
+    expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "overview", "syncConfig", "testRecipe"]);
     expect(Object.keys(contract.runs).sort()).toEqual(["cancel", "forceOutcome", "get", "interrupt", "list", "pause", "resume", "retryStep", "start", "steerStep", "step", "transcript"]);
     expect(Object.keys(contract.decisions).sort()).toEqual(["get", "list", "resolve"]);
     expect(Object.keys(contract.learnings).sort()).toEqual(["approve", "archive", "get", "list", "propose", "reject", "screen", "update"]);

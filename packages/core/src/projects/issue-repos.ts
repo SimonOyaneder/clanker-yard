@@ -1,11 +1,11 @@
-import type { ClankerProject } from "@clanker/api";
+import { type ClankerProject, RepoId } from "@clanker/api";
 
 /**
  * Lo que una issue ya hizo en cada repo: el `repo` de los params de cada corrida dev raíz sobre ella
  * (`undefined` si su flujo no lo declara).
  */
 export interface RepoRun {
-  repoId?: string;
+  repoId?: RepoId;
 }
 
 /**
@@ -19,18 +19,18 @@ export interface RepoRun {
  *   no queda nada por lanzar.
  */
 export type IssuePlan =
-  | { kind: "ambiguous"; candidates: string[] }
-  | { kind: "repos"; repoIds: string[]; next: { repoId: string | undefined; after: string | undefined } | undefined };
+  | { kind: "ambiguous"; candidates: RepoId[] }
+  | { kind: "repos"; repoIds: RepoId[]; next: { repoId: RepoId | undefined; after: string | undefined } | undefined };
 
 export function planIssue(
   project: Pick<ClankerProject, "repos">,
   labels: readonly string[],
   /** El repo que se eligió en la decisión, si el proyecto no tiene uno para sus labels. */
-  chosen: string | undefined,
+  chosen: RepoId | undefined,
   runs: readonly RepoRun[],
 ): IssuePlan {
-  const all: string[] = project.repos.map((bound) => bound.repoId);
-  let repoIds: string[] = project.repos.filter((bound) => bound.labels.some((label) => labels.includes(label))).map((bound) => bound.repoId);
+  const all: RepoId[] = project.repos.map((bound) => bound.repoId);
+  let repoIds: RepoId[] = project.repos.filter((bound) => bound.labels.some((label) => labels.includes(label))).map((bound) => bound.repoId);
   if (repoIds.length === 0) {
     if (chosen !== undefined && all.includes(chosen)) repoIds = [chosen];
     else if (all.length > 1) return { kind: "ambiguous", candidates: all };
@@ -45,4 +45,8 @@ export function planIssue(
 }
 
 /** El repo en que corrió una corrida: el `repo` de sus params, que `runs.start` fija desde el plan de la issue. */
-export const repoOfRun = (params: Record<string, unknown>): string | undefined => (typeof params.repo === "string" ? params.repo : undefined);
+/** El repo de una corrida, de sus params (`repo`), si es un id de repo válido. */
+export const repoOfRun = (params: Record<string, unknown>): RepoId | undefined => {
+  const parsed = RepoId.safeParse(params.repo);
+  return parsed.success ? parsed.data : undefined;
+};

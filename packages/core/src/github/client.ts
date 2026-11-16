@@ -27,12 +27,23 @@ export interface GitHubClientOptions extends GitHubApiOptions {
   tokens: GitHubTokenSource;
   /** Si viene, la cuota que GitHub informa en cada respuesta queda en `sync_cursors`. */
   quota?: { store: Store; account: string };
+  /**
+   * GitHub respondió 401 y no hay refresh, o lo hubo y siguió respondiendo 401: el token no vale. Lo llama el
+   * cliente antes de lanzar el error (quien construye el cliente deja la cuenta `revoked`), así ninguna llamada
+   * tiene que acordarse de hacerlo.
+   */
+  onUnauthorized?: () => void;
 }
 
 export type GitHubClient = Octokit;
 
 /** La clave de `sync_cursors` con la cuota de un recurso (`core`, `graphql`, `search`...) de una cuenta. */
 export const rateKey = (account: string, resource: string): string => `rate:github:${account}:${resource}`;
+
+/** `true` si GitHub rechazó el token (401). */
+export function isUnauthorized(error: unknown): error is RequestError {
+  return error instanceof RequestError && error.status === 401;
+}
 
 /** `true` si GitHub rechazó la request por cuota (primaria o secundaria), no por permisos. */
 export function isRateLimited(error: unknown): error is RequestError {
@@ -41,12 +52,12 @@ export function isRateLimited(error: unknown): error is RequestError {
 
 /**
  * El único punto por donde sale una request a GitHub. Pone el token de `tokens` en cada una, reintenta
- * una vez con `refresh` si GitHub responde 401 y, con `quota`, registra la cuota en `sync_cursors`
+ * una vez con `refresh` si GitHub responde 401 (si sigue en 401 llama a `onUnauthorized`) y, con `quota`, registra la cuota en `sync_cursors`
  * y emite `sync.rate_limited` cuando GitHub corta. Las requests de un cliente (una cuenta) salen en
  * serie, nunca en paralelo, como pide GitHub ("Best practices for using the REST API"). El segundo entre
  * escrituras lo guardan las acciones que escriben en ráfaga (`pr-feedback.ts`).
  */
-export function createGitHubClient({ tokens, quota, baseUrl, fetch }: GitHubClientOptions): GitHubClient {
+export function createGitHubClient({ tokens, quota, onUnauthorized, baseUrl, fetch }: GitHubClientOptions): GitHubClient {
   const octokit = new Octokit({ baseUrl, request: { fetch } });
   const inSeries = createSeries();
 
@@ -55,10 +66,19 @@ export function createGitHubClient({ tokens, quota, baseUrl, fetch }: GitHubClie
     try {
       return await request(options);
     } catch (error) {
-      if (!(error instanceof RequestError) || error.status !== 401 || !tokens.refresh) throw error;
-      await tokens.refresh();
-      options.headers.authorization = `bearer ${await tokens.token()}`;
-      return request(options);
+      if (!isUnauthorized(error)) throw error;
+      if (!tokens.refresh) {
+        onUnauthorized?.();
+        throw error;
+      }
+    }
+    await tokens.refresh();
+    options.headers.authorization = `bearer ${await tokens.token()}`;
+    try {
+      return await request(options);
+    } catch (error) {
+      if (isUnauthorized(error)) onUnauthorized?.();
+      throw error;
     }
   });
 

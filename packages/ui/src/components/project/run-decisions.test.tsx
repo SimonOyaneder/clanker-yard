@@ -5,7 +5,7 @@ import { AppDataProvider } from "@/app-data"
 import { ParkedCallout } from "@/components/project/run-decisions"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { type AppActions, AppActionsContext } from "@/lib/app-context"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 

@@ -101,7 +101,7 @@ describe("merge", () => {
     const pr = approved();
     known(pr);
 
-    const state = await commands.merge(ref(pr.number));
+    const state = await commands.merge(ref(pr.number), "ui");
 
     expect(sent(pr, "/merge")).toHaveLength(1);
     expect(state.merge).toMatchObject({ via: "comment", command: "/merge", queue: "queued", ready: false });
@@ -117,7 +117,7 @@ describe("merge", () => {
     known(pr);
     spoil(pr);
 
-    await expect(commands.merge(ref(pr.number))).rejects.toThrow(message);
+    await expect(commands.merge(ref(pr.number), "ui")).rejects.toThrow(message);
 
     expect(sent(pr, "/merge")).toEqual([]);
   });
@@ -126,23 +126,30 @@ describe("merge", () => {
     await setup("example");
     const pr = approved();
     known(pr);
-    expect((await commands.setHold(ref(pr.number), true)).hold).toBe(true);
+    expect((await commands.setHold(ref(pr.number), true, "ui")).hold).toBe(true);
 
-    await expect(commands.merge(ref(pr.number))).rejects.toThrow(/tiene hold/);
+    await expect(commands.merge(ref(pr.number), "ui")).rejects.toThrow(/tiene hold/);
     expect(sent(pr, "/merge")).toEqual([]);
 
-    await commands.setHold(ref(pr.number), false);
-    await commands.merge(ref(pr.number));
+    await commands.setHold(ref(pr.number), false, "ui");
+    await commands.merge(ref(pr.number), "ui");
     expect(sent(pr, "/merge")).toHaveLength(1);
+    // Cada pedido queda con quién lo hizo: el hold y el comentario del merge.
+    const asked = store.events.since(0, { types: ["pr.hold_changed", "pr.commented"] }).map((e) => [e.type, e.origin, e.payload.hold ?? e.payload.body]);
+    expect(asked).toEqual([
+      ["pr.hold_changed", "ui", true],
+      ["pr.hold_changed", "ui", false],
+      ["pr.commented", "ui", "/merge"],
+    ]);
   });
 
   test("pedirlo dos veces no comenta dos veces: la segunda ve el PR en cola", async () => {
     await setup("example");
     const pr = approved();
     known(pr);
-    await commands.merge(ref(pr.number));
+    await commands.merge(ref(pr.number), "ui");
 
-    await expect(commands.merge(ref(pr.number))).rejects.toThrow(/ya está en cola/);
+    await expect(commands.merge(ref(pr.number), "ui")).rejects.toThrow(/ya está en cola/);
     expect(sent(pr, "/merge")).toHaveLength(1);
   });
 
@@ -153,7 +160,7 @@ describe("merge", () => {
     pr.review("ana", "APPROVED");
     known(pr);
 
-    await expect(commands.merge(ref(pr.number))).rejects.toThrow(/botón de GitHub/);
+    await expect(commands.merge(ref(pr.number), "ui")).rejects.toThrow(/botón de GitHub/);
     expect(sent(pr, "/merge")).toEqual([]);
   });
 });
@@ -163,7 +170,7 @@ describe("requestReview", () => {
     await setup("example");
     const pr = sim.openPr({ head: "one" });
 
-    await commands.requestReview(ref(pr.number));
+    await commands.requestReview(ref(pr.number), "ui");
 
     expect(sent(pr, "/review")).toHaveLength(1);
   });
@@ -172,7 +179,7 @@ describe("requestReview", () => {
     await setup("none");
     const pr = sim.openPr({ head: "one" });
 
-    await expect(commands.requestReview(ref(pr.number))).rejects.toThrow(PrCommandError);
+    await expect(commands.requestReview(ref(pr.number), "ui")).rejects.toThrow(PrCommandError);
     expect(pr.node().comments).toEqual([]);
   });
 
@@ -181,7 +188,7 @@ describe("requestReview", () => {
     const pr = sim.openPr({ head: "one" });
     pr.merge();
 
-    await expect(commands.requestReview(ref(pr.number))).rejects.toThrow(/ya está mergeado/);
+    await expect(commands.requestReview(ref(pr.number), "ui")).rejects.toThrow(/ya está mergeado/);
   });
 });
 

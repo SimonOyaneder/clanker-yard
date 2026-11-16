@@ -7,7 +7,10 @@ import type { AppData } from "@/app-data"
 import { browserHost } from "@/browser-host"
 import type { Host } from "@/host"
 import { UNDO_MS } from "@/hooks/use-decision-resolver"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
+
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 }
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 
@@ -200,7 +203,7 @@ test("una decisión que alguien debe atender avisa con una notificación que sol
 
   stream.push(opened(1, "review_note", "Una nota"))
   stream.push(opened(2, "gate", "¿Publico el PR?"))
-  await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1))
+  await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1), WAIT)
 
   expect(notify).toHaveBeenCalledWith({ title: "Una corrida te espera", body: "¿Publico el PR?", target: { decisionId: `dec_${"2".padStart(26, "0")}` } })
 

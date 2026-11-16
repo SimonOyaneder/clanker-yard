@@ -2,7 +2,7 @@ import type { Issues } from "../tracker/issues";
 import { storedBinding, type ProjectBindings } from "../tracker/tracker-projects";
 import type { Trackers } from "../tracker/trackers";
 import type { Projects } from "../projects/projects";
-import type { ErrorReporter } from "./report";
+import type { ErrorReporter } from "../errors/reporter";
 
 /** Cada cuánto se le pregunta a cada tracker si cambió algo, sin esperar al tick de 5 min del Scheduler. */
 export const TRACKER_EVERY_MS = 60_000;

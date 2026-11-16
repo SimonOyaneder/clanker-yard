@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { type SummaryControls, useSummaryControls } from "@/hooks/use-summary-controls"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
 import { costUsd } from "@/lib/format"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 

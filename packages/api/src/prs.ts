@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { ProjectId, RunId } from "./domain";
+import { IssueId, ProjectId, RunId } from "./domain";
 import { SignalTone } from "./pack";
 
 // El estado normalizado de un PR (`docs/design.html#d-ops`, interface PrState). Es genérico: lo que
@@ -53,7 +53,7 @@ export type BotFinding = z.infer<typeof BotFinding>;
 
 /**
  * Qué dice la estrategia de merge sobre un PR abierto (`docs/design.html#d-ops`, "Tres niveles de merge"):
- * `ready` es la píldora verde (`mergeStatus` de Clanker Control), `blockers` lo que la apaga (el texto que ve
+ * `ready` es la píldora verde, `blockers` lo que la apaga (el texto que ve
  * el usuario), `queue` si ya se pidió el merge (`queued`) o falló (`failed`). `offer` y `auto` son los otros
  * dos niveles: pedir una decisión y mergear sin preguntar; `auto` implica `offer`, y `hold` apaga los dos. Un
  * PR mergeado o cerrado no tiene nada de esto. `via` es cómo se mergea: `comment` con el comando de la
@@ -120,7 +120,7 @@ export const PrState = z.object({
     flaky: z.array(z.string()),
   }),
   threads: z.object({
-    /** Todos los threads sin resolver, de quien sean (humanos, bots, council, la cuenta conectada): los "hilos sin resolver" de Clanker Control. */
+    /** Todos los threads sin resolver, de quien sean (humanos, bots, council, la cuenta conectada): los "hilos sin resolver" que muestra la vista de PRs. */
     unresolved: z.int().nonnegative(),
     humanOpen: z.int().nonnegative(),
     humanResolved: z.int().nonnegative(),
@@ -145,8 +145,8 @@ export type PrState = z.infer<typeof PrState>;
 export type ReviewStatus = "changes" | "pending" | "approved" | "none";
 
 /**
- * El estado de review de un PR abierto o en draft, con las reglas de `reviewStatus` de Clanker Control:
- * pedir cambios o tener algo sin resolver o comentado manda sobre una aprobación a medias.
+ * El estado de review de un PR abierto o en draft: pedir cambios o tener algo sin resolver o comentado
+ * manda sobre una aprobación a medias.
  */
 export function reviewStatusOf(pr: PrState): ReviewStatus {
   if (pr.state !== "open" && pr.state !== "draft") return "none";
@@ -183,7 +183,7 @@ export const CachedPr = z.object({
   /** Lo abrió el sistema (`pr.publish`); los demás los descubrió la búsqueda de tus PRs. */
   owned: z.boolean(),
   /** El sujeto de la corrida que lo abrió. */
-  issueId: z.string().nullable(),
+  issueId: IssueId.nullable(),
   runId: RunId.nullable(),
   /**
    * De qué PRs cuelga (`pr_parents`, el `id` de cada uno, ordenados por id). Con dos o más su base es

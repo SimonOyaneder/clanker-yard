@@ -1,10 +1,12 @@
+import type { RepoId } from "@clanker/api";
 import { existsSync } from "node:fs";
 import { and, eq, isNotNull, isNull, lte } from "drizzle-orm";
 import { git, isAncestor, tryGit } from "../git/git";
-import { pullRequests, workspaces } from "../store/schema";
+import { workspaces } from "../store/schema";
 import type { Store } from "../store/store";
 import { rebaseInProgress } from "./rebase";
 import type { RepoConfig } from "./workspaces";
+import { prsOfBranch } from "../github/pr-rows";
 
 /** Cuánto vive un worktree archivado antes de borrarse (`docs/design.html#d-ops`, estados del worktree). */
 export const ARCHIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -27,10 +29,10 @@ export interface CleanupResult {
 
 export interface ArchiveDeps {
   store: Store;
-  repos: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: RepoId) => RepoConfig;
   now: () => number;
   /** El mutex del repo: `worktree remove` toca refs compartidas. */
-  withRepoLock: <T>(repoId: string, fn: () => Promise<T>) => Promise<T>;
+  withRepoLock: <T>(repoId: RepoId, fn: () => Promise<T>) => Promise<T>;
 }
 
 /**
@@ -38,9 +40,8 @@ export interface ArchiveDeps {
  * una corrida tiene (también estacionada) nunca se archiva ni se borra; cuando lo suelte, la próxima
  * pasada lo archiva.
  */
-export function createArchive({ store, repos, now, withRepoLock }: ArchiveDeps) {
-  const pullsOf = (db: Store["db"], { repoId, branch }: Row) =>
-    db.select({ state: pullRequests.state, headSha: pullRequests.headSha }).from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.headRef, branch))).all();
+export function createArchive({ store, repoConfig, now, withRepoLock }: ArchiveDeps) {
+  const pullsOf = (db: Store["db"], { repoId, branch }: Row) => prsOfBranch(db, repoId, branch);
 
   /** Un PR abierto manda: si hay uno, el worktree sigue vivo aunque otro PR de la misma branch se haya cerrado. */
   const hasOpenPull = (pulls: { state: string }[]) => pulls.some((p) => p.state === "open");
@@ -74,10 +75,10 @@ export function createArchive({ store, repos, now, withRepoLock }: ArchiveDeps) 
     const tip = await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/heads/${row.branch}`]);
     let head = tip;
     if (present) {
-      const run = (...args: string[]) => git(row.path, args);
-      if (await rebaseInProgress(run)) return "tiene un rebase en curso";
-      if ((await run("status", "--porcelain")) !== "") return "tiene cambios sin commitear";
-      head = await run("rev-parse", "HEAD");
+      const inWorktree = (...args: string[]) => git(row.path, args);
+      if (await rebaseInProgress(inWorktree)) return "tiene un rebase en curso";
+      if ((await inWorktree("status", "--porcelain")) !== "") return "tiene cambios sin commitear";
+      head = await inWorktree("rev-parse", "HEAD");
       if (tip !== undefined && tip !== head) return "su HEAD no es la punta de la branch";
     }
     if (head === undefined) return undefined;
@@ -95,7 +96,7 @@ export function createArchive({ store, repos, now, withRepoLock }: ArchiveDeps) 
    * la fila vuelve.
    */
   async function remove(row: Row): Promise<"removed" | "kept"> {
-    const cfg = repos(row.repoId);
+    const cfg = repoConfig(row.repoId);
     return withRepoLock(row.repoId, async () => {
       const present = existsSync(row.path);
       if ((await unpushedWork(row, cfg, present)) !== undefined) return "kept";

@@ -3,13 +3,17 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
-import { createConnections, createFileSecrets, createProcs, createRepos, JUGUETE_FLOW, newId, openStore, type Core, type StartCoreOptions, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createProcs, createRepos, newId, openStore, type Core, type StartCoreOptions, type Store } from "@clanker/core";
+import { JUGUETE_FLOW } from "@clanker/core/testing";
 import { startCore } from "./start-core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { seedDb, type TestHome } from "./home";
+
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
 
 // El core armado como en producción (Flows, Workspaces, Agents y la API) pero con el runtime fake en
 // lugar de Claude. Vive aquí porque el core no puede importar el testkit.
@@ -351,7 +355,7 @@ describe("arranque", () => {
 
     store.tx((tx) => tx.emit({ type: "run.returned", origin: "core", runId: borrower, payload: { runId: borrower, fromRunId: owner } }));
 
-    await vi.waitFor(() => expect(store.db.$client.prepare("SELECT head_sha FROM workspaces").get()).toEqual({ head_sha: repo.git("rev-parse", "HEAD") }));
+    await vi.waitFor(() => expect(store.db.$client.prepare("SELECT head_sha FROM workspaces").get()).toEqual({ head_sha: repo.git("rev-parse", "HEAD") }), WAIT);
   });
 
   test("un worktree idle cuyo PR terminó se archiva al arrancar y al soltarse un lease", async () => {
@@ -366,12 +370,12 @@ describe("arranque", () => {
     const states = () => store.db.$client.prepare("SELECT branch, state FROM workspaces ORDER BY branch").all();
     insert("wsp_a", "a", 1);
     await boot();
-    await vi.waitFor(() => expect(states()).toEqual([{ branch: "a", state: "archived" }]));
+    await vi.waitFor(() => expect(states()).toEqual([{ branch: "a", state: "archived" }]), WAIT);
 
     insert("wsp_b", "b", 2);
     store.tx((tx) => tx.emit({ type: "lease.released", origin: "core", payload: { resource: "workspace", id: "wsp_b", token: 1 } }));
 
-    await vi.waitFor(() => expect(states()).toEqual([{ branch: "a", state: "archived" }, { branch: "b", state: "archived" }]));
+    await vi.waitFor(() => expect(states()).toEqual([{ branch: "a", state: "archived" }, { branch: "b", state: "archived" }]), WAIT);
   });
 
   test("al arrancar despacha los pasos pending que dejó el core anterior", async () => {
@@ -475,7 +479,7 @@ describe("recuperación al arrancar", () => {
 
     await boot();
 
-    await vi.waitFor(() => expect(store.events.since(0, { runId: id, types: ["run.finished"] })).toHaveLength(2));
+    await vi.waitFor(() => expect(store.events.since(0, { runId: id, types: ["run.finished"] })).toHaveLength(2), WAIT);
     const restarted = await createClient({ url: core!.server.url, token: core!.server.token, origin: "cli" }).runs.get({ id });
     expect(restarted).toMatchObject({ status: "done", outcome: "done" });
     expect(restarted.steps.map((s) => [s.nodeId, s.status, s.outcome, s.attempt])).toEqual([

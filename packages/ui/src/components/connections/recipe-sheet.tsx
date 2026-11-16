@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { useAppData } from "@/app-data"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useLive } from "@/hooks/use-live"
-import { cn } from "@/lib/utils"
+import { cn, messageOf } from "@/lib/utils"
 
 /** Un trozo de la salida del comando que corre en `phase`. */
 interface Chunk {
@@ -47,7 +47,7 @@ function RecipeRun({ repo }: { repo: Repo }) {
   useEffect(() => {
     if (started.current) return
     started.current = true
-    appData.testRecipe(repo.id).then(setResult, (e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+    appData.testRecipe(repo.id).then(setResult, (e: unknown) => setError(messageOf(e)))
   }, [appData, repo.id])
 
   useEffect(() => {

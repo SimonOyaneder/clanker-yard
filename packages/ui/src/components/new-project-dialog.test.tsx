@@ -4,8 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider, type AppData } from "@/app-data"
 import { NewProjectDialog } from "@/components/new-project-dialog"
-import { createMemoryAppData } from "@/memory-app-data"
-import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
+import { createMemoryAppData } from "@/demo/memory-app-data"
+import { SEED_TECHLEAD, SEED_TOY } from "@/demo/seed-flows"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 

@@ -38,6 +38,14 @@ export const RecipeStatus = z.discriminatedUnion("status", [
 ]);
 export type RecipeStatus = z.infer<typeof RecipeStatus>;
 
+/** Un repo registrado con lo que hay de su receta y cómo salió su última prueba (`null` si nunca se probó). */
+export const RepoOverview = z.object({
+  repo: Repo,
+  recipe: RecipeStatus,
+  lastTest: z.object({ ok: z.boolean(), at: z.int().nonnegative() }).nullable(),
+});
+export type RepoOverview = z.infer<typeof RepoOverview>;
+
 /** Un repo de git encontrado en una carpeta, registrado o no. */
 export const DetectedRepo = z.object({
   path: z.string().min(1),

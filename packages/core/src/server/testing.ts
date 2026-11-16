@@ -24,7 +24,13 @@ import { createSlots } from "../slots/slots";
 import type { Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { createLocalTracker } from "../tracker/local";
-import { createRepos } from "../workspaces/repos";
+import { createRepos } from "../repos/repos";
+import { createMergeScope } from "../github/merge-scope";
+import { createPrCache } from "../github/pr-cache";
+import { createPrs } from "../github/prs";
+import type { Connections } from "../connections/connections";
+import type { Packs } from "../packs/packs";
+import type { Repos } from "../repos/repos";
 import type { RouterDeps } from "./router";
 
 const noRuntime: AgentRuntime = {
@@ -47,7 +53,7 @@ export function apiDeps(
     artifacts,
     roles: () => undefined,
   });
-  const projects = createProjects(store, defs);
+  const projects = createProjects({ store, defs });
   const repos = createRepos(store);
   const local = createLocalTracker(store);
   const issues = createIssues(store, local);
@@ -93,9 +99,19 @@ export function apiDeps(
     flows,
     artifacts,
     decisions: createDecisions(store),
-    learnings: createLearnings(store),
+    learnings: createLearnings({ store }),
     defs,
     legacyImport: createLegacyImporter({ store, defs, artifacts }),
     republisher: { republish: () => Promise.reject(new Error("este core de pruebas no republica PRs")) },
   };
+}
+
+/**
+ * Completa las deps del router con `prs` y `prCache` armados sobre los mismos `repos`, `connections` y `packs`
+ * que recibe (como hace `startCore`), así un test que pisa alguno de ellos lee los PRs con el suyo.
+ */
+export function withPrs<T extends { store: Store; repos: Repos; connections: Connections; packs: Packs }>(deps: T): T & Pick<RouterDeps, "prs" | "prCache"> {
+  const { store, repos, connections, packs } = deps;
+  const prs = createPrs({ connections, packs, merge: createMergeScope({ store, repos, connections }) });
+  return { ...deps, prs, prCache: createPrCache({ store, repos, packs, prs }) };
 }

@@ -10,7 +10,7 @@ export const DefRecord = z.object({
   kind: DefKind,
   slug: z.string(),
   scope: DefScope,
-  repoId: z.string().nullable(),
+  repoId: RepoId.nullable(),
   /** ms epoch; `null` si está vigente. */
   archivedAt: z.int().nonnegative().nullable(),
   currentVersion: z.int().positive(),

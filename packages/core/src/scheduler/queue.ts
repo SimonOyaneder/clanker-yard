@@ -1,5 +1,4 @@
-import type {
-  CachedIssue,
+import type { CachedIssue,
   ClankerProject,
   IssueRef,
   Person,
@@ -8,8 +7,7 @@ import type {
   QueuePr,
   RunStatus,
   StatusCategory,
-  TrackerCapabilities,
-} from "@clanker/api";
+  TrackerCapabilities, RepoId } from "@clanker/api";
 import { planIssue, type IssuePlan } from "../projects/issue-repos";
 import { matchesIssueFilter } from "../tracker/tracker";
 
@@ -20,13 +18,13 @@ export interface QueueRun {
   /** El `@fin` con que terminó el flujo (`done`, `blocked`, `failed`); `null` mientras vive. */
   outcome: string | null;
   /** El repo en que corrió (`repo` de sus params); `undefined` si su flujo no lo declara. */
-  repoId?: string;
+  repoId?: RepoId;
 }
 
 /** Un PR abierto (draft o no) que el sistema abrió para una issue. */
 export interface QueuePrFact {
   issueId: string;
-  repoId: string;
+  repoId: RepoId;
   /** `repo#número`. */
   key: string;
   headRef: string;
@@ -48,7 +46,7 @@ export interface TickDevInput {
   /** Ids de issues que el usuario pidió no lanzar (`projects.skipIssue`): quedan en la cola como `blocked`. */
   skipped?: ReadonlySet<string>;
   /** Issue id → el repo que el usuario eligió en la decisión de una issue ambigua (`askWhichRepo`). */
-  repoChoices?: ReadonlyMap<string, string>;
+  repoChoices?: ReadonlyMap<string, RepoId>;
   /** Repo id → nombre, para los motivos; sin él se usa el id. */
   repoNames?: ReadonlyMap<string, string>;
   /** Issue id → ms epoch en que el usuario la subió (`projects.boostIssue`): van antes que el resto, la más reciente primero. */
@@ -138,7 +136,7 @@ type Verdict =
   | { kind: "waiting" | "blocked"; reason: string };
 
 function classify(issue: CachedIssue, blockers: readonly IssueRef[], plan: IssuePlan, world: World): QueueEntry {
-  const nameOf = (repoId: string) => world.repoNames.get(repoId) ?? repoId;
+  const nameOf = (repoId: RepoId) => world.repoNames.get(repoId) ?? repoId;
   if (plan.kind === "ambiguous") {
     const names = plan.candidates.map(nameOf).join(", ");
     return { issue, state: "blocked", reason: `ningún label calza con un repo del proyecto (${names}): elige uno en la bandeja de decisiones` };

@@ -1,5 +1,5 @@
-/** Máximo de learnings nuevos que el core guarda de una corrida; el resto se descarta. */
-export const MAX_PROPOSED_PER_RUN = 1;
+/** Máximo de learnings nuevos que el core guarda de cada paso que cierra; el resto se descarta. */
+export const MAX_PROPOSED_PER_STEP = 1;
 
 /** El criterio para proponer un learning. Lo ven los agentes que proponen y el filtro de los propuestos. */
 export const LEARNING_CRITERIA = `Un learning solo se propone si cumple las cuatro condiciones:

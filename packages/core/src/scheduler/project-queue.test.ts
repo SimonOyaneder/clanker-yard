@@ -1,4 +1,4 @@
-import { NewProject, type PrRef, type PrState, type ProjectId } from "@clanker/api";
+import { NewProject, type PrRef, type PrState, type ProjectId, type IssueId, type RepoId } from "@clanker/api";
 import { trackersByKind } from "../tracker/trackers";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
@@ -10,7 +10,7 @@ import { openStore, type Store } from "../store/store";
 import { createIssues, type Issues } from "../tracker/issues";
 import { createLocalTracker, type LocalTracker } from "../tracker/local";
 import type { Tracker } from "../tracker/tracker";
-import { createRepos, type Repos } from "../workspaces/repos";
+import { createRepos, type Repos } from "../repos/repos";
 import { createProjectQueue, QueueUnavailableError } from "./project-queue";
 
 let store: Store;
@@ -28,7 +28,7 @@ beforeEach(() => {
   const defs = createDefs(store);
   defs.register("flow", z.unknown());
   defs.register("profile", z.unknown());
-  projects = createProjects(store, defs);
+  projects = createProjects({ store, defs });
   repos = createRepos(store, { remote: (repo) => ({ url: `https://example.com/${repo}.git`, repo, account: "octocat" }) });
   reads = [];
   readPr = () => Promise.reject(new Error("no se esperaba leer un PR"));
@@ -63,7 +63,7 @@ async function sync(projectId: ProjectId) {
   await issues.sync(local, { projectId, project: { tracker: "local", id: projectId } });
 }
 
-function openPr(issueId: string, repoId: string, number: number, headRef: string, detail?: PrState) {
+function openPr(issueId: IssueId, repoId: RepoId, number: number, headRef: string, detail?: PrState) {
   store.tx((tx) =>
     tx.db
       .insert(pullRequests)

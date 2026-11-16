@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { text } from "node:stream/consumers";
 import { parseArgs } from "node:util";
 import { clankerDirs } from "@clanker/api/node";
-import { runCore } from "./process/core";
+import { runCore } from "./daemon/core";
 
 const { values } = parseArgs({
   options: { "data-dir": { type: "string" }, "log-dir": { type: "string" }, "ui-key-stdin": { type: "boolean" } },

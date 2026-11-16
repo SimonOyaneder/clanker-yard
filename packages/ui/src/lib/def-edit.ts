@@ -1,4 +1,5 @@
 import type { DefChange, DefIssue, DefWriteKind } from "@clanker/api"
+import { messageOf } from "@/lib/utils"
 
 // Lo que el editor de JSON de una def necesita para hablarle a una persona: en qué línea está cada problema y
 // cómo se llama el lugar del que habla el core. Nada aquí valida: eso lo hace `defs.update` con `dryRun`.
@@ -17,7 +18,7 @@ export function syntaxIssue(text: string): LineIssue | null {
     JSON.parse(text)
     return null
   } catch (e) {
-    const reason = e instanceof Error ? e.message : String(e)
+    const reason = messageOf(e)
     const position = /position (\d+)/.exec(reason)
     const line = position ? lineAt(text, Math.min(Number(position[1]), text.length)) : 1
     return { line, message: `El JSON no se puede leer (${reason}). Revisa comas, comillas y llaves en esta línea o en la anterior.` }

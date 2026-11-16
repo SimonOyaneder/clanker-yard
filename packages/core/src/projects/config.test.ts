@@ -2,7 +2,7 @@ import { NewProject, Profile, type ProjectConfig } from "@clanker/api";
 import { afterEach, describe, expect, test } from "vitest";
 import { createDefs } from "../defs/defs";
 import { openStore, type Store } from "../store/store";
-import { createRepos } from "../workspaces/repos";
+import { createRepos } from "../repos/repos";
 import { createProjectConfigs } from "./config";
 import { InvalidProjectError, ProjectNotFoundError, createProjects } from "./projects";
 
@@ -20,7 +20,7 @@ function machine(registered: Record<string, string | null>, account = "acme") {
   defs.save({ kind: "profile", slug: "barato", scope: "user", body: { roles: { dev: { model: "sonnet" } } }, source: "ui" });
   const repos = createRepos(store);
   const ids = Object.fromEntries(Object.entries(registered).map(([name, remote]) => [name, repos.add({ name, path: `/work/${name}`, remote })]));
-  const projects = createProjects(store, defs);
+  const projects = createProjects({ store, defs });
   const project = projects.create(NewProject.parse({ slug: "p", name: "P", tracker: "linear", trackerRef: "team-1", trackerAccount: account }), "ui");
   return { projects, project, ids, configs: createProjectConfigs({ projects, repos, defs }), repos };
 }
@@ -43,7 +43,7 @@ describe("exportar e importar la configuración de un proyecto", () => {
 
     // En la otra máquina el mismo repo vive en otra carpeta (otro id).
     const b = machine({ "web-checkout": "acme/web", api: "acme/api" }, "otro-workspace");
-    const result = b.configs.import(b.project.id, JSON.parse(JSON.stringify(exported)), { dryRun: false, origin });
+    const result = b.configs.import(b.project.id, JSON.parse(JSON.stringify(exported)), origin, { dryRun: false });
 
     expect(result).toMatchObject({ applied: true, errors: [], unmapped: [] });
     expect(b.projects.get(b.project.id)).toMatchObject({
@@ -65,7 +65,7 @@ describe("exportar e importar la configuración de un proyecto", () => {
     const config = { ...a.configs.export(a.project.id), defaultFlowId: "flujo-que-no-existe-aca" };
     const b = machine({ api: "acme/api" });
 
-    const result = b.configs.import(b.project.id, config, { dryRun: true, origin });
+    const result = b.configs.import(b.project.id, config, origin, { dryRun: true });
 
     expect(result.applied).toBe(false);
     expect(result.unmapped).toEqual([
@@ -98,7 +98,7 @@ describe("exportar e importar la configuración de un proyecto", () => {
       maxCostUsd: null,
     };
 
-    const result = b.configs.import(b.project.id, config, { dryRun: false, origin });
+    const result = b.configs.import(b.project.id, config, origin, { dryRun: false });
 
     expect(result.unmapped).toHaveLength(1);
     expect(b.projects.get(b.project.id)).toMatchObject({ parallel: 4, name: "P", repos: [{ repoId: b.ids.api }] });
@@ -108,16 +108,16 @@ describe("exportar e importar la configuración de un proyecto", () => {
     const b = machine({ api: "acme/api", web: "acme/web" });
     const bad = { clankerProjectConfig: 1, name: "x", tracker: "linear", trackerRef: "t", parallel: 0, surprise: true };
 
-    const dry = b.configs.import(b.project.id, bad, { dryRun: true, origin });
+    const dry = b.configs.import(b.project.id, bad, origin, { dryRun: true });
     expect(dry.applied).toBe(false);
     expect(dry.errors.map((e) => e.path).sort()).toEqual(["", "parallel"]);
-    expect(() => b.configs.import(b.project.id, bad, { dryRun: false, origin })).toThrow(InvalidProjectError);
+    expect(() => b.configs.import(b.project.id, bad, origin, { dryRun: false })).toThrow(InvalidProjectError);
 
     const clash = { ...b.configs.export(b.project.id), parallel: 5, repos: [{ name: "api", remote: "acme/api", labels: ["x"] }, { name: "web", remote: "acme/web", labels: ["x"] }] };
-    expect(b.configs.import(b.project.id, clash, { dryRun: true, origin }).errors).toEqual([
+    expect(b.configs.import(b.project.id, clash, origin, { dryRun: true }).errors).toEqual([
       { path: "repos.1.labels", message: expect.stringContaining('el label "x" manda a dos repos') },
     ]);
-    expect(() => b.configs.import(b.project.id, clash, { dryRun: false, origin })).toThrow(/dos repos/);
+    expect(() => b.configs.import(b.project.id, clash, origin, { dryRun: false })).toThrow(/dos repos/);
     expect(b.projects.get(b.project.id)).toMatchObject({ parallel: 1, repos: [] });
   });
 

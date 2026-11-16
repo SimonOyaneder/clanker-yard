@@ -32,7 +32,7 @@ test("los carriles se ven por separado: un rebase corre en mantenimiento con dev
 
   const maintenance = lane(page, "Carril mantenimiento");
   await expect(maintenance.getByText("1/2", { exact: true })).toBeVisible();
-  await expect(maintenance.getByText("rebase v1")).toBeVisible();
+  await expect(maintenance.getByText("rebase-conflicto v1")).toBeVisible();
   await expect(maintenance.getByText(/PR prestado de/)).toBeVisible();
 });
 

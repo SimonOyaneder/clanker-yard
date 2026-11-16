@@ -4,12 +4,12 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createDefs, type Defs } from "../defs/defs";
 import { createRouter } from "../server/router";
-import { apiDeps } from "../server/testing";
+import { apiDeps, withPrs } from "../server/testing";
 import { newId } from "../store/conventions";
 import { issues, syncCursors } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
-import { createRepos } from "../workspaces/repos";
+import { createRepos } from "../repos/repos";
 import { InvalidProjectError, ProjectNotFoundError, createProjects, type Projects } from "./projects";
 
 /** `projects.create` con los defaults de `NewProject`, como los deja la API. */
@@ -24,7 +24,7 @@ beforeEach(() => {
   defs = createDefs(store);
   defs.register("flow", z.unknown());
   defs.register("profile", z.unknown());
-  projects = createProjects(store, defs);
+  projects = createProjects({ store, defs });
 });
 
 afterEach(() => store.close());
@@ -149,7 +149,7 @@ describe("defaults de proyectos nuevos", () => {
 
   test("llegan por la API", async () => {
     const client = createRouterClient(
-      createRouter({
+      createRouter(withPrs({
         store,
         connections: {} as never,
         issues: createIssues(store),
@@ -159,7 +159,7 @@ describe("defaults de proyectos nuevos", () => {
         startedAt: 0,
         dataDir: "/tmp/clanker",
         onShutdown: () => {},
-      }),
+      })),
       { context: { origin: "ui" } },
     );
 
@@ -388,7 +388,7 @@ describe("update", () => {
 
 describe("API", () => {
   function api() {
-    const router = createRouter({
+    const router = createRouter(withPrs({
       store,
       connections: {} as never,
       issues: createIssues(store),
@@ -398,7 +398,7 @@ describe("API", () => {
       startedAt: 0,
       dataDir: "/tmp/clanker",
       onShutdown: () => {},
-    });
+    }));
     return createRouterClient(router, { context: { origin: "ui" } });
   }
   const code = (expected: string, message?: RegExp) => (e: unknown) =>

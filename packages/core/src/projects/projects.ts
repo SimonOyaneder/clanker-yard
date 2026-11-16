@@ -1,9 +1,10 @@
-import type { ClankerProject, NewProject, Origin, ProjectDefaults, ProjectDefaultsPatch, ProjectId, ProjectPatch, ProjectRepo } from "@clanker/api";
+import { type ClankerProject, type NewProject, type Origin, type ProjectDefaults, ProjectDefaultsPatch, type ProjectId, type ProjectPatch, type ProjectRepo } from "@clanker/api";
 import { and, asc, eq } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import type * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
+import { readMetaJson } from "../store/meta-json";
 import { issues, meta, projectRepos, projects, repos, syncCursors } from "../store/schema";
 import { issuesCursorKey } from "../tracker/issues";
 import type { Store, Tx } from "../store/store";
@@ -71,7 +72,7 @@ const STATUS_EVENT = {
 const DEFAULTS_KEY = "project_defaults";
 const BASE_DEFAULTS: ProjectDefaults = { defaultFlowId: null, defaultProfileId: null, parallel: 1, maxCostUsd: null };
 
-export function createProjects(store: Store, defs: Defs): Projects {
+export function createProjects({ store, defs }: { store: Store; defs: Defs }): Projects {
   /** El flujo y el perfil por defecto se guardan por slug: tienen que resolver a una def viva. */
   function assertDefaults({ defaultFlowId, defaultProfileId }: Pick<ProjectPatch, "defaultFlowId" | "defaultProfileId">) {
     if (defaultFlowId && !defs.resolve("flow", defaultFlowId)) {
@@ -129,8 +130,7 @@ export function createProjects(store: Store, defs: Defs): Projects {
     },
 
     defaults() {
-      const saved = store.db.select().from(meta).where(eq(meta.key, DEFAULTS_KEY)).get();
-      return { ...BASE_DEFAULTS, ...(saved && (JSON.parse(saved.value) as Partial<ProjectDefaults>)) };
+      return { ...BASE_DEFAULTS, ...readMetaJson(store.db, DEFAULTS_KEY, ProjectDefaultsPatch) };
     },
 
     setDefaults(patch) {

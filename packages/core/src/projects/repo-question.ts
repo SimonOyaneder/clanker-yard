@@ -1,9 +1,9 @@
-import type { ClankerProject, IssueId } from "@clanker/api";
+import type { ClankerProject, IssueId, RepoId } from "@clanker/api";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { openDecision } from "../decisions/decisions";
 import { decisions, runs } from "../store/schema";
 import type { Store } from "../store/store";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { planIssue, repoOfRun, type IssuePlan } from "./issue-repos";
 
 type ProjectRepos = Pick<ClankerProject, "id" | "repos">;
@@ -16,14 +16,14 @@ const QUESTION = "¿De qué repo es ";
  * de `askWhichRepo`. La opción es la de `repoOption` (o el id del repo). Si la última respuesta ya no es de un repo
  * del proyecto, la issue sigue ambigua en vez de usar una respuesta anterior.
  */
-export function chosenRepos(store: Store, repos: Repos, project: ProjectRepos): Map<IssueId, string> {
+export function chosenRepos(store: Store, repos: Repos, project: ProjectRepos): Map<IssueId, RepoId> {
   const rows = store.db
     .select()
     .from(decisions)
     .where(and(eq(decisions.projectId, project.id), eq(decisions.kind, "question"), eq(decisions.status, "answered")))
     .orderBy(desc(decisions.id))
     .all();
-  const chosen = new Map<IssueId, string>();
+  const chosen = new Map<IssueId, RepoId>();
   const seen = new Set<string>();
   for (const row of rows) {
     if (row.subject?.type !== "issue" || !row.title.startsWith(QUESTION) || seen.has(row.subject.id)) continue;
@@ -64,7 +64,7 @@ export function askWhichRepo(store: Store, repos: Repos, project: ProjectRepos &
  * La opción de un repo en la pregunta: su nombre, o el nombre con el id si otro repo del proyecto se llama igual
  * (dos checkouts del mismo repo): con el nombre solo, elegir uno correría la issue en el otro.
  */
-function repoOption(repos: Repos, project: ProjectRepos, repoId: string): string {
+function repoOption(repos: Repos, project: ProjectRepos, repoId: RepoId): string {
   const name = repos.get(repoId)?.name;
   if (name === undefined) return repoId;
   const twins = project.repos.filter((bound) => repos.get(bound.repoId)?.name === name).length;

@@ -1,15 +1,15 @@
 import type { CachedIssue, ClankerProject, DefRecord } from "@clanker/api"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type RepoRow, useAppData } from "@/app-data"
-import { SaveBar, useSaveShortcut } from "@/components/project/settings-fields"
+import { SaveBar, useSaveShortcut } from "@/components/settings/settings-fields"
 import { ConfigPortSection } from "@/components/project/config-port-section"
-import { SettingsNav, type SettingsNavItem } from "@/components/project/settings-nav"
+import { SettingsNav, type SettingsNavItem } from "@/components/settings/settings-nav"
 import { ConventionsSection, FlowSection, LimitsSection, QueueSection, ReposSection, StatusMappingSection, TrackerSection } from "@/components/project/settings-sections"
-import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useLive, useLiveQuery } from "@/hooks/use-live"
-import { allParamSpecs, changedSections, draftOf, flowParamGroups, managedParams, patchOf, same, type Draft, undoPatch, validate } from "@/lib/project-settings"
+import { allParamSpecs, changedSections, draftOf, flowParamGroups, managedParams, patchOf, sameValue, type ProjectDraft, undoPatch, validateProjectDraft } from "@/lib/project-settings"
 import { undoable } from "@/lib/undoable"
+import { PageLoadError } from "@/components/page-load-error"
 
 /** Lo que la pestaña le da a la paleta y al resto de la app: si hay cambios y cómo guardarlos o descartarlos. */
 export interface SettingsControls {
@@ -38,15 +38,7 @@ export function ProjectSettingsTab(props: TabProps) {
   })
   if (query.data) return <SettingsForm key={project.id} {...props} {...query.data} />
   if (query.error) {
-    return (
-      <div role="alert" className="mx-auto mt-16 flex max-w-md flex-col items-center gap-3 text-center">
-        <h2 className="text-base font-semibold">No pude leer los ajustes</h2>
-        <p className="text-muted-foreground">{query.error}</p>
-        <Button size="sm" onClick={query.reload}>
-          Reintentar
-        </Button>
-      </div>
-    )
+    return <PageLoadError title="No pude leer los ajustes" message={query.error} onRetry={query.reload} />
   }
   return (
     <div className="mx-auto flex max-w-[900px] flex-col gap-4">
@@ -80,17 +72,17 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
   const managed = useMemo(() => managedParams(flows), [flows])
   const base = useMemo(() => draftOf(project, managed), [project, managed])
   // `edit` es lo que la persona cambió; sin cambios se ve el proyecto tal como llega del core.
-  const [edit, setEdit] = useState<Draft | null>(null)
+  const [edit, setEdit] = useState<ProjectDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   // Cuando el proyecto ya refleja lo editado (tras guardar o al volver a como estaba), se vuelve a seguirlo.
-  if (edit && same(edit, base)) setEdit(null)
+  if (edit && sameValue(edit, base)) setEdit(null)
   const draft = edit ?? base
 
   const groups = useMemo(() => flowParamGroups(flows, draft.defaultFlowId), [flows, draft.defaultFlowId])
   const specs = useMemo(() => allParamSpecs(flows, draft.defaultFlowId), [flows, draft.defaultFlowId])
   const shownSpecs = useMemo(() => [...groups.own, ...groups.triggered], [groups])
-  const problems = useMemo(() => validate(draft, shownSpecs), [draft, shownSpecs])
+  const problems = useMemo(() => validateProjectDraft(draft, shownSpecs), [draft, shownSpecs])
   const problemList = Object.values(problems)
   const dirty = edit !== null
   const patch = useMemo(() => patchOf(draft, base, project, specs), [draft, base, project, specs])
@@ -100,7 +92,7 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
   }, [issues])
 
   const update = useCallback(
-    (change: Partial<Draft>) => {
+    (change: Partial<ProjectDraft>) => {
       setEdit({ ...draft, ...change })
       setSaveError(null)
     },

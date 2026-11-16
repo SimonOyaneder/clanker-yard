@@ -1,18 +1,10 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import path from "node:path";
 import { BrowserWindow, dialog, ipcMain, Notification, shell } from "electron";
-import type { NavTarget, Theme } from "@clanker/ui";
+import type { Theme } from "@clanker/ui";
+import { editorTarget, isTarget, isTheme, safeExternalUrl } from "./host-guards";
 
-const THEMES: readonly Theme[] = ["system", "light", "dark"];
 const EDITORS = ["Zed", "Cursor", "Visual Studio Code"];
-
-const isTarget = (v: unknown): v is NavTarget => {
-  if (typeof v !== "object" || v === null) return false;
-  const t = v as Record<string, unknown>;
-  if ("decisionId" in t) return typeof t.decisionId === "string";
-  return typeof t.slug === "string" && (t.issueId === undefined || typeof t.issueId === "string");
-};
 
 export interface HostIpcOptions {
   getWindow(): BrowserWindow | null;
@@ -43,19 +35,13 @@ export function registerHostIpc(opts: HostIpcOptions): void {
   });
 
   ipcMain.on("host:open-external", (_e, raw: unknown) => {
-    if (typeof raw !== "string") return;
-    let url: URL;
-    try {
-      url = new URL(raw);
-    } catch {
-      return;
-    }
-    if (url.protocol === "https:") void shell.openExternal(url.toString());
+    const url = safeExternalUrl(raw);
+    if (url !== undefined) void shell.openExternal(url);
   });
 
   ipcMain.on("host:open-in-editor", (_e, raw: unknown) => {
-    if (typeof raw !== "string" || !path.isAbsolute(raw)) return;
-    void openInEditor(raw);
+    const target = editorTarget(raw);
+    if (target !== undefined) void openInEditor(target);
   });
 
   // El payload no lleva nada: la ventana solo pide el selector, y la ruta que vuelve la valida el core al registrar el repo.
@@ -67,7 +53,7 @@ export function registerHostIpc(opts: HostIpcOptions): void {
   });
 
   ipcMain.on("host:set-theme", (_e, theme: unknown) => {
-    if (THEMES.includes(theme as Theme)) opts.setTheme(theme as Theme);
+    if (isTheme(theme)) opts.setTheme(theme);
   });
 }
 

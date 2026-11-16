@@ -1,10 +1,11 @@
+import type { RepoId } from "@clanker/api";
 import { newId, createSlots, openStore, StaleLeaseError, LEASE_TTL_MS, type SlotLease, type SlotPools, type Slots, type Store } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 // Los pools de slots por carril (`docs/design.html#d-ops`, "Slots globales, por carril").
 
 const pools: SlotPools = { dev: 2, maintenance: 1 };
-const repoId = "r1";
+const repoId: RepoId = "repo_r1";
 
 let clock: number;
 let store: Store;
@@ -23,7 +24,7 @@ afterEach(() => {
   store.close();
 });
 
-function take(lane: "dev" | "maintenance", extra: { repoId?: string; pools?: SlotPools; workspaceId?: string } = {}) {
+function take(lane: "dev" | "maintenance", extra: { repoId?: RepoId; pools?: SlotPools; workspaceId?: string } = {}) {
   const lease = slots.tryAcquire({ repoId, lane, runId: newId("run"), pools, ...extra });
   if (lease) held.push(lease);
   return lease;
@@ -87,7 +88,7 @@ describe("pools por carril", () => {
   test("cada repo tiene sus propios pools; dos corridas del mismo repo los comparten", () => {
     take("dev");
     take("dev");
-    expect(take("dev", { repoId: "r2" })).toMatchObject({ idx: 1 });
+    expect(take("dev", { repoId: "repo_r2" })).toMatchObject({ idx: 1 });
     expect(take("dev")).toBeUndefined();
   });
 

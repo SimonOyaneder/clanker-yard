@@ -1,6 +1,6 @@
 import { toast } from "sonner"
+import { messageOf } from "@/lib/utils"
 
-export const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /**
  * Lo reversible se hace directo y avisa con un toast que lo deshace; un fallo se muestra tal cual. Devuelve el

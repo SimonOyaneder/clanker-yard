@@ -70,18 +70,18 @@ beforeEach(async () => {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos,
+    repoConfig: repos,
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
   });
   const defs = createDefs(store);
   const packs = createPacks({ defs });
   const recipes = createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) });
-  publish = prPublishAction({ store, workspaces, recipes, repos, connections, packs });
-  restack = stackRestackAction({ store, workspaces, repos, prs: createPrs({ connections, packs }), connections, pause: () => Promise.resolve() });
+  publish = prPublishAction({ store, workspaces, recipes, repoConfig: repos, connections, packs });
+  restack = stackRestackAction({ store, workspaces, repoConfig: repos, prs: createPrs({ connections, packs }), connections, pause: () => Promise.resolve() });
 
   issues = createIssues(store, createLocalTracker(store));
-  projectId = createProjects(store, defs).create(NewProject.parse({ slug: "demo", name: "Demo", tracker: "local" }), "cli").id;
+  projectId = createProjects({ store, defs }).create(NewProject.parse({ slug: "demo", name: "Demo", tracker: "local" }), "cli").id;
 });
 
 afterEach(async () => {
@@ -112,7 +112,7 @@ const newIssue = (title = "Con dos padres") => issues.createLocal({ projectId, t
 
 /** Un PR del sistema: `branch` sale de `base` con un commit que escribe `files`, publicado en draft (`beforePublish` corre justo antes). */
 async function openPr(branch: string, base: string, files: Record<string, string>, issue?: CachedIssue, beforePublish?: () => void): Promise<{ number: number; body: string }> {
-  const lease = await workspaces.acquire({ repo: "r1", branch, base, runId: newId("run") });
+  const lease = await workspaces.acquire({ repo: "repo_r1", branch, base, runId: newId("run") });
   for (const [path, content] of Object.entries(files)) writeFileSync(join(lease.path, path), content);
   // Lo que pasa en GitHub mientras la corrida trabaja, antes de que publique.
   beforePublish?.();
@@ -175,7 +175,7 @@ describe("workspaces.combineBase", () => {
   test("junta dos padres con un merge --no-ff de cada uno sobre la branch por defecto, y no pushea nada", async () => {
     const { issue, branch, parents } = await twoParents();
 
-    const result = await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    const result = await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
 
     expect(result).toMatchObject({ outcome: "combined", branch });
     const head = localRef(branch);
@@ -195,7 +195,7 @@ describe("workspaces.combineBase", () => {
     ]);
     expect(() => remoteSha(branch)).toThrow();
     // Rehacerla con los mismos padres da el mismo commit.
-    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
     expect(localRef(branch)).toBe(head);
   });
 
@@ -209,8 +209,8 @@ describe("workspaces.combineBase", () => {
       { key: "r1#2", branch: "cla-2" },
     ];
 
-    const first = await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
-    const again = await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    const first = await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
+    const again = await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
 
     expect(first).toMatchObject({ outcome: "base-conflict", parent: "r1#2", merged: ["r1#1"], files: ["a.txt"], changed: true });
     expect(again).toMatchObject({ outcome: "base-conflict", changed: false });
@@ -220,10 +220,10 @@ describe("workspaces.combineBase", () => {
 
   test("dissolveBase borra la branch sintética y la marca disuelta", async () => {
     const { issue, branch, parents } = await twoParents();
-    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
 
-    await workspaces.dissolveBase("r1", branch);
-    await workspaces.dissolveBase("r1", branch);
+    await workspaces.dissolveBase("repo_r1", branch);
+    await workspaces.dissolveBase("repo_r1", branch);
 
     expect(() => localRef(branch)).toThrow();
     expect(row(branch)?.status).toBe("dissolved");
@@ -233,7 +233,7 @@ describe("workspaces.combineBase", () => {
 describe("pr.publish sobre una base combinada", () => {
   test("el PR apunta al primer padre, el cuerpo lo explica al principio y cuelga de todos", async () => {
     const { issue, branch, parents } = await twoParents();
-    const combined = await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    const combined = await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
     expect(combined.outcome).toBe("combined");
 
     const child = await openPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, issue);
@@ -273,7 +273,7 @@ describe("pr.publish con un padre que se mergeó antes de publicar", () => {
 
   test("con una base combinada, un padre mergeado sale de la base y el PR apunta al que queda", async () => {
     const { issue, branch, parents } = await twoParents();
-    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
 
     const child = await openPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, issue, mergeParent("cla-1", 1));
 
@@ -291,7 +291,7 @@ describe("pr.publish con un padre que se mergeó antes de publicar", () => {
 
   test("con una base combinada y todos los padres mergeados, la base se disuelve y el PR sale sobre la branch por defecto", async () => {
     const { issue, branch, parents } = await twoParents();
-    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
 
     const child = await openPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, issue, () => {
       mergeParent("cla-1", 1)();
@@ -333,7 +333,7 @@ describe("stack.restack con una base combinada", () => {
   /** Los dos padres, la base combinada y el PR de `cla-3` sobre ella. */
   async function combinedPr() {
     const parents = await twoParents();
-    await workspaces.combineBase({ repo: "r1", issueId: parents.issue.id, branch: parents.branch, parents: parents.parents });
+    await workspaces.combineBase({ repo: "repo_r1", issueId: parents.issue.id, branch: parents.branch, parents: parents.parents });
     const child = await openPr("cla-3", parents.branch, { "c.txt": "c1\ntres\n" }, parents.issue);
     return { ...parents, child: child.number };
   }
@@ -422,7 +422,7 @@ describe("stack.restack con una base combinada", () => {
   test("una fila vieja de la issue no frena el restack de un PR relanzado a mano sobre un solo padre: se retira y se restackea normal", async () => {
     const { issue, branch, parents } = await twoParents();
     // La corrida anterior de la issue dejó su base combinada activa; la relanzaron a mano apilada sobre `cla-1`.
-    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
     const child = await openPr("cla-3", "cla-1", { "c.txt": "c1\ntres\n" }, issue);
     const squash = squashOnMain("cla-1");
     github.pr(1).merge({ sha: squash });
@@ -440,7 +440,7 @@ describe("stack.restack con una base combinada", () => {
 
   test("la fila vieja se conserva si otro PR abierto de la issue podría seguir usándola", async () => {
     const { issue, branch, parents } = await twoParents();
-    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
     await openPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, issue);
     await openPr("cla-4", "cla-1", { "c.txt": "c1\ncuatro\n" }, issue);
     github.pr(1).merge({ sha: squashOnMain("cla-1") });

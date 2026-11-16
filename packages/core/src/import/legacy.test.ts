@@ -26,7 +26,7 @@ import {
   defs as defsTable,
 } from "../store/schema";
 import { openStore } from "../store/store";
-import { createRepos } from "../workspaces/repos";
+import { createRepos } from "../repos/repos";
 import { createLegacyImporter, LegacyImportError } from "./legacy";
 import { parseLegacyState } from "./legacy-state";
 
@@ -290,7 +290,7 @@ describe("clanker import legacy", () => {
       importer.run({ from: FIXTURES, dryRun: false });
       const a = store.db.select().from(projects).where(eq(projects.slug, slugA)).get()!;
       const b = store.db.select().from(projects).where(eq(projects.slug, slugB)).get()!;
-      const all = createLearnings(store);
+      const all = createLearnings({ store });
 
       expect(all.list({ projectId: a.id }).map((l) => [l.text, l.status, l.source, l.roles])).toEqual([
         ["Los PRs de `dashboard` van siempre con captura de pantalla en el body.", "proposed", "import", []],
@@ -339,7 +339,7 @@ describe("clanker import legacy", () => {
       expect(prOf(300)).toMatchObject([{ state: "open", issueId: issueOf("DEMO-8").id }]);
       // El estado vivo (`## En curso`, `## Council pendiente`) no se importa.
       expect(store.db.select().from(decisions).all().some((d) => d.body.includes("estado vivo"))).toBe(false);
-      expect(createLearnings(store).list().some((l) => l.text.includes("estado vivo"))).toBe(false);
+      expect(createLearnings({ store }).list().some((l) => l.text.includes("estado vivo"))).toBe(false);
     });
 
     test("los .md de issues/ y el brief quedan como artefactos enlazados a la última corrida, a la issue o al proyecto", () => {

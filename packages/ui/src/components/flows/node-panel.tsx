@@ -1,10 +1,11 @@
 import type { Edge, FlowDef, Node, Role, Value } from "@clanker/api"
 import { Plus, Trash2, X } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
-import { KIND } from "@/components/project/flow-node"
+import { KIND } from "@/components/graph/flow-node"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { branchOwners, edgeSpec, END_NAME, ENDS, type Mark, NODE_SUMMARY, outcomesOf, withEdge } from "@/lib/flow-canvas"
+import { messageOf } from "@/lib/utils"
 
 const SELECT = "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
 
@@ -33,7 +34,7 @@ function JsonField({ label, help, value, onChange }: { label: string; help: stri
       setError(null)
       onChange(parsed as Record<string, Value>)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(messageOf(e))
     }
   }
   return (

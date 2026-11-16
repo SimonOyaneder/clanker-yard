@@ -1,7 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { DefExported, DefExportToRepo } from "@clanker/api";
-import { RequestError } from "@octokit/request-error";
 import * as z from "zod";
 import type { Connections } from "../connections/connections";
 import type { Defs } from "../defs/defs";
@@ -9,9 +8,10 @@ import { DefNotFoundError } from "../defs/write";
 import { git } from "../git/git";
 import type { GitIdentityOf } from "../git/identity";
 import type { GitRemote } from "../git/remote";
-import type { Repos } from "../workspaces/repos";
-import { RepoNotFoundError } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
+import { RepoNotFoundError } from "../repos/repos";
 import { repoConfigPath, renderRepoFile } from "./files";
+import { messageOf } from "../errors/format";
 
 /** No se puede exportar: el mensaje dice por qué y qué hacer. */
 export class RepoExportError extends Error {}
@@ -33,7 +33,7 @@ export interface RepoConfigExporterDeps {
   /** La config del repo (remoto y cuenta), la misma que usa Workspaces. */
   config: Repos["config"];
   remote: GitRemote;
-  connections: Pick<Connections, "githubClient" | "markRevoked">;
+  connections: Pick<Connections, "githubClient">;
   /** Los worktrees desechables viven en `<dataDir>/repo-config-export`. */
   dataDir: string;
   /** Autor y committer del commit del export: la identidad de git del usuario en el repo. */
@@ -76,7 +76,7 @@ export function createRepoConfigExporter({ defs, repos, config, remote, connecti
       let added = false;
       try {
         await git(repo.path, [...NO_HOOKS, "worktree", "add", "--detach", worktree, base]).catch((error: unknown) => {
-          throw new RepoExportError(`No pude leer ${repo.defaultBranch} de ${repo.name} en el remoto: ${error instanceof Error ? error.message : String(error)}`);
+          throw new RepoExportError(`No pude leer ${repo.defaultBranch} de ${repo.name} en el remoto: ${messageOf(error)}`);
         });
         added = true;
         const file = join(worktree, path);
@@ -104,22 +104,17 @@ export function createRepoConfigExporter({ defs, repos, config, remote, connecti
         if (pushed === "unauthorized") throw new RepoExportError(`GitHub rechazó el token de ${target.account}: reconecta la cuenta para exportar.`);
         if (pushed === "lease-rejected") throw new RepoExportError(`La branch ${branch} ya existe en el remoto con otro contenido: bórrala o exporta de nuevo.`);
 
-        try {
-          const { data } = await connections.githubClient(target.account).request("POST /repos/{owner}/{repo}/pulls", {
-            owner,
-            repo: name,
-            title,
-            head: branch,
-            base: repo.defaultBranch,
-            draft: true,
-            body: prBody({ kind, slug: def.slug, path, verb }),
-          });
-          const pull = Pull.parse(data);
-          return { url: pull.html_url, number: pull.number, branch, path };
-        } catch (error) {
-          if (error instanceof RequestError && error.status === 401) connections.markRevoked("github", target.account, "core");
-          throw error;
-        }
+        const { data } = await connections.githubClient(target.account).request("POST /repos/{owner}/{repo}/pulls", {
+          owner,
+          repo: name,
+          title,
+          head: branch,
+          base: repo.defaultBranch,
+          draft: true,
+          body: prBody({ kind, slug: def.slug, path, verb }),
+        });
+        const pull = Pull.parse(data);
+        return { url: pull.html_url, number: pull.number, branch, path };
       } finally {
         if (added) await git(repo.path, ["worktree", "remove", "--force", worktree]).catch(() => undefined);
         rmSync(scratch, { recursive: true, force: true });

@@ -2,13 +2,13 @@ import type { DefRecord, Lanes, PackInfo, ProjectDefaults, Repo } from "@clanker
 import { useCallback, useMemo, useState } from "react"
 import { useAppData } from "@/app-data"
 import { AdvancedSection, DefaultsSection, LanesSection, PacksSection } from "@/components/app-settings/app-settings-sections"
-import { SaveBar, useSaveShortcut } from "@/components/project/settings-fields"
-import { SettingsNav, type SettingsNavItem } from "@/components/project/settings-nav"
-import { Button } from "@/components/ui/button"
+import { SaveBar, useSaveShortcut } from "@/components/settings/settings-fields"
+import { SettingsNav, type SettingsNavItem } from "@/components/settings/settings-nav"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useLive, useLiveQuery } from "@/hooks/use-live"
 import { DEFAULTS_FIELD_LABELS, type DefaultsDraft, defaultsPatch, defaultsProblems, draftOfDefaults, sameDefaults, undoDefaults } from "@/lib/app-settings"
 import { undoable } from "@/lib/undoable"
+import { PageLoadError } from "@/components/page-load-error"
 
 const NAV: SettingsNavItem[] = [
   { id: "lanes", label: "Carriles" },
@@ -36,15 +36,7 @@ export function AppSettingsView() {
   const live = useLive()
   if (query.data) return <AppSettingsForm {...query.data} onChanged={live.refresh} />
   if (query.error) {
-    return (
-      <div role="alert" className="mx-auto mt-16 flex max-w-md flex-col items-center gap-3 text-center">
-        <h2 className="text-base font-semibold">No pude leer los ajustes</h2>
-        <p className="text-muted-foreground">{query.error}</p>
-        <Button size="sm" onClick={query.reload}>
-          Reintentar
-        </Button>
-      </div>
-    )
+    return <PageLoadError title="No pude leer los ajustes" message={query.error} onRetry={query.reload} />
   }
   return (
     <div className="mx-auto flex max-w-[900px] flex-col gap-4">

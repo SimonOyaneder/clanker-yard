@@ -4,12 +4,12 @@ import { useRef, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { ClankerDirNote } from "@/components/flows/clanker-dir-note"
-import { Section } from "@/components/project/settings-fields"
+import { Section } from "@/components/settings/settings-fields"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { useLive } from "@/hooks/use-live"
 import { changeKind, showValue } from "@/lib/def-edit"
-import { messageOf } from "@/lib/undoable"
+import { messageOf } from "@/lib/utils"
 
 const FIELD_LABEL: Record<string, string> = {
   repos: "Repos",

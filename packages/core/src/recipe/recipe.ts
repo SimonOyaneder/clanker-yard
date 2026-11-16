@@ -11,10 +11,11 @@ import { repoScope } from "../breakers/breakers";
 import { EnvironmentError, PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
 import type { SlotLease, Slots } from "../slots/slots";
 import { failedRequires } from "./requires";
-import { agentSessions, runs, stepRuns, workspaces as workspaceRows } from "../store/schema";
+import { agentSessions, runs, stepRuns, workspaces as workspacesTable } from "../store/schema";
 import type { Store } from "../store/store";
 import { excerpt } from "../workspaces/exec";
 import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
+import { messageOf } from "../errors/format";
 
 export const RECIPE_PATH = ".clanker/recipe.json";
 
@@ -226,7 +227,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
       async (command) => (await workspaces.exec(ws, command, { runId: ctx.runId, stepId: ctx.stepId, env, signal: ctx.signal })).exitCode,
     );
     if (down.length === 0) return;
-    const workspace = store.db.select({ repoId: workspaceRows.repoId }).from(workspaceRows).where(eq(workspaceRows.id, ws.workspaceId)).get();
+    const workspace = store.db.select({ repoId: workspacesTable.repoId }).from(workspacesTable).where(eq(workspacesTable.id, ws.workspaceId)).get();
     if (!workspace) throw new PermanentActionError(`El workspace ${ws.workspaceId} no existe en la base.`);
     throw new EnvironmentError(repoScope(workspace.repoId), `Al repo le falta su entorno, no responde: ${down.join(", ")}.`);
   }
@@ -234,7 +235,7 @@ export function createRecipes({ store, defs, workspaces, artifacts, slots, fake 
   /** El slot del pool del carril de la corrida, para el worktree `ws`. */
   function acquireSlot(ws: WorkspaceRef, pools: NonNullable<Recipe["slots"]>, ctx: ActionCtx): Promise<SlotLease> {
     const run = store.db.select({ lane: runs.lane }).from(runs).where(eq(runs.id, ctx.runId)).get();
-    const workspace = store.db.select({ repoId: workspaceRows.repoId }).from(workspaceRows).where(eq(workspaceRows.id, ws.workspaceId)).get();
+    const workspace = store.db.select({ repoId: workspacesTable.repoId }).from(workspacesTable).where(eq(workspacesTable.id, ws.workspaceId)).get();
     if (!run || !workspace) {
       throw new PermanentActionError(
         `No se puede tomar un slot: ${run ? `el workspace ${ws.workspaceId}` : `la corrida ${ctx.runId}`} no existe en la base.`,
@@ -368,5 +369,5 @@ function slotKeyHash(dir: string, files: readonly string[]): string {
 }
 
 function asPermanent(error: unknown): PermanentActionError {
-  return new PermanentActionError(error instanceof Error ? error.message : String(error), { cause: error });
+  return new PermanentActionError(messageOf(error), { cause: error });
 }

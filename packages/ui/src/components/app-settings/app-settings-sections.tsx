@@ -6,7 +6,7 @@ import { useAppData } from "@/app-data"
 import { DefOption } from "@/components/def-option"
 import { Hint, Pill } from "@/components/common"
 import { LaneStepper } from "@/components/project/lanes-control"
-import { Field, Section } from "@/components/project/settings-fields"
+import { Field, Section } from "@/components/settings/settings-fields"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -17,8 +17,8 @@ import { type DefaultsDraft, orgsWithoutPack } from "@/lib/app-settings"
 import { copy } from "@/lib/clipboard"
 import { defaultFlowSlug, defaultProfileSlug, defName, selectableFlows } from "@/lib/defs"
 import { tone } from "@/lib/format"
-import type { Problems } from "@/lib/project-settings"
-import { messageOf } from "@/lib/undoable"
+import type { FieldProblems } from "@/lib/project-settings"
+import { messageOf } from "@/lib/utils"
 
 // Radix Select no admite un valor vacío en un ítem: "sin valor" se representa con un valor propio.
 const NONE = "__none__"
@@ -220,7 +220,7 @@ export function PacksSection({ packs, repos, onChanged }: { packs: PackInfo[]; r
 interface DefaultsProps {
   draft: DefaultsDraft
   update: (change: Partial<DefaultsDraft>) => void
-  problems: Problems
+  problems: FieldProblems
   flows: DefRecord[]
   profiles: DefRecord[]
 }

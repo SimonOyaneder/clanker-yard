@@ -48,8 +48,7 @@ export const markHead = (tx: Tx, prId: string, sha: string, at: number) => recor
 
 /**
  * La aprobación de hoy del PR, numerada: sube cada vez que el PR la perdía (pidieron cambios, la
- * descartaron) y se vuelve a aprobar, que es cuando un aprobado con comentarios es otro hecho. Es el
- * `approved` del vigilante, que vuelve a `false` al perder la aprobación. Se llama en cada evaluación de
+ * descartaron) y se vuelve a aprobar, que es cuando un aprobado con comentarios es otro hecho. Se llama en cada evaluación de
  * un PR abierto, con si hoy está aprobado.
  */
 export function approvalEpoch(tx: Tx, prId: string, approved: boolean, at: number): number {
@@ -69,9 +68,9 @@ export interface PrEventInput {
   /** La corrida que lo provoca, si la hay (el restack). */
   runId?: RunId;
   /**
-   * Emite también en la primera lectura del PR, que por defecto solo siembra las marcas. Es lo que el
-   * vigilante anuncia en su primer run (conflicto, council, merge, aprobado con comentarios); él solo calla
-   * los comentarios de humanos (`pr.human`) y lo ya mergeado.
+   * Emite también en la primera lectura del PR, que por defecto solo siembra las marcas: lo que sigue
+   * pendiente aunque el PR exista desde antes (conflicto, council, merge, aprobado con comentarios). Los
+   * comentarios de humanos (`pr.human`) y lo ya mergeado se siembran callados: ya pasaron.
    */
   emitOnFirstRead?: boolean;
 }

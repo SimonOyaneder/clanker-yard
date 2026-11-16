@@ -4,7 +4,7 @@ import { z } from "zod";
 import { agentSessions, stepRuns } from "../store/schema";
 import { RunCommandError } from "./engine";
 import { StepNotFoundError } from "./step-detail";
-import { harness as createHarness, okReport, type AgentScript } from "./harness";
+import { harness as createHarness, okReport, type AgentScript, WAIT } from "./harness";
 
 // Lo que una persona le pide a una corrida (`control`) y a un paso (`stepCommand`).
 
@@ -19,7 +19,7 @@ function harness(options: Parameters<typeof createHarness>[0] = {}) {
   cleanups.push(h.cleanup);
   // Lo que un test deja en vuelo (un agente o una acción que nunca terminan) se cancela antes de cerrar el motor.
   cleanups.push(() => {
-    for (const { id } of h.flows.listRuns({ status: ["running", "paused", "parked", "queued"] })) h.flows.control(id, "cancel", { by: "core" });
+    for (const { id } of h.flows.listRuns({ status: ["running", "paused", "parked", "queued"] })) h.flows.control(id, "cancel", "core");
   });
   h.action("after", ["ok"]);
   h.flows.registerWait({
@@ -72,18 +72,18 @@ describe("pausar y retomar", () => {
     const h = harness({ script: agentRun.script });
     h.save(planThenAfter);
     const runId = h.start("plan-after");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1), WAIT);
 
-    h.flows.control(runId, "pause", { by: "ui" });
+    h.flows.control(runId, "pause", "ui");
     expect(h.run(runId).status).toBe("paused");
     agentRun.releaseLast();
-    await vi.waitFor(() => expect(h.step(runId, "plan")?.status).toBe("done"));
+    await vi.waitFor(() => expect(h.step(runId, "plan")?.status).toBe("done"), WAIT);
 
     expect(h.step(runId, "after")).toMatchObject({ status: "pending", attempt: 0 });
     expect(h.run(runId).status).toBe("paused");
 
-    h.flows.control(runId, "resume", { by: "cli" });
-    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }));
+    h.flows.control(runId, "resume", "cli");
+    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
     expect(h.eventsOf(runId, "run.status").map((e) => [e.origin, e.payload])).toEqual([
       ["ui", { from: "running", to: "paused", now: false }],
       ["cli", { from: "paused", to: "running" }],
@@ -94,10 +94,10 @@ describe("pausar y retomar", () => {
     const h = harness({ script: () => new Promise(() => {}) });
     h.save(planThenAfter);
     const runId = h.start("plan-after");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1), WAIT);
 
-    h.flows.control(runId, "pause", { by: "ui", now: true });
-    await vi.waitFor(() => expect(h.step(runId, "plan")?.status).toBe("pending"));
+    h.flows.control(runId, "pause", "ui", { now: true });
+    await vi.waitFor(() => expect(h.step(runId, "plan")?.status).toBe("pending"), WAIT);
 
     expect(h.step(runId, "plan")).toMatchObject({ attempt: 1, error: expect.stringContaining("se pausó") });
     expect(h.store.db.select().from(stepRuns).all()[0]).toMatchObject({ deferrals: 1, recoveries: 0, owner: null });
@@ -106,8 +106,8 @@ describe("pausar y retomar", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(h.calls).toHaveLength(1);
 
-    h.flows.control(runId, "resume", { by: "ui" });
-    await vi.waitFor(() => expect(h.calls).toHaveLength(2));
+    h.flows.control(runId, "resume", "ui");
+    await vi.waitFor(() => expect(h.calls).toHaveLength(2), WAIT);
     expect(h.calls[1]).toMatchObject({ kind: "resume", sessionId: h.calls[0]?.sessionId });
     expect(h.calls[1]?.prompt).toMatch(/^Una persona pausó la corrida/);
   });
@@ -116,12 +116,12 @@ describe("pausar y retomar", () => {
     const h = harness({ script: () => new Promise(() => {}) });
     h.save(planThenAfter);
     const runId = h.start("plan-after");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1), WAIT);
 
-    h.flows.control(runId, "pause", { by: "ui" });
+    h.flows.control(runId, "pause", "ui");
     expect(h.step(runId, "plan")?.status).toBe("running");
-    h.flows.control(runId, "pause", { by: "ui", now: true });
-    await vi.waitFor(() => expect(h.step(runId, "plan")?.status).toBe("pending"));
+    h.flows.control(runId, "pause", "ui", { now: true });
+    await vi.waitFor(() => expect(h.step(runId, "plan")?.status).toBe("pending"), WAIT);
 
     expect(h.eventsOf(runId, "run.status")).toHaveLength(1);
   });
@@ -133,17 +133,17 @@ describe("pausar y retomar", () => {
     h.save({ ...flow("child", { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } }, "work"), trigger: { type: "subflow" } });
     h.save(flow("parent", { sub: { type: "flow", flow: "child", params: {}, on: { done: "@done", blocked: "@blocked", failed: "@failed" } } }, "sub"));
     const parent = h.start("parent");
-    await vi.waitFor(() => expect(h.flows.listRuns().some((r) => r.parentRunId === parent)).toBe(true));
+    await vi.waitFor(() => expect(h.flows.listRuns().some((r) => r.parentRunId === parent)).toBe(true), WAIT);
     const child = h.flows.listRuns().find((r) => r.parentRunId === parent)?.id as RunId;
 
-    h.flows.control(parent, "pause", { by: "ui" });
+    h.flows.control(parent, "pause", "ui");
     expect([h.run(parent).status, h.run(child).status]).toEqual(["paused", "paused"]);
-    h.flows.control(parent, "resume", { by: "ui" });
+    h.flows.control(parent, "resume", "ui");
     expect([h.run(parent).status, h.run(child).status]).toEqual(["running", "running"]);
 
-    await vi.waitFor(() => expect(release).toBeDefined());
+    await vi.waitFor(() => expect(release).toBeDefined(), WAIT);
     release();
-    await vi.waitFor(() => expect(h.run(parent)).toMatchObject({ status: "done", outcome: "done" }));
+    await vi.waitFor(() => expect(h.run(parent)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
   });
 
   test("un wait de una corrida pausada se cierra con su evento, pero lo que sigue espera al retomar", async () => {
@@ -159,16 +159,16 @@ describe("pausar y retomar", () => {
       ),
     );
     const runId = h.start("ci");
-    await vi.waitFor(() => expect(h.step(runId, "wait")?.status).toBe("waiting"));
+    await vi.waitFor(() => expect(h.step(runId, "wait")?.status).toBe("waiting"), WAIT);
 
-    h.flows.control(runId, "pause", { by: "ui" });
+    h.flows.control(runId, "pause", "ui");
     expect(h.flows.waitKeys()).toEqual(["pr:7:ci"]);
     h.flows.signal({ type: "pr.ci", pr: 7, state: "ok" });
     expect(h.step(runId, "wait")).toMatchObject({ status: "done", outcome: "ok" });
     expect(h.step(runId, "after")?.status).toBe("pending");
 
-    h.flows.control(runId, "resume", { by: "ui" });
-    await vi.waitFor(() => expect(h.run(runId).status).toBe("done"));
+    h.flows.control(runId, "resume", "ui");
+    await vi.waitFor(() => expect(h.run(runId).status).toBe("done"), WAIT);
   });
 
   test("una corrida pausada sigue ocupando su cupo de carril", async () => {
@@ -176,7 +176,7 @@ describe("pausar y retomar", () => {
     h.action("work", ["ok"], () => new Promise(() => {}));
     h.save(flow("w", { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } }, "work"));
     const first = h.start("w", { type: "issue", id: "ENG-1" });
-    h.flows.control(first, "pause", { by: "ui" });
+    h.flows.control(first, "pause", "ui");
 
     const second = h.start("w", { type: "issue", id: "ENG-2" });
 
@@ -190,21 +190,21 @@ describe("pausar y retomar", () => {
     await h.finished(runId);
     expect(h.run(runId).status).toBe("parked");
 
-    expect(() => h.flows.control(runId, "pause", { by: "ui" })).toThrow(RunCommandError);
-    expect(() => h.flows.control(runId, "pause", { by: "ui" })).toThrow(/estacionada/);
-    expect(() => h.flows.control(runId, "resume", { by: "ui" })).toThrow(/solo se retoma una pausada/);
-    expect(() => h.flows.control("run_00000000000000000000000000" as RunId, "pause", { by: "ui" })).toThrow(/No existe la corrida/);
+    expect(() => h.flows.control(runId, "pause", "ui")).toThrow(RunCommandError);
+    expect(() => h.flows.control(runId, "pause", "ui")).toThrow(/estacionada/);
+    expect(() => h.flows.control(runId, "resume", "ui")).toThrow(/solo se retoma una pausada/);
+    expect(() => h.flows.control("run_00000000000000000000000000" as RunId, "pause", "ui")).toThrow(/No existe la corrida/);
 
-    h.flows.control(runId, "cancel", { by: "ui" });
-    expect(() => h.flows.control(runId, "pause", { by: "ui" })).toThrow(/solo se pausa una corrida que corre/);
+    h.flows.control(runId, "cancel", "ui");
+    expect(() => h.flows.control(runId, "pause", "ui")).toThrow(/solo se pausa una corrida que corre/);
   });
 
   test("cancelar una pausada la cancela y deja al actor en run.finished", async () => {
     const h = harness();
     h.save(flow("w", { work: { type: "action", action: "after", args: {}, on: { ok: "@done" } } }, "work"));
     const runId = h.start("w");
-    h.flows.control(runId, "pause", { by: "ui" });
-    h.flows.control(runId, "cancel", { by: "mcp" });
+    h.flows.control(runId, "pause", "ui");
+    h.flows.control(runId, "cancel", "mcp");
 
     expect(h.run(runId).status).toBe("canceled");
     expect(h.eventsOf(runId, "run.finished").map((e) => [e.origin, e.payload.outcome])).toEqual([["mcp", "canceled"]]);
@@ -221,7 +221,7 @@ describe("reintentar un paso", () => {
     const failed = h.step(runId, "plan") as { id: StepRunId };
 
     h.flows.stepCommand(failed.id, { retry: true }, "ui");
-    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }));
+    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
 
     expect(h.run(runId).steps.map((s) => [s.nodeId, s.visit, s.status])).toEqual([
       ["plan", 1, "failed"],
@@ -250,7 +250,7 @@ describe("reintentar un paso", () => {
       ),
     );
     const runId = h.start("two");
-    await vi.waitFor(() => expect(h.step(runId, "second")?.status).toBe("running"));
+    await vi.waitFor(() => expect(h.step(runId, "second")?.status).toBe("running"), WAIT);
     const first = h.step(runId, "first") as { id: StepRunId };
 
     h.flows.stepCommand(first.id, { retry: true }, "cli");
@@ -258,7 +258,7 @@ describe("reintentar un paso", () => {
     expect(signal?.aborted).toBe(true);
     expect(h.step(runId, "second", 1)).toMatchObject({ status: "canceled" });
     expect(h.run(runId).steps.filter((s) => s.nodeId === "first").map((s) => s.visit)).toEqual([1, 2]);
-    await vi.waitFor(() => expect(h.step(runId, "second", 2)?.status).toBe("running"));
+    await vi.waitFor(() => expect(h.step(runId, "second", 2)?.status).toBe("running"), WAIT);
   });
 
   test("sobre un nodo flow cancela la corrida hija y abre otra", async () => {
@@ -267,11 +267,11 @@ describe("reintentar un paso", () => {
     h.save({ ...flow("child", { work: { type: "action", action: "slow", args: {}, on: { ok: "@done" } } }, "work"), trigger: { type: "subflow" } });
     h.save(flow("parent", { sub: { type: "flow", flow: "child", params: {}, on: { done: "@done", blocked: "@blocked", failed: "@failed" } } }, "sub"));
     const parent = h.start("parent");
-    await vi.waitFor(() => expect(h.flows.listRuns().filter((r) => r.parentRunId === parent)).toHaveLength(1));
+    await vi.waitFor(() => expect(h.flows.listRuns().filter((r) => r.parentRunId === parent)).toHaveLength(1), WAIT);
 
     h.flows.stepCommand(h.step(parent, "sub")?.id as StepRunId, { retry: true }, "ui");
 
-    await vi.waitFor(() => expect(h.flows.listRuns().filter((r) => r.parentRunId === parent)).toHaveLength(2));
+    await vi.waitFor(() => expect(h.flows.listRuns().filter((r) => r.parentRunId === parent)).toHaveLength(2), WAIT);
     expect(h.flows.listRuns().filter((r) => r.parentRunId === parent).map((r) => r.status).sort()).toEqual(["canceled", "running"]);
   });
 
@@ -295,7 +295,7 @@ describe("reintentar un paso", () => {
 
     expect(h.decisions.list({ runId }).map((d) => [d.kind, d.status])).toEqual([["gate", "superseded"]]);
     expect(h.run(runId).status).toBe("running");
-    await vi.waitFor(() => expect(h.run(runId).status).toBe("parked"));
+    await vi.waitFor(() => expect(h.run(runId).status).toBe("parked"), WAIT);
     expect(h.step(runId, "ask", 1)?.status).toBe("canceled");
     expect(h.step(runId, "ask", 2)?.status).toBe("waiting");
   });
@@ -315,7 +315,7 @@ describe("reintentar un paso", () => {
       ),
     );
     const runId = h.start("par");
-    await vi.waitFor(() => expect(h.run(runId).status).toBe("done"));
+    await vi.waitFor(() => expect(h.run(runId).status).toBe("done"), WAIT);
     const branch = h.step(runId, "a") as { id: StepRunId };
 
     expect(() => h.flows.stepCommand(branch.id, { retry: true }, "ui")).toThrow(/solo se comanda un paso de una corrida viva/);
@@ -337,7 +337,7 @@ describe("reintentar un paso", () => {
       ),
     );
     const runId = h.start("par");
-    await vi.waitFor(() => expect(h.step(runId, "a")?.status).toBe("running"));
+    await vi.waitFor(() => expect(h.step(runId, "a")?.status).toBe("running"), WAIT);
 
     expect(() => h.flows.stepCommand(h.step(runId, "a")?.id as StepRunId, { retry: true }, "ui")).toThrow(/reintenta el parallel/);
   });
@@ -349,12 +349,12 @@ describe("steer", () => {
     const h = harness({ script: () => (++calls === 1 ? new Promise(() => {}) : Promise.resolve(okReport())) });
     h.save(planThenAfter);
     const runId = h.start("plan-after");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1), WAIT);
     const plan = h.step(runId, "plan") as { id: StepRunId };
 
     h.flows.stepCommand(plan.id, { steer: "usa el helper que ya existe" }, "ui");
 
-    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }));
+    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
     expect(h.calls[1]).toMatchObject({ kind: "resume", sessionId: h.calls[0]?.sessionId });
     expect(h.calls[1]?.prompt).toContain("usa el helper que ya existe");
     expect(h.store.db.select().from(stepRuns).all().find((s) => s.nodeId === "plan")).toMatchObject({ attempt: 2, deferrals: 1 });
@@ -368,14 +368,14 @@ describe("steer", () => {
     const h = harness({ script: () => (++calls === 1 ? new Promise(() => {}) : Promise.resolve(okReport())) });
     h.save(planThenAfter);
     const runId = h.start("plan-after");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
-    h.flows.control(runId, "pause", { by: "ui", now: true });
-    await vi.waitFor(() => expect(h.step(runId, "plan")?.status).toBe("pending"));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1), WAIT);
+    h.flows.control(runId, "pause", "ui", { now: true });
+    await vi.waitFor(() => expect(h.step(runId, "plan")?.status).toBe("pending"), WAIT);
 
     h.flows.stepCommand(h.step(runId, "plan")?.id as StepRunId, { steer: "mejor no toques el schema" }, "mcp");
-    h.flows.control(runId, "resume", { by: "ui" });
+    h.flows.control(runId, "resume", "ui");
 
-    await vi.waitFor(() => expect(h.run(runId).status).toBe("done"));
+    await vi.waitFor(() => expect(h.run(runId).status).toBe("done"), WAIT);
     expect(h.calls[1]?.prompt).toContain("mejor no toques el schema");
     expect(h.calls[1]?.prompt).not.toMatch(/pausó la corrida/);
   });
@@ -389,7 +389,7 @@ describe("steer", () => {
 
     h.flows.stepCommand(failed.id, { steer: "el outcome es ok si los tests pasan" }, "cli");
 
-    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }));
+    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
     expect(h.calls[1]).toMatchObject({ kind: "resume", sessionId: h.calls[0]?.sessionId });
     expect(h.calls[1]?.prompt).toContain("el outcome es ok si los tests pasan");
     expect(h.decisions.list({ runId })[0]).toMatchObject({ status: "superseded", resolvedBy: "cli" });
@@ -408,7 +408,7 @@ describe("steer", () => {
       ),
     );
     const runId = h.start("ag-slow");
-    await vi.waitFor(() => expect(h.step(runId, "slow")?.status).toBe("running"));
+    await vi.waitFor(() => expect(h.step(runId, "slow")?.status).toBe("running"), WAIT);
 
     expect(() => h.flows.stepCommand(h.step(runId, "slow")?.id as StepRunId, { steer: "hola" }, "ui")).toThrow(/Solo un paso de agente recibe un mensaje/);
     expect(() => h.flows.stepCommand(h.step(runId, "plan")?.id as StepRunId, { steer: "hola" }, "ui")).toThrow(/está done/);
@@ -419,7 +419,7 @@ describe("steer", () => {
     const h = harness({ script: () => new Promise(() => {}) });
     h.save(planThenAfter);
     const runId = h.start("plan-after");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1), WAIT);
 
     expect(() => h.flows.stepCommand(h.step(runId, "plan")?.id as StepRunId, { steer: "  " }, "ui")).toThrow(/vacío/);
   });
@@ -430,7 +430,7 @@ describe("forzar un resultado", () => {
     const h = harness({ script: () => new Promise(() => {}) });
     h.save(planThenAfter);
     const runId = h.start("plan-after");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1), WAIT);
     const plan = h.step(runId, "plan") as { id: StepRunId };
 
     expect(() => h.flows.stepCommand(plan.id, { force: "ok" }, "ui")).toThrow(RunCommandError);
@@ -457,14 +457,14 @@ describe("forzar un resultado", () => {
       ),
     );
     const runId = h.start("w");
-    await vi.waitFor(() => expect(h.step(runId, "slow")?.status).toBe("running"));
+    await vi.waitFor(() => expect(h.step(runId, "slow")?.status).toBe("running"), WAIT);
     const slow = h.step(runId, "slow") as { id: StepRunId };
 
     expect(() => h.flows.stepCommand(slow.id, { force: "nope" }, "ui")).toThrow(/no declara el outcome "nope": ok, fail/);
     h.flows.stepCommand(slow.id, { force: "ok" }, "ui");
 
     expect(signal?.aborted).toBe(true);
-    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }));
+    await vi.waitFor(() => expect(h.run(runId)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
     expect(h.step(runId, "slow")).toMatchObject({ status: "done", outcome: "ok" });
     expect(h.eventsOf(runId, "step.commanded").map((e) => [e.origin, e.payload.command, e.payload.outcome])).toEqual([["ui", "force", "ok"]]);
   });
@@ -482,7 +482,7 @@ describe("forzar un resultado", () => {
       ),
     );
     const runId = h.start("ci");
-    await vi.waitFor(() => expect(h.step(runId, "wait")?.status).toBe("waiting"));
+    await vi.waitFor(() => expect(h.step(runId, "wait")?.status).toBe("waiting"), WAIT);
 
     h.flows.stepCommand(h.step(runId, "wait")?.id as StepRunId, { force: "fail" }, "mcp");
 

@@ -1,6 +1,8 @@
-import type { ClientOrigin, DefChange, DefCreate, DefIssue, DefUpdate, DefWrite, DefWriteKind, FlowDef } from "@clanker/api";
+import type { ClientOrigin, DefChange, DefCreate, DefIssue, DefUpdate, DefWrite, DefWriteKind, FlowDef, RepoId } from "@clanker/api";
 import type { Flows } from "../flows/flows";
 import { canonicalJson, DefValidationError, type Def, type DefScope, type Defs } from "./defs";
+import { issuesAsLines } from "../errors/format";
+import { isRecord } from "./defs";
 
 /** No existe la def que se quiere cambiar. */
 export class DefNotFoundError extends Error {
@@ -40,7 +42,7 @@ export function createDefWriter({ defs, flows }: { defs: Defs; flows: Pick<Flows
   }
 
   /** `slug` es el que ya se conoce (el de la def a actualizar, o el que dio quien crea); un flujo lo trae en su body. */
-  function check(kind: DefWriteKind, slug: string | undefined, body: unknown, repoId: string | undefined): Checked {
+  function check(kind: DefWriteKind, slug: string | undefined, body: unknown, repoId: RepoId | undefined): Checked {
     let parsed: unknown;
     try {
       parsed = defs.validate(kind, slug ?? "", body);
@@ -79,7 +81,7 @@ export function createDefWriter({ defs, flows }: { defs: Defs; flows: Pick<Flows
   ): DefWrite {
     const { warnings } = checked;
     if (errors.length > 0) {
-      if (!dryRun) throw new DefWriteError(`No se guardó ${kind} "${checked.slug ?? ""}":\n` + errors.map((e) => `  ${e.path || "(raíz)"}: ${e.message}`).join("\n"));
+      if (!dryRun) throw new DefWriteError(`No se guardó ${kind} "${checked.slug ?? ""}":\n` + issuesAsLines(errors));
       return { dryRun, errors, warnings, changed: false, diff: [], def: null };
     }
     const diff = diffBodies(before, checked.parsed);
@@ -147,4 +149,3 @@ export function diffBodies(before: unknown, after: unknown, path = ""): DefChang
   return canonicalJson(before) === canonicalJson(after) ? [] : [{ path, before, after }];
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);

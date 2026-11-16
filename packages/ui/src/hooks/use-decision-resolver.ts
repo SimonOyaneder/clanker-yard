@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { optionLabel } from "@/lib/decisions"
+import { messageOf } from "@/lib/utils"
 
 /** Lo que dura el aviso con "Deshacer": la corrida no parte hasta que pasa. */
 export const UNDO_MS = 5000
@@ -13,7 +14,6 @@ interface Resolving {
   sent: boolean
 }
 
-const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /**
  * Resolver con deshacer. El core no tiene "reabrir": resolver reencola la corrida de inmediato. Así que

@@ -1,16 +1,17 @@
-import type { ProjectId, QueueEntry } from "@clanker/api";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import type { IssueId, ProjectId, QueueEntry } from "@clanker/api";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Prs } from "../github/prs";
 import { repoOfRun } from "../projects/issue-repos";
 import { ProjectNotFoundError, type Projects } from "../projects/projects";
 import { chosenRepos } from "../projects/repo-question";
-import { issueBoosts, issueSkips, pullRequests, runs } from "../store/schema";
+import { issueBoosts, issueSkips, runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
 import type { Trackers } from "../tracker/trackers";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { type QueuePrFact, tickDev } from "./queue";
+import { openOwnedPrsOfIssues } from "../github/pr-rows";
 
 /** El core no puede calcular la cola de este proyecto (no tiene el adapter de su tracker o no puede leerlo): el mensaje dice qué falta. */
 export class QueueUnavailableError extends Error {}
@@ -41,13 +42,9 @@ export interface ProjectQueue {
 
 export function createProjectQueue({ store, projects, issues, repos, trackers, prs }: ProjectQueueDeps): ProjectQueue {
   /** Los PRs abiertos del sistema de estas issues, con el CI de cada uno si el proyecto apila sobre CI verde. */
-  async function prFacts(issueIds: readonly string[], readCi: boolean): Promise<QueuePrFact[]> {
+  async function prFacts(issueIds: readonly IssueId[], readCi: boolean): Promise<QueuePrFact[]> {
     if (issueIds.length === 0) return [];
-    const rows = store.db
-      .select()
-      .from(pullRequests)
-      .where(and(eq(pullRequests.owned, true), eq(pullRequests.state, "open"), inArray(pullRequests.issueId, [...issueIds])))
-      .all();
+    const rows = openOwnedPrsOfIssues(store.db, [...issueIds]);
     const facts = await Promise.all(
       rows.map(async (row): Promise<QueuePrFact | undefined> => {
         const repo = repos.get(row.repoId);

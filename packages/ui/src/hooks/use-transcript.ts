@@ -2,6 +2,7 @@ import type { AgentSessionId, TranscriptEntry } from "@clanker/api"
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { useAppData } from "@/app-data"
 import { useLive } from "@/hooks/use-live"
+import { messageOf } from "@/lib/utils"
 
 interface Loaded {
   entries: TranscriptEntry[]
@@ -35,7 +36,7 @@ export function useTranscript(sessionId: AgentSessionId, live: boolean) {
           setState((s) => ({ entries: page.entries.length ? [...s.entries, ...page.entries] : s.entries, hasMore: page.hasMore, loaded: true, error: null }))
         },
         (e: unknown) => {
-          if (mounted.current) setState((s) => ({ ...s, hasMore: false, loaded: true, error: e instanceof Error ? e.message : String(e) }))
+          if (mounted.current) setState((s) => ({ ...s, hasMore: false, loaded: true, error: messageOf(e) }))
         },
       )
       .finally(() => {

@@ -14,6 +14,7 @@ import { useHost } from "@/host"
 import { copy } from "@/lib/clipboard"
 import { tone } from "@/lib/format"
 import { looksLikeGitHubRepo } from "@/lib/repo-path"
+import { messageOf } from "@/lib/utils"
 
 const RECIPE = {
   found: { label: "encontrada", tone: tone.green, hint: "El repo tiene .clanker/recipe.json y es válida." },
@@ -47,7 +48,7 @@ export function ReposTable({ rows, onTest, onAdded }: Props) {
       toast.success(`Registré ${repo.name}`)
       return true
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = messageOf(err)
       setDialog({
         path,
         error: looksLikeGitHubRepo(path) ? `"${path}" parece el repo de GitHub, pero acá se pide la carpeta local donde tienes clonado el repo (el checkout). ${message}` : message,

@@ -192,8 +192,8 @@ function ciOf(node: PrNode, { ciRules }: ResolvedPack): PrState["ci"] {
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * Si la cuenta conectada ya comentó el comando de merge (solo ese texto, como el `/merge` de Control y el
- * vigilante): en cola, o fallida si el check de la cola (`queueCheck`, merge-queue) quedó en FAILURE o ERROR.
+ * Si la cuenta conectada ya comentó el comando de merge (un comentario que es solo ese texto, comparado
+ * literal): en cola, o fallida si el check de la cola (`queueCheck`, merge-queue) quedó en FAILURE o ERROR.
  */
 function queueOf(node: PrNode, strategy: MergeStrategy | undefined, viewer: string): PrState["merge"]["queue"] {
   if (!strategy) return null;
@@ -240,7 +240,7 @@ export function answered(thread: RawThread, prefix: string | undefined): boolean
 }
 
 /**
- * Lo que dijeron los humanos, como el vigilante (`clanker-loop watch`): una review que pide cambios, o
+ * Lo que dijeron los humanos: una review que pide cambios, o
  * con texto que no es un "LGTM" solo (`silentReviewBody`, sin distinguir mayúsculas), de cualquier
  * estado menos las sin enviar (una descartada con texto sigue contando), cada comentario de la
  * conversación y el primer comentario de cada thread sin resolver (sus respuestas no). Un texto de solo

@@ -6,7 +6,7 @@ import { AppDataProvider } from "@/app-data"
 import { GitHubCard } from "@/components/connections/github-card"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { HostProvider, type Host } from "@/host"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 import { stepperOf } from "@/lib/stepper"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")

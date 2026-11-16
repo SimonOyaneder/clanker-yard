@@ -10,3 +10,5 @@ coverage
 *.sqlite-shm
 # capturas de UI: se miran, no se versionan
 screenshots/
+# estado local de desloppify
+.desloppify/

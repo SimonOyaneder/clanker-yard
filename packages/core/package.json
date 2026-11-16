@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -22,6 +23,7 @@
     "@octokit/graphql": "^9.0.5",
     "@octokit/request-error": "^7.1.2",
     "@orpc/server": "^1.16.2",
+    "ajv": "^8.20.0",
     "drizzle-orm": "1.0.0-rc.5",
     "ulid": "3.0.2",
     "yaml": "^2.9.1",
@@ -29,7 +31,7 @@
   },
   "devDependencies": {
     "@orpc/client": "^1.16.2",
-    "ajv": "^8.20.0",
+    "@orpc/contract": "^1.16.2",
     "drizzle-kit": "1.0.0-rc.5",
     "esbuild": "^0.28.2",
     "graphql": "^17.1.0"

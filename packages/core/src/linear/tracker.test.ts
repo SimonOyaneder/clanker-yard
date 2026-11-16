@@ -9,8 +9,8 @@ import { newId } from "../store/conventions";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { IssueNotFoundError, type Tracker } from "../tracker/tracker";
-import { startFakeLinear, type FakeLinear } from "./fake-linear";
-import type { FakeIssue, FakeProject, FakeTeam, FakeWorkspace } from "./fake-workspace";
+import { startFakeLinear, type FakeLinear } from "../testing/linear/fake-linear";
+import type { FakeIssue, FakeProject, FakeTeam, FakeWorkspace } from "../testing/linear/fake-workspace";
 import { createLinearGraphql, LinearApiError } from "./graphql";
 import { createLinearTracker, NO_PROJECT, type LinearTrackerOptions } from "./tracker";
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { OUTPUT_INLINE_MAX_BYTES } from "./engine";
-import { devProfile, devRole, harness as createHarness, okReport } from "./harness";
+import { devProfile, devRole, harness as createHarness, okReport, WAIT } from "./harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -785,7 +785,7 @@ describe("dispatcher", () => {
     const first = h.start("dev-flow", { type: "issue", id: "dev-1" });
     const second = h.start("dev-flow", { type: "issue", id: "dev-2" });
     const maintenance = h.start("maint-flow", { type: "pr", id: "pr-3" });
-    await vi.waitFor(() => expect(h.calls.map((c) => c.subject)).toEqual(["dev-1"]));
+    await vi.waitFor(() => expect(h.calls.map((c) => c.subject)).toEqual(["dev-1"]), WAIT);
 
     release();
     await Promise.all([h.finished(first), h.finished(second), h.finished(maintenance)]);

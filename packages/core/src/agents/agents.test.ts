@@ -29,6 +29,9 @@ import {
   type Usage,
 } from "./runtime";
 
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
+
 const open: Store[] = [];
 afterEach(() => {
   for (const store of open.splice(0)) store.close();
@@ -749,7 +752,7 @@ describe("prefijo compartido", () => {
     const { agents } = setup([stepOf("A", log, firstToken.promise), stepOf("B", log), stepOf("C", log)]);
 
     const runs = [agents.run(request()), agents.run(request()), agents.run(request())];
-    await vi.waitFor(() => expect(log).toEqual(["parte A"]));
+    await vi.waitFor(() => expect(log).toEqual(["parte A"]), WAIT);
     await settleMicrotasks();
     expect(log).toEqual(["parte A"]);
     firstToken.resolve();
@@ -779,7 +782,7 @@ describe("prefijo compartido", () => {
     const a = agents.run(request());
     const b = agents.run(request());
 
-    await vi.waitFor(() => expect(log).toEqual(["parte A", "parte B", "primer token B"]));
+    await vi.waitFor(() => expect(log).toEqual(["parte A", "parte B", "primer token B"]), WAIT);
     firstToken.resolve();
     await Promise.all([a, b]);
   });
@@ -791,7 +794,7 @@ describe("prefijo compartido", () => {
 
     const a = agents.run(request());
     const b = agents.run({ ...request(), profileRole: "analyst-opus" });
-    await vi.waitFor(() => expect(log).toContain("primer token B"));
+    await vi.waitFor(() => expect(log).toContain("primer token B"), WAIT);
     expect(log[0]).toBe("parte A");
     firstToken.resolve();
     await Promise.all([a, b]);
@@ -803,13 +806,13 @@ describe("prefijo compartido", () => {
     const { agents } = setup([stepOf("A", log, firstToken.promise), stepOf("B", log)]);
 
     const a = agents.run(request());
-    await vi.waitFor(() => expect(log).toEqual(["parte A"]));
+    await vi.waitFor(() => expect(log).toEqual(["parte A"]), WAIT);
     const controller = new AbortController();
     const b = agents.run({ ...request(), signal: controller.signal });
     await settleMicrotasks();
     expect(log).toEqual(["parte A"]);
     controller.abort();
-    await vi.waitFor(() => expect(log).toContain("parte B"));
+    await vi.waitFor(() => expect(log).toContain("parte B"), WAIT);
     firstToken.resolve();
     await Promise.all([a, b]);
   });

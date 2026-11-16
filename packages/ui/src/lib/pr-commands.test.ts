@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { buildOpenPrs } from "@/seed-prs"
+import { buildOpenPrs } from "@/demo/seed-prs"
 import { mergeMark } from "./pr-status"
 import { prCaps, whyNotMerge } from "./pr-commands"
 import { openPrsOf, type OpenPr } from "./prs"

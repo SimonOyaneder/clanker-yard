@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useLiveQuery } from "@/hooks/use-live"
 import { useHost } from "@/host"
 import { KIND_LABEL, nameOf, repoFilePath } from "@/lib/defs-library"
-import { messageOf } from "@/lib/undoable"
+import { messageOf } from "@/lib/utils"
 
 interface Props {
   def: DefRecord

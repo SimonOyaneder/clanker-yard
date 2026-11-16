@@ -1,7 +1,7 @@
 import type { ClankerProject, Conventions, DefRecord, ProjectPatch, StackOn, StatusCategory } from "@clanker/api"
 import { FlowDef } from "@clanker/api"
 
-// El modelo de la pestaña Ajustes: lo que el formulario edita (`Draft`, solo texto y listas), cómo sale de un proyecto,
+// El modelo de la pestaña Ajustes: lo que el formulario edita (`ProjectDraft`, solo texto y listas), cómo sale de un proyecto,
 // qué le falta para guardarse y qué `ProjectPatch` produce. Un campo vacío siempre significa "el default": el del
 // core (la cola mira `todo`, excluye `no-clanker`) o el del flujo (un parámetro sin valor usa su `default`).
 
@@ -109,7 +109,7 @@ export interface ConventionsDraft {
   omitSections: string[]
 }
 
-export interface Draft {
+export interface ProjectDraft {
   /** El proyecto del tracker (`trackerRef`); en un proyecto local no se edita. */
   trackerRef: string
   /** La cuenta del tracker (`trackerAccount`); la fija el selector junto con el proyecto. */
@@ -134,7 +134,7 @@ export interface Draft {
 /** Los nombres de parámetro que Ajustes administra: los demás `flowParams` (el `repo` de un flujo, por ejemplo) no se tocan. */
 export const managedParams = (flows: readonly DefRecord[]): string[] => allParamSpecs(flows, null).map((s) => s.name)
 
-export function draftOf(project: ClankerProject, managed: readonly string[]): Draft {
+export function draftOf(project: ClankerProject, managed: readonly string[]): ProjectDraft {
   const c = project.conventions
   return {
     trackerRef: project.trackerRef,
@@ -162,7 +162,7 @@ export function draftOf(project: ClankerProject, managed: readonly string[]): Dr
 }
 
 /** Compara por valor sin importar el orden de las claves. */
-export function same(a: unknown, b: unknown): boolean {
+export function sameValue(a: unknown, b: unknown): boolean {
   const canonical = (value: unknown): unknown =>
     Array.isArray(value)
       ? value.map(canonical)
@@ -172,7 +172,7 @@ export function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))
 }
 
-export type Problems = Record<string, string>
+export type FieldProblems = Record<string, string>
 
 /** Qué corregir en las corridas a la vez de un proyecto, o `undefined` si el texto sirve. */
 export function parallelProblem(text: string): string | undefined {
@@ -187,8 +187,8 @@ export function maxCostProblem(text: string): string | undefined {
 }
 
 /** Qué impide guardar y cómo arreglarlo, por campo (`repo:<id>`, `labels`, `param:<nombre>`...). Sin problemas, `{}`. */
-export function validate(draft: Draft, params: readonly ParamSpec[]): Problems {
-  const problems: Problems = {}
+export function validateProjectDraft(draft: ProjectDraft, params: readonly ParamSpec[]): FieldProblems {
+  const problems: FieldProblems = {}
 
   const owner = new Map<string, string>()
   for (const { repoId, labels } of draft.repos) {
@@ -260,22 +260,22 @@ function paramValue(spec: ParamSpec | undefined, text: string): string | number 
  * Lo que cambió el formulario respecto de `base`, como `projects.update`: solo las secciones distintas. `specs`
  * da el tipo de cada parámetro; los `flowParams` que el formulario no administra (el `repo` de un flujo) quedan igual.
  */
-export function patchOf(draft: Draft, base: Draft, project: ClankerProject, specs: readonly ParamSpec[]): ProjectPatch {
+export function patchOf(draft: ProjectDraft, base: ProjectDraft, project: ClankerProject, specs: readonly ParamSpec[]): ProjectPatch {
   const patch: ProjectPatch = {}
   if (project.tracker !== "local" && draft.trackerRef !== base.trackerRef) patch.trackerRef = draft.trackerRef
   if (project.tracker !== "local" && draft.trackerAccount !== null && draft.trackerAccount !== base.trackerAccount) patch.trackerAccount = draft.trackerAccount
-  if (!same(draft.repos, base.repos)) patch.repos = draft.repos.map((r) => ({ repoId: r.repoId as ClankerProject["repos"][number]["repoId"], labels: r.labels }))
-  if (!same([draft.status, draft.labels, draft.excludeLabels], [base.status, base.labels, base.excludeLabels])) {
+  if (!sameValue(draft.repos, base.repos)) patch.repos = draft.repos.map((r) => ({ repoId: r.repoId as ClankerProject["repos"][number]["repoId"], labels: r.labels }))
+  if (!sameValue([draft.status, draft.labels, draft.excludeLabels], [base.status, base.labels, base.excludeLabels])) {
     patch.queueFilter = {
       ...(draft.status.length && { status: draft.status }),
       ...(draft.labels.length && { labels: draft.labels }),
       ...(draft.excludeLabels.length && { excludeLabels: draft.excludeLabels }),
     }
   }
-  if (!same(draft.statusMapping, base.statusMapping)) patch.statusMapping = draft.statusMapping
+  if (!sameValue(draft.statusMapping, base.statusMapping)) patch.statusMapping = draft.statusMapping
   if (draft.defaultFlowId !== base.defaultFlowId) patch.defaultFlowId = draft.defaultFlowId
   if (draft.defaultProfileId !== base.defaultProfileId) patch.defaultProfileId = draft.defaultProfileId
-  if (!same(draft.params, base.params)) {
+  if (!sameValue(draft.params, base.params)) {
     const names = new Set(Object.keys({ ...draft.params, ...base.params }))
     const kept = Object.fromEntries(Object.entries(project.flowParams).filter(([name]) => !names.has(name)))
     const set = Object.fromEntries(
@@ -288,7 +288,7 @@ export function patchOf(draft: Draft, base: Draft, project: ClankerProject, spec
     )
     patch.flowParams = { ...kept, ...set }
   }
-  if (!same(draft.conventions, base.conventions)) patch.conventions = conventionsOf(draft.conventions, project.conventions)
+  if (!sameValue(draft.conventions, base.conventions)) patch.conventions = conventionsOf(draft.conventions, project.conventions)
   if (draft.stackOn !== base.stackOn) patch.stackOn = draft.stackOn
   if (draft.parallel.trim() !== base.parallel) patch.parallel = Number(draft.parallel)
   if (draft.maxCostUsd !== base.maxCostUsd) patch.maxCostUsd = draft.maxCostUsd.trim() === "" ? null : Number(draft.maxCostUsd)

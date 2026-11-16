@@ -1,7 +1,7 @@
 import type { ClankerProject } from "@clanker/api";
 import { trackersByKind } from "../tracker/trackers";
 import { describe, expect, test, vi } from "vitest";
-import { createErrorReporter } from "./report";
+import { createErrorReporter } from "../errors/reporter";
 import { createTrackerChanges, TRACKER_EVERY_MS } from "./tracker-changes";
 import { openStore } from "../store/store";
 import type { Tracker } from "../tracker/tracker";
@@ -18,7 +18,7 @@ function setup(projects: ClankerProject[], hasChanges: (id: string) => Promise<b
     trackers: trackersByKind({ linear: tracker }),
     issues: { hasChanges: (_, { project: ref }) => hasChanges(ref.id) },
     onChanges,
-    errors: createErrorReporter(store),
+    errors: createErrorReporter(store).within("watch"),
   });
   return { store, onChanges, changes, errors: () => store.events.since(0, { types: ["error"] }).map((e) => e.payload) };
 }

@@ -3,7 +3,7 @@ import { createRouterClient, ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { Connections } from "../connections/connections";
 import { createRouter } from "../server/router";
-import { apiDeps } from "../server/testing";
+import { apiDeps, withPrs } from "../server/testing";
 import { newId } from "../store/conventions";
 import { issues as issuesTable } from "../store/schema";
 import { openStore, type Store } from "../store/store";
@@ -234,7 +234,7 @@ describe("list", () => {
 
 describe("API", () => {
   function client(origin: "ui" | "cli" = "ui") {
-    const router = createRouter({
+    const router = createRouter(withPrs({
       store,
       connections: {} as Connections,
       issues,
@@ -244,7 +244,7 @@ describe("API", () => {
       startedAt: 0,
       dataDir: "/tmp/clanker",
       onShutdown: () => {},
-    });
+    }));
     return createRouterClient(router, { context: { origin } });
   }
 

@@ -1,5 +1,6 @@
 import type { JsonSchema } from "@clanker/api";
 import { Ajv } from "ajv";
+import { messageOf } from "../../errors/format";
 
 /**
  * Por qué Claude Code no podría compilar `schema` como `--json-schema`, o `undefined` si puede. Claude Code lo compila
@@ -17,6 +18,6 @@ export function claudeSchemaError(schema: JsonSchema): string | undefined {
     ajv.compile(sent);
     return undefined;
   } catch (error) {
-    return error instanceof Error ? error.message : String(error);
+    return messageOf(error);
   }
 }

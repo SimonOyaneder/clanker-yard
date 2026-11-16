@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ContextSource } from "@clanker/api";
+import type { ContextSource, RepoId } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createDefs, type Defs } from "../defs/defs";
 import { createPacks, type Packs } from "../packs/packs";
@@ -37,7 +37,7 @@ const write = async (path: string, content: string) => {
   await writeFile(path, content);
 };
 
-const resolve = (sources: ContextSource[], extra: { role?: string; repoId?: string } = {}): Promise<ResolvedContext> =>
+const resolve = (sources: ContextSource[], extra: { role?: string; repoId?: RepoId } = {}): Promise<ResolvedContext> =>
   resolver.resolve({ role: extra.role ?? "dev", sources, cwd, repoId: extra.repoId });
 
 const saveContext = (slug: string, refs: string[], scope: "builtin" | "user" = "user") =>

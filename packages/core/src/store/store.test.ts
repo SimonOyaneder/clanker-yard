@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { RunId } from "@clanker/api";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, test, vi } from "vitest";
 import { microsToUsd, newId, usdToMicros } from "./conventions";
 import { SchemaTooNewError } from "./migrate";
 import { events, meta } from "./schema";
@@ -293,4 +294,25 @@ describe("convenciones", () => {
     expect(usdToMicros(920)).toBe(920_000_000);
     expect(microsToUsd(1_234_567)).toBe(1.234567);
   });
+});
+
+test("los eventos de EventPayloads llevan su payload tipado al emitir y al escuchar", () => {
+  const store = openStore({ path: ":memory:" });
+  const seen: RunId[] = [];
+  const off = store.events.subscribe((event) => {
+    expectTypeOf(event.payload.fromRunId).toEqualTypeOf<RunId>();
+    seen.push(event.payload.fromRunId);
+  }, { types: ["run.returned"] });
+  const lender = "run_00000000000000000000000001" as RunId;
+  const borrower = "run_00000000000000000000000002" as RunId;
+
+  store.tx((tx) => tx.emit({ type: "run.returned", origin: "core", payload: { runId: borrower, fromRunId: lender } }));
+  // Solo para el tipo: a un `run.returned` sin `fromRunId` lo rechaza el compilador.
+  // @ts-expect-error falta `fromRunId`
+  const missing = () => store.tx((tx) => tx.emit({ type: "run.returned", origin: "core", payload: { runId: borrower } }));
+  expect(missing).toBeTypeOf("function");
+
+  expect(seen[0]).toBe(lender);
+  off();
+  store.close();
 });

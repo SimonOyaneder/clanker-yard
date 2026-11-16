@@ -5,7 +5,7 @@ import { AppDataProvider } from "@/app-data"
 import { RunCommandsProvider } from "@/components/project/run-commands"
 import { RunView } from "@/components/project/run-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 

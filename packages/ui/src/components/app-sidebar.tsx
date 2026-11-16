@@ -19,7 +19,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { useAppActions } from "@/lib/app-context"
+import { type Module, useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
 import { footerStatus, type FooterTone } from "@/lib/core-status"
 import { readPref, writePref } from "@/lib/prefs"
@@ -30,36 +30,24 @@ import { Hint } from "./common"
 
 interface Props {
   projects: ClankerProject[]
-  inboxActive: boolean
+  /** El módulo a la vista: su ítem queda marcado (en `projects`, el proyecto elegido). */
+  module: Module
   /** Decisiones pendientes; ámbar si alguna estaciona su corrida. */
   inboxBadge: { count: number; parks: boolean } | null
-  onSelectInbox: () => void
-  learningsActive: boolean
   /** Learnings por revisar: sin número cuando no queda ninguno. */
   learningsBadge: number
-  onSelectLearnings: () => void
   /** Las corridas vivas de todos los proyectos (cualquier estado menos terminadas). */
   liveRuns: Run[]
   selected: string | null
-  prsActive: boolean
-  connectionsActive: boolean
-  flowsActive: boolean
-  onSelectFlows: () => void
-  settingsActive: boolean
-  onSelectSettings: () => void
   /** Algo está vencido o caído: enciende el punto rojo de Conexiones. */
   connectionsAlert: boolean
-  onSelectConnections: () => void
   plan: ClaudePlan
   /** La configuración inicial; `null` mientras no llegan las conexiones, los repos y los proyectos. */
   setup: { steps: SetupStep[]; onStep: (id: SetupStepId) => void } | null
   prsBadge: { count: number; tone: "red" | "green" | "muted" } | null
-  onSelectPrs: () => void
   connected: boolean
   error: string | null
   core: CoreState | undefined
-  onOpenPalette: () => void
-  onOpenShortcuts: () => void
 }
 
 function badge(live: Run[]): { text: string; className: string; title: string } | null {
@@ -108,8 +96,9 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, learningsActive, learningsBadge, onSelectLearnings, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, flowsActive, onSelectFlows, settingsActive, onSelectSettings, plan, setup, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
+export function AppSidebar({ projects, module, inboxBadge, learningsBadge, liveRuns, selected, connectionsAlert, plan, setup, prsBadge, connected, error, core }: Props) {
   const actions = useAppActions()
+  const go = (to: Module) => () => actions.goModule(to)
   const status = footerStatus(core, { error, connected })
   const inBar = barProjects(projects)
   const indexOf = (slug: string) => inBar.findIndex((p) => p.slug === slug)
@@ -120,14 +109,14 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
   const archived = group("archived")
 
   const item = (p: ClankerProject, index: number | null) => (
-    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!inboxActive && !learningsActive && !prsActive && !connectionsActive && !flowsActive && !settingsActive && p.slug === selected} />
+    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={module === "projects" && p.slug === selected} />
   )
 
   return (
     <Sidebar collapsible="offcanvas" className="border-r-0">
       <SidebarHeader className="drag h-11 flex-row items-center justify-end gap-0.5 px-2 py-0">
         <Hint label="Buscar o ejecutar" keys="⌘K" side="bottom">
-          <button type="button" onClick={onOpenPalette} aria-label="Paleta de comandos" className="no-drag grid size-7 place-items-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
+          <button type="button" onClick={actions.openPalette} aria-label="Paleta de comandos" className="no-drag grid size-7 place-items-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
             <Search className="size-4" />
           </button>
         </Hint>
@@ -146,8 +135,8 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  isActive={inboxActive}
-                  onClick={onSelectInbox}
+                  isActive={module === "inbox"}
+                  onClick={go("inbox")}
                   title={`Bandeja · ⇧⌘I · G luego I${inboxBadge ? ` · ${inboxBadge.count === 1 ? "1 decisión pendiente" : `${inboxBadge.count} decisiones pendientes`}${inboxBadge.parks ? ", alguna estaciona su corrida" : ""}` : " · nada pendiente"}`}
                   className="h-8 pr-10"
                 >
@@ -160,8 +149,8 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  isActive={learningsActive}
-                  onClick={onSelectLearnings}
+                  isActive={module === "learnings"}
+                  onClick={go("learnings")}
                   title={`Learnings · ⇧⌘A · G luego A${learningsBadge ? ` · ${learningsBadge === 1 ? "1 por revisar" : `${learningsBadge} por revisar`}` : " · nada por revisar"}`}
                   className="h-8 pr-10"
                 >
@@ -171,7 +160,7 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
                 {learningsBadge ? <SidebarMenuBadge className="text-[11px] text-muted-foreground">{learningsBadge}</SidebarMenuBadge> : null}
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={prsActive} onClick={onSelectPrs} title={`Stacks de PR · ⇧⌘P${prsBadge?.count ? ` · ${prsBadge.tone === "red" ? `${prsBadge.count} necesitan acción tuya` : prsBadge.tone === "green" ? `${prsBadge.count} listos para merge` : `${prsBadge.count} abiertos`}` : ""}`} className="h-8 pr-10">
+                <SidebarMenuButton isActive={module === "prs"} onClick={go("prs")} title={`Stacks de PR · ⇧⌘P${prsBadge?.count ? ` · ${prsBadge.tone === "red" ? `${prsBadge.count} necesitan acción tuya` : prsBadge.tone === "green" ? `${prsBadge.count} listos para merge` : `${prsBadge.count} abiertos`}` : ""}`} className="h-8 pr-10">
                   <GitPullRequest className="size-4" />
                   <span>Stacks de PR</span>
                 </SidebarMenuButton>
@@ -242,7 +231,7 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={connectionsActive} onClick={onSelectConnections} title={`Conexiones · G luego C${connectionsAlert ? " · algo está vencido o caído" : ""}`} className="h-8 pr-8">
+                <SidebarMenuButton isActive={module === "connections"} onClick={go("connections")} title={`Conexiones · G luego C${connectionsAlert ? " · algo está vencido o caído" : ""}`} className="h-8 pr-8">
                   <Plug className="size-4" />
                   <span>Conexiones</span>
                 </SidebarMenuButton>
@@ -253,13 +242,13 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
                 ) : null}
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={flowsActive} onClick={onSelectFlows} title="Flujos, roles y perfiles" className="h-8">
+                <SidebarMenuButton isActive={module === "flows"} onClick={go("flows")} title="Flujos, roles y perfiles" className="h-8">
                   <Workflow className="size-4" />
                   <span>Flujos</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={settingsActive} onClick={onSelectSettings} title="Carriles, packs y defaults de proyectos nuevos" className="h-8">
+                <SidebarMenuButton isActive={module === "settings"} onClick={go("settings")} title="Carriles, packs y defaults de proyectos nuevos" className="h-8">
                   <Settings className="size-4" />
                   <span>Ajustes</span>
                 </SidebarMenuButton>
@@ -281,7 +270,7 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
             </button>
           </Hint>
           <Hint label="Atajos de teclado" keys="⌘/" side="top">
-            <button type="button" onClick={onOpenShortcuts} aria-label="Atajos de teclado" className="grid size-7 place-items-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
+            <button type="button" onClick={actions.openShortcuts} aria-label="Atajos de teclado" className="grid size-7 place-items-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
               <Keyboard className="size-4" />
             </button>
           </Hint>

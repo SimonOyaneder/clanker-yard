@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { DEFAULT_RANGE, ORIGINS, type Origin, type RangePreset, type SummaryRange } from "@/lib/summary"
+import { isTypingTarget, overlayOpen } from "@/lib/keys"
 
 /** Rango, origen y vista (gráficos o tablas) del Resumen. Viven en `App` para que la paleta y los atajos los muevan. */
 export interface SummaryControls {
@@ -33,8 +34,8 @@ export function useSummaryControls(active: boolean): SummaryControls {
     if (!active) return
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
-      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true'], [role='combobox']")) return
-      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
+      if (isTypingTarget(e.target, ["[role='combobox']"])) return
+      if (overlayOpen()) return
       const key = e.key.toLowerCase()
       if (key === "t") toggleTables()
       else if (key === "o") cycleOrigin()

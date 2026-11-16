@@ -1,15 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MergeStrategy, PrRef } from "@clanker/api";
+import type { MergeStrategy, PrRef, RepoId } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
-import { createRepos, type Repos } from "../workspaces/repos";
-import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "./fake-github";
-import { prGraphql, type DefaultBranchCommit } from "./fake-pr-graphql";
+import { createRepos, type Repos } from "../repos/repos";
+import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
+import { prGraphql, type DefaultBranchCommit } from "../testing/github/fake-pr-graphql";
 import { createMergeScope } from "./merge-scope";
 import { prNode } from "./pr-fixtures";
 
@@ -32,7 +32,7 @@ let dir: string;
 let store: Store;
 let github: FakeGitHub | undefined;
 let repos: Repos;
-let repoId: string;
+let repoId: RepoId;
 let clock: number;
 /** Los commits de la branch por defecto que GitHub responde ahora. */
 let history: DefaultBranchCommit[];

@@ -9,6 +9,7 @@ import type { Recipes } from "../recipe/recipe";
 import { excerpt } from "../workspaces/exec";
 import { splitMoves } from "./split-moves";
 import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
+import { messageOf } from "../errors/format";
 
 /** Conventional Commits: el formato por defecto. Un pack que pida otro pasa su `messagePattern`. */
 export const CONVENTIONAL_COMMIT = /^(feat|fix|refactor|docs|test|chore|perf|ci|build|style|revert)(\([^)]+\))?!?: \S/;
@@ -98,7 +99,7 @@ export function commitsApplyAction({
       recipe = recipes.read(ws.path);
     } catch (error) {
       // Una receta mal escrita no se arregla reintentando.
-      throw new PermanentActionError(error instanceof Error ? error.message : String(error), { cause: error });
+      throw new PermanentActionError(messageOf(error), { cause: error });
     }
     const dir = mkdtempSync(join(tmpdir(), "clanker-verify-"));
     const verify: WorkspaceRef = { ...ws, path: join(dir, "worktree") };

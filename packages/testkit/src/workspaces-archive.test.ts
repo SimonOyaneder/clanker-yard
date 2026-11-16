@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RunId } from "@clanker/api";
+import type { RunId, RepoId } from "@clanker/api";
 import {
   ARCHIVE_TTL_MS,
   createConnections,
@@ -77,7 +77,7 @@ beforeEach(async () => {
   workspaces = createWorkspaces({
     store,
     dataDir: dir,
-    repos: repos.config,
+    repoConfig: repos.config,
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote,
     now: () => clock,
@@ -98,7 +98,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const repoId = () => (store.db.$client.prepare("SELECT id FROM repos").get() as { id: string }).id;
+const repoId = () => (store.db.$client.prepare("SELECT id FROM repos").get() as { id: RepoId }).id;
 const row = (branch: string) =>
   store.db.$client.prepare("SELECT state, archived_at, holder_run_id FROM workspaces WHERE branch = ?").get(branch) as
     | { state: string; archived_at: number | null; holder_run_id: string | null }

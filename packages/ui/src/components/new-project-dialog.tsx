@@ -11,6 +11,7 @@ import { DefOption } from "@/components/def-option"
 import { TrackerProjectPicker } from "@/components/tracker-project-picker"
 import { useLiveQuery } from "@/hooks/use-live"
 import { defaultFlowSlug, defaultProfileSlug, defName, selectableFlows } from "@/lib/defs"
+import { messageOf } from "@/lib/utils"
 
 // Los trackers con adapter en el core. GitHub Issues y Jira existen en la API pero no tienen adapter: no se ofrecen.
 const TRACKERS: { id: TrackerId; label: string }[] = [
@@ -88,7 +89,7 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
     try {
       onCreated(await appData.createProject(input))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(messageOf(err))
       setSaving(false)
     }
   }

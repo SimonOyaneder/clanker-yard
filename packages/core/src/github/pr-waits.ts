@@ -103,7 +103,7 @@ interface TriageItem {
  * - `pr.ci { pr }`: `ok` con el CI verde, `fail` con `failures` apenas un check que cuenta falla (sin
  *   esperar a los pendientes). Con los checks pendientes sigue esperando. Cada falla trae `flaky: true` si
  *   el pack la declara flaky conocida. Un head sin ningún check que cuente (`ci.state === "none"`) también
- *   es `ok`, como en `ciGreen` del vigilante, pero solo cuando el caché lo conoce (`headSeen`, con ese mismo
+ *   es `ok` (un repo sin CI no espera para siempre), pero solo cuando el caché lo conoce (`headSeen`, con ese mismo
  *   sha) desde hace `NO_CI_GRACE_MS`: antes puede ser un CI que aún no registra sus checks. Un PR que
  *   el caché no conoce, o con un head distinto del leído, sigue esperando. Watch solo avisa por `signal` los
  *   cambios del PR, y el tiempo sin checks no lo es: este caso lo cierra el sondeo del wait.

@@ -8,14 +8,14 @@ import { createDefs } from "../defs/defs";
 import { createPacks, type Packs } from "../packs/packs";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createRouter } from "../server/router";
-import { apiDeps } from "../server/testing";
+import { apiDeps, withPrs } from "../server/testing";
 import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
-import { createRepos, type Repos } from "../workspaces/repos";
-import { healthyGitHub, startFakeGitHub, type FakeGitHub, type FakeRequest, type RecordedResponse } from "./fake-github";
+import { createRepos, type Repos } from "../repos/repos";
+import { healthyGitHub, startFakeGitHub, type FakeGitHub, type FakeRequest, type RecordedResponse } from "../testing/github/fake-github";
 import { PrNotFoundError } from "./pr-query";
-import { graphqlNotFound, prGraphql } from "./fake-pr-graphql";
+import { graphqlNotFound, prGraphql } from "../testing/github/fake-pr-graphql";
 import { bot, checkRun, HEAD_SHA, prNode, review, thread, user } from "./pr-fixtures";
 import { createPrs } from "./prs";
 
@@ -192,7 +192,7 @@ describe("prs.get", () => {
 
 describe("API", () => {
   async function clientFor(connections: Connections, repos?: Repos, origin: "ui" | "cli" | "mcp" = "ui") {
-    const router = createRouter({
+    const router = createRouter(withPrs({
       store,
       connections,
       issues: createIssues(store),
@@ -204,7 +204,7 @@ describe("API", () => {
       startedAt: 0,
       dataDir: dir,
       onShutdown: () => {},
-    });
+    }));
     return createRouterClient(router, { context: { origin } });
   }
 

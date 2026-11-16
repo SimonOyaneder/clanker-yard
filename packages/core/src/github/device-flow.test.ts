@@ -9,8 +9,8 @@ import { createFileSecrets } from "../secrets/encrypted-file";
 import type { Secrets } from "../secrets/secrets";
 import { openStore, type Store } from "../store/store";
 import { GitHubAuthError, pollDeviceToken, requestDeviceCode } from "./device-flow";
-import { recorded, startFakeGitHub, type FakeGitHub } from "./fake-github";
-import { startFakeGitHubOAuth, type FakeGitHubOAuth } from "./fake-github-oauth";
+import { recorded, startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
+import { startFakeGitHubOAuth, type FakeGitHubOAuth } from "../testing/github/fake-github-oauth";
 
 const NOW = 1_700_000_000_000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -338,7 +338,7 @@ describe("refresh", () => {
 
       expect((await changed).payload).toMatchObject({ provider: "github", account: ACCOUNT, status: "revoked" });
       expect(connections.list()[0]).toMatchObject({ status: "revoked", auth: "app" });
-      expect(breakers.open(GITHUB_SCOPE)).toContain(ACCOUNT);
+      expect(breakers.openReason(GITHUB_SCOPE)).toContain(ACCOUNT);
 
       const requests = oauth.requests.length;
       await expect(connections.token("github", ACCOUNT)).rejects.toThrow(/revocada/);

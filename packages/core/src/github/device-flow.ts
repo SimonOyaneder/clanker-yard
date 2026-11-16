@@ -87,14 +87,14 @@ async function post(url: string, form: Record<string, string>, signal?: AbortSig
   }
   const error = OAuthError.safeParse(body);
   if (error.success) {
-    if (TRANSIENT_ERRORS.has(error.data.error)) throw new Error(`GitHub no pudo atender la solicitud (${describe(error.data)}).`);
+    if (TRANSIENT_ERRORS.has(error.data.error)) throw new Error(`GitHub no pudo atender la solicitud (${oauthErrorText(error.data)}).`);
     return { kind: "error", error: error.data };
   }
   if (!response.ok) throw new Error(`GitHub respondió ${response.status} en ${url}.`);
   return { kind: "ok", body };
 }
 
-function describe({ error, error_description }: z.infer<typeof OAuthError>): string {
+function oauthErrorText({ error, error_description }: z.infer<typeof OAuthError>): string {
   return error_description ? `${error}: ${error_description}` : error;
 }
 
@@ -124,7 +124,7 @@ function startFailure(error: z.infer<typeof OAuthError>): string {
   if (error.error === "incorrect_client_credentials") {
     return "GitHub no reconoce el client_id de la GitHub App: revisa que sea el Client ID (empieza con Iv) y no el App ID (docs/github-app.md).";
   }
-  return `GitHub rechazó iniciar el device flow (${describe(error)}).`;
+  return `GitHub rechazó iniciar el device flow (${oauthErrorText(error)}).`;
 }
 
 export interface PollOptions {
@@ -191,7 +191,7 @@ export async function refreshAppTokens(
 ): Promise<GitHubAppTokens> {
   const reply = await post(endpoints.token, { client_id: clientId, grant_type: "refresh_token", refresh_token: refreshToken });
   if (reply.kind === "error") {
-    throw new GitHubAuthError(`GitHub rechazó renovar el token (${describe(reply.error)}): vuelve a conectar la GitHub App.`);
+    throw new GitHubAuthError(`GitHub rechazó renovar el token (${oauthErrorText(reply.error)}): vuelve a conectar la GitHub App.`);
   }
   return toTokens(reply.body, now);
 }

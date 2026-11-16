@@ -9,6 +9,7 @@ import { AppActionsContext } from "@/lib/app-context"
 import { parksRun } from "@/lib/decisions"
 import { tone } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { isTypingTarget, overlayOpen } from "@/lib/keys"
 
 /** Las decisiones pendientes que tienen estacionada la corrida: una a lo más, porque un paso a la vez la avanza. */
 function useParkingDecision(runId: RunId): Decision | undefined {
@@ -24,8 +25,8 @@ function useOpenWithD(decision: Decision | undefined) {
     if (!decision || !open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== "d" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
-      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return
-      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
+      if (isTypingTarget(e.target)) return
+      if (overlayOpen()) return
       e.preventDefault()
       open(decision.id)
     }

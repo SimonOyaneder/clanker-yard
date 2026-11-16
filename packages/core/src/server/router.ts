@@ -3,11 +3,10 @@ import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { GitHubAuthError } from "../github/device-flow";
 import { GitHubPatError, githubPatForm } from "../github/pat";
 import { PrNotFoundError } from "../github/pr-query";
-import { createMergeScope } from "../github/merge-scope";
-import { createPrCache, type PrCacheDeps } from "../github/pr-cache";
-import { createPrCommands, PrCommandError } from "../github/pr-commands";
-import { createPrs } from "../github/prs";
-import type { PrRepublisher } from "../github/republisher";
+import type { PrCache } from "../github/pr-cache";
+import { createPrCommands, PrCommandError } from "../github/actions/pr-commands";
+import type { Prs } from "../github/prs";
+import type { PrRepublisher } from "../github/actions/republisher";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
 import { CLAUDE_OPTIONS } from "../agents/claude/models";
@@ -40,8 +39,9 @@ import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import { TrackerProjectsError, type TrackerProjects } from "../tracker/tracker-projects";
 import { defaultLogDir } from "../workspaces/exec";
-import { NotAGitRepoError } from "../workspaces/inspect";
-import { InvalidRepoError, RepoNotFoundError, type Repos } from "../workspaces/repos";
+import { NotAGitRepoError } from "../repos/inspect";
+import { InvalidRepoError, RepoNotFoundError, type Repos } from "../repos/repos";
+import { isMergeOffer } from "../watch/merge-reactions";
 import { eventsAfter } from "./event-stream";
 
 /** Lo que cada llamada trae consigo, venga por HTTP o en proceso (`createRouterClient`, MCP). */
@@ -71,15 +71,17 @@ export interface RouterDeps {
   queue: ProjectQueue;
   /** `trackers.projects`. */
   trackerProjects: TrackerProjects;
-  /** `projects.skipIssue`, y el tick que `system.setLanes` y `projects.setParallel` piden para repartir el cupo que liberaron. */
+  /** `projects.skipIssue`, y el tick que `system.setLanes` pide para repartir el cupo que liberó. */
   scheduler: Pick<Scheduler, "skipIssue" | "boostIssue" | "tick">;
   /** `system.lanes` y `system.setLanes`. */
   lanes: LaneSettings;
   /** `system.breakers`. */
   breakers: Pick<Breakers, "list">;
   flows: Flows;
-  /** Lo que `prs.refresh` avisa cuando un PR cambió (los waits y los eventos de Watch): el core lo comparte con su propio caché. */
-  onPrChange?: PrCacheDeps["onChange"];
+  /** `prs.get` y lo que leen las acciones sobre un PR: el mismo que usan los waits del core. */
+  prs: Prs;
+  /** `prs.list` y `prs.refresh`: el caché del core, que avisa a los waits y a los eventos de Watch cuando un PR cambia. */
+  prCache: PrCache;
   artifacts: Artifacts;
   decisions: Decisions;
   learnings: Learnings;
@@ -107,37 +109,32 @@ export function createRouter(deps: RouterDeps) {
   const defWriter = createDefWriter({ defs: deps.defs, flows: deps.flows });
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
-  const prs = createPrs({ connections: deps.connections, packs: deps.packs, merge: createMergeScope({ store, repos, connections: deps.connections }) });
-  const prCache = createPrCache({ store, repos, packs: deps.packs, prs, onChange: deps.onPrChange });
+  const { prs, prCache } = deps;
   const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
-    if (!project) throw new ORPCError("NOT_FOUND", { message: `No existe el proyecto ${id}.` });
+    if (!project) throw toApiError(new ProjectNotFoundError(id));
     return project;
   };
   /** `runs.pause|resume|cancel|interrupt`: el comando y la corrida como quedó. */
   const controlRun = (id: RunId, cmd: "pause" | "resume" | "cancel", by: ClientOrigin, now?: boolean) =>
     asApiError(() => {
-      flows.control(id, cmd, { by, now });
+      flows.control(id, cmd, by, { now });
       return flows.getRun(id);
     });
   /** `runs.retryStep|steerStep|forceOutcome`: el comando y la corrida del paso como quedó. */
   const commandStep = (stepId: StepRunId, cmd: Parameters<Engine["stepCommand"]>[1], by: ClientOrigin) =>
     asApiError(() => flows.getRun(flows.stepCommand(stepId, cmd, by)));
-  /** Lo que `prs.*` hace con un PR de GitHub (leerlo, mergearlo...): traduce sus errores a los de la API. */
-  const readPr = async <T>(ref: PrRef, read: (ref: PrRef) => Promise<T>): Promise<T> => {
-    if (!deps.connections.list().some((c) => c.provider === "github" && c.account === ref.account)) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: `No hay una cuenta github conectada como "${ref.account}": conéctala primero.`,
-      });
-    }
-    try {
-      return await read(ref);
-    } catch (error) {
-      if (error instanceof PrNotFoundError) throw new ORPCError("NOT_FOUND", { message: error.message, cause: error });
-      throw error;
-    }
-  };
+  /** Lo que `prs.*` hace con un PR de GitHub (leerlo, mergearlo...), con la cuenta del PR ya conectada y sus errores traducidos a los de la API. */
+  const readPr = <T>(ref: PrRef, read: (ref: PrRef) => Promise<T>): Promise<T> =>
+    asApiErrorAsync(() => {
+      if (!deps.connections.list().some((c) => c.provider === "github" && c.account === ref.account)) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `No hay una cuenta github conectada como "${ref.account}": conéctala primero.`,
+        });
+      }
+      return read(ref);
+    });
   const platform = process.platform;
   if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
     throw new Error(
@@ -183,70 +180,18 @@ export function createRouter(deps: RouterDeps) {
     },
     connections: {
       list: os.connections.list.handler(() => deps.connections.list()),
-      setPat: os.connections.setPat.handler(async ({ input, context }) => {
-        try {
-          return await deps.connections.setPat(input.token, context.origin);
-        } catch (error) {
-          if (error instanceof GitHubPatError) {
-            throw new ORPCError("BAD_REQUEST", { message: error.message });
-          }
-          throw error;
-        }
-      }),
+      setPat: os.connections.setPat.handler(({ input, context }) => asApiErrorAsync(() => deps.connections.setPat(input.token, context.origin))),
       githubPatForm: os.connections.githubPatForm.handler(() => githubPatForm()),
-      startDeviceFlow: os.connections.startDeviceFlow.handler(async ({ context }) => {
-        try {
-          return await deps.connections.startDeviceFlow(context.origin);
-        } catch (error) {
-          if (error instanceof GitHubAuthError) {
-            throw new ORPCError("BAD_REQUEST", { message: error.message });
-          }
-          throw error;
-        }
-      }),
-      githubInstallations: os.connections.githubInstallations.handler(async () => {
-        try {
-          return await deps.connections.githubInstallations();
-        } catch (error) {
-          if (error instanceof GitHubAuthError) {
-            throw new ORPCError("BAD_REQUEST", { message: error.message });
-          }
-          throw error;
-        }
-      }),
-      linearAuth: os.connections.linearAuth.handler(async ({ context }) => {
-        try {
-          // `done` no se espera: el resultado llega como `connection.changed`, y un fallo se le muestra
-          // al usuario en la pestaña del navegador.
-          const { url } = await deps.connections.linearAuth(context.origin);
-          return { url };
-        } catch (error) {
-          if (error instanceof LinearAuthError) {
-            throw new ORPCError("BAD_REQUEST", { message: error.message });
-          }
-          throw error;
-        }
-      }),
-      testClaude: os.connections.testClaude.handler(async ({ input, context }) => {
-        try {
-          return await deps.connections.testClaude(input.mode, context.origin);
-        } catch (error) {
-          if (error instanceof ClaudeSetupError) {
-            throw new ORPCError("BAD_REQUEST", { message: error.message });
-          }
-          throw error;
-        }
-      }),
-      setClaudeApiKey: os.connections.setClaudeApiKey.handler(async ({ input, context }) => {
-        try {
-          return await deps.connections.setClaudeApiKey(input.key, context.origin);
-        } catch (error) {
-          if (error instanceof ClaudeSetupError) {
-            throw new ORPCError("BAD_REQUEST", { message: error.message });
-          }
-          throw error;
-        }
-      }),
+      startDeviceFlow: os.connections.startDeviceFlow.handler(({ context }) => asApiErrorAsync(() => deps.connections.startDeviceFlow(context.origin))),
+      githubInstallations: os.connections.githubInstallations.handler(() => asApiErrorAsync(() => deps.connections.githubInstallations())),
+      // `done` no se espera: el resultado llega como `connection.changed`, y un fallo se le muestra al usuario en la pestaña del navegador.
+      linearAuth: os.connections.linearAuth.handler(({ context }) =>
+        asApiErrorAsync(async () => ({ url: (await deps.connections.linearAuth(context.origin)).url })),
+      ),
+      testClaude: os.connections.testClaude.handler(({ input, context }) => asApiErrorAsync(() => deps.connections.testClaude(input.mode, context.origin))),
+      setClaudeApiKey: os.connections.setClaudeApiKey.handler(({ input, context }) =>
+        asApiErrorAsync(() => deps.connections.setClaudeApiKey(input.key, context.origin)),
+      ),
       disconnect: os.connections.disconnect.handler(async ({ input, context }) => {
         await deps.connections.disconnect(input.provider, input.account, context.origin);
       }),
@@ -310,13 +255,10 @@ export function createRouter(deps: RouterDeps) {
       ),
       exportConfig: os.projects.exportConfig.handler(({ input }) => asApiError(() => deps.projectConfigs.export(input.id))),
       importConfig: os.projects.importConfig.handler(({ input, context }) =>
-        asApiError(() => deps.projectConfigs.import(input.id, input.config, { dryRun: input.dryRun, origin: context.origin })),
+        asApiError(() => deps.projectConfigs.import(input.id, input.config, context.origin, { dryRun: input.dryRun })),
       ),
       pause: os.projects.pause.handler(({ input, context }) => asApiError(() => projects.pause(input.id, context.origin))),
       resume: os.projects.resume.handler(({ input, context }) => asApiError(() => projects.resume(input.id, context.origin))),
-      setParallel: os.projects.setParallel.handler(({ input: { id, parallel }, context }) =>
-        asApiError(() => projects.update(id, { parallel }, context.origin)),
-      ),
       skipIssue: os.projects.skipIssue.handler(({ input: { id, issueId, skipped }, context }) =>
         asApiError(() => deps.scheduler.skipIssue({ projectId: id, issueId, skipped }, context.origin)),
       ),
@@ -328,31 +270,37 @@ export function createRouter(deps: RouterDeps) {
     },
     packs: {
       list: os.packs.list.handler(() => deps.packs.list()),
-      install: os.packs.install.handler(({ input }) => asApiErrorAsync(() => deps.packs.install(input.path))),
-      remove: os.packs.remove.handler(({ input }) => asApiErrorAsync(() => deps.packs.remove(input.id))),
+      install: os.packs.install.handler(({ input, context }) =>
+        asApiErrorAsync(async () => {
+          const pack = await deps.packs.install(input.path);
+          store.tx((tx) => tx.emit({ type: "pack.installed", origin: context.origin, payload: { packId: pack.id, version: pack.version } }));
+          return pack;
+        }),
+      ),
+      remove: os.packs.remove.handler(({ input, context }) =>
+        asApiErrorAsync(async () => {
+          await deps.packs.remove(input.id);
+          store.tx((tx) => tx.emit({ type: "pack.removed", origin: context.origin, payload: { packId: input.id } }));
+        }),
+      ),
     },
     prs: {
       get: os.prs.get.handler(({ input }) => readPr(input, prs.get)),
       list: os.prs.list.handler(({ input }) => prCache.list(input)),
       refresh: os.prs.refresh.handler(({ input }) => readPr(input, prCache.refresh)),
-      setHold: os.prs.setHold.handler(({ input }) => asApiErrorAsync(() => readPr(input.ref, (ref) => prCommands.setHold(ref, input.hold)))),
+      setHold: os.prs.setHold.handler(({ input, context }) => readPr(input.ref, (ref) => prCommands.setHold(ref, input.hold, context.origin))),
       merge: os.prs.merge.handler(({ input, context }) => {
         // Mergear lo decide una persona: un agente que use el CLI o el MCP no comenta el comando de merge por su cuenta.
-        if (context.origin !== "ui") {
-          throw new ORPCError("FORBIDDEN", { message: "Mergear lo pide una persona desde la app: un agente no lo hace por su cuenta." });
-        }
-        return asApiErrorAsync(() => readPr(input, prCommands.merge));
+        requireUi(context, "Mergear lo pide una persona desde la app: un agente no lo hace por su cuenta.");
+        return readPr(input, (ref) => prCommands.merge(ref, context.origin));
       }),
-      requestReview: os.prs.requestReview.handler(({ input }) =>
-        asApiErrorAsync(() => readPr(input, prCommands.requestReview)),
-      ),
-      rebase: os.prs.rebase.handler(({ input, context }) =>
-        asApiErrorAsync(() => readPr(input, (ref) => prCommands.rebase(ref, context.origin))),
-      ),
-      republish: os.prs.republish.handler(({ input }) => asApiErrorAsync(() => deps.republisher.republish(input))),
+      requestReview: os.prs.requestReview.handler(({ input, context }) => readPr(input, (ref) => prCommands.requestReview(ref, context.origin))),
+      rebase: os.prs.rebase.handler(({ input, context }) => readPr(input, (ref) => prCommands.rebase(ref, context.origin))),
+      republish: os.prs.republish.handler(({ input, context }) => asApiErrorAsync(() => deps.republisher.republish(input, context.origin))),
     },
     repos: {
       list: os.repos.list.handler(() => repos.list()),
+      overview: os.repos.overview.handler(() => repos.overview()),
       add: os.repos.add.handler(({ input }) =>
         asApiErrorAsync(async () => {
           const repo = await repos.register(input.path, input.name);
@@ -395,13 +343,18 @@ export function createRouter(deps: RouterDeps) {
     },
     decisions: {
       list: os.decisions.list.handler(({ input }) => deps.decisions.list(input)),
-      get: os.decisions.get.handler(({ input }) => {
-        const decision = deps.decisions.get(input.id);
-        if (!decision) throw new ORPCError("NOT_FOUND", { message: `No existe la decisión ${input.id}.` });
-        return decision;
-      }),
+      get: os.decisions.get.handler(({ input }) =>
+        asApiError(() => {
+          const decision = deps.decisions.get(input.id);
+          if (!decision) throw new DecisionNotFoundError(input.id);
+          return decision;
+        }),
+      ),
       resolve: os.decisions.resolve.handler(({ input, context }) =>
         asApiError(() => {
+          if (isMergeOffer(store, input.id)) {
+            requireUi(context, "Una oferta de merge la aprueba una persona desde la app: comenta el comando de merge con tu identidad.");
+          }
           deps.flows.resolveGate(input.id, input.option, context.origin);
           const decision = deps.decisions.get(input.id);
           if (!decision) throw new DecisionNotFoundError(input.id);
@@ -411,25 +364,27 @@ export function createRouter(deps: RouterDeps) {
     },
     learnings: {
       list: os.learnings.list.handler(({ input }) => deps.learnings.list(input)),
-      get: os.learnings.get.handler(({ input }) => {
-        const learning = deps.learnings.get(input.id);
-        if (!learning) throw new ORPCError("NOT_FOUND", { message: new LearningNotFoundError(input.id).message });
-        return learning;
-      }),
+      get: os.learnings.get.handler(({ input }) =>
+        asApiError(() => {
+          const learning = deps.learnings.get(input.id);
+          if (!learning) throw new LearningNotFoundError(input.id);
+          return learning;
+        }),
+      ),
       propose: os.learnings.propose.handler(({ input, context }) => deps.learnings.propose(input, context.origin)),
       // Lo aprobado entra a los briefs de las corridas que siguen: un agente que lo aprobara por el CLI se dejaría instrucciones a sí mismo.
       approve: os.learnings.approve.handler(({ input, context }) => {
-        if (context.origin !== "ui") throw new ORPCError("FORBIDDEN", { message: "Un learning lo aprueba una persona desde la app." });
+        requireUi(context, "Un learning lo aprueba una persona desde la app.");
         return asApiError(() => deps.learnings.approve(input.id, context.origin));
       }),
       reject: os.learnings.reject.handler(({ input, context }) => asApiError(() => deps.learnings.reject(input.id, context.origin))),
       screen: os.learnings.screen.handler(({ input }) => asApiErrorAsync(() => deps.learnings.screen(input))),
       archive: os.learnings.archive.handler(({ input, context }) => asApiError(() => deps.learnings.archive(input.ids, context.origin))),
       update: os.learnings.update.handler(({ input, context }) => {
-        if (context.origin !== "ui" && deps.learnings.get(input.id)?.status === "approved") {
-          throw new ORPCError("FORBIDDEN", { message: "Un learning aprobado solo se edita desde la app: el texto nuevo entra a los briefs sin otra aprobación." });
+        if (deps.learnings.get(input.id)?.status === "approved") {
+          requireUi(context, "Un learning aprobado solo se edita desde la app: el texto nuevo entra a los briefs sin otra aprobación.");
         }
-        return asApiError(() => deps.learnings.update(input));
+        return asApiError(() => deps.learnings.update(input, context.origin));
       }),
     },
     defs: {
@@ -469,6 +424,14 @@ export function createRouter(deps: RouterDeps) {
 
 export type CoreRouter = ReturnType<typeof createRouter>;
 
+/**
+ * Lo que solo una persona puede pedir desde la app (origin `ui`, que exige la llave de la app): un agente con
+ * el CLI o el MCP recibe `FORBIDDEN` con `message`, que dice por qué.
+ */
+function requireUi(context: CoreContext, message: string): void {
+  if (context.origin !== "ui") throw new ORPCError("FORBIDDEN", { message });
+}
+
 /** Los errores de un pedido inválido o de algo que no existe llegan al cliente con su mensaje; el resto es un bug del core. */
 export function asApiError<T>(fn: () => T): T {
   try {
@@ -496,7 +459,8 @@ function toApiError(error: unknown): unknown {
     error instanceof DefNotFoundError ||
     error instanceof SessionNotFoundError ||
     error instanceof RepoNotFoundError ||
-    error instanceof IssueNotCachedError
+    error instanceof IssueNotCachedError ||
+    error instanceof PrNotFoundError
   ) {
     return new ORPCError("NOT_FOUND", { message: error.message, cause: error });
   }
@@ -520,7 +484,11 @@ function toApiError(error: unknown): unknown {
     error instanceof LegacyImportError ||
     error instanceof PackLoadError ||
     error instanceof PackInstallError ||
-    error instanceof RepoExportError
+    error instanceof RepoExportError ||
+    error instanceof GitHubPatError ||
+    error instanceof GitHubAuthError ||
+    error instanceof LinearAuthError ||
+    error instanceof ClaudeSetupError
   ) {
     return new ORPCError("BAD_REQUEST", { message: error.message, cause: error });
   }

@@ -117,11 +117,11 @@ async function setup(options: SetupOptions = {}) {
   const workspaces = createWorkspaces({
     store,
     dataDir: join(dir, "workspaces"),
-    repos: unusedRepos,
+    repoConfig: unusedRepos,
     identityOf: async () => ({ name: "Test", email: "test@clanker.invalid" }),
   });
   // Los tests que recorren `pr.pushFixups` (publicar un PR de verdad y empujarle fixups) corren en `techlead-e2e.test.ts`.
-  flows.registerAction(prPushFixupsAction({ store, workspaces, repos: unusedRepos, prs: createPrs({ connections, packs }) }));
+  flows.registerAction(prPushFixupsAction({ store, workspaces, repoConfig: unusedRepos, prs: createPrs({ connections, packs }) }));
   flows.registerAction(prReplyAction({ connections, packs, pause: () => Promise.resolve() }));
   const requestBot = reviewRequestBotAction({ connections, packs });
   flows.registerAction(
