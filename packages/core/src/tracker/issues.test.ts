@@ -147,6 +147,43 @@ describe("sync", () => {
     expect(issues.list()).toHaveLength(1);
   });
 
+  test("no lee las issues de otros proyectos: una que el tracker no puede leer no corta el sync", async () => {
+    await local.createIssue("demo", { title: "a" });
+    await issues.sync(local, binding());
+    const other = (await local.createIssue("otro", { title: "x" })).ref;
+    await local.createIssue("demo", { title: "b" });
+
+    const read: string[] = [];
+    const tracker: Tracker = {
+      ...local,
+      getIssue: (ref) => {
+        read.push(ref.key);
+        return ref.id === other.id ? Promise.reject(new Error("demasiadas relaciones")) : local.getIssue(ref);
+      },
+    };
+    expect(await issues.sync(tracker, binding())).toBe(1);
+    expect(read).not.toContain(other.key);
+    expect(issues.list().map((i) => i.title)).toEqual(["a", "b"]);
+  });
+
+  test("una issue del caché que el tracker dice que pasó a otro proyecto se vuelve a leer", async () => {
+    const moved = (await local.createIssue("demo", { title: "a" })).ref;
+    await issues.sync(local, binding());
+
+    const read: string[] = [];
+    const tracker: Tracker = {
+      ...local,
+      changesSince: async (cursor) => {
+        const changes = await local.changesSince(cursor);
+        return { ...changes, changed: changes.changed.map((c) => (c.id === moved.id ? { ...c, project: "otro" } : c)) };
+      },
+      getIssue: (ref) => (read.push(ref.key), local.getIssue(ref)),
+    };
+    await local.setStatus(moved, "done");
+    await issues.sync(tracker, binding());
+    expect(read).toEqual([moved.key]);
+  });
+
   test("dos proyectos de Clanker sobre el mismo tracker tienen cursores independientes", async () => {
     await local.createIssue("demo", { title: "a" });
     await local.createIssue("otro", { title: "b" });

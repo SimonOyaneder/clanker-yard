@@ -83,7 +83,7 @@ const QUERIES = {
   }`,
   changes: `query Changes($filter: IssueFilter, $after: String) {
     issues(filter: $filter, first: 100, after: $after, orderBy: updatedAt) {
-      nodes { id identifier url updatedAt } pageInfo { hasNextPage endCursor }
+      nodes { id identifier url updatedAt project { id } } pageInfo { hasNextPage endCursor }
     }
   }`,
   states: `query States($team: ID, $after: String) {
@@ -392,7 +392,7 @@ export function createLinearTracker({
     async changesSince(cursor) {
       const since = cursor === undefined ? undefined : parseCursor(cursor);
       const changed = await all((after) =>
-        gql<{ issues: Page<RawRef & { updatedAt: string }> }>(QUERIES.changes, {
+        gql<{ issues: Page<RawRef & { updatedAt: string; project: { id: string } | null }> }>(QUERIES.changes, {
           filter: since === undefined ? undefined : { updatedAt: { gt: since } },
           after,
         }).then((d) => d.issues),
@@ -400,7 +400,7 @@ export function createLinearTracker({
       // El cursor es el `updatedAt` más reciente que se vio (no el reloj local, que puede ir desfasado).
       // Sin issues todavía, el epoch: la próxima llamada trae todo lo que aparezca.
       const latest = changed.map((c) => c.updatedAt).sort().at(-1) ?? since ?? new Date(0).toISOString();
-      return { changed: changed.map(toRef), cursor: latest };
+      return { changed: changed.map((c) => ({ ...toRef(c), project: c.project?.id ?? null })), cursor: latest };
     },
   };
 }
