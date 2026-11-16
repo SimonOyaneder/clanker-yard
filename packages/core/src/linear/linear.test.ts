@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createConnections,
+  LINEAR_DEFAULT_CLIENT_ID,
   LINEAR_REFRESH_MARGIN_MS,
   type Connections,
   type LinearLogin,
@@ -153,10 +154,22 @@ describe("linearAuth", () => {
     await expect(second.done).resolves.toMatchObject({ account: "clanker-yard" });
   });
 
-  test("sin client_id explica cómo configurarlo", async () => {
-    const bare = createConnections(store, secrets, { linear: { endpoints: linear.endpoints } });
+  test("sin client_id configurado usa el que trae la app, y uno configurado lo pisa", async () => {
+    const withDefault = await startFakeLinear({ clientId: LINEAR_DEFAULT_CLIENT_ID });
+    try {
+      const bare = createConnections(store, secrets, { linear: { redirectPort: 0, endpoints: withDefault.endpoints } });
+      const login = await bare.linearAuth("ui");
+      expect(new URL(login.url).searchParams.get("client_id")).toBe(LINEAR_DEFAULT_CLIENT_ID);
+      await approve(login.url);
+      await expect(login.done).resolves.toMatchObject({ provider: "linear" });
+    } finally {
+      await withDefault.close();
+    }
 
-    await expect(bare.linearAuth("ui")).rejects.toThrow(/client_id de la OAuth app de Linear/);
+    const custom = await login("ui");
+    expect(new URL(custom.url).searchParams.get("client_id")).toBe(CLIENT_ID);
+    await approve(custom.url);
+    await custom.done;
   });
 
   test("con el puerto del redirect ocupado dice cuál es", async () => {

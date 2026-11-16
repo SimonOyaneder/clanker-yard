@@ -150,7 +150,7 @@ const connections = {
   /**
    * Inicia el login de Linear (OAuth con PKCE) y devuelve el `url` que hay que abrir en el navegador: el
    * core no lo abre. Responde en cuanto el core escucha el redirect; la cuenta aparece al aprobar, con un
-   * `connection.changed`. Falla con `BAD_REQUEST` si el core no tiene el `client_id` de la OAuth app o el
+   * `connection.changed`. Falla con `BAD_REQUEST` si el
    * puerto del redirect está ocupado. Sin `meta.mcp`: el login lo hace una persona.
    */
   linearAuth: base.output(z.object({ url: z.url() })),

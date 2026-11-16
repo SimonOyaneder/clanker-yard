@@ -282,16 +282,6 @@ describe("connections", () => {
     }
   });
 
-  test("linearAuth sin client_id es BAD_REQUEST con el paso a seguir", async () => {
-    const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
-
-    await expect(client.connections.linearAuth()).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: expect.stringMatching(/config\.json.*CLANKER_LINEAR_CLIENT_ID/),
-    });
-  });
-
   test("linearAuth devuelve el link y la cuenta aparece al aprobar", async () => {
     const linear = await startFakeLinear({ clientId: "test-client-id" });
     try {

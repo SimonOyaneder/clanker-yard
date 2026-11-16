@@ -46,6 +46,8 @@ const EXPIRY_WARNING_MS = EXPIRY_WARNING_DAYS * 24 * 60 * 60 * 1000;
 
 /** Puerto del loopback que recibe el redirect de Linear; el redirect URI de la OAuth app lo incluye. */
 export const LINEAR_REDIRECT_PORT = 48721;
+/** Client_id de la OAuth app pública de Linear (workspace clanker-yard): el flujo es PKCE sin client secret, así que no es secreto. */
+export const LINEAR_DEFAULT_CLIENT_ID = "60358f9aaddae2ba3a9c09e1419c2579";
 /** Cuánto espera `linearAuth` a que el usuario apruebe en el navegador. */
 export const LINEAR_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 /** Un access token de Linear con menos margen que este se refresca antes de entregarse. */
@@ -54,7 +56,7 @@ export const LINEAR_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 export const GITHUB_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 export interface LinearOptions {
-  /** El client_id de la OAuth app de Linear. Sin él `linearAuth` no puede iniciar. */
+  /** El client_id de la OAuth app de Linear. Default `LINEAR_DEFAULT_CLIENT_ID`. */
   clientId?: string;
   /** Default `LINEAR_REDIRECT_PORT`; 0 elige un puerto libre (tests). */
   redirectPort?: number;
@@ -143,7 +145,7 @@ export interface Connections {
    * Inicia el login de Linear con OAuth y PKCE: levanta el loopback del redirect y devuelve el `url` que
    * el usuario abre en el navegador (el core no lo abre). Al aprobar, guarda los tokens en `Secrets`, conecta
    * la cuenta (el workspace del token) y emite `connection.changed`; `done` entrega esa cuenta. Un
-   * `linearAuth` nuevo cancela el que siga pendiente. Lanza `LinearAuthError` si falta el `client_id` o el
+   * `linearAuth` nuevo cancela el que siga pendiente. Lanza `LinearAuthError` si el
    * puerto del loopback está ocupado.
    */
   linearAuth(origin: Origin): Promise<LinearLogin>;
@@ -359,15 +361,6 @@ export function createConnections(
     return apiKeyCredentials(await self.token("claude", CLAUDE_API_KEY_ACCOUNT), { env: claudeEnv });
   }
 
-  function linearConfig() {
-    if (!linear.clientId) {
-      throw new LinearAuthError(
-        `Falta el client_id de la OAuth app de Linear. Regístrala (AGENTS.md, "Paso manual pendiente") y ponlo en config.json de la carpeta de datos de Clanker Yard (en macOS, ~/Library/Application Support/Clanker Yard) como { "linear": { "clientId": "..." } }, o en la variable CLANKER_LINEAR_CLIENT_ID; luego reinicia el core.`,
-      );
-    }
-    return { endpoints, clientId: linear.clientId };
-  }
-
   function githubAppConfig() {
     if (!githubApp?.clientId) {
       throw new GitHubAuthError(
@@ -385,7 +378,7 @@ export function createConnections(
    */
   function refresher(provider: RotatingProvider): (refreshToken: string) => Promise<Refreshed> {
     if (provider === "linear") {
-      const { clientId } = linearConfig();
+      const clientId = linear.clientId ?? LINEAR_DEFAULT_CLIENT_ID;
       return async (refreshToken) => {
         const at = now();
         const tokens = await refreshTokens(endpoints, { clientId, refreshToken }, at);
@@ -592,7 +585,7 @@ export function createConnections(
     },
 
     async linearAuth(origin) {
-      const { clientId } = linearConfig();
+      const clientId = linear.clientId ?? LINEAR_DEFAULT_CLIENT_ID;
       await pendingLogin?.cancel("Se inició otra conexión con Linear.");
       const login = await startLinearLogin(
         {

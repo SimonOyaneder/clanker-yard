@@ -83,7 +83,7 @@ El core lee el `client_id` al arrancar, de dos lugares (el entorno gana):
 
   `slug` es opcional (el nombre corto de la App, el de `github.com/apps/<slug>`): con él, si la App no está instalada, la tarjeta de Conexiones ofrece el botón que abre la instalación. Variable `CLANKER_GITHUB_APP_SLUG`.
 
-  El mismo archivo guarda el `client_id` de la OAuth app de Linear (`"linear": { "clientId": "..." }`, variable `CLANKER_LINEAR_CLIENT_ID`).
+  El mismo archivo puede sobreescribir el `client_id` de la OAuth app de Linear, que la app ya trae incluido (`"linear": { "clientId": "..." }`, variable `CLANKER_LINEAR_CLIENT_ID`).
 
   `dataDir` es `~/Library/Application Support/Clanker Yard` en macOS, `~/.local/share/clanker-yard` en Linux y `%APPDATA%\Clanker Yard` en Windows; con `CLANKER_HOME`, esa carpeta. Es el lugar para la app de escritorio, que lanzada desde el Dock no hereda variables de la terminal.
 - La variable `CLANKER_GITHUB_APP_CLIENT_ID`, para dev y tests.

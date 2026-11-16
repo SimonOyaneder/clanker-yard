@@ -25,7 +25,7 @@ const ConfigFile = z
 export interface CoreConfig {
   /** El client_id de la GitHub App; sin él no se puede iniciar el device flow. */
   githubApp?: { clientId: string; slug?: string };
-  /** El client_id de la OAuth app de Linear; sin él `connections.linearAuth` falla con el paso a seguir. */
+  /** El client_id de la OAuth app de Linear; sin él `connections` usa el que trae incluido. */
   linear?: { clientId: string };
 }
 

@@ -322,15 +322,6 @@ describe("core", () => {
     expect(JSON.parse(log.split("\n")[0]!)).toMatchObject({ level: "info" });
   });
 
-  test("sin client_id de Linear, linearAuth dice dónde configurarlo", async () => {
-    const core = await ensure(tempHome());
-
-    await expect(core.client.connections.linearAuth()).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: expect.stringContaining("CLANKER_LINEAR_CLIENT_ID"),
-    });
-  });
-
   test.each([
     ["config.json", (home: string) => writeFileSync(join(home, "config.json"), JSON.stringify({ linear: { clientId: "lin-from-file" } })), {}],
     ["la variable de entorno", () => {}, { CLANKER_LINEAR_CLIENT_ID: "lin-from-file" }],
