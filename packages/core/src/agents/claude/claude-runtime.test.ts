@@ -217,6 +217,18 @@ describe("start", () => {
     expect(calls[0]?.options.pathToClaudeCodeExecutable).toBe("/bin/claude");
   });
 
+  test("borra el gitconfig global de instalaciones anteriores y guarda el de la identidad en gitconfigs/", async () => {
+    const legacy = join(home, "agent-env", "gitconfig");
+    await mkdir(join(home, "agent-env"), { recursive: true });
+    await writeFile(legacy, "[user]\n\temail = clanker@localhost\n");
+    const { query, calls } = fakeQuery([init(), success()]);
+    const run = await runtimeWith(query).start(spec({ gitIdentity: { name: "Ana Pérez", email: "ana@example.com" } }));
+    await run.result;
+
+    expect(await readdir(join(home, "agent-env"))).not.toContain("gitconfig");
+    expect(calls[0]?.options.env?.GIT_CONFIG_GLOBAL?.startsWith(join(home, "agent-env", "gitconfigs") + "/")).toBe(true);
+  });
+
   test("sin identidad no configura autor: nunca inventa uno del sistema", async () => {
     const { query, calls } = fakeQuery([init(), success()]);
     const run = await runtimeWith(query).start(spec());
