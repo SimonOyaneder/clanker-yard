@@ -4,7 +4,9 @@ import { connectCore } from "./core-client";
 
 const interrupt = new AbortController();
 // Un segundo Ctrl+C mata el proceso aunque el comando no escuche la señal.
-process.on("SIGINT", () => (interrupt.signal.aborted ? process.exit(130) : interrupt.abort()));
+process.on("SIGINT", () =>
+  interrupt.signal.aborted ? process.exit(130) : interrupt.abort(),
+);
 
 let core: ReturnType<typeof connectCore> | undefined;
 const connection = () => (core ??= connectCore());
@@ -17,6 +19,15 @@ runCli(process.argv.slice(2), {
   },
   write: (line) => console.log(line),
   readFile: (path) => readFileSync(path, "utf8"),
+  sleep: (ms) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      interrupt.signal.addEventListener(
+        "abort",
+        () => (clearTimeout(timer), resolve()),
+        { once: true },
+      );
+    }),
   signal: interrupt.signal,
 }).then(
   () => process.exit(),
