@@ -77,7 +77,7 @@ function setup(opts: TempGitRepoOptions = {}, { remote = true } = {}) {
 }
 
 async function acquire(branch = "cla-48") {
-  const lease = await workspaces.acquire({ repo: "r1", branch, base: "main", runId: run });
+  const lease = await workspaces.acquire({ repo: "repo_r1", branch, base: "main", runId: run });
   leases.push(lease);
   return lease;
 }

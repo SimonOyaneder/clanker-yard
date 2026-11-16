@@ -45,7 +45,7 @@ beforeEach(async () => {
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   learnings = createLearnings({ store });
   briefFor = createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues: { get: () => undefined }, learnings, trackers: () => undefined, projects: { get: () => undefined } });
-  lease = await workspaces.acquire({ repo: "r1", branch: "cla-1", base: "main", runId });
+  lease = await workspaces.acquire({ repo: "repo_r1", branch: "cla-1", base: "main", runId });
 });
 
 afterEach(() => {

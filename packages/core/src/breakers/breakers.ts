@@ -1,4 +1,4 @@
-import { BreakerCause, DecisionId } from "@clanker/api";
+import { BreakerCause, DecisionId, type RepoId } from "@clanker/api";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import { meta } from "../store/schema";
@@ -11,7 +11,9 @@ import { messageOf } from "../errors/format";
 // abre el breaker de su ámbito y solo eso se pausa. Se reintenta con una prueba barata y se cierra solo.
 
 export const GITHUB_SCOPE = "github";
-export const repoScope = (repoId: string): string => `repo:${repoId}`;
+/** El prefijo del ámbito de un repo: `repo:<id>`. */
+export const REPO_SCOPE_PREFIX = "repo:";
+export const repoScope = (repoId: RepoId): string => `${REPO_SCOPE_PREFIX}${repoId}`;
 export const runtimeScope = (runtime: string): string => `runtime:${runtime}`;
 
 export type { BreakerCause };

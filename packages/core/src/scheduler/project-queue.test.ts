@@ -1,4 +1,4 @@
-import { NewProject, type PrRef, type PrState, type ProjectId } from "@clanker/api";
+import { NewProject, type PrRef, type PrState, type ProjectId, type IssueId, type RepoId } from "@clanker/api";
 import { trackersByKind } from "../tracker/trackers";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
@@ -63,7 +63,7 @@ async function sync(projectId: ProjectId) {
   await issues.sync(local, { projectId, project: { tracker: "local", id: projectId } });
 }
 
-function openPr(issueId: string, repoId: string, number: number, headRef: string, detail?: PrState) {
+function openPr(issueId: IssueId, repoId: RepoId, number: number, headRef: string, detail?: PrState) {
   store.tx((tx) =>
     tx.db
       .insert(pullRequests)

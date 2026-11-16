@@ -114,7 +114,7 @@ beforeEach(async () => {
     packs,
   };
   publish = prPublishAction(deps);
-  lease = await workspaces.acquire({ repo: "r1", branch: BRANCH, base: "main", runId: newId("run") });
+  lease = await workspaces.acquire({ repo: "repo_r1", branch: BRANCH, base: "main", runId: newId("run") });
   write("feature.txt", "una feature\n");
 });
 

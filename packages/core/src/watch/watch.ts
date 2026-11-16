@@ -1,4 +1,4 @@
-import type { PrRef } from "@clanker/api";
+import type { PrRef, RepoId } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
@@ -69,7 +69,7 @@ export interface WatchDeps {
 /** Un PR que Watch mira: de qué cuenta, en qué repo del core y si algún flujo lo espera. */
 interface Target {
   ref: PrRef;
-  repoId: string;
+  repoId: RepoId;
   waited: boolean;
   /** `undefined` si el caché aún no lo conoce (un wait sobre un PR que Watch no vio todavía). */
   row: PrRow | undefined;
@@ -95,7 +95,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
   function targets(): Target[] {
     const waited = new Set(waitKeys().flatMap((key) => prOfWaitKey(key) ?? []).map(keyOf));
     const found = new Map<string, Target>();
-    const add = (repoId: string, number: number, row: PrRow | undefined) => {
+    const add = (repoId: RepoId, number: number, row: PrRow | undefined) => {
       const remoteOf = repos.get(repoId) && repos.config(repoId).remote;
       if (!remoteOf) return;
       const ref = { account: remoteOf.account, repo: remoteOf.repo, number };

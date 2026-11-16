@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { IssueId, type RunId } from "@clanker/api";
+import { IssueId, RepoId, type RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
 import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/catalog";
@@ -51,7 +51,7 @@ export interface WorkspacesOptions {
   dataDir: string;
   /** Carpeta de los logs de comandos (`<logDir>/runs/<runId>/<stepId>.log`); por defecto `<dataDir>/logs`. */
   logDir?: string;
-  repoConfig: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: RepoId) => RepoConfig;
   /** Autor y committer de todo lo que corre `git` en un worktree: la identidad de git del usuario en ese repo. */
   identityOf: GitIdentityOf;
   /** Quien pushea y fetchea; sin él `push` y `fetch` lanzan. */
@@ -68,7 +68,7 @@ export interface WorkspacesOptions {
 }
 
 export interface AcquireRequest {
-  repo: string;
+  repo: RepoId;
   /** La branch del workspace; `refs/heads/x` se acepta como `x`. */
   branch: string;
   /** `main`, `origin/main` y `refs/heads/main` son la misma base. */
@@ -135,7 +135,7 @@ export interface Workspaces {
   /** Suelta el lease y deja el worktree `idle`. No hace nada si el token ya no es el vigente. */
   release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void;
   /** El worktree que `runId` tiene tomado: dónde corren sus agentes, su base y lo que hace falta para operar sobre él. */
-  held(runId: RunId): (WorkspaceRef & { base: string; repoId: string }) | undefined;
+  held(runId: RunId): (WorkspaceRef & { base: string; repoId: RepoId }) | undefined;
   /**
    * Suelta los worktrees que `runId` aún tiene tomados: lo que queda al terminar una corrida cuyo flujo
    * no los soltó (`@done`, `@failed` o cancelada). Sin worktrees tomados no hace nada (la hija de un
@@ -179,7 +179,7 @@ export interface Workspaces {
    */
   push(lease: WorkspaceRef, opts?: { council?: boolean }): Promise<PushOutcome>;
   /** Trae las branches del remoto a `refs/remotes/origin/*` con el mismo mecanismo que `push`. */
-  fetch(repo: string): Promise<FetchOutcome>;
+  fetch(repo: RepoId): Promise<FetchOutcome>;
   /**
    * La base vigente del worktree: la de `acquire`, o la que dejó el último `syncBase`. Lo que las
    * acciones sobre el worktree deben usar para el diff de la issue, no el `baseSha` de `$ws`, que no se
@@ -233,7 +233,7 @@ export interface Workspaces {
    * nada si no existe o ya estaba disuelta. Es lo que queda cuando se mergean todos los padres y cuando la
    * issue sale a otra base.
    */
-  dissolveBase(repo: string, branch: string): Promise<void>;
+  dissolveBase(repo: RepoId, branch: string): Promise<void>;
   /**
    * `restack` de un PR cuya base es la combinada `branch`: la recalcula con los padres que quedan (`parents`,
    * abiertos y en orden: la branch por defecto actual con un merge de cada uno, o solo la branch por defecto si ya
@@ -316,7 +316,7 @@ export type RestackResult =
   | { outcome: Exclude<PushOutcome, "ok"> };
 
 export interface CombineRequest {
-  repo: string;
+  repo: RepoId;
   issueId: IssueId;
   /** La branch sintética de la issue: `combinedBaseBranch`. */
   branch: string;
@@ -367,7 +367,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   const repoLocks = new Map<string, Promise<unknown>>();
 
   /** Un solo fetch o worktree add/remove a la vez por repo: tocan refs compartidas. */
-  async function withRepoLock<T>(repoId: string, fn: () => Promise<T>): Promise<T> {
+  async function withRepoLock<T>(repoId: RepoId, fn: () => Promise<T>): Promise<T> {
     const result = (repoLocks.get(repoId) ?? Promise.resolve()).then(fn);
     const tail = result.catch(() => undefined);
     repoLocks.set(repoId, tail);
@@ -464,7 +464,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     }
   }
 
-  function workspacePath(repoId: string, cfg: RepoConfig, branch: string): string {
+  function workspacePath(repoId: RepoId, cfg: RepoConfig, branch: string): string {
     const root = cfg.worktreeDir ? resolve(dataDir, cfg.worktreeDir) : join(dataDir, "worktrees");
     return join(root, repoId, branch);
   }
@@ -735,7 +735,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     );
   }
 
-  function remoteOf(repoId: string) {
+  function remoteOf(repoId: RepoId) {
     const target = repoConfig(repoId).remote;
     if (!remote || !target) {
       throw new Error(`El repo ${repoId} no tiene remoto configurado (repoConfig().remote y la opción remote): no se puede pushear ni fetchear.`);
@@ -815,7 +815,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return sha;
   }
 
-  async function fetchRepo(repo: string): Promise<FetchOutcome> {
+  async function fetchRepo(repo: RepoId): Promise<FetchOutcome> {
     const { remote, url, account } = remoteOf(repo);
     return withRepoLock(repo, () => remote.fetch({ cwd: repoConfig(repo).path, url, account }));
   }
@@ -1211,7 +1211,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return Promise.all(parents.map(async ({ key, branch }) => ({ key, branch, sha: await resolveBase(cfg, branch) })));
   }
 
-  function combinedRow(repoId: string, branch: string) {
+  function combinedRow(repoId: RepoId, branch: string) {
     return store.db.select().from(combinedBases).where(and(eq(combinedBases.repoId, repoId), eq(combinedBases.branch, branch))).get();
   }
 
@@ -1240,7 +1240,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     });
   }
 
-  async function dissolveBase(repo: string, branch: string): Promise<void> {
+  async function dissolveBase(repo: RepoId, branch: string): Promise<void> {
     const dissolved = store.tx(({ db }) =>
       db
         .update(combinedBases)
@@ -1366,7 +1366,7 @@ function normalizeBase(base: string): string {
 }
 
 export const WorkspaceAcquireArgs = z.object({
-  repo: z.string(),
+  repo: RepoId,
   branch: z.string(),
   base: z.string(),
 });
@@ -1481,7 +1481,7 @@ export function workspaceSyncBaseAction(workspaces: Workspaces): ActionDef<typeo
 }
 
 const CombineBaseArgs = z.object({
-  repo: z.string(),
+  repo: RepoId,
   issueId: IssueId,
   /** La clave de la issue en su tracker: nombra la branch sintética (`clanker/base/<clave>`). */
   issueKey: z.string().min(1),

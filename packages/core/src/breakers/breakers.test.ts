@@ -45,22 +45,22 @@ describe("abrir", () => {
   test("pausa su ámbito, deja la alerta en la bandeja y emite breaker.opened", () => {
     const b = breakers();
 
-    b.trip({ scope: repoScope("a"), cause: "environment", reason: "No responde: Postgres." });
+    b.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "No responde: Postgres." });
 
-    expect(b.openReason(repoScope("a"))).toBe("No responde: Postgres.");
-    expect(b.openReason(repoScope("b"))).toBeUndefined();
+    expect(b.openReason(repoScope("repo_a"))).toBe("No responde: Postgres.");
+    expect(b.openReason(repoScope("repo_b"))).toBeUndefined();
     expect(b.openReason(GITHUB_SCOPE)).toBeUndefined();
-    expect(events("breaker.opened")[0]?.payload).toMatchObject({ scope: "repo:a", cause: "environment", retryAt: Date.now() + MIN });
-    expect(alerts()).toMatchObject([{ status: "pending", title: "Pausado: repo:a", body: expect.stringContaining("No responde: Postgres.") }]);
+    expect(events("breaker.opened")[0]?.payload).toMatchObject({ scope: "repo:repo_a", cause: "environment", retryAt: Date.now() + MIN });
+    expect(alerts()).toMatchObject([{ status: "pending", title: "Pausado: repo:repo_a", body: expect.stringContaining("No responde: Postgres.") }]);
   });
 
   test("abrir uno ya abierto no repite la alerta ni reinicia el backoff", async () => {
-    failing.add(repoScope("a"));
+    failing.add(repoScope("repo_a"));
     const b = breakers();
-    b.trip({ scope: repoScope("a"), cause: "environment", reason: "uno" });
+    b.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "uno" });
     await vi.advanceTimersByTimeAsync(MIN);
 
-    b.trip({ scope: repoScope("a"), cause: "environment", reason: "dos" });
+    b.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "dos" });
 
     expect(events("breaker.opened")).toHaveLength(1);
     expect(alerts()).toHaveLength(1);
@@ -94,7 +94,7 @@ describe("backoff y cierre", () => {
   });
 
   test("backoffMs acorta las pruebas: la última se repite", async () => {
-    failing.add(repoScope("a"));
+    failing.add(repoScope("repo_a"));
     const created = createBreakers({
       store,
       runtime: "fake",
@@ -107,7 +107,7 @@ describe("backoff y cierre", () => {
     created.start();
     open.push(created);
     const start = Date.now();
-    created.trip({ scope: repoScope("a"), cause: "environment", reason: "No responde: Postgres." });
+    created.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "No responde: Postgres." });
 
     await vi.advanceTimersByTimeAsync(1000);
 
@@ -132,7 +132,7 @@ describe("backoff y cierre", () => {
     const created = createBreakers({ store, runtime: "fake", probe: () => Promise.reject(new Error("pg_isready no existe")) });
     created.start();
     open.push(created);
-    created.trip({ scope: repoScope("a"), cause: "environment", reason: "caído" });
+    created.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "caído" });
 
     await vi.advanceTimersByTimeAsync(MIN);
 
@@ -205,14 +205,14 @@ describe("eventos de conexión y cuota", () => {
 
 test("un corte no pierde los breakers: el core que arranca los retoma, sigue su backoff y los cierra", async () => {
   const first = breakers();
-  first.trip({ scope: repoScope("a"), cause: "environment", reason: "Postgres caído" });
+  first.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "Postgres caído" });
   first.close();
 
   const second = breakers();
 
-  expect(second.openReason(repoScope("a"))).toBe("Postgres caído");
+  expect(second.openReason(repoScope("repo_a"))).toBe("Postgres caído");
   expect(second.list()[0]?.decisionId).toBe(first.list()[0]?.decisionId);
   await vi.advanceTimersByTimeAsync(MIN);
-  expect(second.openReason(repoScope("a"))).toBeUndefined();
+  expect(second.openReason(repoScope("repo_a"))).toBeUndefined();
   expect(alerts()).toMatchObject([{ status: "superseded" }]);
 });

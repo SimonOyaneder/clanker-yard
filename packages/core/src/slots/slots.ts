@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import type { Lane, RunId } from "@clanker/api";
+import type { Lane, RunId, RepoId } from "@clanker/api";
 import { and, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { slots } from "../store/schema";
 import type { Store, Tx } from "../store/store";
@@ -15,7 +15,7 @@ export interface SlotPools {
 }
 
 export interface SlotRequest {
-  repoId: string;
+  repoId: RepoId;
   /** De qué pool sale el slot: el mantenimiento nunca usa ni espera slots de dev. */
   lane: Lane;
   /** Quién lo tiene. `repos.testRecipe` no es una corrida y pasa un id propio. */
@@ -27,7 +27,7 @@ export interface SlotRequest {
 
 /** Un slot tomado. Lo que dice de su preparación decide si hay que correr `setup.slot`. */
 export interface SlotLease {
-  repoId: string;
+  repoId: RepoId;
   idx: number;
   lane: Lane;
   runId: RunId;
@@ -83,10 +83,10 @@ export function createSlots({ store, leaseTtlMs = LEASE_TTL_MS, retryMs = RETRY_
   const mine = (l: Pick<SlotLease, "repoId" | "idx" | "fencingToken">) =>
     and(eq(slots.repoId, l.repoId), eq(slots.idx, l.idx), eq(slots.fencingToken, l.fencingToken));
 
-  const slotId = (repoId: string, idx: number) => `${repoId}#${idx}`;
+  const slotId = (repoId: RepoId, idx: number) => `${repoId}#${idx}`;
 
   /** Crea los slots que faltan y deja cada uno libre en el pool que dicen los tamaños; sobrantes libres se borran. */
-  function syncPools({ db }: Tx, repoId: string, pools: SlotPools) {
+  function syncPools({ db }: Tx, repoId: RepoId, pools: SlotPools) {
     const t = now();
     const free = or(isNull(slots.holderRunId), lt(slots.leaseUntil, t));
     const total = pools.dev + pools.maintenance;

@@ -104,7 +104,7 @@ beforeEach(async () => {
     connections,
     packs,
   });
-  lease = await workspaces.acquire({ repo: "r1", branch: BRANCH, base: "main", runId: newId("run") });
+  lease = await workspaces.acquire({ repo: "repo_r1", branch: BRANCH, base: "main", runId: newId("run") });
   writeFileSync(join(lease.path, "feature.txt"), "una feature\n");
 });
 

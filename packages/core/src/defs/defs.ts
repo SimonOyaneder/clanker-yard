@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DefKind, Origin } from "@clanker/api";
+import type { DefKind, Origin, RepoId } from "@clanker/api";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import type { ZodType } from "zod";
 import { newId } from "../store/conventions";
@@ -17,7 +17,7 @@ export interface SaveDef {
   slug: string;
   scope: DefScope;
   /** Obligatorio con scope `repo`, y solo ahí. */
-  repoId?: string;
+  repoId?: RepoId;
   body: unknown;
   /** `ui`, `cli`, `mcp`, `import` o `repo:<ruta>@<sha>`. */
   source: string;
@@ -28,7 +28,7 @@ export interface Def {
   kind: DefKind;
   slug: string;
   scope: DefScope;
-  repoId: string | null;
+  repoId: RepoId | null;
   archivedAt: number | null;
   currentVersion: number;
   /** La versión pedida (o la actual) con su contenido. */
@@ -89,7 +89,7 @@ export interface Defs {
    * La def que gana para `slug`: user, luego repo (si se da `repoId`), luego pack, luego builtin.
    * Una def archivada no participa, así que deja pasar a la de menor precedencia.
    */
-  resolve(kind: DefKind, slug: string, opts?: { repoId?: string }): Def | undefined;
+  resolve(kind: DefKind, slug: string, opts?: { repoId?: RepoId }): Def | undefined;
   archive(kind: DefKind, id: string, origin: Origin): void;
   restore(kind: DefKind, id: string, origin: Origin): void;
 }

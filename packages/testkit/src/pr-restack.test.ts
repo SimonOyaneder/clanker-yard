@@ -113,7 +113,7 @@ function ctx(): ActionCtx {
 
 /** Un PR del sistema: `branch` sale de `base` con un commit que escribe `files`, publicado en draft. */
 async function openPr(branch: string, base: string, files: Record<string, string>, body = ""): Promise<number> {
-  const lease = await workspaces.acquire({ repo: "r1", branch, base, runId: newId("run") });
+  const lease = await workspaces.acquire({ repo: "repo_r1", branch, base, runId: newId("run") });
   for (const [path, content] of Object.entries(files)) writeFileSync(join(lease.path, path), content);
   const { workspaceId, path, baseSha, fencingToken } = lease;
   const published = await publish.run(

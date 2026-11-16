@@ -1,4 +1,4 @@
-import type { CachedPr, PrFilter, PrRef, PrState } from "@clanker/api";
+import type { CachedPr, PrFilter, PrRef, PrState, RepoId } from "@clanker/api";
 import { and, asc, eq } from "drizzle-orm";
 import * as z from "zod";
 import { newId } from "../store/conventions";
@@ -39,7 +39,7 @@ export interface PrCache {
    * REST) se lee igual pero no entra al caché.
    */
   refresh(ref: PrRef): Promise<PrState>;
-  row(repoId: string, number: number): PrRow | undefined;
+  row(repoId: RepoId, number: number): PrRow | undefined;
   /**
    * Marca o desmarca "no mergear nunca" (`pull_requests.hold`) y relee el PR con `refresh`, así su `merge`
    * (y el evento `pr.mergeReady` si vuelve a estar listo) ya cuenta con el cambio. Lanza si el core no
@@ -52,7 +52,7 @@ export interface PrCache {
    * Deja lo que dice la REST: crea la fila si no estaba (un PR que el sistema no abrió) y, si el head se
    * movió, anota cuándo. Devuelve la fila ya al día.
    */
-  saveRest(repoId: string, pull: RestPull, at?: number): PrRow;
+  saveRest(repoId: RepoId, pull: RestPull, at?: number): PrRow;
 }
 
 export interface PrCacheDeps {
@@ -70,7 +70,7 @@ export interface PrCacheDeps {
 const restState = ({ state, merged }: RestPull): PrRow["state"] => (merged ? "merged" : state);
 
 export function createPrCache({ store, repos, packs, prs, onChange, now = Date.now }: PrCacheDeps): PrCache {
-  const find = (repoId: string, number: number) =>
+  const find = (repoId: RepoId, number: number) =>
     store.db
       .select()
       .from(pullRequests)
@@ -78,7 +78,7 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
       .get();
 
   /** Guarda el `PrState` leído de GraphQL. Devuelve el anterior (`null` si nunca se había leído) y la fila ya al día, o `undefined` si el PR no está. */
-  function saveDetail(repoId: string, number: number, state: PrState): { previous: PrState | null; row: PrRow } | undefined {
+  function saveDetail(repoId: RepoId, number: number, state: PrState): { previous: PrState | null; row: PrRow } | undefined {
     return store.tx(({ db, emit }) => {
       const current = find(repoId, number);
       if (!current) return undefined;

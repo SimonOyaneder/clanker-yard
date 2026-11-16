@@ -1,3 +1,4 @@
+import type { RepoId } from "@clanker/api";
 import { existsSync } from "node:fs";
 import { and, eq, isNotNull, isNull, lte } from "drizzle-orm";
 import { git, isAncestor, tryGit } from "../git/git";
@@ -28,10 +29,10 @@ export interface CleanupResult {
 
 export interface ArchiveDeps {
   store: Store;
-  repoConfig: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: RepoId) => RepoConfig;
   now: () => number;
   /** El mutex del repo: `worktree remove` toca refs compartidas. */
-  withRepoLock: <T>(repoId: string, fn: () => Promise<T>) => Promise<T>;
+  withRepoLock: <T>(repoId: RepoId, fn: () => Promise<T>) => Promise<T>;
 }
 
 /**

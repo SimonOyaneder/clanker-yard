@@ -1,4 +1,4 @@
-import { PackSettings, type PrRef, type PrState } from "@clanker/api";
+import { PackSettings, type PrRef, type PrState, type RepoId } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { prParents, pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
@@ -12,7 +12,7 @@ const NOW = 1_000_000;
 
 let store: Store;
 let repos: Repos;
-let repoId: string;
+let repoId: RepoId;
 let cache: PrCache;
 let state: PrState;
 const onChange = vi.fn<NonNullable<PrCacheDeps["onChange"]>>();

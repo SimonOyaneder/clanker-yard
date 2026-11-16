@@ -1,4 +1,4 @@
-import type { IssueId, PrRef, RunId } from "@clanker/api";
+import type { IssueId, PrRef, RunId, RepoId } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { and, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
@@ -44,7 +44,7 @@ export interface PrPublishDeps {
   store: Store;
   workspaces: Workspaces;
   recipes: Recipes;
-  repoConfig: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: RepoId) => RepoConfig;
   connections: Pick<Connections, "githubClient">;
   packs: Packs;
 }
@@ -276,7 +276,7 @@ async function openPull(
 function recordPull(
   store: Store,
   ctx: ActionCtx,
-  { repoId, repo, pull, headRef, baseRef, parentBranches }: { repoId: string; repo: string; pull: Pull; headRef: string; baseRef: string; parentBranches: string[] },
+  { repoId, repo, pull, headRef, baseRef, parentBranches }: { repoId: RepoId; repo: string; pull: Pull; headRef: string; baseRef: string; parentBranches: string[] },
 ): void {
   const run = store.db.select().from(runs).where(eq(runs.id, ctx.runId)).get();
   store.tx((tx) => {
@@ -288,7 +288,8 @@ function recordPull(
       headSha: pull.head.sha,
       state: pull.state,
       isDraft: pull.draft,
-      issueId: run?.subjectType === "issue" ? run.subjectId : null,
+      // `subject_id` es de cualquier sujeto: con `subjectType` issue es el id de una issue.
+      issueId: run?.subjectType === "issue" ? (run.subjectId as IssueId) : null,
       runId: ctx.runId,
       owned: true,
       headChangedAt: Date.now(),

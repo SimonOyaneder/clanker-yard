@@ -65,7 +65,7 @@ async function setup(files: Record<string, string> = {}, recipe?: unknown) {
   briefs = createBriefs({ workspaces, artifacts });
   const recipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts, slots: createSlots({ store }) });
   apply = commitsApplyAction({ workspaces, recipes });
-  lease = await workspaces.acquire({ repo: "r1", branch: "cla-43", base: "main", runId });
+  lease = await workspaces.acquire({ repo: "repo_r1", branch: "cla-43", base: "main", runId });
   base = lease.baseSha;
 }
 
@@ -482,7 +482,7 @@ test("el lease vence antes de aplicar: no se hace nada", async () => {
   write("b.txt", "b2\n");
   const [id] = Object.values(await hunkIds());
   workspaces.release(lease);
-  const other = await workspaces.acquire({ repo: "r1", branch: "cla-43", base: "main", runId: newId("run") as RunId });
+  const other = await workspaces.acquire({ repo: "repo_r1", branch: "cla-43", base: "main", runId: newId("run") as RunId });
   try {
     await expect(run([{ message: "feat: b", hunks: [id!] }])).rejects.toThrow(/ya no es el vigente/);
     expect(git("rev-parse", "HEAD")).toBe(base);

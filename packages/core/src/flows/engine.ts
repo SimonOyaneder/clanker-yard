@@ -1,5 +1,4 @@
-import {
-  FlowDef,
+import { FlowDef,
   Role,
   type ArtifactHash,
   type Brief,
@@ -13,8 +12,7 @@ import {
   type RunUsage,
   type RunWorkspace,
   type StepRunId,
-  type SubjectRef,
-} from "@clanker/api";
+  type SubjectRef, type RepoId } from "@clanker/api";
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
@@ -122,7 +120,7 @@ type GateNode = Extract<Node, { type: "gate" }>;
 export interface StartOptions {
   projectId?: ProjectId;
   /** Para resolver el flujo y los roles con scope `repo`. */
-  repoId?: string;
+  repoId?: RepoId;
   /** Slug del perfil. Obligatorio si el flujo tiene pasos agent. */
   profile?: string;
   /** Quién la lanzó, para `run.started`; por defecto el core (un trigger, el Scheduler). */
@@ -212,7 +210,7 @@ export interface EngineDeps extends SubjectsDeps {
    * `fencingToken`, un `$nodo` que lo nombra (el output de `workspace.acquire`) lleva siempre el token vigente: un
    * préstamo del sujeto lo sube y la dueña, al retomar, no puede seguir con el que tomó antes.
    */
-  workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string; workspaceId?: string; fencingToken?: number } | undefined;
+  workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: RepoId; workspaceId?: string; fencingToken?: number } | undefined;
   /**
    * Arma el brief de un paso agent: deja en el worktree lo que el agente lee (`.clanker-run/`) y lo cita en
    * el brief. Sin esto el brief lleva solo el payload del nodo.
@@ -579,7 +577,7 @@ export function createEngine(deps: EngineDeps): Engine {
    * El flujo y los subflujos que llama, también los de sus subflujos: lo que la corrida fija al
    * empezar. Así una corrida hija parte de las versiones del padre aunque el flujo cambie después.
    */
-  function pinCalls(root: FlowDef, repoId: string | undefined): { flows: FlowDef[]; subflows: Record<string, DefPin> } {
+  function pinCalls(root: FlowDef, repoId: RepoId | undefined): { flows: FlowDef[]; subflows: Record<string, DefPin> } {
     const flows = [root];
     const subflows: Record<string, DefPin> = {};
     for (const flow of flows) {
@@ -1295,7 +1293,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** El worktree que tiene tomada la corrida o, si es un subflujo, el de quien la llamó. */
-  function workspaceFor(run: RunRow): { path: string; base: string; repoId?: string } | undefined {
+  function workspaceFor(run: RunRow): { path: string; base: string; repoId?: RepoId } | undefined {
     for (const id of lineage(run)) {
       const held = workspaceOf?.(id);
       if (held) return held;

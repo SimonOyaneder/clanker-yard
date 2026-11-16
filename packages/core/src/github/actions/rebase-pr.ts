@@ -1,4 +1,4 @@
-import { PrRef } from "@clanker/api";
+import { PrRef, type RepoId } from "@clanker/api";
 import * as z from "zod";
 import { preparePush } from "../../commits/prepare-push";
 import { PermanentActionError, type ActionCtx, type ActionDef } from "../../flows/catalog";
@@ -15,7 +15,7 @@ import { ownedOpenPr, pushOrThrow, type PrPurpose } from "./push";
 export interface RebasePrDeps {
   store: Store;
   workspaces: Workspaces;
-  repoConfig: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: RepoId) => RepoConfig;
   prs: Pick<Prs, "get">;
 }
 

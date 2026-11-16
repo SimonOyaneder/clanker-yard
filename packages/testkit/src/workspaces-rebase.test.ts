@@ -93,7 +93,7 @@ function pushBranch(branch: string, commits: Record<string, string>[], from = "m
 /** Un commit de `files` en `branch` del remoto, hecho por otro, y el fetch que el flujo ya hizo en `attach`. */
 async function advance(branch: string, files: Record<string, string>, message?: string) {
   const sha = moveRemote(branch, files, message);
-  await workspaces.fetch("r1");
+  await workspaces.fetch("repo_r1");
   return sha;
 }
 
@@ -109,7 +109,7 @@ function moveRemote(branch: string, files: Record<string, string>, message = "ch
 }
 
 async function attach(branch: string, base = "main") {
-  const lease = await workspaces.attach({ repo: "r1", branch, base, runId: run });
+  const lease = await workspaces.attach({ repo: "repo_r1", branch, base, runId: run });
   leases.push(lease);
   return lease;
 }
@@ -358,7 +358,7 @@ describe("workspaces.rebase", () => {
           git("push", "--quiet", "origin", "main");
           return git("rev-parse", "HEAD");
         });
-        await workspaces.fetch("r1");
+        await workspaces.fetch("repo_r1");
         return sha;
       };
     }

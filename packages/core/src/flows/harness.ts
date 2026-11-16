@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FlowDef, Role, type Profile, type RunId, type SubjectRef } from "@clanker/api";
+import { FlowDef, Role, type Profile, type RunId, type SubjectRef, type RepoId } from "@clanker/api";
 import { z } from "zod";
 import { createAgents } from "../agents/agents";
 import type { AgentRuntime, RunResult, RunSpec, SessionRef, Usage } from "../agents/runtime";
@@ -81,7 +81,7 @@ export function harness(
     /** Un resume vuelve con el mismo id de sesión, como Claude; por defecto abre uno nuevo. */
     resumeKeepsSession?: boolean;
     /** El worktree que tiene tomado cada corrida; por defecto todas tienen el mismo. */
-    workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: string; workspaceId?: string; fencingToken?: number } | undefined;
+    workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: RepoId; workspaceId?: string; fencingToken?: number } | undefined;
     /** Lo que hace el préstamo del sujeto con los worktrees (en producción, `workspaces.handOver`). */
     handOverWorkspaces?: (tx: Tx, from: RunId, to: RunId) => void;
     /** La capacidad de cada carril; sin ella ningún carril tiene tope. */

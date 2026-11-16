@@ -1,4 +1,4 @@
-import type { PrRef, PrState } from "@clanker/api";
+import type { PrRef, PrState, RepoId } from "@clanker/api";
 import { isAncestor, tryGit } from "../git/git";
 import type { PrRow } from "../github/pr-cache";
 import type { Store } from "../store/store";
@@ -50,7 +50,7 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
    * `false` si no se puede saber: sin la punta vieja en el repo local no hay cómo ver si la nueva la
    * contiene, y confundir un push normal con un force push dispararía un restack de más.
    */
-  async function wasRewritten(repoId: string, from: string, to: string): Promise<boolean> {
+  async function wasRewritten(repoId: RepoId, from: string, to: string): Promise<boolean> {
     if ((await workspaces.fetch(repoId)) === "unauthorized") return false;
     const { path } = repos.config(repoId);
     if ((await tryGit(path, ["cat-file", "-e", `${from}^{commit}`])) === undefined) return false;

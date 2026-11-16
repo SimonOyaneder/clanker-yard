@@ -82,7 +82,7 @@ async function worktree(files: Record<string, string> = {}, recipe?: unknown): P
       },
     ],
   });
-  lease = await workspaces.acquire({ repo: "r1", branch: "cla-38", base: "main", runId });
+  lease = await workspaces.acquire({ repo: "repo_r1", branch: "cla-38", base: "main", runId });
   return lease;
 }
 
@@ -580,8 +580,8 @@ describe("recipe.check con slots", () => {
   test("el pool dev lleno no impide el check de una corrida de mantenimiento", async () => {
     await worktree({}, recipeWith());
     seedRun("maintenance");
-    slots.tryAcquire({ repoId: "r1", lane: "dev", runId: newId("run"), pools });
-    slots.tryAcquire({ repoId: "r1", lane: "dev", runId: newId("run"), pools });
+    slots.tryAcquire({ repoId: "repo_r1", lane: "dev", runId: newId("run"), pools });
+    slots.tryAcquire({ repoId: "repo_r1", lane: "dev", runId: newId("run"), pools });
 
     const result = await check();
 
@@ -693,7 +693,7 @@ describe("recipe.check con requires", () => {
     const error = await check().catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(EnvironmentError);
-    expect((error as EnvironmentError).scope).toBe(repoScope("r1"));
+    expect((error as EnvironmentError).scope).toBe(repoScope("repo_r1"));
     expect((error as Error).message).toBe("Al repo le falta su entorno, no responde: Postgres, Doppler.");
     expect(existsSync(join(lease!.path, "checked"))).toBe(false);
   });

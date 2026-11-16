@@ -1,4 +1,4 @@
-import type { ClientOrigin, DefChange, DefCreate, DefIssue, DefUpdate, DefWrite, DefWriteKind, FlowDef } from "@clanker/api";
+import type { ClientOrigin, DefChange, DefCreate, DefIssue, DefUpdate, DefWrite, DefWriteKind, FlowDef, RepoId } from "@clanker/api";
 import type { Flows } from "../flows/flows";
 import { canonicalJson, DefValidationError, type Def, type DefScope, type Defs } from "./defs";
 import { issuesAsLines } from "../errors/format";
@@ -42,7 +42,7 @@ export function createDefWriter({ defs, flows }: { defs: Defs; flows: Pick<Flows
   }
 
   /** `slug` es el que ya se conoce (el de la def a actualizar, o el que dio quien crea); un flujo lo trae en su body. */
-  function check(kind: DefWriteKind, slug: string | undefined, body: unknown, repoId: string | undefined): Checked {
+  function check(kind: DefWriteKind, slug: string | undefined, body: unknown, repoId: RepoId | undefined): Checked {
     let parsed: unknown;
     try {
       parsed = defs.validate(kind, slug ?? "", body);

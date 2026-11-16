@@ -18,7 +18,7 @@ describe("planIssue", () => {
 
   test("el repo elegido resuelve la ambigüedad; uno que ya no es del proyecto no", () => {
     expect(planIssue(project, [], BACK, [])).toMatchObject({ kind: "repos", repoIds: [BACK] });
-    expect(planIssue(project, [], "gone", [])).toMatchObject({ kind: "ambiguous" });
+    expect(planIssue(project, [], "repo_gone", [])).toMatchObject({ kind: "ambiguous" });
   });
 
   test("un label calzado manda sobre lo elegido", () => {

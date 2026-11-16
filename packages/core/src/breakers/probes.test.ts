@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ClaudeStatus } from "@clanker/api";
+import type { ClaudeStatus, RepoId } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
@@ -85,7 +85,7 @@ describe("runtime", () => {
 });
 
 describe("repo", () => {
-  function repoWith(recipe?: unknown): string {
+  function repoWith(recipe?: unknown): RepoId {
     const path = join(dir, "repo");
     mkdirSync(join(path, ".clanker"), { recursive: true });
     if (recipe) writeFileSync(join(path, ".clanker", "recipe.json"), JSON.stringify(recipe));

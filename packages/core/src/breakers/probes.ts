@@ -1,10 +1,10 @@
-import { renderTemplate } from "@clanker/api";
+import { renderTemplate, type RepoId } from "@clanker/api";
 import { readRecipe } from "../recipe/recipe";
 import { failedRequires } from "../recipe/requires";
 import type { Connections } from "../connections/connections";
 import type { Repos } from "../repos/repos";
 import { execStreaming } from "../workspaces/exec";
-import { GITHUB_SCOPE, repoScope, runtimeScope } from "./breakers";
+import { GITHUB_SCOPE, REPO_SCOPE_PREFIX, runtimeScope } from "./breakers";
 import { messageOf } from "../errors/format";
 
 /** Una prueba de `requires` que se cuelga es una causa que sigue: no puede dejar al breaker sin reintentar. */
@@ -67,7 +67,7 @@ export function environmentProbe({ connections, repos, runtime }: ProbeDeps): (s
   return (scope) => {
     if (scope === GITHUB_SCOPE) return github();
     if (runtime === "claude-sdk" && scope === runtimeScope(runtime)) return claude();
-    if (scope.startsWith(repoScope(""))) return repo(scope.slice(repoScope("").length));
+    if (scope.startsWith(REPO_SCOPE_PREFIX)) return repo(scope.slice(REPO_SCOPE_PREFIX.length) as RepoId);
     return Promise.resolve(undefined);
   };
 }

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MergeStrategy, PrRef } from "@clanker/api";
+import type { MergeStrategy, PrRef, RepoId } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
@@ -32,7 +32,7 @@ let dir: string;
 let store: Store;
 let github: FakeGitHub | undefined;
 let repos: Repos;
-let repoId: string;
+let repoId: RepoId;
 let clock: number;
 /** Los commits de la branch por defecto que GitHub responde ahora. */
 let history: DefaultBranchCommit[];

@@ -55,7 +55,7 @@ beforeEach(async () => {
   });
   artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   briefs = createBriefs({ workspaces, artifacts });
-  lease = await workspaces.acquire({ repo: "r1", branch: "cla-1", base: "main", runId });
+  lease = await workspaces.acquire({ repo: "repo_r1", branch: "cla-1", base: "main", runId });
 });
 
 afterEach(() => {
@@ -331,7 +331,7 @@ describe("Brief", () => {
 
   test("un lease que ya no es el vigente no deja nada escrito", async () => {
     workspaces.release(lease);
-    const other = await workspaces.acquire({ repo: "r1", branch: "cla-1", base: "main", runId: newId("run") });
+    const other = await workspaces.acquire({ repo: "repo_r1", branch: "cla-1", base: "main", runId: newId("run") });
     try {
       await expect(briefs.prepare(request(1))).rejects.toThrow(/ya no es el vigente/);
     } finally {

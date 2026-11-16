@@ -1,4 +1,4 @@
-import type { CachedPr, PrSignal, PrState, ReviewerState } from "@clanker/api"
+import type { CachedPr, IssueId, PrSignal, PrState, ReviewerState } from "@clanker/api"
 
 // Stacks de PR de ejemplo para desarrollar la UI sin core: lo que `prs.list` serviría con el caché de Watch ya
 // leído. Todo cuelga de `now`, así "hace 2 min" se ve igual cada vez que se abre y los tests no dependen del reloj.
@@ -33,7 +33,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
     owned?: boolean
     parents?: CachedPr[]
     runId?: CachedPr["runId"]
-    issueId?: string
+    issueId?: IssueId
   }
   const pr = (repo: string, number: number, title: string, headRef: string, o: Options = {}): CachedPr => {
     const { merge, risk, updated, owned = false, parents = [], runId = null, issueId = null, ...rest } = o
@@ -82,7 +82,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
   // ─── Un stack de 4 sobre `ledger`, con un PR hijo que sale de una base combinada más abajo ──────────────────
   const stackBase = pr("ledger", 421, "Prohibir imports cruzados entre engines", "eng-9160-no-cross-imports", {
     owned: true,
-    issueId: "ENG-9160",
+    issueId: "iss_eng_9160",
     reviewers: [human("marta", "approved")],
     reviewDecision: "approved",
     approvers: ["marta"],
@@ -95,7 +95,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
   })
   const stackMid = pr("ledger", 424, "Agregar checks de boundaries a CI", "eng-9167-boundary-checks", {
     owned: true,
-    issueId: "ENG-9167",
+    issueId: "iss_eng_9167",
     baseRef: "eng-9160-no-cross-imports",
     baseIsDefault: false,
     reviewers: [human("marta", "changes_requested")],
@@ -108,7 +108,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
   })
   const stackTop = pr("ledger", 426, "Reglas de boundaries para engines nuevas", "eng-9173-new-engine-rules", {
     owned: true,
-    issueId: "ENG-9173",
+    issueId: "iss_eng_9173",
     state: "draft",
     baseRef: "eng-9167-boundary-checks",
     baseIsDefault: false,
@@ -122,7 +122,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
   })
   const stackBranch = pr("ledger", 427, "Lint de imports entre engines", "eng-9174-import-lint", {
     owned: true,
-    issueId: "ENG-9174",
+    issueId: "iss_eng_9174",
     baseRef: "eng-9160-no-cross-imports",
     baseIsDefault: false,
     reviewers: [human("diego", "pending")],
@@ -134,7 +134,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
   // Dos PRs de `payments-api` que un tercero junta en una rama sintética: su diff incluye los commits de los dos.
   const reconcile = pr("payments-api", 391, "Migrar el job de conciliación", "eng-9170-reconciliation-job", {
     owned: true,
-    issueId: "ENG-9170",
+    issueId: "iss_eng_9170",
     ci: { state: "red", sha: "a".repeat(40), failing: ["queue"], flaky: [] },
     reviewers: [human("marta", "approved")],
     reviewDecision: "approved",
@@ -146,7 +146,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
   })
   const rename = pr("payments-api", 388, "Renombrar Payments::Ledger a Payments::Posting", "eng-9163-rename-posting", {
     owned: true,
-    issueId: "ENG-9163",
+    issueId: "iss_eng_9163",
     reviewers: [human("marta", "commented"), human("diego", "approved")],
     reviewDecision: "approved",
     approvers: ["diego"],
@@ -161,7 +161,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
   })
   const combined = pr("payments-api", 395, "Cerrar la conciliación con el nuevo nombre", "eng-9176-reconcile-posting", {
     owned: true,
-    issueId: "ENG-9176",
+    issueId: "iss_eng_9176",
     baseRef: "clanker/base/eng-9176",
     baseIsDefault: false,
     parents: [reconcile, rename],
@@ -184,7 +184,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
     combined,
     pr("dashboard", 977, "Arreglar el scroll del listado de cuentas", "tw-31-accounts-scroll", {
       owned: true,
-      issueId: "TW-31",
+      issueId: "iss_tw_31",
       reviewers: [human("sofia", "approved")],
       reviewDecision: "approved",
       approvers: ["sofia"],
@@ -198,7 +198,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
     }),
     pr("dashboard", 979, "Quitar el modal duplicado de confirmación", "tw-33-duplicate-modal", {
       owned: true,
-      issueId: "TW-33",
+      issueId: "iss_tw_33",
       reviewers: [human("sofia", "pending")],
       risk: "low",
       additions: 40,

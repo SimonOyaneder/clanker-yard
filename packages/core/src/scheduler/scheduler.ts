@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, IssueId, Origin, ProjectId, QueueEntry } from "@clanker/api";
+import type { CachedIssue, ClankerProject, IssueId, Origin, ProjectId, QueueEntry, RepoId } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { RuntimeId } from "../agents/runtime";
 import type { Breakers as AllBreakers } from "../breakers/breakers";
@@ -209,7 +209,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   }
 
   /** El repo donde correrá la issue, si ya se sabe (ver `issuePlan`). */
-  function repoOfIssue(project: ClankerProject, issue: CachedIssue): string | undefined {
+  function repoOfIssue(project: ClankerProject, issue: CachedIssue): RepoId | undefined {
     const plan = issuePlan(store, repos, project, issue);
     return plan.kind === "repos" ? plan.next?.repoId : undefined;
   }

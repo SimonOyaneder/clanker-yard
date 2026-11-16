@@ -1,3 +1,4 @@
+import type { RepoId } from "@clanker/api";
 import type { Connections } from "../connections/connections";
 import type { RepoConfig } from "../workspaces/workspaces";
 import { tryGit } from "./git";
@@ -16,18 +17,18 @@ export interface GitIdentity {
  * noreply `<id>+<login>@users.noreply.github.com`, que GitHub siempre liga a la cuenta. Nunca hay una
  * identidad del sistema: sin ninguna de las dos fuentes lanza, con el modo de arreglarlo.
  */
-export type GitIdentityOf = (repoId: string) => Promise<GitIdentity>;
+export type GitIdentityOf = (repoId: RepoId) => Promise<GitIdentity>;
 
 export function createGitIdentityOf({
   repoConfig,
   connections,
 }: {
-  repoConfig: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: RepoId) => RepoConfig;
   connections: Pick<Connections, "githubClient">;
 }): GitIdentityOf {
   const cache = new Map<string, Promise<GitIdentity>>();
 
-  async function resolve(repoId: string): Promise<GitIdentity> {
+  async function resolve(repoId: RepoId): Promise<GitIdentity> {
     const cfg = repoConfig(repoId);
     const [email, name] = await Promise.all([tryGit(cfg.path, ["config", "user.email"]), tryGit(cfg.path, ["config", "user.name"])]);
     if (email && name) return { name, email };

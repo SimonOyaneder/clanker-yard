@@ -36,7 +36,7 @@ function setup(script?: AgentScript, options: { maxAgents?: number } = {}) {
     },
     workspaceOf: (runId) => {
       const subject = store.db.select({ id: runs.subjectId }).from(runs).where(eq(runs.id, runId)).get()?.id ?? "";
-      return { path: "/work/tree", base: "main", repoId: subject.startsWith("a-") ? "a" : "b" };
+      return { path: "/work/tree", base: "main", repoId: subject.startsWith("a-") ? "repo_a" : "repo_b" };
     },
   });
   cleanups.push(() => breakers.close(), h.cleanup);
@@ -56,7 +56,7 @@ describe("un repo caído", () => {
       "check",
       ["ok"],
       (_args, ctx) => {
-        const repo = t.store.db.select({ id: runs.subjectId }).from(runs).where(eq(runs.id, ctx.runId)).get()!.id.startsWith("a-") ? "a" : "b";
+        const repo = t.store.db.select({ id: runs.subjectId }).from(runs).where(eq(runs.id, ctx.runId)).get()!.id.startsWith("a-") ? "repo_a" : "repo_b";
         checked.push(repo);
         if (t.down.has(repoScope(repo))) throw new EnvironmentError(repoScope(repo), "No responde: Postgres.");
         return { outcome: "ok" };
@@ -70,7 +70,7 @@ describe("un repo caído", () => {
   test("no frena a otro repo, espera sin gastar intento y sigue solo cuando la prueba pasa", async () => {
     vi.useFakeTimers();
     const t = repoDown();
-    t.down.add(repoScope("a"));
+    t.down.add(repoScope("repo_a"));
 
     const a = t.start("check", subject("a-1"));
     const b = t.start("check", subject("b-1"));
@@ -79,13 +79,13 @@ describe("un repo caído", () => {
     expect(t.flows.getRun(b)).toMatchObject({ status: "done" });
     expect(t.flows.getRun(a)).toMatchObject({ status: "running" });
     expect(t.flows.getRun(a).steps[0]).toMatchObject({ status: "pending", error: "No responde: Postgres." });
-    expect(t.breakers.list().map((x) => x.scope)).toEqual(["repo:a"]);
-    expect(t.store.events.since(0, { types: ["breaker.opened"] })[0]?.payload).toMatchObject({ scope: "repo:a", cause: "environment" });
+    expect(t.breakers.list().map((x) => x.scope)).toEqual(["repo:repo_a"]);
+    expect(t.store.events.since(0, { types: ["breaker.opened"] })[0]?.payload).toMatchObject({ scope: "repo:repo_a", cause: "environment" });
 
     // Pasa la primera prueba (1 min) y sigue caído: el breaker lo mantiene en pausa, aunque el paso ya podría correr.
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(t.probes).toEqual(["repo:a"]);
-    expect(t.checked).toEqual(["a", "b"]);
+    expect(t.probes).toEqual(["repo:repo_a"]);
+    expect(t.checked).toEqual(["repo_a", "repo_b"]);
     expect(t.flows.getRun(a).steps[0]).toMatchObject({ status: "pending" });
 
     t.down.clear();
@@ -102,7 +102,7 @@ describe("un repo caído", () => {
     vi.useFakeTimers();
     const t = setup();
     t.save(flow("plan", { plan: { type: "agent", role: "dev", mode: "plan", brief: {}, on: { ok: "@done", changes: "@failed" } } }, "plan"));
-    t.breakers.trip({ scope: repoScope("a"), cause: "environment", reason: "Postgres caído" });
+    t.breakers.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "Postgres caído" });
 
     const a = t.start("plan", subject("a-1"));
     const b = t.start("plan", subject("b-1"));

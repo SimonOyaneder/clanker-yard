@@ -1,4 +1,4 @@
-import type { ProjectId, QueueEntry } from "@clanker/api";
+import type { IssueId, ProjectId, QueueEntry } from "@clanker/api";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Prs } from "../github/prs";
 import { repoOfRun } from "../projects/issue-repos";
@@ -42,7 +42,7 @@ export interface ProjectQueue {
 
 export function createProjectQueue({ store, projects, issues, repos, trackers, prs }: ProjectQueueDeps): ProjectQueue {
   /** Los PRs abiertos del sistema de estas issues, con el CI de cada uno si el proyecto apila sobre CI verde. */
-  async function prFacts(issueIds: readonly string[], readCi: boolean): Promise<QueuePrFact[]> {
+  async function prFacts(issueIds: readonly IssueId[], readCi: boolean): Promise<QueuePrFact[]> {
     if (issueIds.length === 0) return [];
     const rows = openOwnedPrsOfIssues(store.db, [...issueIds]);
     const facts = await Promise.all(

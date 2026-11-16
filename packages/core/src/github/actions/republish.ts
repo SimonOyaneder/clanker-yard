@@ -1,4 +1,4 @@
-import { PrRef } from "@clanker/api";
+import { PrRef, type RepoId } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { and, eq } from "drizzle-orm";
 import * as z from "zod";
@@ -119,7 +119,7 @@ export function prSupersedeAction({ store, connections }: PrSupersedeDeps): Acti
 }
 
 /** `branch` si es el head de un PR cerrado cuya issue ya tiene otro PR abierto (un padre que ya se rehízo), `undefined` si no. */
-function supersededParent(store: Store, repoId: string, branch: string): string | undefined {
+function supersededParent(store: Store, repoId: RepoId, branch: string): string | undefined {
   const closed = store.db
     .select({ issueId: pullRequests.issueId })
     .from(pullRequests)
@@ -147,7 +147,7 @@ async function deleteUnlessBase(client: GitHubClient, owner: string, repo: strin
 }
 
 /** El viejo queda cerrado en el caché, y lo que lo seguía (corridas que lo tenían, PRs apilados sobre él) pasa al nuevo. */
-function followNew(store: Store, runId: string, repoId: string, oldNumber: number, newNumber: number): void {
+function followNew(store: Store, runId: string, repoId: RepoId, oldNumber: number, newNumber: number): void {
   store.tx(({ db }) => {
     const old = db.select({ id: pullRequests.id }).from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, oldNumber))).get();
     const fresh = db.select({ id: pullRequests.id }).from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, newNumber))).get();

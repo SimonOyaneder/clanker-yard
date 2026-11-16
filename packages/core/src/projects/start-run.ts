@@ -1,4 +1,4 @@
-import { FlowDef, type Origin, type StartRun } from "@clanker/api";
+import { FlowDef, type Origin, type RepoId, type StartRun } from "@clanker/api";
 import type * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { RunStartError, type Engine, type RunView } from "../flows/engine";
@@ -9,7 +9,7 @@ import { storedBinding, TrackerProjectsError, type ProjectBindings } from "../tr
 import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../repos/repos";
 import { ProjectNotFoundError, type Projects } from "./projects";
-import type { IssuePlan } from "./issue-repos";
+import { repoOfRun, type IssuePlan } from "./issue-repos";
 import { issueBranch } from "./branch-name";
 import { issuePlan } from "./repo-question";
 
@@ -72,7 +72,7 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
       }
 
       const plan = issuePlan(store, repos, project, issue);
-      const repoId = typeof input.params?.repo === "string" ? input.params.repo : planned(plan);
+      const repoId = repoOfRun(input.params ?? {}) ?? planned(plan);
       if (repoId === undefined && plan.kind === "ambiguous") {
         throw new RunStartError(
           `${issue.ref.key} no calza ningún repo del proyecto ${project.slug}: pasa \`params.repo\` o responde la decisión de la bandeja que pregunta de qué repo es.`,
@@ -153,6 +153,6 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
 }
 
 /** El repo de la próxima corrida de la issue; si ya corrió en todos (un reintento a mano), el primero. */
-function planned(plan: IssuePlan): string | undefined {
+function planned(plan: IssuePlan): RepoId | undefined {
   return plan.kind === "repos" ? (plan.next ? plan.next.repoId : plan.repoIds[0]) : undefined;
 }

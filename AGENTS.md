@@ -67,7 +67,7 @@ El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run 
 
 Lo que ya define `@clanker/api` (ids con prefijo, `EventType`, `Origin`, `SubjectRef`, `Event`, `EventFilter`, `EventPayloads`) se importa de ahí, no se redeclara en el core: en el schema con `.$type<...>()`, que no cambia la migración.
 
-Los ids de prueba salen de `newId("run")` o son ULIDs válidos (`run_00000000000000000000000001`): `run_1` pasa el tipo, pero el store rechaza el evento.
+Las columnas que apuntan a `repos` o a `issues` llevan su brand (`$type<RepoId>()`, `$type<IssueId>()`) y las firmas del core piden `RepoId`, no `string`: un id que llega como texto (los `params` de una corrida) se valida con `RepoId.safeParse` (`repoOfRun`), no se castea. `SubjectRef.id` y `runs.subject_id` siguen como texto: el sujeto de una corrida puede ser cualquier cosa (los tests del motor usan `ENG-1`). Los ids de prueba salen de `newId("run")` o son ULIDs válidos (`run_00000000000000000000000001`): `run_1` pasa el tipo, pero el store rechaza el evento.
 
 Si una tx emite el inicio de algo (`lease.acquired`) y el paso que sigue falla, el camino de error emite el cierre (`lease.released`): la línea de tiempo no puede quedar con un lease que nunca se soltó.
 

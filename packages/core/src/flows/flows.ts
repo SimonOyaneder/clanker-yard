@@ -1,4 +1,4 @@
-import { FlowBody, FlowDef, type FlowIssue, type Validation } from "@clanker/api";
+import { FlowBody, FlowDef, type FlowIssue, type Validation, type RepoId } from "@clanker/api";
 import type { ZodType } from "zod";
 import type { Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
@@ -34,7 +34,7 @@ export interface SaveFlowOptions {
   /** Por defecto `user`. */
   scope?: DefScope;
   /** Obligatorio con scope `repo`. */
-  repoId?: string;
+  repoId?: RepoId;
   /** `ui`, `mcp`, `import` o `repo:<ruta>@<sha>`. Por defecto `ui`. */
   source?: string;
 }
@@ -52,7 +52,7 @@ export interface Flows extends Engine {
    * Esquema y reglas del diseño. Los errores llevan la ruta dentro del flujo
    * (`nodes.sync.on.conflict`); los avisos no impiden guardar. `repoId` resuelve los subflujos con scope repo.
    */
-  validate(def: unknown, opts?: { repoId?: string }): Validation;
+  validate(def: unknown, opts?: { repoId?: RepoId }): Validation;
   /**
    * Valida y guarda el flujo en `defs` con slug = `def.id`. Crea una versión nueva solo si el
    * contenido cambió; si hay errores lanza `FlowValidationError`.
@@ -90,7 +90,7 @@ export function createFlows({ roles, ...deps }: FlowsDeps): Flows {
     into.set(def.name, def);
   }
 
-  function catalog(repoId: string | undefined): Catalog {
+  function catalog(repoId: RepoId | undefined): Catalog {
     return {
       action: (name) => actions.get(name),
       wait: (name) => waits.get(name),
@@ -103,7 +103,7 @@ export function createFlows({ roles, ...deps }: FlowsDeps): Flows {
     };
   }
 
-  function validate(def: unknown, opts: { repoId?: string } = {}): Validation {
+  function validate(def: unknown, opts: { repoId?: RepoId } = {}): Validation {
     const parsed = FlowDef.safeParse(def);
     if (!parsed.success) {
       const errors = parsed.error.issues.map(({ path, message }) => ({ path: path.map(String).join("."), message }));

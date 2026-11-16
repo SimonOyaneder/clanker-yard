@@ -1,3 +1,4 @@
+import type { RepoId } from "@clanker/api";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,7 +42,7 @@ const PushFixupsArgs = z.object({
 export interface PrPushFixupsDeps {
   store: Store;
   workspaces: Workspaces;
-  repoConfig: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: RepoId) => RepoConfig;
   prs: Pick<Prs, "get">;
 }
 

@@ -1,4 +1,4 @@
-import { PrRef } from "@clanker/api";
+import { PrRef, type RepoId } from "@clanker/api";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
@@ -18,7 +18,7 @@ import type { Prs } from "../prs";
 export interface StackRestackDeps {
   store: Store;
   workspaces: Workspaces;
-  repoConfig: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: RepoId) => RepoConfig;
   prs: Pick<Prs, "get">;
   connections: Pick<Connections, "githubClient">;
   /** Espera entre las relecturas de `mergeable` (10 s); los tests la reemplazan. */

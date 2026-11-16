@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { ProjectId, RunId } from "./domain";
+import { IssueId, ProjectId, RunId } from "./domain";
 import { SignalTone } from "./pack";
 
 // El estado normalizado de un PR (`docs/design.html#d-ops`, interface PrState). Es genérico: lo que
@@ -183,7 +183,7 @@ export const CachedPr = z.object({
   /** Lo abrió el sistema (`pr.publish`); los demás los descubrió la búsqueda de tus PRs. */
   owned: z.boolean(),
   /** El sujeto de la corrida que lo abrió. */
-  issueId: z.string().nullable(),
+  issueId: IssueId.nullable(),
   runId: RunId.nullable(),
   /**
    * De qué PRs cuelga (`pr_parents`, el `id` de cada uno, ordenados por id). Con dos o más su base es

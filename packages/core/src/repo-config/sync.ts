@@ -1,4 +1,4 @@
-import type { DefWriteKind, FlowDef, RepoConfigSync } from "@clanker/api";
+import type { DefWriteKind, FlowDef, RepoConfigSync, RepoId } from "@clanker/api";
 import { git, GitError, tryGit } from "../git/git";
 import { canonicalJson, DefValidationError, type Defs } from "../defs/defs";
 import type { Flows } from "../flows/flows";
@@ -17,12 +17,12 @@ export interface RepoConfigSyncer {
    * contenido). Lo que una persona editó o archivó en la app sobrevive hasta que el archivo cambia. Roles primero, luego
    * perfiles y flujos: un flujo puede citar un rol del mismo repo. Lanza `RepoNotFoundError`.
    */
-  sync(repoId: string): Promise<RepoConfigSync>;
+  sync(repoId: RepoId): Promise<RepoConfigSync>;
 }
 
 export function createRepoConfigSyncer({ defs, flows, repos }: { defs: Defs; flows: Pick<Flows, "validate" | "save">; repos: Repos }): RepoConfigSyncer {
   /** Los archivos de `.clanker/` de la punta por defecto; uno que git no pudo leer queda con su `GitError`, sin borrar su def. */
-  async function readTree(repoId: string): Promise<{ commit: string; files: Map<string, string | GitError> } | undefined> {
+  async function readTree(repoId: RepoId): Promise<{ commit: string; files: Map<string, string | GitError> } | undefined> {
     const repo = repos.get(repoId);
     if (!repo) throw new RepoNotFoundError(repoId);
     let commit: string | undefined;

@@ -23,7 +23,7 @@ beforeEach(async () => {
     repoConfig: () => ({ path: repo.dir, defaultBranch: "main" }),
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
-  lease = await workspaces.acquire({ repo: "r1", branch: "cla-47", base: "main", runId: newId("run") });
+  lease = await workspaces.acquire({ repo: "repo_r1", branch: "cla-47", base: "main", runId: newId("run") });
 });
 
 afterEach(() => {

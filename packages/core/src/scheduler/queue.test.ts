@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, IssueRef, Person, QueueEntry, StackOn, StatusCategory, TrackerCapabilities } from "@clanker/api";
+import type { CachedIssue, ClankerProject, IssueRef, Person, QueueEntry, StackOn, StatusCategory, TrackerCapabilities, RepoId } from "@clanker/api";
 import { describe, expect, test } from "vitest";
 import { type QueuePrFact, type QueueRun, tickDev, type TickDevInput } from "./queue";
 
@@ -395,8 +395,8 @@ describe("repo de la issue", () => {
   });
   const names = new Map([[FRONT, "front"], [BACK, "back"]]);
   const chained = (issues: CachedIssue[], extra: Partial<TickDevInput> = {}) => queue(issues, { project: twoRepos, repoNames: names, ...extra });
-  const runIn = (n: number, repoId: string, status: QueueRun["status"], outcome: string | null = null): QueueRun => ({ ...run(n, status, outcome), repoId });
-  const prIn = (n: number, repoId: string, key: string): QueuePrFact => pr(n, { repoId, key, ci: "not_green" });
+  const runIn = (n: number, repoId: RepoId, status: QueueRun["status"], outcome: string | null = null): QueueRun => ({ ...run(n, status, outcome), repoId });
+  const prIn = (n: number, repoId: RepoId, key: string): QueuePrFact => pr(n, { repoId, key, ci: "not_green" });
 
   test("un label mapea a su repo: la issue es elegible y sale sobre la branch por defecto", () => {
     expect(only(chained([issue(1, { labels: ["backend"] })]))).toMatchObject({ state: "ready", base: { kind: "default" }, dependsOn: [] });

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RunId } from "@clanker/api";
+import type { RunId, RepoId } from "@clanker/api";
 import {
   BranchNotAllowedError,
   createAgents,
@@ -73,14 +73,15 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-function repo(id: string, opts: TempGitRepoOptions = { remote: true }): string {
+function repo(name: string, opts: TempGitRepoOptions = { remote: true }): RepoId {
+  const id: RepoId = `repo_${name}`;
   const created = tempGitRepo(opts);
   repos.push(created);
   repoById.set(id, created);
   return id;
 }
 
-async function acquire(repoId: string, branch: string, runId: RunId = runA, base = "main") {
+async function acquire(repoId: RepoId, branch: string, runId: RunId = runA, base = "main") {
   const lease = await workspaces.acquire({ repo: repoId, branch, base, runId });
   leases.push(lease);
   return lease;
@@ -102,7 +103,7 @@ describe("acquire", () => {
 
     const lease = await acquire(id, "feat/cla-1");
 
-    expect(lease.path).toBe(join(dataDir, "worktrees", "r1", "feat", "cla-1"));
+    expect(lease.path).toBe(join(dataDir, "worktrees", "repo_r1", "feat", "cla-1"));
     const main = repoById.get(id)!.git("rev-parse", "main");
     expect(lease.baseSha).toBe(main);
     const listing = repoById.get(id)!.git("worktree", "list", "--porcelain");
@@ -176,7 +177,7 @@ describe("acquire", () => {
   test("una branch nueva no reusa una carpeta que ya existe, aunque sea un worktree", async () => {
     const id = repo("r1");
     // Lo que pasa en macOS con `CLA-1` después de `cla-1`: la carpeta es la misma.
-    const path = join(dataDir, "worktrees", "r1", "cla-1");
+    const path = join(dataDir, "worktrees", "repo_r1", "cla-1");
     repoById.get(id)!.git("worktree", "add", "-b", "otra", path);
 
     await expect(acquire(id, "cla-1")).rejects.toBeInstanceOf(BranchNotAllowedError);
@@ -262,7 +263,7 @@ describe("setup.worktree", () => {
 
     expect(error).toBeInstanceOf(WorktreeSetupError);
     expect((error as Error).message).toMatch(/setup\.worktree falló en .*: echo 'sin red' >&2; exit 7 \(exit 7\)\nsin red/);
-    expect(existsSync(join(dataDir, "worktrees", "r1", "cla-1"))).toBe(false);
+    expect(existsSync(join(dataDir, "worktrees", "repo_r1", "cla-1"))).toBe(false);
     expect(r.git("branch", "--list", "cla-1")).toBe("");
     expect(r.git("worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(1);
     expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);

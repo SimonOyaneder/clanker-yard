@@ -104,7 +104,7 @@ beforeEach(async () => {
   abort = workspaceRebaseAbortAction(workspaces);
 
   // El PR ya publicado: un commit sobre a.txt.
-  const lease = await workspaces.acquire({ repo: "r1", branch: BRANCH, base: "main", runId: newId("run") });
+  const lease = await workspaces.acquire({ repo: "repo_r1", branch: BRANCH, base: "main", runId: newId("run") });
   writeFileSync(join(lease.path, "a.txt"), "a1\nmine\na3\n");
   const publish = prPublishAction({ store, workspaces, recipes, repoConfig: repos, connections, packs });
   const { workspaceId, path, branch, baseSha, fencingToken } = lease;

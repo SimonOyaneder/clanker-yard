@@ -86,7 +86,7 @@ async function setup(password = TOKEN, branches: Parameters<typeof tempGitRepo>[
 }
 
 async function acquire(branch = BRANCH) {
-  const lease = await workspaces.acquire({ repo: "r1", branch, base: "main", runId: newId("run") });
+  const lease = await workspaces.acquire({ repo: "repo_r1", branch, base: "main", runId: newId("run") });
   leases.push(lease);
   return lease;
 }
@@ -208,7 +208,7 @@ describe("push", () => {
     const lease = await acquire();
     await commit(lease, "feat: one");
     clock += 2 * LEASE_TTL_MS;
-    await workspaces.acquire({ repo: "r1", branch: BRANCH, base: "main", runId: newId("run") }).then((l) => leases.push(l));
+    await workspaces.acquire({ repo: "repo_r1", branch: BRANCH, base: "main", runId: newId("run") }).then((l) => leases.push(l));
 
     await expect(workspaces.push(lease)).rejects.toThrow(/ya no es el vigente/);
     expect(existsSync(join(repo.remoteDir!, "refs", "heads", BRANCH))).toBe(false);
@@ -237,7 +237,7 @@ describe("push", () => {
       repoConfig: () => ({ path: repo.dir, defaultBranch: "main" }),
       identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     });
-    await expect(bare.fetch("r1")).rejects.toThrow(/no tiene remoto configurado/);
+    await expect(bare.fetch("repo_r1")).rejects.toThrow(/no tiene remoto configurado/);
   });
 });
 
@@ -301,7 +301,7 @@ describe("el token solo va al remoto del ticket", () => {
     const seen = join(dataDir, "hook-ran.txt");
     writeHook("reference-transaction", `touch "${seen}"`);
 
-    expect(await workspaces.fetch("r1")).toBe("ok");
+    expect(await workspaces.fetch("repo_r1")).toBe("ok");
 
     expect(repo.git("rev-parse", "refs/remotes/origin/other")).toBeTruthy();
     expect(existsSync(seen)).toBe(false);
@@ -330,7 +330,7 @@ describe("fetch", () => {
     await acquire();
     const theirs = otherProcessPushes("chore: someone else", "other");
 
-    expect(await workspaces.fetch("r1")).toBe("ok");
+    expect(await workspaces.fetch("repo_r1")).toBe("ok");
 
     expect(repo.git("rev-parse", "refs/remotes/origin/other")).toBe(theirs);
     expect(Buffer.from(server!.authorizations.at(-1)!.replace("Basic ", ""), "base64").toString()).toBe(
@@ -341,7 +341,7 @@ describe("fetch", () => {
   test("un 401 en el fetch también deja la conexión revocada", async () => {
     await setup("otro-token");
 
-    expect(await workspaces.fetch("r1")).toBe("unauthorized");
+    expect(await workspaces.fetch("repo_r1")).toBe("unauthorized");
 
     expect(connections.list()).toMatchObject([{ status: "revoked" }]);
   });

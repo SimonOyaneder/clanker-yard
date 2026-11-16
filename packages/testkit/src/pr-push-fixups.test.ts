@@ -94,7 +94,7 @@ beforeEach(async () => {
   });
   pushFixups = prPushFixupsAction({ store, workspaces, repoConfig: repos, prs: createPrs({ connections, packs }) });
 
-  lease = await workspaces.acquire({ repo: "r1", branch: BRANCH, base: "main", runId: newId("run") });
+  lease = await workspaces.acquire({ repo: "repo_r1", branch: BRANCH, base: "main", runId: newId("run") });
   // El PR ya publicado: dos commits, uno sobre la línea 2 de c.txt y otro sobre la 28.
   write("c.txt", file(lines(30)).replace("l2\n", "top\n").replace("l28\n", "bottom\n"));
   const { workspaceId, path, branch, baseSha, fencingToken } = lease;

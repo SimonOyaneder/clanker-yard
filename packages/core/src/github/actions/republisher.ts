@@ -1,4 +1,4 @@
-import type { IssueId, Origin, PrRef, PrRepublish, RepublishInput, RunId } from "@clanker/api";
+import type { IssueId, Origin, PrRef, PrRepublish, RepublishInput, RunId, RepoId } from "@clanker/api";
 import { and, eq, inArray, or } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
@@ -22,7 +22,7 @@ export interface PrRepublisherDeps {
   connections: Pick<Connections, "githubClient">;
   prs: Pick<Prs, "get">;
   /** `workspaces.fetch`: trae las branches del remoto, que `pr.replay` y los nombres nuevos necesitan al día. */
-  fetchRepo(repoId: string): Promise<FetchOutcome>;
+  fetchRepo(repoId: RepoId): Promise<FetchOutcome>;
   /** Cada cuántos ms mira si la corrida terminó. */
   pollMs?: number;
 }

@@ -1,4 +1,4 @@
-import type { PrRef } from "@clanker/api";
+import type { PrRef, RepoId } from "@clanker/api";
 import { eq } from "drizzle-orm";
 import { PermanentActionError } from "../../flows/catalog";
 import { workspaces as workspacesTable } from "../../store/schema";
@@ -23,7 +23,7 @@ export interface PrPurpose {
  * `pull_requests` los PRs tuyos que el sistema no abrió, y esos nunca se reescriben ni se pushean.
  */
 export function ownedOpenPr(
-  deps: { store: Store; repoConfig: (repoId: string) => RepoConfig },
+  deps: { store: Store; repoConfig: (repoId: RepoId) => RepoConfig },
   ws: { workspaceId: string; branch: string },
   purpose: PrPurpose,
 ): { remote: NonNullable<RepoConfig["remote"]>; ref: PrRef; remoteSha: string } {
