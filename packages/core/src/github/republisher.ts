@@ -206,8 +206,9 @@ async function readPull(deps: PrRepublisherDeps, account: string, owner: string,
 /** Por qué rehacer el PR perdería contexto de una persona (o del council); `undefined` si no hay nada que perder. */
 async function lostContext(deps: PrRepublisherDeps, ref: PrRef): Promise<string | undefined> {
   const { threads, talk } = await deps.prs.get(ref);
-  // Los threads de un bot de review se atienden solos; lo demás sin resolver es de humanos o del council.
-  if (threads.unresolved > threads.botOpen) return `tiene ${threads.unresolved - threads.botOpen} threads sin resolver (humanos o council): rehacerlo perdería ese contexto`;
+  // Los threads de bots se vuelven a abrir solos en el PR nuevo; solo se pierde el contexto de personas o del council.
+  const open = threads.humanOpen + threads.councilOpen.length;
+  if (open > 0) return `tiene ${open} threads sin resolver (humanos o council): rehacerlo perdería ese contexto`;
   if (talk.length > 0) return "tiene comentarios o reviews de humanos: rehacerlo perdería ese contexto";
   return undefined;
 }
