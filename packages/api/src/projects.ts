@@ -48,6 +48,11 @@ export const ClankerProject = z.object({
   tracker: TrackerId,
   /** Con `local` es el id del propio proyecto: así lo llama `issues.createLocal`. */
   trackerRef: z.string().min(1),
+  /**
+   * La cuenta del tracker de la que sale la cola (en Linear, el `urlKey` del workspace, que es el nombre de la cuenta en
+   * `connections`). `null` en `local` y en un proyecto que aún no la fijó: entonces se usa la única cuenta conectada.
+   */
+  trackerAccount: z.string().min(1).nullable(),
   /** Slug del flujo con que corre `runs.start` si no se pide otro. */
   defaultFlowId: z.string().min(1).nullable(),
   /** Slug del perfil con que corren los pasos agent. */
@@ -83,6 +88,8 @@ export const NewProject = z
     name: z.string().min(1),
     tracker: TrackerId,
     trackerRef: z.string().min(1).optional(),
+    /** La cuenta (workspace) del tracker a la que pertenece `trackerRef`; sin ella se usa la única conectada. */
+    trackerAccount: z.string().min(1).optional(),
     defaultFlowId: z.string().min(1).optional(),
     defaultProfileId: z.string().min(1).optional(),
     repos: ProjectRepos.default([]),
@@ -96,6 +103,9 @@ export const NewProject = z
   })
   .superRefine((project, ctx) => {
     const isLocal = project.tracker === "local";
+    if (isLocal && project.trackerAccount !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["trackerAccount"], message: "un proyecto local no lleva trackerAccount" });
+    }
     if (isLocal && project.trackerRef !== undefined) {
       ctx.addIssue({
         code: "custom",
@@ -123,6 +133,8 @@ const patchShape = {
   name: z.string().min(1).optional(),
   /** Solo en un proyecto de un tracker externo y mientras no tenga issues en el caché; el core lo normaliza como en `create`. */
   trackerRef: z.string().min(1).optional(),
+  /** La cuenta (workspace) del tracker; va junto con `trackerRef` al cambiar de proyecto, con las mismas condiciones. */
+  trackerAccount: z.string().min(1).optional(),
   defaultFlowId: z.string().min(1).nullable().optional(),
   defaultProfileId: z.string().min(1).nullable().optional(),
   /** Reemplaza la lista entera. */

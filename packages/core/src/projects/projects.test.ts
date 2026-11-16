@@ -6,7 +6,7 @@ import { createDefs, type Defs } from "../defs/defs";
 import { createRouter } from "../server/router";
 import { apiDeps } from "../server/testing";
 import { newId } from "../store/conventions";
-import { syncCursors } from "../store/schema";
+import { issues, syncCursors } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { createRepos } from "../workspaces/repos";
@@ -44,6 +44,7 @@ describe("create", () => {
       name: "Demo",
       tracker: "local",
       trackerRef: project.id,
+      trackerAccount: null,
       defaultFlowId: null,
       defaultProfileId: null,
       repos: [],
@@ -237,6 +238,43 @@ describe("update", () => {
     expect(projects.update(linear.id, { trackerRef: "new" }, "ui").trackerRef).toBe("new");
     expect(store.db.select().from(syncCursors).all()).toEqual([]);
     expect(() => projects.update(project.id, { trackerRef: "x" }, "ui")).toThrow(InvalidProjectError);
+  });
+
+  test("la cuenta del tracker se guarda al crear y cambia junto con el proyecto; un proyecto local no la lleva", () => {
+    const linear = create({ slug: "lin", name: "Lin", tracker: "linear", trackerRef: "old", trackerAccount: "acme", parallel: 1, flowParams: {} }, "ui");
+
+    expect(linear.trackerAccount).toBe("acme");
+    expect(project.trackerAccount).toBeNull();
+    expect(projects.update(linear.id, { trackerRef: "new", trackerAccount: "clanker-yard" }, "ui")).toMatchObject({ trackerRef: "new", trackerAccount: "clanker-yard" });
+    expect(() => projects.update(project.id, { trackerAccount: "acme" }, "ui")).toThrow(InvalidProjectError);
+    expect(NewProject.safeParse({ slug: "l", name: "L", tracker: "local", trackerAccount: "acme" }).success).toBe(false);
+  });
+
+  test("fijar la cuenta de un proyecto que no la tenía no exige un caché vacío; cambiarla después sí", () => {
+    const viejo = create({ slug: "viejo", name: "Viejo", tracker: "linear", trackerRef: "ref", parallel: 1, flowParams: {} }, "ui");
+    store.db
+      .insert(issues)
+      .values({
+        id: newId("iss"),
+        tracker: "linear",
+        trackerId: "uuid-1",
+        key: "DEMO-1",
+        url: "https://linear.app/acme/issue/DEMO-1",
+        projectId: viejo.id,
+        trackerProject: "ref",
+        title: "DEMO-1",
+        body: "",
+        status: "todo",
+        rawStatus: "Todo",
+        priority: 0,
+        labels: [],
+        relations: { blocks: [], blockedBy: [], related: [] },
+        remoteUpdatedAt: 0,
+      })
+      .run();
+
+    expect(projects.update(viejo.id, { trackerAccount: "acme" }, "ui").trackerAccount).toBe("acme");
+    expect(() => projects.update(viejo.id, { trackerAccount: "clanker-yard" }, "ui")).toThrow(/ya tiene issues/);
   });
 
   test("un cambio de estado emite el evento de ese estado y un patch sin cambios no emite nada", () => {

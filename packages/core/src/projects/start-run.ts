@@ -5,6 +5,7 @@ import { RunStartError, type Engine, type RunView } from "../flows/engine";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
+import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../workspaces/repos";
 import { ProjectNotFoundError, type Projects } from "./projects";
 import type { IssuePlan } from "./issue-repos";
@@ -21,7 +22,7 @@ export interface RunStarterDeps {
   issues: Issues;
   flows: Engine;
   /** Los adapters que este core conoce, por id de tracker (`local` y `linear`). */
-  trackers: Readonly<Record<string, Tracker>>;
+  trackers: Trackers;
 }
 
 export interface RunStarter {
@@ -97,7 +98,12 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
         );
       }
 
-      const tracker = trackers[issue.ref.tracker];
+      let tracker: Tracker | undefined;
+      try {
+        tracker = trackers(project);
+      } catch (error) {
+        throw new RunStartError(`No se pudo reclamar ${issue.ref.key}: ${(error as Error).message}`, { cause: error });
+      }
       if (!tracker) {
         throw new RunStartError(`Este core todavía no tiene un adapter de ${issue.ref.tracker}: no puede reclamar ${issue.ref.key}.`);
       }

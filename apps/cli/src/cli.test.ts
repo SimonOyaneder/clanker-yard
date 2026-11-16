@@ -13,6 +13,7 @@ const project = ClankerProject.parse({
   name: "Demo",
   tracker: "local",
   trackerRef: projectId,
+  trackerAccount: null,
   defaultFlowId: "juguete",
   defaultProfileId: null,
   repos: [],

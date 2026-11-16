@@ -110,7 +110,7 @@ test("con Linear, los proyectos salen con los míos primero, se filtran por text
   const expected = (await data.trackerProjects("linear")).find((p) => p.name === "Facturación mensual")!
   create()
   await waitFor(() => expect(createProject).toHaveBeenCalled())
-  expect(sent(createProject)).toMatchObject({ tracker: "linear", trackerRef: expected.ref.id })
+  expect(sent(createProject)).toMatchObject({ tracker: "linear", trackerRef: expected.ref.id, trackerAccount: expected.account })
 })
 
 test("con Linear sin conectar muestra el error del core y un botón a Conexiones", async () => {
@@ -141,4 +141,20 @@ test("un tracker sin listado (Jira) deja el campo de texto con el id", async () 
 
   await waitFor(() => expect(createProject).toHaveBeenCalled())
   expect(sent(createProject)).toMatchObject({ tracker: "jira", trackerRef: "PROJ-1" })
+})
+
+test("con dos workspaces, el proyecto que se elige guarda la cuenta de su workspace", async () => {
+  const project = (id: string, name: string, account: string) => ({ ref: { tracker: "linear" as const, id }, name, mine: true, account })
+  const { createProject } = setup({
+    trackerProjects: async () => [project("a1", "Pagos", "acme"), project("b1", "Clanker Yard MVP", "clanker-yard")],
+  })
+  await chooseTracker("Linear")
+  fillName("Cinco")
+
+  fireEvent.click(await screen.findByRole("combobox", { name: "Proyecto del tracker" }))
+  fireEvent.click(screen.getByRole("option", { name: /Clanker Yard MVP/ }))
+  create()
+
+  await waitFor(() => expect(createProject).toHaveBeenCalled())
+  expect(sent(createProject)).toMatchObject({ tracker: "linear", trackerRef: "b1", trackerAccount: "clanker-yard" })
 })

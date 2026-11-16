@@ -1,4 +1,5 @@
 import { NewProject, type CachedIssue, type ProjectId, type RunId } from "@clanker/api";
+import { trackersByKind } from "../tracker/trackers";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { harness as createHarness, type HarnessHome } from "../flows/harness";
 import { createProjects } from "../projects/projects";
@@ -77,7 +78,7 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
 
   const local = createLocalTracker(h.store);
   const tracker: Tracker = claim ? { ...local, claim } : local;
-  const trackers = { local: tracker };
+  const trackers = trackersByKind({ local: tracker });
   const issues = createIssues(h.store, local);
   const projects = createProjects(h.store, h.defs);
   const repos = createRepos(h.store);

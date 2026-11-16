@@ -36,6 +36,7 @@ import {
 import { githubRemote } from "./github/remote-config";
 import { createPacks } from "./packs/packs";
 import { createLinearTracker } from "./linear/tracker";
+import { createTrackers } from "./tracker/trackers";
 import { createTrackerProjects } from "./tracker/tracker-projects";
 import { createProcs, type Procs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
@@ -161,14 +162,17 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const local = createLocalTracker(store);
   const issues = createIssues(store, local);
   const projects = createProjects(store, defs);
-  const trackers = {
+  const trackers = createTrackers({
     local,
-    linear: createLinearTracker({
-      connections: opts.connections,
-      endpoint: opts.linearEndpoint,
-      statusMapping: (ref) => projects.list().find((p) => p.tracker === "linear" && p.trackerRef === ref)?.statusMapping,
-    }),
-  };
+    connections: opts.connections,
+    linear: (account) =>
+      createLinearTracker({
+        connections: opts.connections,
+        account,
+        endpoint: opts.linearEndpoint,
+        statusMapping: (ref) => projects.list().find((p) => p.tracker === "linear" && p.trackerRef === ref)?.statusMapping,
+      }),
+  });
   const lanes = createLaneSettings(store);
   const breakers = createBreakers({
     store,
@@ -197,7 +201,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     roles: roleInfoOf(defs),
     workspaceOf: workspaces.held,
     handOverWorkspaces: workspaces.handOver,
-    briefFor: createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, learnings, trackers }),
+    briefFor: createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, learnings, trackers, projects }),
     bootId,
     // Con Watch avisando por `signal`, el sondeo de un wait es solo la red de seguridad (cuesta GraphQL).
     ...(opts.watch && { probeEverySec: WATCH_SAFETY_PROBE_SEC }),

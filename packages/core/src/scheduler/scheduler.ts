@@ -12,7 +12,7 @@ import type { RunStarter } from "../projects/start-run";
 import { issueBoosts, issueSkips, issues as issuesTable, runs } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import type { Issues } from "../tracker/issues";
-import type { Tracker } from "../tracker/tracker";
+import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../workspaces/repos";
 import { combinedBaseBranch, type Workspaces } from "../workspaces/workspaces";
 import type { LaneSettings } from "./lanes";
@@ -50,7 +50,7 @@ export interface SchedulerDeps {
   issues: Issues;
   repos: Repos;
   /** Los adapters que este core conoce, por id de tracker: el tick trae de ahí lo que cambió antes de leer la cola. */
-  trackers: Readonly<Record<string, Tracker>>;
+  trackers: Trackers;
   flows: Pick<Engine, "wake">;
   /** `runs.start`: reclama la issue y lanza el flujo. */
   runs: Pick<RunStarter, "start">;
@@ -152,7 +152,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** Lanza las issues `ready` de la cola del proyecto, en orden, mientras su carril dev tenga cupo. */
   async function launch(project: ClankerProject): Promise<void> {
-    const tracker = deps.trackers[project.tracker];
+    const tracker = deps.trackers(project);
     if (tracker) await issues.sync(tracker, { projectId: project.id, project: { tracker: project.tracker, id: project.trackerRef } }, "core");
     const entries = await deps.queue.of(project.id);
     const cache = issues.list();

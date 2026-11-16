@@ -62,7 +62,7 @@ export function TrackerSection({ draft, update, project }: SectionProps & { proj
     >
       <Field id="tracker-project" label="Proyecto del tracker">
         {listsProjects(project.tracker) ? (
-          <TrackerProjectPicker id="tracker-project" tracker={project.tracker} value={draft.trackerRef} onChange={(trackerRef) => update({ trackerRef })} onOpenConnections={actions.goConnections} />
+          <TrackerProjectPicker id="tracker-project" tracker={project.tracker} value={draft.trackerRef} onChange={(trackerRef, trackerAccount) => update({ trackerRef, trackerAccount })} onOpenConnections={actions.goConnections} />
         ) : (
           <Input id="tracker-project" value={draft.trackerRef} onChange={(e) => update({ trackerRef: e.target.value })} />
         )}

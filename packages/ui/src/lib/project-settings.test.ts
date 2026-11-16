@@ -24,6 +24,7 @@ const project = (extra: Partial<ClankerProject> = {}): ClankerProject => ({
   name: "BA",
   tracker: "linear",
   trackerRef: "boundaries",
+  trackerAccount: "clanker-yard",
   defaultFlowId: "techlead-clasico",
   defaultProfileId: "medio",
   repos: [{ repoId: "repo_00000000000000000000000001", labels: ["api"] }],

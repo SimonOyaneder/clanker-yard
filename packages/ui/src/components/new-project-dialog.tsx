@@ -51,6 +51,8 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
   const [slug, setSlug] = useState<string | null>(null)
   const [tracker, setTracker] = useState<TrackerId>("local")
   const [trackerRef, setTrackerRef] = useState("")
+  // La cuenta del proyecto elegido; solo la fija el selector (un id escrito a mano no la trae).
+  const [trackerAccount, setTrackerAccount] = useState<string | null>(null)
   // `null` es "no tocado": vale el default de lo que haya llegado.
   const [pickedFlow, setPickedFlow] = useState<string | null>(null)
   const [pickedProfile, setPickedProfile] = useState<string | null>(null)
@@ -72,7 +74,7 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
       name: name.trim(),
       tracker,
       parallel: Number(parallel),
-      ...(local ? {} : { trackerRef: trackerRef.trim() }),
+      ...(local ? {} : { trackerRef: trackerRef.trim(), ...(trackerAccount ? { trackerAccount } : {}) }),
       ...(flow ? { defaultFlowId: flow } : {}),
       ...(profile ? { defaultProfileId: profile } : {}),
     }
@@ -110,6 +112,7 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
             onValueChange={(v) => {
               setTracker(v as TrackerId)
               setTrackerRef("")
+              setTrackerAccount(null)
             }}
           >
             <SelectTrigger id="project-tracker">
@@ -133,10 +136,10 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="project-ref">Proyecto del tracker</Label>
           {picker ? (
-            <TrackerProjectPicker id="project-ref" tracker={tracker} value={trackerRef} onChange={setTrackerRef} onOpenConnections={onOpenConnections} />
+            <TrackerProjectPicker id="project-ref" tracker={tracker} value={trackerRef} onChange={(ref, account) => { setTrackerRef(ref); setTrackerAccount(account) }} onOpenConnections={onOpenConnections} />
           ) : (
             <>
-              <Input id="project-ref" value={trackerRef} onChange={(e) => setTrackerRef(e.target.value)} required />
+              <Input id="project-ref" value={trackerRef} onChange={(e) => { setTrackerRef(e.target.value); setTrackerAccount(null) }} required />
               <p className="text-xs text-muted-foreground">El id del proyecto dentro de {TRACKERS.find((t) => t.id === tracker)?.label} del que sale la cola.</p>
             </>
           )}

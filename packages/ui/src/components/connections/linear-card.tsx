@@ -1,5 +1,5 @@
-import type { Connection } from "@clanker/api"
-import { Copy, ExternalLink, Layers, Loader2, Unplug } from "lucide-react"
+import type { ClankerProject, Connection } from "@clanker/api"
+import { Copy, ExternalLink, Layers, Loader2, Plus, Unplug } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
@@ -12,18 +12,49 @@ import { copy } from "@/lib/clipboard"
 import { expiryLabel, statusLook } from "@/lib/connections"
 import { tone } from "@/lib/format"
 
+interface Props {
+  /** Un workspace de Linear por conexión. */
+  connections: Connection[]
+  projects: ClankerProject[]
+  login: LinearLogin
+  onChanged: () => void
+}
+
+/** Los proyectos que dejan de tener tracker si se desconecta `account`: los suyos y, con una sola cuenta, los que aún no fijaron la suya. */
+export function projectsOfAccount(projects: ClankerProject[], account: string, accounts: number): ClankerProject[] {
+  return projects.filter((p) => p.tracker === "linear" && (p.trackerAccount === account || (p.trackerAccount === null && accounts === 1)))
+}
+
 // Linear entra por OAuth en el navegador: el core devuelve el link, lo abre el host y la cuenta aparece sola.
-export function LinearCard({ connection, login, onChanged }: { connection: Connection | undefined; login: LinearLogin; onChanged: () => void }) {
+// Cada workspace es una cuenta; "Conectar otro workspace" corre el mismo OAuth, y uno ya conectado se reconecta.
+export function LinearCard({ connections, projects, login, onChanged }: Props) {
+  if (connections.length === 0) return <WorkspaceCard login={login} projects={projects} accounts={0} onChanged={onChanged} />
+  return (
+    <>
+      {connections.map((connection) => (
+        <WorkspaceCard key={connection.account} connection={connection} login={login} projects={projects} accounts={connections.length} onChanged={onChanged} />
+      ))}
+      <div>
+        <Button size="sm" variant="outline" disabled={login.pending !== null} onClick={() => void login.start()}>
+          <Plus /> Conectar otro workspace
+        </Button>
+      </div>
+    </>
+  )
+}
+
+function WorkspaceCard({ connection, login, projects, accounts, onChanged }: { connection?: Connection; login: LinearLogin; projects: ClankerProject[]; accounts: number; onChanged: () => void }) {
   const appData = useAppData()
   const host = useHost()
   const [confirming, setConfirming] = useState(false)
+  const orphans = connection ? projectsOfAccount(projects, connection.account, accounts) : []
 
   const disconnect = async () => {
     if (!connection) return
     try {
       await appData.disconnect("linear", connection.account)
       onChanged()
-      toast.success("Linear desconectado")
+      toast.success(`Linear desconectado de ${connection.account}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
     }
@@ -46,7 +77,7 @@ export function LinearCard({ connection, login, onChanged }: { connection: Conne
           ) : null
         }
         primary={
-          <Hint label={label} keys="⇧⌘L" side="top">
+          <Hint label={label} keys={connection ? undefined : "⇧⌘L"} side="top">
             <Button size="sm" variant={connection?.status === "active" ? "outline" : "default"} disabled={login.pending !== null} onClick={() => void login.start()}>
               {login.pending ? <Loader2 className="animate-spin" /> : null}
               {label}
@@ -86,8 +117,10 @@ export function LinearCard({ connection, login, onChanged }: { connection: Conne
         ) : null}
       </ConnectionCard>
       <ConfirmDisconnect
-        title={confirming ? "¿Desconectar Linear?" : null}
-        description="Se borra el token y la cuenta de este equipo; no se revoca en Linear (hazlo desde su configuración si quieres). La cola de issues deja de actualizarse; las corridas en curso siguen."
+        title={confirming ? `¿Desconectar ${connection?.account ?? "Linear"}?` : null}
+        description={`Se borra el token y la cuenta de este equipo; no se revoca en Linear (hazlo desde su configuración si quieres). La cola de issues deja de actualizarse; las corridas en curso siguen.${
+          orphans.length > 0 ? ` Se quedan sin tracker: ${orphans.map((p) => p.name).join(", ")}.` : ""
+        }`}
         onOpenChange={setConfirming}
         onConfirm={() => void disconnect()}
       />

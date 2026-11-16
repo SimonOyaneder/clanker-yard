@@ -1,5 +1,6 @@
 // Solo para tests de la API que no corren agentes: arma los módulos que el router necesita con un
 // runtime que rechaza cualquier sesión.
+import { trackersByKind } from "../tracker/trackers";
 import { join } from "node:path";
 import { createAgents } from "../agents/agents";
 import type { AgentRuntime } from "../agents/runtime";
@@ -47,14 +48,14 @@ export function apiDeps(
   const repos = createRepos(store);
   const local = createLocalTracker(store);
   const issues = createIssues(store, local);
-  const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers: { local } });
+  const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers: trackersByKind({ local }) });
   const lanes = createLaneSettings(store);
   const scheduler = createScheduler({
     store,
     projects,
     issues,
     repos,
-    trackers: { local },
+    trackers: trackersByKind({ local }),
     flows,
     runs,
     queue: createProjectQueue({
@@ -62,7 +63,7 @@ export function apiDeps(
       projects,
       issues,
       repos,
-      trackers: { local },
+      trackers: trackersByKind({ local }),
       prs: { get: () => Promise.reject(new Error("este test no lee PRs")) },
     }),
     // Sin repos git: este core de pruebas no arma bases combinadas.

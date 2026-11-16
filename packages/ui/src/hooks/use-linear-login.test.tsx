@@ -21,7 +21,7 @@ const wrapper = (linearAuth: () => Promise<string>, host: Partial<Host> = {}) =>
 test("si el core rechaza linearAuth (puerto ocupado), el mensaje con el paso a seguir queda en error y no se abre el navegador", async () => {
   const message = "El puerto 48721 está ocupado: ciérralo y vuelve a intentar."
   const openExternal = vi.fn()
-  const { result } = renderHook(() => useLinearLogin(undefined, () => {}), { wrapper: wrapper(() => Promise.reject(new Error(message)), { openExternal }) })
+  const { result } = renderHook(() => useLinearLogin([], () => {}), { wrapper: wrapper(() => Promise.reject(new Error(message)), { openExternal }) })
 
   await act(() => result.current.start())
 

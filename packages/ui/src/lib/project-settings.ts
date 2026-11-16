@@ -112,6 +112,8 @@ export interface ConventionsDraft {
 export interface Draft {
   /** El proyecto del tracker (`trackerRef`); en un proyecto local no se edita. */
   trackerRef: string
+  /** La cuenta del tracker (`trackerAccount`); la fija el selector junto con el proyecto. */
+  trackerAccount: string | null
   repos: { repoId: string; labels: string[] }[]
   status: StatusCategory[]
   labels: string[]
@@ -136,6 +138,7 @@ export function draftOf(project: ClankerProject, managed: readonly string[]): Dr
   const c = project.conventions
   return {
     trackerRef: project.trackerRef,
+    trackerAccount: project.trackerAccount,
     repos: project.repos.map((r) => ({ repoId: r.repoId, labels: [...r.labels] })),
     status: [...(project.queueFilter.status ?? [])],
     labels: [...(project.queueFilter.labels ?? [])],
@@ -251,6 +254,7 @@ function paramValue(spec: ParamSpec | undefined, text: string): string | number 
 export function patchOf(draft: Draft, base: Draft, project: ClankerProject, specs: readonly ParamSpec[]): ProjectPatch {
   const patch: ProjectPatch = {}
   if (project.tracker !== "local" && draft.trackerRef !== base.trackerRef) patch.trackerRef = draft.trackerRef
+  if (project.tracker !== "local" && draft.trackerAccount !== null && draft.trackerAccount !== base.trackerAccount) patch.trackerAccount = draft.trackerAccount
   if (!same(draft.repos, base.repos)) patch.repos = draft.repos.map((r) => ({ repoId: r.repoId as ClankerProject["repos"][number]["repoId"], labels: r.labels }))
   if (!same([draft.status, draft.labels, draft.excludeLabels], [base.status, base.labels, base.excludeLabels])) {
     patch.queueFilter = {
@@ -286,7 +290,9 @@ export function patchOf(draft: Draft, base: Draft, project: ClankerProject, spec
 export function undoPatch(project: ClankerProject, patch: ProjectPatch): ProjectPatch {
   const before: ProjectPatch = {}
   for (const field of Object.keys(patch) as (keyof ProjectPatch)[]) {
-    ;(before as Record<string, unknown>)[field] = project[field as keyof ClankerProject]
+    const previous = project[field as keyof ClankerProject]
+    // Una cuenta que el proyecto no tenía no se puede "desfijar": la actualización solo la pone.
+    if (field !== "trackerAccount" || previous !== null) (before as Record<string, unknown>)[field] = previous
   }
   return before
 }
@@ -295,6 +301,7 @@ export function undoPatch(project: ClankerProject, patch: ProjectPatch): Project
 export function changedSections(patch: ProjectPatch): string[] {
   const names: [keyof ProjectPatch, string][] = [
     ["trackerRef", "proyecto del tracker"],
+    ["trackerAccount", "cuenta del tracker"],
     ["repos", "repos"],
     ["queueFilter", "filtros de la cola"],
     ["statusMapping", "mapeo de estados"],

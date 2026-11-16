@@ -1,4 +1,4 @@
-import type { Connection } from "@clanker/api"
+import type { ClankerProject, Connection } from "@clanker/api"
 import { useState } from "react"
 import { useAppData } from "@/app-data"
 import { ClaudeCard } from "@/components/connections/claude-card"
@@ -14,13 +14,14 @@ import { connectionOf } from "@/lib/connections"
 
 interface Props {
   connections: Connection[]
+  projects: ClankerProject[]
   plan: ClaudePlan
   linearLogin: LinearLogin
   onChanged: () => void
 }
 
 // Conexiones: las tres cuentas (GitHub, Linear, Claude) y los repos con su receta.
-export function ConnectionsView({ connections, plan, linearLogin, onChanged }: Props) {
+export function ConnectionsView({ connections, projects, plan, linearLogin, onChanged }: Props) {
   const appData = useAppData()
   const repos = useLiveQuery("repos", () => appData.repos())
   const [recipeTest, setRecipeTest] = useState<{ repoId: string; runId: number } | null>(null)
@@ -34,7 +35,7 @@ export function ConnectionsView({ connections, plan, linearLogin, onChanged }: P
       </header>
       <div className="flex flex-col gap-3">
         <GitHubCard connection={connectionOf(connections, "github")} onChanged={onChanged} />
-        <LinearCard connection={connectionOf(connections, "linear")} login={linearLogin} onChanged={onChanged} />
+        <LinearCard connections={connections.filter((c) => c.provider === "linear")} projects={projects} login={linearLogin} onChanged={onChanged} />
         <ClaudeCard connection={connectionOf(connections, "claude")} plan={plan} onChanged={onChanged} />
       </div>
       {repos.data ? (

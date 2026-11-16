@@ -35,7 +35,7 @@ import { useSummaryControls } from "@/hooks/use-summary-controls"
 import { LiveProvider, useLive, useLiveQuery } from "@/hooks/use-live"
 import { type Host, HostProvider, useHost } from "@/host"
 import { type AppActions, AppActionsContext } from "@/lib/app-context"
-import { connectionOf, needsAttention } from "@/lib/connections"
+import { needsAttention } from "@/lib/connections"
 import { useCoreState } from "@/lib/core-status"
 import { parksRun } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
@@ -129,7 +129,8 @@ function Shell() {
   const learningsView = useLearningsView(learnings, triage.apply)
   const toReview = learnings.filter((l) => l.status === "proposed").length
   const claudePlan = useClaudePlan(connectionsQuery.data, connectionsQuery.reload)
-  const linearLogin = useLinearLogin(connectionOf(connections, "linear"), connectionsQuery.reload)
+  const linearConnections = useMemo(() => connections.filter((c) => c.provider === "linear"), [connections])
+  const linearLogin = useLinearLogin(linearConnections, connectionsQuery.reload)
   const startLinearLogin = linearLogin.start
   const testClaude = claudePlan.test
   // El punto rojo de Conexiones: algo vencido, revocado o caído.
@@ -688,7 +689,7 @@ function Shell() {
             <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>
               <div className="px-6 pt-5 pb-10">
                 {connectionsQuery.data ? (
-                  <ConnectionsView connections={connections} plan={claudePlan} linearLogin={linearLogin} onChanged={connectionsQuery.reload} />
+                  <ConnectionsView connections={connections} projects={projects} plan={claudePlan} linearLogin={linearLogin} onChanged={connectionsQuery.reload} />
                 ) : connectionsQuery.error ? (
                   <Problem message={connectionsQuery.error} onRetry={connectionsQuery.reload} />
                 ) : (

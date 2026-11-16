@@ -349,6 +349,8 @@ export const projects = sqliteTable(
     name: text().notNull(),
     tracker: text().$type<TrackerId>().notNull(),
     trackerRef: text("tracker_ref").notNull(),
+    /** La cuenta del tracker de la que sale la cola (en Linear, el `urlKey` del workspace). `null` en `local` y en los proyectos que aún no la fijaron. */
+    trackerAccount: text("tracker_account"),
     defaultFlowId: text("default_flow_id"),
     defaultProfileId: text("default_profile_id"),
     parallel: integer().notNull().default(1),

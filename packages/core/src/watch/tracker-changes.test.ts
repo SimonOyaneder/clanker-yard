@@ -1,4 +1,5 @@
 import type { ClankerProject } from "@clanker/api";
+import { trackersByKind } from "../tracker/trackers";
 import { describe, expect, test, vi } from "vitest";
 import { createErrorReporter } from "./report";
 import { createTrackerChanges, TRACKER_EVERY_MS } from "./tracker-changes";
@@ -14,7 +15,7 @@ function setup(projects: ClankerProject[], hasChanges: (id: string) => Promise<b
   const onChanges = vi.fn();
   const changes = createTrackerChanges({
     projects: { list: () => projects },
-    trackers: { linear: tracker },
+    trackers: trackersByKind({ linear: tracker }),
     issues: { hasChanges: (_, { project: ref }) => hasChanges(ref.id) },
     onChanges,
     errors: createErrorReporter(store),

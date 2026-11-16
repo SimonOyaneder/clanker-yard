@@ -18,7 +18,8 @@ interface Props {
   tracker: TrackerId
   /** El `ref.id` del proyecto elegido, o "" si no hay. */
   value: string
-  onChange: (id: string) => void
+  /** El proyecto elegido y la cuenta (workspace) a la que pertenece. */
+  onChange: (id: string, account: string) => void
   onOpenConnections: () => void
 }
 
@@ -55,7 +56,7 @@ export function TrackerProjectPicker({ id, tracker, value, onChange, onOpenConne
   const others = projects.filter((p) => !p.mine)
   const manyAccounts = new Set(projects.map((p) => p.account)).size > 1
   const pick = (project: TrackerProject) => {
-    onChange(project.ref.id)
+    onChange(project.ref.id, project.account)
     setOpen(false)
   }
   const item = (project: TrackerProject) => (

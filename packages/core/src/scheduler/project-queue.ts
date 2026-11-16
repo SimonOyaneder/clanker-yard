@@ -8,6 +8,7 @@ import { issueBoosts, issueSkips, pullRequests, runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
+import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../workspaces/repos";
 import { type QueuePrFact, tickDev } from "./queue";
 
@@ -20,7 +21,7 @@ export interface ProjectQueueDeps {
   issues: Issues;
   repos: Repos;
   /** Los adapters que este core conoce, por id de tracker. */
-  trackers: Readonly<Record<string, Tracker>>;
+  trackers: Trackers;
   /**
    * Solo con `stackOn: "ci_green"`, para saber si el PR sigue abierto y si su CI está verde, y solo si Watch
    * todavía no dejó su estado en `pull_requests.detail`: la cola se calcula en cada tick y en cada vista.
@@ -76,7 +77,12 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
     async of(projectId) {
       const project = projects.get(projectId);
       if (!project) throw new ProjectNotFoundError(projectId);
-      const tracker = trackers[project.tracker];
+      let tracker: Tracker | undefined;
+      try {
+        tracker = trackers(project);
+      } catch (error) {
+        throw new QueueUnavailableError((error as Error).message, { cause: error });
+      }
       if (!tracker) {
         throw new QueueUnavailableError(`Este core todavía no tiene un adapter de ${project.tracker}: no puede calcular la cola de ${project.slug}.`);
       }

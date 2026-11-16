@@ -1,4 +1,5 @@
 import { NewProject, type PrRef, type PrState, type ProjectId } from "@clanker/api";
+import { trackersByKind } from "../tracker/trackers";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createDefs } from "../defs/defs";
@@ -49,7 +50,7 @@ const strictTracker = (): Tracker => ({
   changesSince: () => Promise.reject(new Error("la cola no sincroniza")),
 });
 
-const queueOf = () => createProjectQueue({ store, projects, issues, repos, trackers: { local: strictTracker() }, prs: { get: (ref) => (reads.push(ref), readPr(ref)) } });
+const queueOf = () => createProjectQueue({ store, projects, issues, repos, trackers: trackersByKind({ local: strictTracker() }), prs: { get: (ref) => (reads.push(ref), readPr(ref)) } });
 
 function createProject(stackOn: "ready" | "ci_green" | "any_open" = "ci_green", repoIds: string[] = []) {
   return projects.create(
@@ -123,7 +124,7 @@ describe("la cola de un proyecto", () => {
   test("si el tracker no dice quién es la persona (sin cuenta conectada), QueueUnavailableError con su motivo", async () => {
     const project = createProject();
     const disconnected: Tracker = { ...strictTracker(), viewer: () => Promise.reject(new Error("No hay una cuenta de Linear conectada")) };
-    const queue = createProjectQueue({ store, projects, issues, repos, trackers: { local: disconnected }, prs: { get: readPr } });
+    const queue = createProjectQueue({ store, projects, issues, repos, trackers: trackersByKind({ local: disconnected }), prs: { get: readPr } });
 
     const failure = queue.of(project.id);
     await expect(failure).rejects.toThrow(QueueUnavailableError);

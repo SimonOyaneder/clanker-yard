@@ -6,7 +6,8 @@ import { artifactRefs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Learnings } from "../learnings/learnings";
-import type { Tracker } from "../tracker/tracker";
+import type { Trackers } from "../tracker/trackers";
+import type { Projects } from "../projects/projects";
 import type { Workspaces } from "../workspaces/workspaces";
 import type { Briefs } from "./brief";
 
@@ -18,7 +19,9 @@ export interface StepBriefsDeps {
   issues: Pick<Issues, "get">;
   learnings: Pick<Learnings, "forBrief">;
   /** Los adapters por id de tracker: de ahí sale el detalle de la issue del sujeto. */
-  trackers: Readonly<Record<string, Tracker>>;
+  /** Para el proyecto de una corrida. */
+  trackers: Trackers;
+  projects: Pick<Projects, "get">;
 }
 
 /**
@@ -28,7 +31,7 @@ export interface StepBriefsDeps {
  * worktree: el snapshot de cada paso queda como artefacto de la corrida (`snapshot/<nodo>/<visita>/<intento>`)
  * y el siguiente paso del nodo parte del más reciente.
  */
-export function createStepBriefs({ store, workspaces, briefs, artifacts, issues, learnings, trackers }: StepBriefsDeps) {
+export function createStepBriefs({ store, workspaces, briefs, artifacts, issues, learnings, trackers, projects }: StepBriefsDeps) {
   function lastSnapshot(request: StepBriefRequest): string | undefined {
     const prefix = `snapshot/${request.nodeId}/`;
     const found = store.db
@@ -51,7 +54,8 @@ export function createStepBriefs({ store, workspaces, briefs, artifacts, issues,
     if (!held) throw new Error(`El paso "${request.nodeId}" es un agente y la corrida no tiene un worktree tomado.`);
 
     const cached = request.run.subject.type === "issue" ? issues.get(request.run.subject.id as IssueId) : undefined;
-    const tracker = cached && trackers[cached.ref.tracker];
+    const project = request.projectId ? projects.get(request.projectId) : undefined;
+    const tracker = cached && project && trackers(project);
     const issue = tracker && cached ? await tracker.getIssue(cached.ref) : undefined;
 
     const { brief, snapshot } = await briefs.prepare({

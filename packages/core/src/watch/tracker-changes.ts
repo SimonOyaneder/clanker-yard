@@ -1,5 +1,5 @@
 import type { Issues } from "../tracker/issues";
-import type { Tracker } from "../tracker/tracker";
+import type { Trackers } from "../tracker/trackers";
 import type { Projects } from "../projects/projects";
 import type { ErrorReporter } from "./report";
 
@@ -9,7 +9,7 @@ export const TRACKER_EVERY_MS = 60_000;
 export interface TrackerChangesDeps {
   projects: Pick<Projects, "list">;
   /** Los adapters que este core conoce, por id de tracker. */
-  trackers: Readonly<Record<string, Tracker>>;
+  trackers: Trackers;
   issues: Pick<Issues, "hasChanges">;
   /** Hay issues nuevas o modificadas que traer: el Scheduler hace tick (`tick()` trae lo que cambió y lanza). */
   onChanges(): void;
@@ -27,11 +27,12 @@ export function createTrackerChanges({ projects, trackers, issues, onChanges, er
   return {
     async poll(at) {
       for (const project of projects.list()) {
-        const tracker = trackers[project.tracker];
-        if (project.status !== "active" || !tracker || at - (lastPoll.get(project.id) ?? Number.NEGATIVE_INFINITY) < TRACKER_EVERY_MS) continue;
-        lastPoll.set(project.id, at);
+        if (project.status !== "active" || at - (lastPoll.get(project.id) ?? Number.NEGATIVE_INFINITY) < TRACKER_EVERY_MS) continue;
         const scope = `tracker ${project.slug}`;
         try {
+          const tracker = trackers(project);
+          if (!tracker) continue;
+          lastPoll.set(project.id, at);
           if (await issues.hasChanges(tracker, { projectId: project.id, project: { tracker: project.tracker, id: project.trackerRef } })) onChanges();
           errors.clear(scope);
         } catch (error) {
