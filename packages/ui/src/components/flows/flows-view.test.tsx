@@ -83,3 +83,60 @@ test("sin flujos explica por qué y qué revisar", async () => {
   await openFlows({ defs: async () => [] })
   expect(await screen.findByText(/Todavía no hay flujos/)).toBeTruthy()
 })
+
+// Duplica el flujo incluido (queda uno tuyo, editable), abre el editor y devuelve su textarea.
+async function openEditor() {
+  await openFlows()
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
+  fireEvent.click(await screen.findByRole("button", { name: /Editar JSON/ }))
+  return (await screen.findByRole("textbox", { name: /en JSON/ })) as HTMLTextAreaElement
+}
+
+const withName = (area: HTMLTextAreaElement, name: string) => JSON.stringify({ ...JSON.parse(area.value), name }, null, 2)
+
+test("editar un flujo tuyo: el diff se ve antes de guardar, se crea una versión nueva y se puede volver a la anterior", async () => {
+  const area = await openEditor()
+  expect(screen.getByText(/Las corridas en curso siguen con la versión con que empezaron: lo que guardes/)).toBeTruthy()
+  fireEvent.change(area, { target: { value: withName(area, "Mi techlead") } })
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("1 cambio por guardar"))
+
+  fireEvent.click(screen.getByRole("button", { name: /^Guardar…/ }))
+  const dialog = await screen.findByRole("alertdialog")
+  expect(within(dialog).getByRole("list", { name: "Cambios" }).textContent).toContain("campo `name` (cambia)")
+  expect(within(dialog).getByText('"Mi techlead"')).toBeTruthy()
+  fireEvent.click(within(dialog).getByRole("button", { name: "Guardar versión nueva" }))
+
+  expect(await screen.findByText("versión 2", { selector: "span.text-xs" })).toBeTruthy()
+  expect(screen.queryByRole("textbox", { name: /en JSON/ })).toBeNull()
+
+  fireEvent.click(await screen.findByRole("button", { name: "Volver a la versión 1" }))
+  const back = await screen.findByRole("alertdialog")
+  expect(within(back).getByText(/campo `name`/)).toBeTruthy()
+  fireEvent.click(within(back).getByRole("button", { name: "Volver a esta versión" }))
+  expect(await screen.findByText("versión 3", { selector: "span.text-xs" })).toBeTruthy()
+})
+
+test("un error del core se marca en su línea, dicho como paso y campo, y bloquea guardar", async () => {
+  const area = await openEditor()
+  const flow = JSON.parse(area.value) as { nodes: Record<string, { type: string; role?: string }> }
+  const agentId = Object.keys(flow.nodes).find((id) => flow.nodes[id]!.type === "agent")!
+  flow.nodes[agentId]!.role = "no-existe"
+  fireEvent.change(area, { target: { value: JSON.stringify(flow, null, 2) } })
+
+  const list = await screen.findByRole("list", { name: "Problemas por arreglar" })
+  expect(within(list).getByText(`paso \`${agentId}\` → campo \`role\`: no existe el rol "no-existe"`)).toBeTruthy()
+  expect((screen.getByRole("button", { name: /^Guardar…/ }) as HTMLButtonElement).disabled).toBe(true)
+})
+
+test("un JSON roto dice en qué línea y no llama al core", async () => {
+  const area = await openEditor()
+  fireEvent.change(area, { target: { value: '{\n  "id": "x"\n  "nodes": {}\n}' } })
+  const list = await screen.findByRole("list", { name: "Problemas por arreglar" })
+  expect(within(list).getByRole("button", { name: "línea 3" })).toBeTruthy()
+})
+
+test("un incluido no ofrece editar JSON", async () => {
+  await openFlows()
+  await screen.findByRole("button", { name: /Duplicar para editar/ })
+  expect(screen.queryByRole("button", { name: /Editar JSON/ })).toBeNull()
+})

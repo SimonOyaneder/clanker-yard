@@ -125,7 +125,7 @@ export function duplicateOf(def: DefRecord, defs: readonly DefRecord[]): Duplica
   return { slug, body, overrides }
 }
 
-const SOURCE_LABEL: Record<string, string> = { builtin: "la app", ui: "esta app", cli: "la línea de comandos", mcp: "un agente", import: "una importación" }
+const SOURCE_LABEL: Record<string, string> = { builtin: "la app", ui: "esta app", cli: "la línea de comandos", mcp: "un agente (MCP)", repo: "el repo", import: "una importación" }
 
 /** Quién guardó una versión, en palabras. */
 export const sourceLabel = (source: string) => SOURCE_LABEL[source] ?? source

@@ -1,15 +1,18 @@
-import { type DefRecord, type DefWriteKind, FlowDef, Profile, Role } from "@clanker/api"
-import { Archive, ArchiveRestore, Copy } from "lucide-react"
+import { type DefRecord, type DefWrite, type DefWriteKind, FlowDef, Profile, Role } from "@clanker/api"
+import { Archive, ArchiveRestore, Copy, Pencil, Undo2 } from "lucide-react"
 import { useState } from "react"
+import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { Ago } from "@/components/common"
+import { ChangeDialog } from "@/components/flows/change-dialog"
+import { DefEditor } from "@/components/flows/def-editor"
 import { RowPills, UsedBy } from "@/components/flows/flow-parts"
 import { FlowDefGraph } from "@/components/project/run-graph"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { useLiveQuery } from "@/hooks/use-live"
 import { duplicateOf, isReadOnly, KIND_LABEL, type LibraryRow, nameOf, sourceLabel } from "@/lib/defs-library"
-import { undoable } from "@/lib/undoable"
+import { messageOf, undoable } from "@/lib/undoable"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -27,11 +30,14 @@ export function DefDetail({ row, defs, onChanged }: Props) {
   const { def } = row
   const [version, setVersion] = useState<number | null>(null)
   const [confirmArchive, setConfirmArchive] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [revert, setRevert] = useState<{ to: DefRecord; write: DefWrite } | null>(null)
   const kind = def.kind as DefWriteKind
   const versions = useLiveQuery(`def-versions:${kind}:${def.id}:${def.currentVersion}`, () => appData.defVersions(kind, def.id), { live: false })
   const shown = versions.data?.find((v) => v.version === version) ?? versions.data?.[0]
   const readOnly = isReadOnly(def)
   const archived = def.archivedAt !== null
+  const editable = !readOnly && !archived
 
   const duplicate = async () => {
     const copy = duplicateOf(def, defs)
@@ -48,6 +54,27 @@ export function DefDetail({ row, defs, onChanged }: Props) {
       },
     )
     return failure
+  }
+  // Volver a una versión es una versión nueva con ese contenido: antes se muestra qué cambia (o por qué ya no cabe).
+  const askRevert = async (to: DefRecord) => {
+    try {
+      setRevert({ to, write: await appData.updateDef({ kind, id: def.id, body: to.body, dryRun: true }) })
+    } catch (e) {
+      toast.error(messageOf(e))
+    }
+  }
+  const confirmRevert = async () => {
+    if (!revert) return
+    try {
+      await appData.updateDef({ kind, id: def.id, body: revert.to.body, dryRun: false })
+      toast(`Volví a la versión ${revert.to.version}: quedó como versión nueva.`)
+      setVersion(null)
+      onChanged()
+    } catch (e) {
+      toast.error(messageOf(e))
+    } finally {
+      setRevert(null)
+    }
   }
   const archive = () =>
     undoable(
@@ -76,7 +103,12 @@ export function DefDetail({ row, defs, onChanged }: Props) {
             <Button size="sm" variant={readOnly ? "default" : "secondary"} onClick={() => void duplicate()}>
               <Copy /> {readOnly ? "Duplicar para editar" : "Duplicar"}
             </Button>
-            {!readOnly && !archived ? (
+            {editable && !editing ? (
+              <Button size="sm" onClick={() => setEditing(true)}>
+                <Pencil /> Editar JSON
+              </Button>
+            ) : null}
+            {editable ? (
               <Button size="sm" variant="secondary" onClick={askArchive}>
                 <Archive /> Archivar
               </Button>
@@ -99,8 +131,19 @@ export function DefDetail({ row, defs, onChanged }: Props) {
         </p>
       </header>
 
-      <section aria-label="Contenido" className="flex min-h-0 flex-col gap-2">
-        {!shown ? (
+      <section aria-label="Contenido" className={cn("flex flex-col gap-2", !editing && "min-h-0")}>
+        {editing ? (
+          <DefEditor
+            def={def}
+            kind={kind}
+            onCancel={() => setEditing(false)}
+            onSaved={() => {
+              setEditing(false)
+              setVersion(null)
+              onChanged()
+            }}
+          />
+        ) : !shown ? (
           <p className="text-[13px] text-muted-foreground">{versions.error ?? "Cargando…"}</p>
         ) : kind === "flow" ? (
           <FlowBody def={shown} />
@@ -115,23 +158,30 @@ export function DefDetail({ row, defs, onChanged }: Props) {
         <h3 className="text-[13px] font-medium">Historial de versiones</h3>
         <ul className="divide-y rounded-lg border text-[13px]">
           {(versions.data ?? []).map((v) => (
-            <li key={v.version}>
+            <li key={v.version} className="flex items-center">
               <button
                 type="button"
                 aria-pressed={v.version === shown?.version}
                 onClick={() => setVersion(v.version)}
-                className={cn("flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-accent", v.version === shown?.version && "bg-accent")}
+                className={cn("flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left hover:bg-accent", v.version === shown?.version && "bg-accent")}
               >
                 <span className="w-16 flex-none font-medium tabular-nums">versión {v.version}</span>
                 {v.version === def.currentVersion ? <span className="flex-none text-xs text-muted-foreground">vigente</span> : null}
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">guardada por {sourceLabel(v.source)}</span>
                 <Ago at={v.createdAt} className="flex-none text-xs text-muted-foreground" />
               </button>
+              {editable && v.version !== def.currentVersion ? (
+                <Button size="sm" variant="ghost" className="mr-1 flex-none" onClick={() => void askRevert(v)} aria-label={`Volver a la versión ${v.version}`}>
+                  <Undo2 /> Volver a esta versión
+                </Button>
+              ) : null}
             </li>
           ))}
         </ul>
-        <p className="text-xs text-muted-foreground">Las corridas en curso siguen con la versión con que empezaron. Elige una versión para ver su contenido.</p>
+        <p className="text-xs text-muted-foreground">Las corridas en curso siguen con la versión con que empezaron. Elige una versión para ver su contenido.{editable ? " Volver a una versión crea una versión nueva con ese contenido: no borra las demás." : ""}</p>
       </section>
+
+      {revert ? <ChangeDialog title={`Volver a la versión ${revert.to.version}`} confirmLabel="Volver a esta versión" write={revert.write} kind={kind} onConfirm={() => void confirmRevert()} onCancel={() => setRevert(null)} /> : null}
 
       <AlertDialog open={confirmArchive} onOpenChange={setConfirmArchive}>
         <AlertDialogContent>
@@ -158,8 +208,8 @@ function explain(row: LibraryRow, kind: DefWriteKind): string {
   if (def.archivedAt !== null) return `Está archivado: no se usa. Conserva sus versiones y las corridas anteriores no cambian. Restáuralo para volver a usarlo.`
   if (row.overriddenBy) return `Hay un ${thing} ${row.overriddenBy === "repo" ? "del repo" : "tuyo"} con el mismo slug y manda sobre este. Este queda de respaldo: si archivas el otro, vuelve a usarse.`
   if (isReadOnly(def)) return `Viene ${def.scope === "pack" ? "en un pack" : "con la app"} y no se edita directo. "Duplicar para editar" crea uno tuyo con el mismo slug: desde ese momento manda el tuyo y este queda de respaldo.`
-  if (row.overrides) return `Es tuyo y manda sobre el ${row.overrides === "pack" ? "del pack" : "incluido"} con el mismo slug. Si lo archivas, vuelve a usarse el otro. Editarlo desde la app todavía no se puede.`
-  return `Es ${def.scope === "repo" ? "del repo" : "tuyo"}. Puedes archivarlo cuando ya no lo quieras y restaurarlo después. Editarlo desde la app todavía no se puede.`
+  if (row.overrides) return `Es tuyo y manda sobre el ${row.overrides === "pack" ? "del pack" : "incluido"} con el mismo slug. Si lo archivas, vuelve a usarse el otro. "Editar JSON" lo cambia y guarda una versión nueva.`
+  return `Es ${def.scope === "repo" ? "del repo" : "tuyo"}. "Editar JSON" lo cambia y guarda una versión nueva; puedes archivarlo cuando ya no lo quieras y restaurarlo después.`
 }
 
 const Unreadable = ({ what }: { what: string }) => <p className="text-[13px] text-destructive">No pude leer {what}: su contenido no coincide con el formato esperado.</p>

@@ -26,11 +26,34 @@ test("los flujos incluidos se ven con su grafo y su historial de versiones", asy
   await snapBoth(page, "flujos-biblioteca");
 });
 
-test("duplicar un incluido da uno tuyo y archivarlo lo saca de la lista", async ({ window: page }) => {
+test("duplicar un incluido da uno tuyo, se edita como JSON con diff e historial, y archivarlo lo saca de la lista", async ({ window: page }) => {
   await page.getByRole("button", { name: "Duplicar para editar" }).click();
   const list = page.getByRole("list", { name: "Flujos", exact: true });
   await expect(list.getByRole("listitem").filter({ hasText: "manda sobre el incluido" })).toHaveCount(1);
   await expect(list.getByRole("listitem").filter({ hasText: "reemplazado por el tuyo" })).toHaveCount(1);
+
+  // Editar: un campo inválido se marca en su línea; arreglado, Guardar muestra el diff y crea la versión 2.
+  await page.getByRole("button", { name: "Editar JSON" }).click();
+  const editor = page.getByRole("textbox", { name: /en JSON/ });
+  const original = await editor.inputValue();
+  const broken = JSON.stringify({ ...JSON.parse(original), name: 42 }, null, 2);
+  await editor.fill(broken);
+  const problems = page.getByRole("list", { name: "Problemas por arreglar" });
+  await expect(problems).toContainText("campo `name`");
+  await snapBoth(page, "flujos-editor-error");
+  await editor.fill(JSON.stringify({ ...JSON.parse(original), name: "Mi techlead" }, null, 2));
+  await expect(page.getByRole("status")).toHaveText("1 cambio por guardar");
+  await page.getByRole("button", { name: "Guardar…" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog.getByRole("list", { name: "Cambios" })).toContainText("Mi techlead");
+  await snapBoth(page, "flujos-editor-diff");
+  await dialog.getByRole("button", { name: "Guardar versión nueva" }).click();
+  const versions = page.getByRole("region", { name: "Versiones" });
+  await expect(versions).toContainText("versión 2");
+  await versions.getByRole("button", { name: "Volver a la versión 1" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Volver a esta versión" }).click();
+  await expect(versions).toContainText("versión 3");
+
   await page.getByRole("button", { name: "Archivar", exact: true }).click();
   await expect(list.getByRole("listitem").filter({ hasText: "reemplazado por el tuyo" })).toHaveCount(0);
   await expect(page.getByText(/Mostrar archivados \(1\)/)).toBeVisible();

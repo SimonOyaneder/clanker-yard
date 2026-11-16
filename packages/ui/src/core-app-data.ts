@@ -149,6 +149,7 @@ export function createCoreAppData(client: CoreClient): AppData {
       if (!def) throw new Error(`El core no devolvió el ${kind} ${slug} que acaba de crear.`)
       return def
     },
+    updateDef: (input) => client.defs.update(input),
     archiveDef: (kind, id) => client.defs.archive({ kind, id }),
     restoreDef: (kind, id) => client.defs.restore({ kind, id }),
     repos: async () => {

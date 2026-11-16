@@ -1,4 +1,4 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefRecord, type IssueId, type Lanes, type Learning, type LearningPatch, type PrRef, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, Profile, type PrRef, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildOpenPrs } from "@/seed-prs"
@@ -336,6 +336,22 @@ export function createMemoryAppData(now = Date.now()): AppData {
     def("profile", "medio", { roles: { dev: { model: "claude-sonnet-5", effort: "medium" }, "review-bugs": { model: "claude-sonnet-5" } } }),
     def("profile", "juguete", { roles: { juguete: { model: "claude-haiku-4" } } }),
   ]
+  // Los bodies de las versiones guardadas desde `updateDef`, por def.
+  const bodies = new Map<string, Map<number, { body: unknown; source: string; createdAt: number }>>()
+  const checkBody = (kind: DefRecord["kind"], slug: string, body: unknown): { parsed: unknown; errors: DefIssue[] } => {
+    const schema = kind === "flow" ? FlowDef : kind === "role" ? Role : Profile
+    const result = schema.safeParse(body)
+    if (!result.success) return { parsed: undefined, errors: result.error.issues.map(({ path, message }) => ({ path: path.map(String).join("."), message })) }
+    const errors: DefIssue[] = []
+    if (kind === "flow") {
+      const flow = result.data as FlowDef
+      if (flow.id !== slug) errors.push({ path: "id", message: `el id del flujo es "${flow.id}" y debe ser su slug "${slug}"` })
+      for (const [nodeId, node] of Object.entries(flow.nodes)) {
+        if (node.type === "agent" && !defsStore.some((d) => d.kind === "role" && d.slug === node.role && d.archivedAt === null)) errors.push({ path: `nodes.${nodeId}.role`, message: `no existe el rol "${node.role}"` })
+      }
+    }
+    return { parsed: result.data, errors }
+  }
   const needDef = (kind: DefRecord["kind"], defId: string) => {
     const found = defsStore.find((d) => d.kind === kind && d.id === defId)
     if (!found) throw new Error(`No existe el ${kind} ${defId}.`)
@@ -634,7 +650,36 @@ export function createMemoryAppData(now = Date.now()): AppData {
     defs: async (kind, opts) => defsStore.filter((d) => d.kind === kind && (opts?.includeArchived || d.archivedAt === null)).map((d) => ({ ...d })),
     defVersions: async (kind, defId) => {
       const found = needDef(kind, defId)
-      return Array.from({ length: found.currentVersion }, (_, i) => ({ ...found, version: found.currentVersion - i, createdAt: found.createdAt + i * 60_000 }))
+      const saved = bodies.get(defId) ?? new Map<number, { body: unknown; source: string; createdAt: number }>()
+      // Lo que no se editó desde aquí es el seed: sus versiones viejas comparten el contenido de la primera guardada.
+      const firstSaved = Math.min(...saved.keys())
+      return Array.from({ length: found.currentVersion }, (_, i) => {
+        const version = found.currentVersion - i
+        const own = saved.get(version)
+        const body = (own ?? (version < firstSaved ? saved.get(firstSaved) : undefined))?.body ?? found.body
+        return { ...found, version, body, source: own?.source ?? found.source, createdAt: own?.createdAt ?? (saved.get(firstSaved)?.createdAt ?? found.createdAt) - (Number.isFinite(firstSaved) ? firstSaved - version : -i) * 60_000 }
+      })
+    },
+    updateDef: async ({ kind, id: defId, body, dryRun }) => {
+      const found = writableDef(kind, defId)
+      const { parsed, errors } = checkBody(kind, found.slug, body)
+      if (errors.length > 0) {
+        if (!dryRun) throw new Error(`No se guardó ${kind} "${found.slug}":\n` + errors.map((e) => `  ${e.path || "(raíz)"}: ${e.message}`).join("\n"))
+        return { dryRun, errors, warnings: [], changed: false, diff: [], def: null }
+      }
+      const diff = diffLeaves(found.body, parsed)
+      if (dryRun) return { dryRun, errors, warnings: [], changed: diff.length > 0, diff, def: null }
+      if (diff.length === 0) return { dryRun, errors, warnings: [], changed: false, diff, def: { ...found } }
+      const saved = bodies.get(defId) ?? new Map()
+      saved.set(found.currentVersion, { body: found.body, source: found.source, createdAt: found.createdAt })
+      found.currentVersion += 1
+      found.version = found.currentVersion
+      found.body = parsed
+      found.source = "ui"
+      found.createdAt = Date.now()
+      saved.set(found.currentVersion, { body: parsed, source: "ui", createdAt: found.createdAt })
+      bodies.set(defId, saved)
+      return { dryRun, errors, warnings: [], changed: true, diff, def: { ...found } }
     },
     createDef: async ({ kind, slug, body }) => {
       if (defsStore.some((d) => d.kind === kind && d.slug === slug && d.scope === "user")) throw new Error(`Ya existe ${kind} "${slug}" (user): archívalo o elige otro slug.`)
@@ -668,4 +713,12 @@ export function createMemoryAppData(now = Date.now()): AppData {
       return repo
     },
   }
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
+
+/** Las hojas que cambian entre dos bodies, como el diff del core; un arreglo se compara entero. */
+function diffLeaves(before: unknown, after: unknown, path = ""): DefChange[] {
+  if (isRecord(before) && isRecord(after)) return [...new Set([...Object.keys(before), ...Object.keys(after)])].sort().flatMap((key) => diffLeaves(before[key], after[key], path === "" ? key : `${path}.${key}`))
+  return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ path, before, after }]
 }

@@ -11,6 +11,7 @@ import type {
   ConnectionProvider,
   DayMetrics,
   DefRecord,
+  DefWrite,
   DefWriteKind,
   Decision,
   DecisionFilter,
@@ -180,6 +181,11 @@ export interface AppData {
   defVersions(kind: DefWriteKind, id: string): Promise<DefRecord[]>
   /** Crea una def tuya (scope `user`) con ese slug y ese body; si el slug es de un incluido o de un pack, la tuya pasa a mandar. */
   createDef(input: { kind: DefWriteKind; slug: string; body: unknown }): Promise<DefRecord>
+  /**
+   * Reemplaza el body de una def tuya y crea una versión nueva (las corridas en curso siguen con la suya). Con `dryRun`
+   * no guarda nada: devuelve los errores del core (`errors`, cada uno con su ruta) y el diff contra la versión vigente.
+   */
+  updateDef(input: { kind: DefWriteKind; id: string; body: unknown; dryRun: boolean }): Promise<DefWrite>
   /** La def deja de resolverse por slug pero conserva sus versiones. Solo las tuyas y las del repo. */
   archiveDef(kind: DefWriteKind, id: string): Promise<DefRecord>
   restoreDef(kind: DefWriteKind, id: string): Promise<DefRecord>
