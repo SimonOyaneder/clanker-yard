@@ -1,10 +1,10 @@
 import { PrRef } from "@clanker/api";
 import * as z from "zod";
-import { preparePush } from "../commits/prepare-push";
-import { PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
-import type { Store } from "../store/store";
-import { RebaseError, WorkspaceOutput, type RepoConfig, type Workspaces } from "../workspaces/workspaces";
-import type { Prs } from "./prs";
+import { preparePush } from "../../commits/prepare-push";
+import { PermanentActionError, type ActionCtx, type ActionDef } from "../../flows/catalog";
+import type { Store } from "../../store/store";
+import { RebaseError, WorkspaceOutput, type RepoConfig, type Workspaces } from "../../workspaces/workspaces";
+import type { Prs } from "../prs";
 import { ownedOpenPr, pushOrThrow, type PrPurpose } from "./push";
 
 // El rebase de un PR abierto en el carril de mantenimiento (`docs/design.html#d-ops`, rebasePr):

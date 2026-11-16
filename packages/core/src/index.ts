@@ -106,8 +106,8 @@ export { createMergeScope } from "./github/merge-scope";
 export type { MergeScope } from "./github/merge-scope";
 export { startMergeReactions, approveOption, BUTTON_OPTION, WAIT_OPTION } from "./watch/merge-reactions";
 export type { MergeReactions } from "./watch/merge-reactions";
-export { createPrCommands, PrCommandError } from "./github/pr-commands";
-export type { PrCommands } from "./github/pr-commands";
+export { createPrCommands, PrCommandError } from "./github/actions/pr-commands";
+export type { PrCommands } from "./github/actions/pr-commands";
 export { createPrCache } from "./github/pr-cache";
 export type { PrCache } from "./github/pr-cache";
 export { createWatch, WATCH_TICK_MS } from "./watch/watch";
@@ -212,22 +212,22 @@ export type { RecipeTester, RecipeTesterOptions } from "./recipe/recipe-test";
 
 export { commitsApplyAction } from "./commits/apply";
 export { NO_CI_GRACE_MS, prOfWaitKey, prWaits, signalPr } from "./github/pr-waits";
-export { prPublishAction } from "./github/publish";
-export { createPrRepublisher } from "./github/republisher";
-export type { PrRepublisher } from "./github/republisher";
-export type { PrPublishDeps } from "./github/publish";
-export { prPushFixupsAction } from "./github/push-fixups";
+export { prPublishAction } from "./github/actions/publish";
+export { createPrRepublisher } from "./github/actions/republisher";
+export type { PrRepublisher } from "./github/actions/republisher";
+export type { PrPublishDeps } from "./github/actions/publish";
+export { prPushFixupsAction } from "./github/actions/push-fixups";
 export {
   prPushLeaseAction,
   prRebaseApprovalAction,
   workspaceRebaseAction,
-} from "./github/rebase-pr";
+} from "./github/actions/rebase-pr";
 export { workspaceCommitAfterRebaseAction, workspaceRebaseAbortAction } from "./workspaces/rebase-actions";
-export type { RebasePrDeps } from "./github/rebase-pr";
-export { stackRestackAction, stackRestackRewrittenAction } from "./github/restack";
-export type { ChildReport, StackRestackDeps } from "./github/restack";
-export type { PrPushFixupsDeps } from "./github/push-fixups";
-export { councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
-export type { PrFeedbackDeps } from "./github/pr-feedback";
+export type { RebasePrDeps } from "./github/actions/rebase-pr";
+export { stackRestackAction, stackRestackRewrittenAction } from "./github/actions/restack";
+export type { ChildReport, StackRestackDeps } from "./github/actions/restack";
+export type { PrPushFixupsDeps } from "./github/actions/push-fixups";
+export { councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/actions/pr-feedback";
+export type { PrFeedbackDeps } from "./github/actions/pr-feedback";
 export { preparePush } from "./commits/prepare-push";
 export type { PreparePushOptions, PreparePushResult } from "./commits/prepare-push";

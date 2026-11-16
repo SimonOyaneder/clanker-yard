@@ -1,9 +1,9 @@
 import type { PrRef } from "@clanker/api";
 import { and, eq } from "drizzle-orm";
-import { PermanentActionError } from "../flows/catalog";
-import { pullRequests, workspaces as workspacesTable } from "../store/schema";
-import type { Store } from "../store/store";
-import type { RepoConfig, Workspaces, WorkspaceRef } from "../workspaces/workspaces";
+import { PermanentActionError } from "../../flows/catalog";
+import { pullRequests, workspaces as workspacesTable } from "../../store/schema";
+import type { Store } from "../../store/store";
+import type { RepoConfig, Workspaces, WorkspaceRef } from "../../workspaces/workspaces";
 
 /** Qué iba a hacer la acción con el PR, para los mensajes de `ownedOpenPr`. */
 export interface PrPurpose {

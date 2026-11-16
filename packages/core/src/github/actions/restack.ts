@@ -1,16 +1,16 @@
 import { PrRef } from "@clanker/api";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
-import type { Connections } from "../connections/connections";
-import { openDecision } from "../decisions/decisions";
-import { PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
-import { git, GitError, isAncestor, tryGit } from "../git/git";
-import { combinedBases, prParents, pullRequests } from "../store/schema";
-import type { Store } from "../store/store";
-import { emitOnce } from "../watch/marks";
-import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RepoConfig, type RestackResult, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
-import type { GitHubClient } from "./client";
-import type { Prs } from "./prs";
+import type { Connections } from "../../connections/connections";
+import { openDecision } from "../../decisions/decisions";
+import { PermanentActionError, type ActionCtx, type ActionDef } from "../../flows/catalog";
+import { git, GitError, isAncestor, tryGit } from "../../git/git";
+import { combinedBases, prParents, pullRequests } from "../../store/schema";
+import type { Store } from "../../store/store";
+import { emitOnce } from "../../watch/marks";
+import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RepoConfig, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
+import type { GitHubClient } from "../client";
+import type { Prs } from "../prs";
 
 // El restack de la cadena (`docs/design.html#d-ops`, restack y restackRewritten): `stack.restack` al mergear un
 // padre y `stack.restackRewritten` cuando se reescribe su branch.

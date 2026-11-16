@@ -2,7 +2,7 @@ import { DecisionId, type Event, type MergeStrategy, type PrRef, type PrState } 
 import { and, eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
 import { closeDecision, openDecision } from "../decisions/decisions";
-import { commentOnPr } from "../github/comment";
+import { commentOnPr } from "../github/actions/comment";
 import type { PrRow } from "../github/pr-cache";
 import type { Prs } from "../github/prs";
 import type { Packs } from "../packs/packs";

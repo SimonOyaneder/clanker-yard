@@ -2,14 +2,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as z from "zod";
-import { ApplyArgs, cleanMessage, CONVENTIONAL_COMMIT, patchOf } from "../commits/apply";
-import { preparePush } from "../commits/prepare-push";
-import { branchCommits, fixupMessage, FIXUP_PREFIX, oldRange, routeHunks } from "../commits/route";
-import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../flows/catalog";
-import { diffBetween, listHunks, snapshotTree, type Hunk } from "../git/tree";
-import type { Store } from "../store/store";
-import type { RepoConfig, Workspaces } from "../workspaces/workspaces";
-import type { Prs } from "./prs";
+import { ApplyArgs, cleanMessage, CONVENTIONAL_COMMIT, patchOf } from "../../commits/apply";
+import { preparePush } from "../../commits/prepare-push";
+import { branchCommits, fixupMessage, FIXUP_PREFIX, oldRange, routeHunks } from "../../commits/route";
+import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
+import { diffBetween, listHunks, snapshotTree, type Hunk } from "../../git/tree";
+import type { Store } from "../../store/store";
+import type { RepoConfig, Workspaces } from "../../workspaces/workspaces";
+import type { Prs } from "../prs";
 import { ownedOpenPr, pushOrThrow, type PrPurpose } from "./push";
 
 /** Para qué toma `pr.pushFixups` el PR de la branch (`ownedOpenPr`). */

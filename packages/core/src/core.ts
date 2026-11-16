@@ -18,21 +18,21 @@ import { createFlows } from "./flows/flows";
 import { createAskpass } from "./git/askpass";
 import { createLegacyImporter } from "./import/legacy";
 import { createGitRemote } from "./git/remote";
-import { councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/pr-feedback";
+import { councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/actions/pr-feedback";
 import { createPrCache, type PrRow } from "./github/pr-cache";
 import { prWaits, signalPr } from "./github/pr-waits";
 import { createMergeScope } from "./github/merge-scope";
 import { createPrs } from "./github/prs";
-import { prPublishAction } from "./github/publish";
-import { stackRestackAction, stackRestackRewrittenAction } from "./github/restack";
-import { prPushFixupsAction } from "./github/push-fixups";
-import { prReplayAction, prSupersedeAction } from "./github/republish";
-import { createPrRepublisher } from "./github/republisher";
+import { prPublishAction } from "./github/actions/publish";
+import { stackRestackAction, stackRestackRewrittenAction } from "./github/actions/restack";
+import { prPushFixupsAction } from "./github/actions/push-fixups";
+import { prReplayAction, prSupersedeAction } from "./github/actions/republish";
+import { createPrRepublisher } from "./github/actions/republisher";
 import {
   prPushLeaseAction,
   prRebaseApprovalAction,
   workspaceRebaseAction,
-} from "./github/rebase-pr";
+} from "./github/actions/rebase-pr";
 import { workspaceCommitAfterRebaseAction, workspaceRebaseAbortAction } from "./workspaces/rebase-actions";
 import { createGitIdentityOf } from "./git/identity";
 import { githubRemote } from "./github/remote-config";

@@ -2,14 +2,14 @@ import { PrRef } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { and, eq } from "drizzle-orm";
 import * as z from "zod";
-import type { Connections } from "../connections/connections";
-import { PermanentActionError, type ActionDef } from "../flows/catalog";
-import { GitError } from "../git/git";
-import { prParents, pullRequests, runs } from "../store/schema";
-import type { Store } from "../store/store";
-import { excerpt } from "../workspaces/exec";
-import { WorkspaceOutput, type Workspaces } from "../workspaces/workspaces";
-import type { GitHubClient } from "./client";
+import type { Connections } from "../../connections/connections";
+import { PermanentActionError, type ActionDef } from "../../flows/catalog";
+import { GitError } from "../../git/git";
+import { prParents, pullRequests, runs } from "../../store/schema";
+import type { Store } from "../../store/store";
+import { excerpt } from "../../workspaces/exec";
+import { WorkspaceOutput, type Workspaces } from "../../workspaces/workspaces";
+import type { GitHubClient } from "../client";
 
 // Las dos acciones propias de `republish-pr` (`prs.republish`): rehacer un PR como uno nuevo con la branch, el autor
 // y los commits de hoy. El resto del flujo (`workspace.acquire`, el committer, `pr.publish`) es el de siempre.

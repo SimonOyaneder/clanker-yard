@@ -1,12 +1,12 @@
 import { PrRef, type ResolvedPack } from "@clanker/api";
 import * as z from "zod";
-import { cleanMessage } from "../commits/apply";
-import type { Connections } from "../connections/connections";
-import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../flows/catalog";
-import type { Packs } from "../packs/packs";
-import type { GitHubClient } from "./client";
-import { fetchPr, PrNotFoundError, type PrNode, type RawThread } from "./pr-query";
-import { answered, humanTest } from "./pr-state";
+import { cleanMessage } from "../../commits/apply";
+import type { Connections } from "../../connections/connections";
+import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
+import type { Packs } from "../../packs/packs";
+import type { GitHubClient } from "../client";
+import { fetchPr, PrNotFoundError, type PrNode, type RawThread } from "../pr-query";
+import { answered, humanTest } from "../pr-state";
 
 // Lo que el core escribe en un PR además de publicarlo: comentarios, respuestas a threads, resolverlos y
 // pedirle review al bot (`docs/design.html#d-agents`, biblioteca de acciones). Todo sale con el token de

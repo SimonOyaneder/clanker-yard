@@ -4,7 +4,7 @@ import { rebaseInProgress } from "./rebase";
 import { WorkspaceOutput, type Workspaces } from "./workspaces";
 
 // Las acciones del rebase de un PR que solo tocan el worktree. `workspace.rebase`, que además lee el PR, está en
-// `github/rebase-pr.ts`.
+// `github/actions/rebase-pr.ts`.
 
 const RebaseAbortArgs = z.object({ ws: WorkspaceOutput });
 

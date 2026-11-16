@@ -1,13 +1,13 @@
 import type { ClientOrigin, PrRef, PrState } from "@clanker/api";
 import { eq } from "drizzle-orm";
-import type { Packs } from "../packs/packs";
-import { runs } from "../store/schema";
-import type { Store } from "../store/store";
-import type { Connections } from "../connections/connections";
-import type { Repos } from "../repos/repos";
+import type { Packs } from "../../packs/packs";
+import { runs } from "../../store/schema";
+import type { Store } from "../../store/store";
+import type { Connections } from "../../connections/connections";
+import type { Repos } from "../../repos/repos";
 import { commentOnPr } from "./comment";
-import type { PrCache } from "./pr-cache";
-import type { Prs } from "./prs";
+import type { PrCache } from "../pr-cache";
+import type { Prs } from "../prs";
 
 // Lo que una persona le pide al core sobre un PR desde la app (`prs.setHold`, `prs.merge`,
 // `prs.requestReview`, `prs.rebase`). Cada pedido relee el PR antes de actuar: lo que vale es lo que pasa
