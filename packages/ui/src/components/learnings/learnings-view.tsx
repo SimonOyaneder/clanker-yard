@@ -1,10 +1,11 @@
 import type { ClankerProject, Learning, LearningStatus, RepoId } from "@clanker/api"
-import { Archive, BookCheck, Check, Copy, Pencil, ScrollText, Search, SquareCheck, X } from "lucide-react"
+import { Archive, BookCheck, Check, Copy, Pencil, Plus, ScrollText, Search, SquareCheck, X } from "lucide-react"
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { useAppData } from "@/app-data"
 import { Ago, Hint, Shortcut } from "@/components/common"
 import { LearningDetail, type LearningPatchInput } from "@/components/learnings/learning-detail"
 import { RolesPills, scopeName, SourcePill } from "@/components/learnings/learning-parts"
+import { NewLearningDialog } from "@/components/learnings/new-learning-dialog"
 import { ScreenDialog } from "@/components/learnings/screen-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -42,6 +43,7 @@ export function LearningsView({ learnings, projects, view, onEdited }: Props) {
   const search = useRef<HTMLInputElement>(null)
   const { items, current, selected, counts, tab } = view
   const [screening, setScreening] = useState(false)
+  const [creating, setCreating] = useState(false)
 
   // El nombre de cada repo con learnings: solo se piden las recetas si hay alguno con alcance de repo.
   const { repos: repoIds } = useMemo(() => scopesOf(learnings), [learnings])
@@ -202,14 +204,18 @@ export function LearningsView({ learnings, projects, view, onEdited }: Props) {
             Quitar filtros
           </Button>
         ) : null}
+        <Button size="sm" className="ml-auto" onClick={() => setCreating(true)}>
+          <Plus /> Nuevo learning
+        </Button>
         {learnings.some((l) => l.status === "proposed" && l.source === "agent") ? (
           <Hint label="Un agente revisa los propuestos por agentes con el criterio (reutilizable, no obvio, comprobado, una línea) y te muestra cuáles archivaría">
-            <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setScreening(true)}>
+            <Button size="sm" variant="secondary" onClick={() => setScreening(true)}>
               <Archive /> Filtrar con el criterio
             </Button>
           </Hint>
         ) : null}
       </div>
+      <NewLearningDialog open={creating} onOpenChange={setCreating} projects={projects} learnings={learnings} onCreated={onEdited} />
       <ScreenDialog open={screening} onOpenChange={setScreening} learnings={learnings} onArchived={onEdited} />
 
       {learnings.length === 0 ? (

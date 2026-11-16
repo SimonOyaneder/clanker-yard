@@ -38,6 +38,9 @@ describe("generateMcp sobre el contrato real", () => {
       retry_step: { ...safe, idempotentHint: false },
       steer_step: { ...safe, idempotentHint: false },
       resolve_decision: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      project_queue: readOnly,
+      update_project: safeIdempotent,
+      propose_learning: safeIdempotent,
     });
   });
 
@@ -63,7 +66,7 @@ describe("generateMcp sobre el contrato real", () => {
 
   test("cada kind que una tool sirve tiene esquema, y los procedimientos van a su ruta", () => {
     const [list, get] = plan.tools;
-    expect([...list!.routes.keys()].sort()).toEqual(["decision", "flow", "pack", "profile", "project", "recipe", "role", "run"]);
+    expect([...list!.routes.keys()].sort()).toEqual(["decision", "flow", "learning", "pack", "profile", "project", "recipe", "role", "run"]);
     expect([...get!.routes.keys()].sort()).toEqual([...list!.routes.keys()].sort());
     expect([...plan.schemas.keys()].sort()).toEqual([...list!.routes.keys()].sort());
     expect(Object.keys(MCP_KIND_SCHEMAS).sort()).toEqual([...plan.schemas.keys()].sort());

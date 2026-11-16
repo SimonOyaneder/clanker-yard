@@ -32,7 +32,7 @@ describe("tools", () => {
     const { tools } = await h.mcp.listTools();
 
     expect(tools.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations }))).toMatchSnapshot();
-    expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name)).toEqual(["list", "get"]);
+    expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name)).toEqual(["list", "get", "project_queue"]);
     expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name)).toEqual(["delete", "cancel_run", "interrupt_run", "resolve_decision"]);
   });
 
@@ -73,7 +73,7 @@ describe("resources", () => {
     const { resources } = await h.mcp.listResources();
     const schemas = resources.filter((r) => r.uri.startsWith("clanker://schema/")).map((r) => r.uri);
 
-    expect(schemas.sort()).toEqual(["decision", "flow", "pack", "profile", "project", "recipe", "role", "run"].map((k) => `clanker://schema/${k}`));
+    expect(schemas.sort()).toEqual(["decision", "flow", "learning", "pack", "profile", "project", "recipe", "role", "run"].map((k) => `clanker://schema/${k}`));
     expect(await h.read("clanker://schema/flow")).toMatchObject({ type: "object", properties: { nodes: expect.any(Object), start: expect.any(Object) } });
     expect(await h.read("clanker://schema/decision")).toMatchObject({ type: "object", properties: { status: expect.any(Object) } });
   });

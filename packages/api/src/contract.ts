@@ -42,6 +42,7 @@ const base = oc.$meta<ContractMeta>({});
  * verdadero si falta, y pediría confirmación hasta para pausar.
  */
 const SAFE = { destructiveHint: false, openWorldHint: false } as const;
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
 const SAFE_IDEMPOTENT = { ...SAFE, idempotentHint: true } as const;
 const DESTRUCTIVE_IDEMPOTENT = { destructiveHint: true, idempotentHint: true, openWorldHint: false } as const;
 
@@ -245,7 +246,17 @@ const projects = {
    * Cambia solo los campos presentes, planos junto al `id` (`{ id, name }`, no `{ id, patch: { name } }`); las
    * mismas validaciones que `create`. Un campo que no existe es `BAD_REQUEST`.
    */
-  update: base.input(ProjectUpdate).output(ClankerProject),
+  update: base
+    .meta({
+      mcp: {
+        action: "update_project",
+        description:
+          "Cambia solo los campos presentes de un proyecto (repos, filtros, flujo, perfil, `parallel`, tope de gasto, `trackerRef`...), planos junto al `id`; las mismas validaciones que al crearlo. Un campo que no existe es `BAD_REQUEST`.",
+        annotations: SAFE_IDEMPOTENT,
+      },
+    })
+    .input(ProjectUpdate)
+    .output(ClankerProject),
   /**
    * La configuración del proyecto como archivo (`ProjectConfig`): repos por nombre y remoto, filtros, mapeo de estados,
    * flujo y perfil por defecto, parámetros, convenciones y límites. `NOT_FOUND` si no existe.
@@ -304,7 +315,16 @@ const projects = {
    * primero las `ready` (en el orden en que se lanzarían), luego `waiting` y `blocked`, cada una con su
    * motivo. `NOT_FOUND` si el proyecto no existe; `BAD_REQUEST` si el core no tiene adapter de su tracker.
    */
-  queue: base.input(z.object({ id: ProjectId })).output(z.array(QueueEntry)),
+  queue: base
+    .meta({
+      mcp: {
+        action: "project_queue",
+        description: "La cola de un proyecto: cada issue con su estado (`ready`, `blocked`, `running`...) y el motivo, en el orden en que el Scheduler la lanzaría.",
+        annotations: READ_ONLY,
+      },
+    })
+    .input(z.object({ id: ProjectId }))
+    .output(z.array(QueueEntry)),
   /**
    * Totales, rondas y costo por rol de las corridas cerradas del proyecto, por el instante en que cerraron:
    * `from`, `to` e `imported` acotan como en `metrics.*`. `NOT_FOUND` si no existe.
@@ -599,15 +619,28 @@ const decisions = {
 
 const learnings = {
   /** De la más reciente a la más antigua. Sin filtro trae todos, rechazados y archivados incluidos. */
-  list: base.input(LearningFilter.default({})).output(z.array(Learning)),
+  list: base.meta({ mcp: { tool: "list", kind: "learning" } }).input(LearningFilter.default({})).output(z.array(Learning)),
   /** `NOT_FOUND` si no existe. */
-  get: base.input(z.object({ id: LearningId })).output(Learning),
+  get: base
+    .meta({ mcp: { tool: "get", kind: "learning" } })
+    .input(z.object({ id: LearningId }))
+    .output(Learning),
   /**
    * Deja un learning de una persona en `proposed` y emite `learning.proposed`. Si el mismo texto ya existe en
    * ese alcance, devuelve el que había (cualquiera sea su estado) y no emite nada. `BAD_REQUEST` si no trae
    * exactamente uno de `projectId` o `repoId`.
    */
-  propose: base.input(NewLearning).output(Learning),
+  propose: base
+    .meta({
+      mcp: {
+        action: "propose_learning",
+        description:
+          "Propone un learning (una línea que un agente futuro necesita saber) para un proyecto o un repo, con `projectId` o `repoId`. Queda `proposed`: una persona lo aprueba en la app y recién entonces entra a los briefs. Si el texto ya existe en ese alcance devuelve el que había.",
+        annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+    })
+    .input(NewLearning)
+    .output(Learning),
   /**
    * Un `proposed`, `rejected` o `archived` pasa a `approved`: desde la próxima corrida entra a los briefs de
    * su alcance y sus roles. Emite `learning.approved`. Uno ya aprobado se devuelve igual, sin evento.

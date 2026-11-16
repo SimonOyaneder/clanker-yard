@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import type { DefRecord, DefWrite, EventType, FlowDef, Run, RunDetail } from "@clanker/api";
+import type { DefRecord, DefWrite, EventType, FlowDef, Learning, Run, RunDetail } from "@clanker/api";
 import { createRepos } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { startMcpHarness, type McpHarness } from "./mcp-harness";
@@ -290,5 +290,36 @@ describe("acciones", () => {
 
     expect(lanes).toMatchObject({ dev: { capacity: 7 }, maintenance: { capacity: before.maintenance.capacity } });
     expect(await h.api.system.lanes()).toEqual(lanes);
+  });
+});
+
+describe("learnings, cola y proyectos", () => {
+  test("propose_learning deja el learning propuesto y el mismo texto devuelve el que había", async () => {
+    const { project } = await projectWithIssue();
+
+    const proposed = (await h.call("propose_learning", { projectId: project.id, text: "Corre `srb tc` antes del commit", roles: ["dev"] })) as Learning;
+    const again = (await h.call("propose_learning", { projectId: project.id, text: "Corre `srb tc` antes del commit" })) as Learning;
+
+    expect(proposed).toMatchObject({ status: "proposed", source: "human", projectId: project.id, roles: ["dev"] });
+    expect(again.id).toBe(proposed.id);
+    expect(await h.call("get", { kind: "learning", id: proposed.id })).toEqual(proposed);
+    expect(await h.call("list", { kind: "learning", filter: { status: ["proposed"] } })).toEqual([proposed]);
+  });
+
+  test("project_queue devuelve la cola con el estado de cada issue", async () => {
+    const { project, issue } = await projectWithIssue();
+
+    const queue = (await h.call("project_queue", { id: project.id })) as { state: string; reason: string; issue: { id: string } }[];
+
+    expect(queue).toEqual(await h.api.projects.queue({ id: project.id }));
+    expect(queue.map((e) => e.issue.id)).toContain(issue.id);
+  });
+
+  test("update_project cambia los campos presentes y respeta las validaciones del core", async () => {
+    const { project } = await projectWithIssue();
+
+    expect(await h.call("update_project", { id: project.id, parallel: 3, name: "Otro" })).toMatchObject({ parallel: 3, name: "Otro" });
+    expect(await h.api.projects.get({ id: project.id })).toMatchObject({ parallel: 3, name: "Otro" });
+    await expect(h.call("update_project", { id: project.id, defaultFlowId: "no-existe" })).rejects.toThrow(/BAD_REQUEST/);
   });
 });

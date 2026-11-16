@@ -1,4 +1,4 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type NewLearning, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_REBASE, SEED_TECHLEAD } from "@/seed-flows"
 import { buildOpenPrs } from "@/seed-prs"
@@ -636,6 +636,14 @@ export function createMemoryAppData(now = Date.now()): AppData {
       return { ...found }
     },
     learnings: async () => learnings.toSorted((a, b) => (a.id < b.id ? 1 : -1)).map((l) => ({ ...l })),
+    proposeLearning: async ({ projectId, repoId, text, roles = [], tags = [] }: NewLearning) => {
+      const clean = text.trim()
+      const same = learnings.find((l) => l.text === clean && l.projectId === (projectId ?? null) && l.repoId === (repoId ?? null))
+      if (same) return { ...same }
+      const created = learning(learnings.length + 1, { text: clean, status: "proposed", source: "human", projectId: projectId ?? null, repoId: repoId ?? null, roles, tags, createdAt: Date.now() })
+      learnings.push(created)
+      return { ...created }
+    },
     approveLearning: async (learningId) => {
       const found = needLearning(learningId)
       found.status = "approved"

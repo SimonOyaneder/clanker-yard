@@ -135,6 +135,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     decisions: (filter) => client.decisions.list(filter),
     resolveDecision: (id, option) => client.decisions.resolve({ id, option }),
     learnings: () => client.learnings.list(),
+    proposeLearning: (learning) => client.learnings.propose(learning),
     approveLearning: (id) => client.learnings.approve({ id }),
     rejectLearning: (id) => client.learnings.reject({ id }),
     updateLearning: (patch) => client.learnings.update(patch),

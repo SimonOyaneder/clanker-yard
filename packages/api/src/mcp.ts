@@ -6,6 +6,7 @@ import { FlowBody } from "./flow";
 import { Pack } from "./pack";
 import { ClankerProject } from "./projects";
 import { Recipe } from "./recipe";
+import { Learning } from "./learnings";
 import { RunDetail } from "./runs";
 
 /**
@@ -36,7 +37,7 @@ export type McpMeta =
   | { resource: McpResourceName };
 
 /** Los kinds que `list` y `get` entienden: los de `defs` que ya tienen esquema, más las entidades. */
-export type McpKind = Exclude<DefKind, "context"> | "project" | "run" | "decision";
+export type McpKind = Exclude<DefKind, "context"> | "project" | "run" | "decision" | "learning";
 
 export type McpResourceName = "run_timeline" | "step_report";
 
@@ -64,6 +65,7 @@ export const MCP_KIND_SCHEMAS = {
   project: { schema: ClankerProject, io: "output" },
   run: { schema: RunDetail, io: "output" },
   decision: { schema: Decision, io: "output" },
+  learning: { schema: Learning, io: "output" },
 } as const satisfies Record<McpKind, KindSchema>;
 
 export interface KindSchema {

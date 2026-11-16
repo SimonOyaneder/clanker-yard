@@ -10,6 +10,7 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
     "description": "Lista las entidades de un kind. Los esquemas están en los resources clanker://schema/<kind>. Filtros por kind (los que no aparecen no tienen):
 - run: projectId?: string, status?: queued|running|waiting|parked|paused|done|failed|canceled[]
 - decision: projectId?: string, runId?: string, status?: pending|accepted|rejected|answered|expired|superseded[], kind?: gate|needs_human|question|review_note|note|alert[]
+- learning: projectId?: string, repoId?: string, status?: proposed|approved|rejected|archived[]
 - flow: includeArchived?: boolean
 - role: includeArchived?: boolean
 - profile: includeArchived?: boolean
@@ -32,6 +33,7 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
             "project",
             "run",
             "decision",
+            "learning",
             "flow",
             "role",
             "profile",
@@ -68,6 +70,7 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
             "project",
             "run",
             "decision",
+            "learning",
             "flow",
             "role",
             "profile",
@@ -246,6 +249,229 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
       "idempotentHint": true,
       "openWorldHint": false,
     },
+    "description": "Cambia solo los campos presentes de un proyecto (repos, filtros, flujo, perfil, \`parallel\`, tope de gasto, \`trackerRef\`...), planos junto al \`id\`; las mismas validaciones que al crearlo. Un campo que no existe es \`BAD_REQUEST\`.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "conventions": {
+          "additionalProperties": false,
+          "properties": {
+            "commentPrefix": {
+              "type": "string",
+            },
+            "commits": {
+              "enum": [
+                "conventional",
+              ],
+              "type": "string",
+            },
+            "context": {
+              "additionalProperties": {
+                "items": {
+                  "pattern": "^(skill|rule|repo|file):\\S",
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "propertyNames": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "object",
+            },
+            "councilPrefix": {
+              "type": "string",
+            },
+            "noAiAttribution": {
+              "type": "boolean",
+            },
+            "pr": {
+              "additionalProperties": false,
+              "properties": {
+                "omitSections": {
+                  "items": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "template": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "type": "object",
+            },
+          },
+          "type": "object",
+        },
+        "defaultFlowId": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "defaultProfileId": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "flowParams": {
+          "additionalProperties": {},
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "maxCostUsd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "parallel": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "queueFilter": {
+          "properties": {
+            "excludeLabels": {
+              "items": {
+                "type": "string",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+            "labels": {
+              "items": {
+                "type": "string",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+            "status": {
+              "items": {
+                "enum": [
+                  "backlog",
+                  "todo",
+                  "in_progress",
+                  "in_review",
+                  "done",
+                  "canceled",
+                ],
+                "type": "string",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "type": "object",
+        },
+        "repos": {
+          "items": {
+            "properties": {
+              "labels": {
+                "default": [],
+                "items": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "repoId": {
+                "pattern": "^repo_[0-9A-HJKMNP-TV-Z]{26}$",
+                "type": "string",
+              },
+            },
+            "required": [
+              "repoId",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "stackOn": {
+          "enum": [
+            "ready",
+            "ci_green",
+            "any_open",
+          ],
+          "type": "string",
+        },
+        "status": {
+          "enum": [
+            "active",
+            "paused",
+            "archived",
+          ],
+          "type": "string",
+        },
+        "statusMapping": {
+          "additionalProperties": {
+            "enum": [
+              "backlog",
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "canceled",
+            ],
+            "type": "string",
+          },
+          "propertyNames": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "trackerAccount": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "trackerRef": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "update_project",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
     "description": "Pausa el loop de un proyecto: deja de lanzar sus issues, sin tocar lo que ya corre ni a otros proyectos.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -283,6 +509,27 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
       "type": "object",
     },
     "name": "start_loop",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "La cola de un proyecto: cada issue con su estado (\`ready\`, \`blocked\`, \`running\`...) y el motivo, en el orden en que el Scheduler la lanzaría.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "project_queue",
   },
   {
     "annotations": {
@@ -490,6 +737,52 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
       "type": "object",
     },
     "name": "resolve_decision",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Propone un learning (una línea que un agente futuro necesita saber) para un proyecto o un repo, con \`projectId\` o \`repoId\`. Queda \`proposed\`: una persona lo aprueba en la app y recién entonces entra a los briefs. Si el texto ya existe en ese alcance devuelve el que había.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "repoId": {
+          "pattern": "^repo_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "roles": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "text": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "propose_learning",
   },
 ]
 `;

@@ -253,3 +253,45 @@ test("cancelar el filtro no archiva nada", async () => {
   expect(archive).not.toHaveBeenCalled()
   expect((await data.learnings()).filter((l) => l.status === "proposed")).toHaveLength(6)
 })
+
+async function fillNewLearning(text: string) {
+  fireEvent.click(screen.getByRole("button", { name: /Nuevo learning/ }))
+  await act(() => vi.advanceTimersByTimeAsync(10))
+  const dialog = screen.getByRole("dialog", { name: "Nuevo learning" })
+  const scope = within(dialog).getByLabelText("Alcance") as HTMLSelectElement
+  fireEvent.change(scope, { target: { value: scope.querySelector("optgroup[label=Proyectos] option")!.getAttribute("value")! } })
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "dev" }))
+  fireEvent.change(within(dialog).getByLabelText("Texto"), { target: { value: text } })
+  return dialog
+}
+
+test("Nuevo learning lo propone y lo aprueba con los roles marcados", async () => {
+  const { data } = await openLearnings()
+  const propose = vi.spyOn(data, "proposeLearning")
+  const approve = vi.spyOn(data, "approveLearning")
+  const dialog = await fillNewLearning("Corre `srb tc` con `doppler run --config dev`")
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }))
+  await act(() => vi.advanceTimersByTimeAsync(10))
+
+  expect(propose).toHaveBeenCalledWith(expect.objectContaining({ text: "Corre `srb tc` con `doppler run --config dev`", roles: ["dev"] }))
+  const created = (await data.learnings()).find((l) => l.text.startsWith("Corre `srb tc`"))!
+  expect(approve).toHaveBeenCalledWith(created.id)
+  expect(created).toMatchObject({ status: "approved", source: "human", roles: ["dev"] })
+  expect(screen.queryByRole("dialog", { name: "Nuevo learning" })).toBeNull()
+})
+
+test("Nuevo learning con un texto que ya existía no lo aprueba de nuevo", async () => {
+  const { data } = await openLearnings()
+  const approve = vi.spyOn(data, "approveLearning")
+  const existing = (await data.learnings()).find((l) => l.status === "proposed" && l.projectId)!
+  const dialog = await fillNewLearning(existing.text)
+  const scope = within(dialog).getByLabelText("Alcance") as HTMLSelectElement
+  fireEvent.change(scope, { target: { value: `p:${existing.projectId}` } })
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }))
+  await act(() => vi.advanceTimersByTimeAsync(10))
+
+  expect(approve).not.toHaveBeenCalled()
+  expect(screen.getByText(/Ya existía en ese alcance/)).toBeTruthy()
+})

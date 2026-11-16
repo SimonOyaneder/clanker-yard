@@ -30,6 +30,7 @@ import type {
   Learning,
   LearningId,
   LearningPatch,
+  NewLearning,
   LearningVerdict,
   ModelMetrics,
   NewProject,
@@ -174,6 +175,8 @@ export interface AppData {
    * `needs_human` la corrida estacionada vuelve a la cola de su carril.
    */
   resolveDecision(id: DecisionId, option: string): Promise<Decision>
+  /** Deja un learning de una persona en `proposed`; si el mismo texto ya existe en ese alcance devuelve el que había, sea cual sea su estado. */
+  proposeLearning(learning: NewLearning): Promise<Learning>
   /** Todos los learnings, de cualquier estado, del más reciente al más antiguo: la UI filtra y cuenta. */
   learnings(): Promise<Learning[]>
   /** Un `proposed`, `rejected` o `archived` pasa a `approved` y entra a los briefs de su alcance. Solo la app puede (origin `ui`). */
