@@ -6,6 +6,7 @@ import { Ago, Hint, Pill, SectionTitle, StatBar } from "@/components/common"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ParkedList, QueueList } from "@/components/project/issue-lists"
 import { LaneBoard } from "@/components/project/lanes"
+import { LanesControl } from "@/components/project/lanes-control"
 import { useRunCommands } from "@/components/project/run-commands"
 import { RunStatusIcon, RunStatusPill, isLive } from "@/components/project/status"
 import { Button } from "@/components/ui/button"
@@ -117,11 +118,12 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
     <>
       <StatBar
         items={[
-          { label: "Carril dev", value: `${usage.dev.active}/${usage.dev.capacity}`, sub: `máquina ${usage.dev.machine.active}/${usage.dev.machine.capacity}` },
+          { label: "Carril dev", value: `${usage.dev.active}/${usage.dev.capacity}`, sub: `máquina ${usage.dev.machine.active}/${usage.dev.machine.capacity}`, action: <LanesControl lanes={lanes} /> },
           {
             label: "Carril mantenimiento",
             value: `${usage.maintenance.active}/${usage.maintenance.capacity}`,
             sub: `máquina ${usage.maintenance.machine.active}/${usage.maintenance.machine.capacity}`,
+            action: <LanesControl lanes={lanes} />,
           },
           { label: "PRs abiertos", value: String(projectPrs(prs, runs).length), sub: "que abrió el proyecto" },
           {

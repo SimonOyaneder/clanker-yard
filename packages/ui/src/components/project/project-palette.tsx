@@ -1,8 +1,11 @@
 import type { ClankerProject, QueueEntry } from "@clanker/api"
 import { Fragment } from "react"
-import { ArrowUpToLine, Ban, ChevronLeft, Gauge, Undo2 } from "lucide-react"
+import { ArrowUpToLine, Ban, ChevronLeft, Gauge, Minus, Plus, Undo2 } from "lucide-react"
+import { BELOW_USE, LANE_NAME } from "@/components/project/lanes-control"
 import { PARALLEL_OPTIONS } from "@/components/project/project-view"
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from "@/components/ui/command"
+import { useAppData } from "@/app-data"
+import { useLiveQuery } from "@/hooks/use-live"
 import { useAppActions } from "@/lib/app-context"
 import { issueKey } from "@/lib/format"
 
@@ -38,6 +41,48 @@ export function ParallelPage({ open, onOpenChange, project, onBack }: ParallelPr
               {n === project.parallel ? <CommandShortcut>actual</CommandShortcut> : null}
             </CommandItem>
           ))}
+        </CommandGroup>
+      </CommandList>
+    </CommandDialog>
+  )
+}
+
+// La sub-página "Cambiar capacidad de carriles ›" de ⌘K: sube o baja en 1 el tope de cada carril de la máquina.
+export function LanesPage({ open, onOpenChange, onBack }: { open: boolean; onOpenChange: (open: boolean) => void; onBack: () => void }) {
+  const actions = useAppActions()
+  const data = useAppData()
+  const { data: lanes } = useLiveQuery("lanes", () => data.lanes())
+  return (
+    <CommandDialog open={open} onOpenChange={onOpenChange} title="Cambiar capacidad de carriles" description="Cuántas corridas caben a la vez en cada carril de la máquina">
+      <CommandInput placeholder="Subir o bajar un carril…" />
+      <CommandList className="max-h-[420px]">
+        <CommandEmpty>Sin resultados.</CommandEmpty>
+        <CommandGroup heading="Capacidad de los carriles (tope de la máquina; el parallel es el de cada proyecto)">
+          <CommandItem value="volver" onSelect={onBack}>
+            <ChevronLeft /> Volver
+          </CommandItem>
+          {lanes
+            ? (["dev", "maintenance"] as const).flatMap((lane) => {
+                const { capacity, active } = lanes[lane]
+                const change = (to: number) => () => {
+                  onOpenChange(false)
+                  void actions.setLanes(lane, to, capacity)
+                }
+                const state = `${capacity} ahora, en uso ${active}`
+                return [
+                  <CommandItem key={`${lane}-up`} value={`subir ${LANE_NAME[lane]}`} onSelect={change(capacity + 1)}>
+                    <Plus /> Subir {LANE_NAME[lane].toLowerCase()} a {capacity + 1}
+                    <CommandShortcut>{state}</CommandShortcut>
+                  </CommandItem>,
+                  capacity > 1 ? (
+                    <CommandItem key={`${lane}-down`} value={`bajar ${LANE_NAME[lane]}`} onSelect={change(capacity - 1)}>
+                      <Minus /> Bajar {LANE_NAME[lane].toLowerCase()} a {capacity - 1}
+                      <CommandShortcut>{capacity - 1 < active ? BELOW_USE : state}</CommandShortcut>
+                    </CommandItem>
+                  ) : null,
+                ]
+              })
+            : null}
         </CommandGroup>
       </CommandList>
     </CommandDialog>

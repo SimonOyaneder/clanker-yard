@@ -9,7 +9,7 @@ import { PR_KEYS } from "@/components/prs/pr-menu"
 import type { RunTab } from "@/components/project/run-view"
 import type { StepTab } from "@/components/project/step-panel"
 import { KindIcon } from "@/components/inbox/decision-parts"
-import { ParallelPage, QueueCommands } from "@/components/project/project-palette"
+import { LanesPage, ParallelPage, QueueCommands } from "@/components/project/project-palette"
 import { useRunCommands } from "@/components/project/run-commands"
 import { RunStatusIcon, isLive } from "@/components/project/status"
 import {
@@ -86,8 +86,12 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
   const host = useHost()
   // Una acción con parámetro abre una sub-página dentro de la paleta (patrón de páginas de cmdk).
   const [parallelPage, setParallelPage] = useState(false)
+  const [lanesPage, setLanesPage] = useState(false)
   const close = (next: boolean) => {
-    if (!next) setParallelPage(false)
+    if (!next) {
+      setParallelPage(false)
+      setLanesPage(false)
+    }
     onOpenChange(next)
   }
   const run = (fn: () => void) => () => {
@@ -100,6 +104,7 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
   const runnable = current?.status === "active" ? issues.filter((i) => i.status === "todo" && !live.has(i.id)) : []
   const ordered = [...barProjects(projects), ...projects.filter((p) => p.status === "archived")]
 
+  if (lanesPage) return <LanesPage open={open} onOpenChange={close} onBack={() => setLanesPage(false)} />
   if (parallelPage && current) return <ParallelPage open={open} onOpenChange={close} project={current} onBack={() => setParallelPage(false)} />
 
   return (
@@ -285,6 +290,13 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             ) : null}
           </CommandGroup>
         ) : null}
+
+        <CommandGroup heading="Máquina">
+          <CommandItem value="cambiar capacidad de carriles" onSelect={() => setLanesPage(true)}>
+            <Gauge /> Cambiar capacidad de carriles
+            <CommandShortcut>›</CommandShortcut>
+          </CommandItem>
+        </CommandGroup>
 
         {current && queue ? <QueueCommands project={current} queue={queue} run={run} /> : null}
 

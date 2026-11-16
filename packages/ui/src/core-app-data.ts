@@ -75,6 +75,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     skipIssue: async (id, issueId, skipped) => void (await client.projects.skipIssue({ id, issueId, skipped })),
     boostIssue: async (id, issueId, boosted) => void (await client.projects.boostIssue({ id, issueId, boosted })),
     lanes: () => client.system.lanes(),
+    setLanes: (patch) => client.system.setLanes(patch),
     breakers: () => client.system.breakers(),
     openPrs: () => client.prs.list({ state: "open" }),
     refreshPrs: async (refs) => {

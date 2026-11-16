@@ -1,4 +1,4 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefRecord, type IssueId, type Learning, type LearningPatch, type PrRef, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefRecord, type IssueId, type Lanes, type Learning, type LearningPatch, type PrRef, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildOpenPrs } from "@/seed-prs"
@@ -337,6 +337,12 @@ export function createMemoryAppData(now = Date.now()): AppData {
   })
   // Lo que el usuario saltó o subió en la cola, que `queue` refleja.
   const skipped = new Set<IssueId>()
+  // Los topes por defecto del core: dev 4, mantenimiento 2.
+  const capacities = { dev: 4, maintenance: 2 }
+  const lanesNow = (): Lanes => {
+    const holding = (lane: Run["lane"]) => runs.filter((r) => r.lane === lane && (r.status === "running" || r.status === "waiting" || r.status === "paused")).length
+    return { dev: { active: holding("dev"), capacity: capacities.dev }, maintenance: { active: holding("maintenance"), capacity: capacities.maintenance } }
+  }
   const boosted: IssueId[] = []
   const breakers: Breaker[] = []
   const prs: CachedPr[] = buildOpenPrs(now)
@@ -412,9 +418,15 @@ export function createMemoryAppData(now = Date.now()): AppData {
       if (at >= 0) boosted.splice(at, 1)
       if (boost) boosted.unshift(issueId)
     },
-    lanes: async () => {
-      const holding = (lane: Run["lane"]) => runs.filter((r) => r.lane === lane && (r.status === "running" || r.status === "waiting" || r.status === "paused")).length
-      return { dev: { active: holding("dev"), capacity: 4 }, maintenance: { active: holding("maintenance"), capacity: 2 } }
+    lanes: async () => lanesNow(),
+    setLanes: async (patch) => {
+      for (const lane of ["dev", "maintenance"] as const) {
+        const capacity = patch[lane]
+        if (capacity === undefined) continue
+        if (!Number.isInteger(capacity) || capacity < 1) throw new Error(`La capacidad del carril ${lane} debe ser un entero de 1 o más`)
+        capacities[lane] = capacity
+      }
+      return lanesNow()
     },
     breakers: async () => breakers.map((b) => ({ ...b })),
     openPrs: async () => prs.map((p) => ({ ...p })),

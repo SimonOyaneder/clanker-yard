@@ -101,3 +101,23 @@ test("el paralelismo se cambia desde el menú del proyecto y desde ⌘K", async 
   await page.getByRole("option", { name: /^1 corrida a la vez/ }).click();
   await expect(lane(page, "Carril dev").getByText("1/1", { exact: true })).toBeVisible();
 });
+
+test("la capacidad de los carriles de la máquina se cambia desde el popover y desde ⌘K", async ({ window: page }) => {
+  const stats = page.getByLabel("Métricas");
+  await page.getByRole("button", { name: "Cambiar la capacidad de los carriles" }).first().click();
+  const dev = page.getByRole("group", { name: "Carril dev" });
+  await expect(dev.getByText(/^en uso: \d+$/)).toBeVisible();
+  await expect(page.getByText(/el tope de la máquina entera/)).toBeVisible();
+  await snapBoth(page, "proyecto-carriles-capacidad");
+
+  const before = Number(await dev.getByRole("status", { name: "Capacidad del carril dev" }).textContent());
+  await dev.getByRole("button", { name: "Subir la capacidad del carril dev" }).click();
+  await expect(dev.getByRole("status", { name: "Capacidad del carril dev" })).toHaveText(String(before + 1));
+  await expect(stats).toContainText(`máquina 1/${before + 1}`);
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: /Buscar o ejecutar/ }).click();
+  await page.getByRole("option", { name: /Cambiar capacidad de carriles/ }).click();
+  await page.getByRole("option", { name: new RegExp(`^Bajar carril dev a ${before}`) }).click();
+  await expect(stats).toContainText(`máquina 1/${before}`);
+});

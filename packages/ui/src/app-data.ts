@@ -21,6 +21,7 @@ import type {
   IssueId,
   IssueMetrics,
   Lanes,
+  LanesPatch,
   Learning,
   LearningId,
   LearningPatch,
@@ -86,6 +87,8 @@ export interface AppData {
   boostIssue(projectId: ProjectId, issueId: IssueId, boosted: boolean): Promise<void>
   /** La capacidad de cada carril de la máquina y cuánto está en uso. */
   lanes(): Promise<Lanes>
+  /** Cambia la capacidad de los carriles de la máquina; rige al instante y nunca interrumpe lo que corre. */
+  setLanes(patch: LanesPatch): Promise<Lanes>
   /** Los circuit breakers abiertos: qué está en pausa y cuándo se vuelve a probar. */
   breakers(): Promise<Breaker[]>
   /** Los PRs abiertos que Watch conoce (los que abrió el sistema y los de tu búsqueda), con su estado ya leído y las señales de su pack. */

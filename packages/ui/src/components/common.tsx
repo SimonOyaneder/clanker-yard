@@ -57,11 +57,12 @@ export function Ago({ at, className }: { at: number | string | null | undefined;
 }
 
 // Fila de métricas en un solo bloque, en vez de cinco tarjetas sueltas.
-export function StatBar({ items }: { items: { label: string; value: string; sub?: string; tone?: string }[] }) {
+export function StatBar({ items }: { items: { label: string; value: string; sub?: string; tone?: string; /** Un control en la esquina de la celda. */ action?: ReactNode }[] }) {
   return (
     <section aria-label="Métricas" className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] overflow-hidden rounded-lg border bg-card">
       {items.map((k, i) => (
-        <div key={k.label} className={cn("flex min-w-0 flex-col gap-0.5 px-4 py-3", i > 0 && "border-l")}>
+        <div key={k.label} className={cn("relative flex min-w-0 flex-col gap-0.5 px-4 py-3", i > 0 && "border-l")}>
+          {k.action}
           <span className="truncate text-xs text-muted-foreground">{k.label}</span>
           <span className={cn("text-lg leading-tight font-semibold tabular-nums", k.tone)}>{k.value}</span>
           {k.sub ? <span className="truncate text-[11.5px] text-muted-foreground">{k.sub}</span> : null}

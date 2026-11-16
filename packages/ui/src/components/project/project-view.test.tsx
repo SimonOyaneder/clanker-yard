@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Breaker, ClankerProject, Decision, QueueEntry, Run } from "@clanker/api"
+import type { Breaker, ClankerProject, Decision, Lanes, QueueEntry, Run } from "@clanker/api"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
@@ -22,9 +22,10 @@ interface Scenario {
   decisions?: Decision[]
   breakers?: Breaker[]
   project?: Partial<ClankerProject>
+  lanes?: Lanes
 }
 
-async function setup({ entries = () => [], queueError, runs = () => [], decisions = [], breakers = [], project: overrides = {} }: Scenario = {}) {
+async function setup({ entries = () => [], queueError, runs = () => [], decisions = [], breakers = [], project: overrides = {}, lanes = LANES }: Scenario = {}) {
   const data = createMemoryAppData(NOW)
   const project = { ...(await data.projects())[0]!, ...overrides }
   const issues = await data.issues(project.id)
@@ -32,6 +33,7 @@ async function setup({ entries = () => [], queueError, runs = () => [], decision
   const actions = {
     startRun: vi.fn(() => Promise.resolve()),
     setParallel: vi.fn(() => Promise.resolve()),
+    setLanes: vi.fn(() => Promise.resolve()),
     skipIssue: vi.fn(() => Promise.resolve()),
     boostIssue: vi.fn(() => Promise.resolve()),
     refresh: () => {},
@@ -45,7 +47,7 @@ async function setup({ entries = () => [], queueError, runs = () => [], decision
         <AppActionsContext.Provider value={actions as unknown as AppActions}>
           <TooltipProvider>
             <ProjectFrame project={project} tab="operation" onTab={() => {}}>
-              <ProjectView project={project} runs={runs(memoryRuns)} issues={issues} queue={entries(issues)} queueError={queueError} decisions={decisions} lanes={LANES} breakers={breakers} prs={[]} />
+              <ProjectView project={project} runs={runs(memoryRuns)} issues={issues} queue={entries(issues)} queueError={queueError} decisions={decisions} lanes={lanes} breakers={breakers} prs={[]} />
             </ProjectFrame>
           </TooltipProvider>
         </AppActionsContext.Provider>
@@ -130,6 +132,40 @@ test("los carriles se ven por separado: el rebase corre en mantenimiento con dev
   expect(within(maintenance).getByText(/PR prestado de ENG-9183/)).toBeTruthy()
   expect(stat("Carril dev").textContent).toContain("1/1")
   expect(stat("Carril mantenimiento").textContent).toContain("1/2")
+})
+
+const openLanes = () => fireEvent.click(screen.getAllByRole("button", { name: "Cambiar la capacidad de los carriles" })[0]!)
+
+test("el popover de carriles sube y baja la capacidad con lo que hay en uso", async () => {
+  const { actions } = await setup()
+
+  openLanes()
+  const dev = await screen.findByRole("group", { name: "Carril dev" })
+  expect(within(dev).getByText("en uso: 1")).toBeTruthy()
+  expect(within(dev).getByLabelText("Capacidad del carril dev").textContent).toBe("4")
+  fireEvent.click(within(dev).getByRole("button", { name: "Subir la capacidad del carril dev" }))
+  expect(actions.setLanes).toHaveBeenLastCalledWith("dev", 5, 4)
+  fireEvent.click(within(screen.getByRole("group", { name: "Carril mantenimiento" })).getByRole("button", { name: "Bajar la capacidad del carril mantenimiento" }))
+  expect(actions.setLanes).toHaveBeenLastCalledWith("maintenance", 1, 2)
+  expect(screen.getByText(/el tope de la máquina entera/)).toBeTruthy()
+  expect(screen.queryByText(/Las corridas en curso siguen/)).toBeNull()
+})
+
+test("la capacidad de un carril no baja de 1", async () => {
+  await setup({ lanes: { dev: { active: 0, capacity: 1 }, maintenance: { active: 0, capacity: 2 } } })
+
+  openLanes()
+  const down = within(await screen.findByRole("group", { name: "Carril dev" })).getByRole("button", { name: "Bajar la capacidad del carril dev" }) as HTMLButtonElement
+  expect(down.disabled).toBe(true)
+})
+
+test("con la capacidad por debajo de lo que corre avisa que las corridas en curso siguen", async () => {
+  await setup({ lanes: { dev: { active: 3, capacity: 2 }, maintenance: { active: 0, capacity: 2 } } })
+
+  openLanes()
+  const dev = await screen.findByRole("group", { name: "Carril dev" })
+  expect(within(dev).getByText("Las corridas en curso siguen; no entran nuevas hasta que baje.")).toBeTruthy()
+  expect(within(screen.getByRole("group", { name: "Carril mantenimiento" })).queryByText(/Las corridas en curso siguen/)).toBeNull()
 })
 
 test("cada corrida en un carril lleva el flujo real como stepper, con su paso actual", async () => {

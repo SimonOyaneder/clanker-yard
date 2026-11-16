@@ -110,3 +110,16 @@ test("la cola de ejemplo son las issues en todo sin corrida", async () => {
   )
   expect(queue.every((e) => e.state === "ready")).toBe(true)
 })
+
+test("setLanes cambia solo la capacidad que se pide y rechaza menos de 1", async () => {
+  const data = createMemoryAppData(NOW)
+  const before = await data.lanes()
+
+  const after = await data.setLanes({ maintenance: 3 })
+  expect(after.maintenance.capacity).toBe(3)
+  expect(after.dev).toEqual(before.dev)
+  expect((await data.lanes()).maintenance.capacity).toBe(3)
+
+  await expect(data.setLanes({ dev: 0 })).rejects.toThrow(/entero de 1 o más/)
+  expect((await data.lanes()).dev.capacity).toBe(before.dev.capacity)
+})

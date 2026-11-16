@@ -35,7 +35,7 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
     { issue: a!, state: "ready", reason: "lista", base: { kind: "default" }, dependsOn: [] },
     { issue: b!, state: "blocked", skipped: true, reason: "saltada a mano" },
   ]
-  const actions = { setParallel: vi.fn(), boostIssue: vi.fn(), skipIssue: vi.fn() }
+  const actions = { setParallel: vi.fn(), setLanes: vi.fn(), boostIssue: vi.fn(), skipIssue: vi.fn() }
   render(
     <AppDataProvider value={data}>
       <RunCommandsProvider>
@@ -97,6 +97,15 @@ test("Cambiar paralelismo abre una sub-página con 1 a 6", async () => {
   fireEvent.click(screen.getByText("3 corridas a la vez"))
 
   expect(actions.setParallel).toHaveBeenCalledWith(project, 3)
+})
+
+test("Cambiar capacidad de carriles sube o baja un carril de la máquina; en 1 no se puede bajar", async () => {
+  const { actions, data } = await setup()
+  const lanes = await data.lanes()
+
+  fireEvent.click(screen.getByText("Cambiar capacidad de carriles"))
+  fireEvent.click(await screen.findByText(`Subir carril mantenimiento a ${lanes.maintenance.capacity + 1}`))
+  expect(actions.setLanes).toHaveBeenCalledWith("maintenance", lanes.maintenance.capacity + 1, lanes.maintenance.capacity)
 })
 
 test("las pestañas del proyecto y los filtros del Resumen son acciones de ⌘K", async () => {

@@ -417,6 +417,14 @@ function Shell() {
           () => appData.updateProject(p.id, { parallel }),
           () => appData.updateProject(p.id, { parallel: p.parallel }),
         ),
+      setLanes: async (lane, capacity, from) => {
+        const apply = (n: number) => appData.setLanes({ [lane]: n }).then(live.refresh)
+        await reversible(
+          `${lane === "dev" ? "Carril dev" : "Carril mantenimiento"}: ${capacity} ${capacity === 1 ? "cupo" : "cupos"} en la máquina`,
+          () => apply(capacity),
+          () => apply(from),
+        )
+      },
       skipIssue: (p, issue, skipped) =>
         reversible(
           skipped ? `No tomaré ${issueKey(issue)}` : `${issueKey(issue)} vuelve a la cola`,
@@ -436,7 +444,7 @@ function Shell() {
       openExternal: host.openExternal,
       refresh,
     }),
-    [selectProject, go, appData, host, refresh, goConnections, connectLinear, probeClaude, openDecision],
+    [selectProject, go, appData, host, live.refresh, refresh, goConnections, connectLinear, probeClaude, openDecision],
   )
 
   // Menú nativo (accelerators) y clicks en notificaciones.
