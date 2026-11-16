@@ -309,7 +309,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
     else connections.push(c)
     return c
   }
-  const def = (kind: DefRecord["kind"], slug: string, body: unknown): DefRecord => ({
+  const def = (kind: DefRecord["kind"], slug: string, body: unknown, extra: Partial<DefRecord> = {}): DefRecord => ({
     id: id("def", nextId++),
     kind,
     slug,
@@ -321,9 +321,31 @@ export function createMemoryAppData(now = Date.now()): AppData {
     body,
     source: "builtin",
     createdAt: min(600),
+    ...extra,
   })
-  const flowDefs = [SEED_TECHLEAD, SEED_TOY, SEED_REBASE].map((flow) => def("flow", flow.id, flow))
-  const profileDefs = ["medio", "juguete"].map((slug) => def("profile", slug, { name: slug }))
+  const roleBody = (prompt: string, mode: string) => ({
+    prompt,
+    context: [],
+    modes: { [mode]: { instructions: `Haz el trabajo del modo ${mode}.`, report: { type: "object" }, outcomes: ["ok"], session: "new" } },
+  })
+  const defsStore: DefRecord[] = [
+    ...[SEED_TECHLEAD, SEED_TOY, SEED_REBASE].map((flow) => def("flow", flow.id, flow, flow === SEED_TECHLEAD ? { currentVersion: 3, version: 3 } : {})),
+    def("role", "dev", roleBody("Eres quien implementa la issue.", "implement")),
+    def("role", "review-bugs", roleBody("Buscas bugs de producción en el cambio.", "review")),
+    def("role", "juguete", roleBody("Saludas.", "saludar")),
+    def("profile", "medio", { roles: { dev: { model: "claude-sonnet-5", effort: "medium" }, "review-bugs": { model: "claude-sonnet-5" } } }),
+    def("profile", "juguete", { roles: { juguete: { model: "claude-haiku-4" } } }),
+  ]
+  const needDef = (kind: DefRecord["kind"], defId: string) => {
+    const found = defsStore.find((d) => d.kind === kind && d.id === defId)
+    if (!found) throw new Error(`No existe el ${kind} ${defId}.`)
+    return found
+  }
+  const writableDef = (kind: DefRecord["kind"], defId: string) => {
+    const found = needDef(kind, defId)
+    if (found.scope === "builtin" || found.scope === "pack") throw new Error(`El ${kind} "${found.slug}" viene incluido: no se archiva ni se edita. Duplícalo para tener uno tuyo.`)
+    return found
+  }
 
   const repoRows: RepoRow[] = (
     [
@@ -609,7 +631,27 @@ export function createMemoryAppData(now = Date.now()): AppData {
       const at = connections.findIndex((c) => c.provider === provider && c.account === account)
       if (at >= 0) connections.splice(at, 1)
     },
-    defs: async (kind) => (kind === "flow" ? flowDefs : profileDefs).map((d) => ({ ...d })),
+    defs: async (kind, opts) => defsStore.filter((d) => d.kind === kind && (opts?.includeArchived || d.archivedAt === null)).map((d) => ({ ...d })),
+    defVersions: async (kind, defId) => {
+      const found = needDef(kind, defId)
+      return Array.from({ length: found.currentVersion }, (_, i) => ({ ...found, version: found.currentVersion - i, createdAt: found.createdAt + i * 60_000 }))
+    },
+    createDef: async ({ kind, slug, body }) => {
+      if (defsStore.some((d) => d.kind === kind && d.slug === slug && d.scope === "user")) throw new Error(`Ya existe ${kind} "${slug}" (user): archívalo o elige otro slug.`)
+      const created = def(kind, slug, body, { scope: "user", source: "ui", createdAt: Date.now() })
+      defsStore.push(created)
+      return { ...created }
+    },
+    archiveDef: async (kind, defId) => {
+      const found = writableDef(kind, defId)
+      found.archivedAt ??= Date.now()
+      return { ...found }
+    },
+    restoreDef: async (kind, defId) => {
+      const found = writableDef(kind, defId)
+      found.archivedAt = null
+      return { ...found }
+    },
     repos: async () => repoRows.map((r) => ({ ...r })),
     testRecipe: async (repoId) => {
       const row = repoRows.find((r) => r.repo.id === repoId)

@@ -11,6 +11,7 @@ import type {
   ConnectionProvider,
   DayMetrics,
   DefRecord,
+  DefWriteKind,
   Decision,
   DecisionFilter,
   DecisionId,
@@ -173,8 +174,15 @@ export interface AppData {
   /** La prueba antes de guardar: una key rechazada no queda guardada. */
   setClaudeApiKey(key: string): Promise<Connection>
   disconnect(provider: ConnectionProvider, account: string): Promise<void>
-  /** Los flujos o perfiles vigentes, con su versión vigente: de ahí salen los parámetros con default y las opciones de Ajustes. */
-  defs(kind: "flow" | "profile"): Promise<DefRecord[]>
+  /** Las defs vigentes del kind, cada una con su versión vigente (de ahí salen los parámetros con default y las opciones de Ajustes); con `includeArchived` también las archivadas. Puede haber varias con el mismo slug: una por scope. */
+  defs(kind: DefWriteKind, opts?: { includeArchived?: boolean }): Promise<DefRecord[]>
+  /** Todas las versiones de la def, de la más nueva a la más vieja, cada una con su body. */
+  defVersions(kind: DefWriteKind, id: string): Promise<DefRecord[]>
+  /** Crea una def tuya (scope `user`) con ese slug y ese body; si el slug es de un incluido o de un pack, la tuya pasa a mandar. */
+  createDef(input: { kind: DefWriteKind; slug: string; body: unknown }): Promise<DefRecord>
+  /** La def deja de resolverse por slug pero conserva sus versiones. Solo las tuyas y las del repo. */
+  archiveDef(kind: DefWriteKind, id: string): Promise<DefRecord>
+  restoreDef(kind: DefWriteKind, id: string): Promise<DefRecord>
   repos(): Promise<RepoRow[]>
   /** Corre la receta del repo en un worktree desechable y vuelve al terminar; la salida llega mientras tanto como eventos `recipe.test_output`. */
   testRecipe(repoId: RepoId): Promise<RecipeTestResult>

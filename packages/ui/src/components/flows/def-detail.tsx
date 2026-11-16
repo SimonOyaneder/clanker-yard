@@ -1,0 +1,220 @@
+import { type DefRecord, type DefWriteKind, FlowDef, Profile, Role } from "@clanker/api"
+import { Archive, ArchiveRestore, Copy } from "lucide-react"
+import { useState } from "react"
+import { useAppData } from "@/app-data"
+import { Ago } from "@/components/common"
+import { RowPills, UsedBy } from "@/components/flows/flow-parts"
+import { FlowDefGraph } from "@/components/project/run-graph"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
+import { useLiveQuery } from "@/hooks/use-live"
+import { duplicateOf, isReadOnly, KIND_LABEL, type LibraryRow, nameOf, sourceLabel } from "@/lib/defs-library"
+import { undoable } from "@/lib/undoable"
+import { cn } from "@/lib/utils"
+
+interface Props {
+  row: LibraryRow
+  /** Todas las defs del kind (archivadas incluidas): de ahí sale un slug libre para la copia. */
+  defs: DefRecord[]
+  /** Quien tiene la lista la relee tras cada cambio, y abre la def que se acaba de crear. */
+  onChanged: (opened?: DefRecord) => void
+}
+
+// Una def a la vista: de dónde viene, quién la usa, su contenido en la versión elegida y el historial de versiones.
+// Las acciones son las que el core acepta: duplicar cualquiera; archivar y restaurar solo lo tuyo.
+export function DefDetail({ row, defs, onChanged }: Props) {
+  const appData = useAppData()
+  const { def } = row
+  const [version, setVersion] = useState<number | null>(null)
+  const [confirmArchive, setConfirmArchive] = useState(false)
+  const kind = def.kind as DefWriteKind
+  const versions = useLiveQuery(`def-versions:${kind}:${def.id}:${def.currentVersion}`, () => appData.defVersions(kind, def.id), { live: false })
+  const shown = versions.data?.find((v) => v.version === version) ?? versions.data?.[0]
+  const readOnly = isReadOnly(def)
+  const archived = def.archivedAt !== null
+
+  const duplicate = async () => {
+    const copy = duplicateOf(def, defs)
+    let created: DefRecord | undefined
+    const failure = await undoable(
+      copy.overrides ? `Ahora tienes tu propio ${KIND_LABEL[kind].singular} "${copy.slug}": manda sobre el incluido` : `Creé "${copy.slug}", una copia tuya`,
+      async () => {
+        created = await appData.createDef({ kind, slug: copy.slug, body: copy.body })
+        onChanged(created)
+      },
+      async () => {
+        if (created) await appData.archiveDef(kind, created.id)
+        onChanged()
+      },
+    )
+    return failure
+  }
+  const archive = () =>
+    undoable(
+      `Archivé ${nameOf(def)}`,
+      () => appData.archiveDef(kind, def.id).then(() => onChanged()),
+      () => appData.restoreDef(kind, def.id).then(() => onChanged()),
+    )
+  const restore = () =>
+    undoable(
+      `Restauré ${nameOf(def)}`,
+      () => appData.restoreDef(kind, def.id).then(() => onChanged()),
+      () => appData.archiveDef(kind, def.id).then(() => onChanged()),
+    )
+  // Archivar lo que un proyecto usa y nada más lo reemplaza lo deja sin eso: antes se pregunta.
+  const askArchive = () => (row.projects.length > 0 && row.overrides === null ? setConfirmArchive(true) : void archive())
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto px-6 py-5">
+      <header className="flex flex-col gap-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-medium">{nameOf(def)}</h2>
+            <p className="font-mono text-xs text-muted-foreground">{def.slug}</p>
+          </div>
+          <div className="flex flex-none items-center gap-2">
+            <Button size="sm" variant={readOnly ? "default" : "secondary"} onClick={() => void duplicate()}>
+              <Copy /> {readOnly ? "Duplicar para editar" : "Duplicar"}
+            </Button>
+            {!readOnly && !archived ? (
+              <Button size="sm" variant="secondary" onClick={askArchive}>
+                <Archive /> Archivar
+              </Button>
+            ) : null}
+            {!readOnly && archived ? (
+              <Button size="sm" variant="secondary" onClick={() => void restore()}>
+                <ArchiveRestore /> Restaurar
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <RowPills row={row} />
+          <span className="text-xs text-muted-foreground tabular-nums">versión {def.currentVersion}</span>
+        </div>
+        <p className="text-[13px] text-pretty text-muted-foreground">{explain(row, kind)}</p>
+        <p className="text-[13px]">
+          <span className="text-muted-foreground">Se usa en: </span>
+          <UsedBy projects={row.projects} internal={row.internal} />
+        </p>
+      </header>
+
+      <section aria-label="Contenido" className="flex min-h-0 flex-col gap-2">
+        {!shown ? (
+          <p className="text-[13px] text-muted-foreground">{versions.error ?? "Cargando…"}</p>
+        ) : kind === "flow" ? (
+          <FlowBody def={shown} />
+        ) : kind === "role" ? (
+          <RoleBody def={shown} />
+        ) : (
+          <ProfileBody def={shown} />
+        )}
+      </section>
+
+      <section aria-label="Versiones" className="flex flex-col gap-2">
+        <h3 className="text-[13px] font-medium">Historial de versiones</h3>
+        <ul className="divide-y rounded-lg border text-[13px]">
+          {(versions.data ?? []).map((v) => (
+            <li key={v.version}>
+              <button
+                type="button"
+                aria-pressed={v.version === shown?.version}
+                onClick={() => setVersion(v.version)}
+                className={cn("flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-accent", v.version === shown?.version && "bg-accent")}
+              >
+                <span className="w-16 flex-none font-medium tabular-nums">versión {v.version}</span>
+                {v.version === def.currentVersion ? <span className="flex-none text-xs text-muted-foreground">vigente</span> : null}
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">guardada por {sourceLabel(v.source)}</span>
+                <Ago at={v.createdAt} className="flex-none text-xs text-muted-foreground" />
+              </button>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-muted-foreground">Las corridas en curso siguen con la versión con que empezaron. Elige una versión para ver su contenido.</p>
+      </section>
+
+      <AlertDialog open={confirmArchive} onOpenChange={setConfirmArchive}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Archivar {nameOf(def)}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {row.projects.map((p) => p.name).join(", ")} {row.projects.length === 1 ? "lo usa" : "lo usan"} y no hay otro con el mismo slug que lo reemplace: se quedará sin {KIND_LABEL[kind].singular} hasta que restaures este o elijas otro. Las corridas que ya empezaron no cambian.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void archive()}>Archivar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
+/** Qué significa el estado de esta def y qué pasa si se toca. */
+function explain(row: LibraryRow, kind: DefWriteKind): string {
+  const thing = KIND_LABEL[kind].singular
+  const { def } = row
+  if (def.archivedAt !== null) return `Está archivado: no se usa. Conserva sus versiones y las corridas anteriores no cambian. Restáuralo para volver a usarlo.`
+  if (row.overriddenBy) return `Hay un ${thing} ${row.overriddenBy === "repo" ? "del repo" : "tuyo"} con el mismo slug y manda sobre este. Este queda de respaldo: si archivas el otro, vuelve a usarse.`
+  if (isReadOnly(def)) return `Viene ${def.scope === "pack" ? "en un pack" : "con la app"} y no se edita directo. "Duplicar para editar" crea uno tuyo con el mismo slug: desde ese momento manda el tuyo y este queda de respaldo.`
+  if (row.overrides) return `Es tuyo y manda sobre el ${row.overrides === "pack" ? "del pack" : "incluido"} con el mismo slug. Si lo archivas, vuelve a usarse el otro. Editarlo desde la app todavía no se puede.`
+  return `Es ${def.scope === "repo" ? "del repo" : "tuyo"}. Puedes archivarlo cuando ya no lo quieras y restaurarlo después. Editarlo desde la app todavía no se puede.`
+}
+
+const Unreadable = ({ what }: { what: string }) => <p className="text-[13px] text-destructive">No pude leer {what}: su contenido no coincide con el formato esperado.</p>
+
+function FlowBody({ def }: { def: DefRecord }) {
+  const flow = FlowDef.safeParse(def.body)
+  if (!flow.success) return <Unreadable what="este flujo" />
+  return (
+    <>
+      <h3 className="text-[13px] font-medium">Pasos del flujo · versión {def.version}</h3>
+      <div className="h-[380px] flex-none">
+        <FlowDefGraph def={flow.data} />
+      </div>
+    </>
+  )
+}
+
+function RoleBody({ def }: { def: DefRecord }) {
+  const role = Role.safeParse(def.body)
+  if (!role.success) return <Unreadable what="este rol" />
+  return (
+    <>
+      <h3 className="text-[13px] font-medium">Modos · versión {def.version}</h3>
+      <ul className="divide-y rounded-lg border text-[13px]">
+        {Object.entries(role.data.modes).map(([mode, spec]) => (
+          <li key={mode} className="flex items-baseline gap-3 px-3 py-2">
+            <span className="w-28 flex-none font-mono text-xs">{mode}</span>
+            <span className="min-w-0 flex-1 text-muted-foreground">termina con: {spec.outcomes.join(", ")}</span>
+          </li>
+        ))}
+      </ul>
+      <h3 className="text-[13px] font-medium">Instrucciones base</h3>
+      <pre className="max-h-64 overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">{role.data.prompt}</pre>
+    </>
+  )
+}
+
+function ProfileBody({ def }: { def: DefRecord }) {
+  const profile = Profile.safeParse(def.body)
+  if (!profile.success) return <Unreadable what="este perfil" />
+  return (
+    <>
+      <h3 className="text-[13px] font-medium">Modelo de cada rol · versión {def.version}</h3>
+      <ul className="divide-y rounded-lg border text-[13px]">
+        {Object.entries(profile.data.roles).map(([role, spec]) => (
+          <li key={role} className="flex items-baseline gap-3 px-3 py-2">
+            <span className="w-36 flex-none font-mono text-xs">{role}</span>
+            <span className="min-w-0 flex-1 text-muted-foreground">
+              {spec.model}
+              {spec.effort ? ` · esfuerzo ${spec.effort}` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
+

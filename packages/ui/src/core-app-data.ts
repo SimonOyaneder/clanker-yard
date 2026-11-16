@@ -39,6 +39,9 @@ const LIVE_EVENTS = [
   "agent.ended",
   "decision.opened",
   "decision.resolved",
+  "def.versioned",
+  "def.archived",
+  "def.restored",
   "learning.proposed",
   "learning.approved",
   "learning.rejected",
@@ -135,7 +138,19 @@ export function createCoreAppData(client: CoreClient): AppData {
     testClaude: (mode) => client.connections.testClaude(mode ? { mode } : {}),
     setClaudeApiKey: (key) => client.connections.setClaudeApiKey({ key }),
     disconnect: (provider, account) => client.connections.disconnect({ provider, account }),
-    defs: (kind) => client.defs.list({ kind }),
+    defs: (kind, opts) => client.defs.list({ kind, includeArchived: opts?.includeArchived ?? false }),
+    defVersions: async (kind, id) => {
+      const current = await client.defs.get({ kind, id })
+      const older = Array.from({ length: current.currentVersion - 1 }, (_, i) => client.defs.get({ kind, id, version: current.currentVersion - 1 - i }))
+      return [current, ...(await Promise.all(older))]
+    },
+    createDef: async ({ kind, slug, body }) => {
+      const { def } = await client.defs.create({ kind, slug, scope: "user", body, dryRun: false })
+      if (!def) throw new Error(`El core no devolvió el ${kind} ${slug} que acaba de crear.`)
+      return def
+    },
+    archiveDef: (kind, id) => client.defs.archive({ kind, id }),
+    restoreDef: (kind, id) => client.defs.restore({ kind, id }),
     repos: async () => {
       const [repos, tests] = await Promise.all([client.repos.list(), lastRecipeTests(client)])
       return Promise.all(

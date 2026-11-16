@@ -201,13 +201,14 @@ export interface NodeState {
   stepId: StepRunId | null
 }
 
-const PENDING: NodeState = { status: "pending", outcome: null, error: null, costMicros: 0, durationMs: null, visits: 0, round: 0, current: false, stepId: null }
+/** Un nodo al que ninguna corrida llegó. */
+export const IDLE_NODE: NodeState = { status: "pending", outcome: null, error: null, costMicros: 0, durationMs: null, visits: 0, round: 0, current: false, stepId: null }
 
 const isClosed = (status: StepStatus) => status === "done" || status === "failed" || status === "canceled"
 
 function stateOf(steps: readonly Step[], kind: GraphNodeKind, now: number): NodeState {
   const last = steps.at(-1)
-  if (!last) return PENDING
+  if (!last) return IDLE_NODE
   const timed = steps.filter((s) => s.startedAt !== null)
   return {
     status: last.status,
@@ -232,7 +233,7 @@ export function nodeStates(shape: GraphShape, run: Pick<RunDetail, "steps" | "ou
     if (n.kind === "end") {
       // Llegar a `@blocked` o `@failed` termina la corrida como `failed`: el fin lo dice el outcome, no el estado.
       const reached = END_OUTCOME[n.id as keyof typeof END_OUTCOME] === run.outcome
-      states.set(n.id, reached ? { ...PENDING, status: "done", visits: 1 } : PENDING)
+      states.set(n.id, reached ? { ...IDLE_NODE, status: "done", visits: 1 } : IDLE_NODE)
     } else if (n.kind === "join") {
       states.set(n.id, joinState(byNode, n.id.slice(0, -"#join".length), now))
     } else {
@@ -247,8 +248,8 @@ function joinState(byNode: Map<string, Step[]>, parallelId: string, now: number)
   const consolidator = byNode.get(joinId(parallelId))
   if (consolidator) return stateOf(consolidator, "agent", now)
   const parallel = byNode.get(parallelId)?.at(-1)
-  if (!parallel || !isClosed(parallel.status)) return PENDING
-  return { ...PENDING, status: parallel.status, outcome: parallel.outcome, visits: 1, round: parallel.round }
+  if (!parallel || !isClosed(parallel.status)) return IDLE_NODE
+  return { ...IDLE_NODE, status: parallel.status, outcome: parallel.outcome, visits: 1, round: parallel.round }
 }
 
 /** `maxRounds` ya resuelto: el número, o el param de la corrida al que apunta. */
