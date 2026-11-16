@@ -194,6 +194,13 @@ describe("threads", () => {
     expect(state.threads).toEqual({ unresolved: 6, humanOpen: 2, humanResolved: 1, botOpen: 1, councilOpen: [], councilEver: false });
   });
 
+  test("un autor que el pack deja resolver (bot de cobertura) cuenta como bot, no como humano", () => {
+    const pack: ResolvedPack = { ...example, reviewBot: { ...example.reviewBot!, resolvableAuthors: ["coverage-ci"] } };
+    const state = build(prNode({ reviewThreads: [thread(user("coverage-ci"), "Not covered lines: 34")] }), pack);
+
+    expect(state.threads).toEqual({ unresolved: 1, humanOpen: 0, humanResolved: 0, botOpen: 1, councilOpen: [], councilEver: false });
+  });
+
   test("council abierto: el id de su primer comentario, y no cuenta como humano aunque lo escriba el usuario", () => {
     const open = thread(user(VIEWER), "[clanker-council] 🟡 falta un test");
     const state = build(prNode({ reviewThreads: [open, thread(user(VIEWER), "[clanker-council] ya aplicado", { resolved: true })] }));

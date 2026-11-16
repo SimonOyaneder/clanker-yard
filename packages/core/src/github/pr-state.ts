@@ -223,7 +223,8 @@ function threadsOf(node: PrNode, pack: ResolvedPack, isHuman: IsHuman, viewer: s
       if (!thread.isResolved && !answered(thread, pack.conventions.commentPrefix)) {
         threads.councilOpen.push(Number(first.fullDatabaseId));
       }
-    } else if (login && pack.reviewBot?.logins.includes(login)) {
+    } else if (login && (pack.reviewBot?.logins.includes(login) || pack.reviewBot?.resolvableAuthors?.includes(login))) {
+      // Los bots cuyos threads el pack deja resolver (p. ej. un bot de cobertura) tampoco son de una persona.
       if (!thread.isResolved) threads.botOpen++;
     } else if (isHuman(first.author) && login !== viewer) {
       if (thread.isResolved) threads.humanResolved++;
