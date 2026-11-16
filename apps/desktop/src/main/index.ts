@@ -9,7 +9,7 @@ import { coreEntry } from "./core-entry";
 import { CORE_SCHEME, createCoreProxy, windowCoreState } from "./core-proxy";
 import { createCoreSupervisor, type CoreSupervisor } from "./core-supervisor";
 import { registerHostIpc } from "./host-ipc";
-import { withLoginPath } from "./login-path";
+import { loginEnv } from "./login-env";
 import { buildMenu } from "./menu";
 import { createPrefs } from "./prefs";
 import { loadUiKey } from "./ui-key";
@@ -18,8 +18,8 @@ import { createMainWindow } from "./window";
 const devUrl = process.env.ELECTRON_RENDERER_URL;
 const dirs = clankerDirs();
 
-// Abierta desde el Dock, la app hereda un PATH mínimo y el core no encontraría `claude` ni `gh`.
-if (app.isPackaged) process.env.PATH = withLoginPath(process.env);
+// Abierta desde el Dock, la app hereda un PATH mínimo y ningún LANG: el core no encontraría `claude` ni `gh`.
+if (app.isPackaged) Object.assign(process.env, loginEnv(process.env));
 
 // Lo de Electron (cachés, preferencias) va en una subcarpeta de los datos de Clanker Yard: con
 // `CLANKER_HOME` un arranque de prueba no toca nada del usuario.
