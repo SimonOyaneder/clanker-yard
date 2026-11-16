@@ -37,9 +37,13 @@ export const test = base.extend<object, { scenario: DemoScenario; home: string; 
           args: [".", ...(process.platform === "linux" ? ["--no-sandbox"] : [])],
           env,
         });
+        // Los tests no abren el navegador: en Linux `xdg-open` queda como hijo de la app y no la deja cerrar.
+        await app.evaluate(({ shell }) => {
+          shell.openExternal = async () => {};
+        });
         await use(app);
       } finally {
-        await app?.close();
+        if (app) await closeOrKill(app);
         await core?.stop();
       }
     },
@@ -55,6 +59,16 @@ export const test = base.extend<object, { scenario: DemoScenario; home: string; 
     { scope: "worker" },
   ],
 });
+
+/**
+ * En el runner de Linux, cerrar Electron a veces no termina nunca y Playwright corta el worker a los 60 s con un error,
+ * aunque todos los tests pasaron. La app es para macOS; aquí basta con que el proceso termine.
+ */
+async function closeOrKill(app: ElectronApplication): Promise<void> {
+  const closed = app.close().then(() => true);
+  const timedOut = new Promise<false>((resolve) => setTimeout(() => resolve(false), 10_000).unref());
+  if (!(await Promise.race([closed, timedOut]))) app.process().kill("SIGKILL");
+}
 
 // Playwright fija `prefers-color-scheme` en la ventana, así que el tema se cambia con `emulateMedia`; `nativeTheme` no lo mueve.
 export async function setTheme(page: Page, theme: Theme): Promise<void> {

@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -19,7 +19,8 @@ function fakeShell(real: string, loginPath: string, lang: string): string {
 }
 
 // `zsh -f`: sin el ~/.zshenv de quien corre el test.
-test.each(["/bin/sh", "/bin/zsh -f"])("con %s de verdad, suma el PATH de la shell de login al actual y toma su LANG", (real) => {
+// zsh no viene en todos los runners de la CI (Ubuntu no lo trae): se prueba con las shells que existan.
+test.each(["/bin/sh", "/bin/zsh -f"].filter((shell) => existsSync(shell.split(" ")[0]!)))("con %s de verdad, suma el PATH de la shell de login al actual y toma su LANG", (real) => {
   const shell = fakeShell(real, "/login/bin:/usr/bin:/bin", "es_CL.UTF-8");
   expect(loginEnv({ SHELL: shell, PATH: "/usr/bin:/sbin" })).toEqual({ PATH: "/login/bin:/usr/bin:/bin:/sbin", LANG: "es_CL.UTF-8" });
 });

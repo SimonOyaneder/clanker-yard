@@ -82,6 +82,8 @@ test("⇧⌘3 abre Ajustes, y cambiar reviewRounds se ve en el siguiente runs.st
 test("un valor inválido dice qué escribir y no deja guardar; ⌘S guarda y Deshacer devuelve el valor", async ({ window: page, home }) => {
   const client = coreClient(home);
   const project = (await client.projects.list()).find((p) => p.slug === "ajustes")!;
+  // El toast del guardado del test anterior también tiene "Deshacer", y deshacerlo devolvería otro valor: se espera a que se vaya.
+  await expect(page.getByRole("button", { name: "Deshacer" })).toHaveCount(0, { timeout: 15_000 });
 
   await page.getByLabel("Rondas de review").fill("0");
   await expect(page.getByRole("alert").filter({ hasText: "Escribe un entero de 1 en adelante (el flujo usa 3)" })).toBeVisible();
@@ -92,7 +94,7 @@ test("un valor inválido dice qué escribir y no deja guardar; ⌘S guarda y Des
   await page.keyboard.press("Meta+s");
   await expect.poll(async () => (await client.projects.get({ id: project.id })).flowParams).toEqual({ reviewRounds: 8 });
 
-  await page.getByRole("button", { name: "Deshacer" }).first().click();
+  await page.getByRole("button", { name: "Deshacer" }).click();
   await expect.poll(async () => (await client.projects.get({ id: project.id })).flowParams).toEqual({ reviewRounds: 5 });
   await expect(page.getByLabel("Rondas de review")).toHaveValue("5");
 });
