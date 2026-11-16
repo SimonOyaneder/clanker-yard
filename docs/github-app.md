@@ -18,9 +18,9 @@ Registrarla es un paso manual en github.com: nadie la crea por ti. El manifiesto
 | Webhooks | Inactivos | Sin relay, el core hace polling con ETags. |
 | Visibilidad | "Only on this account" | Solo tú la puedes instalar. |
 
-Son los mismos permisos que pide el fine-grained PAT de la fase 1 (`connections.githubPatForm`); un test los compara para que no se separen. Un token de usuario de una GitHub App solo puede lo que la app tiene **y** lo que tú puedes, y solo ve los repos donde la app está instalada.
+Son los permisos que Clanker Yard necesita de GitHub (`PERMISSIONS` en `github/pat.ts`, lo que valida el token pegado); un test los compara para que no se separen. Un fine-grained PAT no sirve: no tiene el permiso Checks, así que el PAT pegado es un classic con `repo`, y esta App es el camino a largo plazo. Un token de usuario de una GitHub App solo puede lo que la app tiene **y** lo que tú puedes, y solo ve los repos donde la app está instalada.
 
-Fuera a propósito: `workflows` (un push que toque `.github/workflows/` falla; el PAT tampoco lo tiene) y `statuses` (ver "Si el CI sale vacío").
+Fuera a propósito: `workflows` (un push que toque `.github/workflows/` falla; el PAT classic con `repo` tampoco lo tiene) y `statuses` (ver "Si el CI sale vacío").
 
 ## 1. Registrarla
 

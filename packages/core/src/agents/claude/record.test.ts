@@ -18,6 +18,7 @@ describe("createScrubber", () => {
   test.each([
     ["sk-ant-api03-abcdefghijklmnopqrstuvwxyz", "[secreto]"],
     ["ghs_abcdefghijklmnopqrstuvwxyz0123456789", "[secreto]"],
+    ["ghp_abcdefghijklmnopqrstuvwxyz0123456789", "[secreto]"],
     ["github_pat_11ABCDEFG0abcdefghijklmnop_qrstuv", "[secreto]"],
     ["lin_api_abcdefghijklmnopqrstuvwxyz012345", "[secreto]"],
     ["Authorization: Bearer abcdefghijklmnop1234", "Authorization: Bearer [secreto]"],

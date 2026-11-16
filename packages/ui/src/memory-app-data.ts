@@ -561,18 +561,12 @@ export function createMemoryAppData(now = Date.now()): AppData {
     },
     connections: async () => connections.map((c) => ({ ...c })),
     githubPatForm: async () => ({
-      url: "https://github.com/settings/personal-access-tokens/new?name=Clanker+Yard",
-      permissions: [
-        { name: "contents", label: "Contents", access: "write" },
-        { name: "pull_requests", label: "Pull requests", access: "write" },
-        { name: "issues", label: "Issues", access: "write" },
-        { name: "checks", label: "Checks", access: "read" },
-        { name: "statuses", label: "Commit statuses", access: "read" },
-      ],
+      url: "https://github.com/settings/tokens/new?description=Clanker%20Yard&scopes=repo",
+      scopes: ["repo"],
     }),
     setGithubPat: async (token) => {
       if (token.startsWith("bad")) throw new Error("GitHub rechazó el token: es inválido, está vencido o fue revocado. Crea uno nuevo y vuelve a pegarlo.")
-      return connect({ provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 90 * day, expiresSoon: false, auth: "pat" })
+      return connect({ provider: "github", account: "octocat", scopes: ["repo"], status: "active", expiresAt: now + 90 * day, expiresSoon: false, auth: "pat" })
     },
     // No hay GitHub: la cuenta queda conectada de una vez, como si el usuario ya hubiera aprobado.
     startGithubDeviceFlow: async () => {

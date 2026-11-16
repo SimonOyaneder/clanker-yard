@@ -19,7 +19,7 @@ import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScena
 // (`summary-scenario.ts`): el proyecto de las capturas del Resumen.
 //
 // Las conexiones nunca salen a internet: GitHub es el simulador (`startGitHubSim`, acepta el PAT
-// `github_pat_demo` y el token del device flow del OAuth falso), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
+// `ghp_demo` y el token del device flow del OAuth falso), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
 // esperar, escribe `<CLANKER_HOME>/demo-control.json` con `{ "clockDays": 40, "claude": "login_expired" }`: el
 // reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario.
 // Un agente que desarrolla la app hace lo mismo por MCP con el router `dev` (`inject_step_result`, `load_fixture`,
@@ -70,7 +70,7 @@ const withBrokenRecipe = tempGitRepo({ commits: [{ message: "chore: add a broken
 const githubOAuth = await startFakeGitHubOAuth({ clientId: "Iv23liDEMO", now: Date.now, interval: 1 });
 const github = await startGitHubSim({
   origin: repo,
-  token: (bearer) => bearer === "github_pat_demo" || githubOAuth.isAccessTokenValid(bearer),
+  token: (bearer) => bearer === "ghp_demo" || githubOAuth.isAccessTokenValid(bearer),
   ...(prsScenario && { repo: "octocat/demo" }),
 });
 if (prsScenario) {
@@ -216,7 +216,7 @@ if (process.env.DEMO_INBOX) {
 
 if (lanes) {
   // Sin una cuenta de GitHub conectada, `prs.list` no conoce el remoto del repo y los PRs sembrados no salen.
-  await client.connections.setPat({ token: "github_pat_demo" });
+  await client.connections.setPat({ token: "ghp_demo" });
   await seedLanes({ client, store, repoId });
 }
 
@@ -224,7 +224,7 @@ if (process.env.DEMO_SCENARIO === "summary") await seedSummary({ client, store }
 
 if (prsScenario) {
   // Sin una cuenta de GitHub conectada, `prs.list` no conoce el remoto del repo y los PRs sembrados no salen.
-  await client.connections.setPat({ token: "github_pat_demo" });
+  await client.connections.setPat({ token: "ghp_demo" });
   // El PR de la base del stack lo "abrió" esta corrida: es la que abre "Ver corrida".
   const run = await client.runs.start({ projectId: project.id, issueId: demoIssues[0]!.id, params: { repo: repoId } });
   await seedPrs({ client, store, sim: github, repoId, origin: { issueId: demoIssues[0]!.id, runId: run.id } });

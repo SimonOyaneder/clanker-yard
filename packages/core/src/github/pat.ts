@@ -8,12 +8,12 @@ export class GitHubPatError extends Error {
 }
 
 /**
- * Lo que Clanker Yard necesita de un fine-grained PAT (`docs/design.html#integraciones`). `write` en
- * contents (push), pull requests (abrir y editar PRs) e issues (los comentarios de un PR son
- * comentarios de issue); checks y commit statuses solo se leen (el CI de un PR mezcla check runs y
- * status contexts como el de merge-queue). `probe` es el endpoint de lectura con el que se verifica.
+ * Lo que Clanker Yard necesita de GitHub: `write` en contents (push), pull requests (abrir y editar
+ * PRs) e issues (los comentarios de un PR son comentarios de issue); checks y commit statuses solo se
+ * leen (el CI de un PR mezcla check runs y status contexts como el de merge-queue). `probe` es el endpoint de
+ * lectura con el que se verifica. La GitHub App pide estos mismos permisos (`docs/github-app.md`).
  */
-const PERMISSIONS = [
+export const PERMISSIONS = [
   { name: "contents", label: "Contents", access: "write", probe: "GET /repos/{owner}/{repo}/commits" },
   { name: "pull_requests", label: "Pull requests", access: "write", probe: "GET /repos/{owner}/{repo}/pulls" },
   { name: "issues", label: "Issues", access: "write", probe: "GET /repos/{owner}/{repo}/issues" },
@@ -22,37 +22,33 @@ const PERMISSIONS = [
 ] as const;
 
 /**
- * El link abre el formulario de fine-grained PAT con nombre, vencimiento y permisos marcados (la
- * documentación de GitHub lo define como "URL template for pre-filling"; decisión #49). Se probó solo
- * contra la documentación, no contra github.com. La lista va aparte por si el link deja de servir.
+ * Un PAT classic con `repo`, no un fine-grained: GitHub no tiene el permiso "Checks" para los
+ * fine-grained PAT, así que con uno la lectura de check runs de un repo privado da 403 y Clanker Yard
+ * no puede ver el CI de GitHub Actions. El link abre el formulario de classic con descripción y scope
+ * prellenados (`description` y `scopes`, separados por comas, son los parámetros de la URL de GitHub).
  */
+const CLASSIC_SCOPE = "repo";
+const CLASSIC_FORM_URL = `https://github.com/settings/tokens/new?description=Clanker%20Yard&scopes=${CLASSIC_SCOPE}`;
+
 export function githubPatForm(): GitHubPatForm {
-  const params = new URLSearchParams({
-    name: "Clanker Yard",
-    description: "Token de Clanker Yard",
-    expires_in: "90",
-  });
-  for (const { name, access } of PERMISSIONS) params.set(name, access);
-  return {
-    url: `https://github.com/settings/personal-access-tokens/new?${params}`,
-    permissions: PERMISSIONS.map(({ name, label, access }) => ({ name, label, access })),
-  };
+  return { url: CLASSIC_FORM_URL, scopes: [CLASSIC_SCOPE] };
 }
 
 export interface ValidatedPat {
   login: string;
   /** ms epoch; ausente si el token no vence. */
   expiresAt?: number;
-  /** Los permisos de `PERMISSIONS` que el token tiene, por nombre. */
-  permissions: string[];
+  /** Los scopes del token (`repo`); vacío si es un fine-grained PAT, que no los tiene. */
+  scopes: string[];
 }
 
 /**
  * Valida el token contra GitHub: de quién es, que vea repos y un check por permiso. Lanza
  * `GitHubPatError` si no sirve; cualquier otro error (red, 5xx, cuota agotada) sube tal cual.
  *
- * Un fine-grained PAT no lista sus permisos, así que cada uno se prueba con una lectura sobre un repo
- * visible: `403` es permiso faltante. Se prefiere un repo privado, porque en uno público las lecturas
+ * Un token classic informa sus scopes en `x-oauth-scopes` y debe tener `repo`; un fine-grained no manda
+ * ese header. En ambos cada permiso de `PERMISSIONS` se prueba con una lectura sobre un repo visible:
+ * `403` es permiso faltante. Se prefiere un repo privado, porque en uno público las lecturas
  * pasan sin permiso y el check no distingue nada. Solo se prueba lectura: que `write` esté marcado no
  * se puede comprobar sin escribir.
  */
@@ -60,6 +56,13 @@ export async function validatePat(token: string, api: GitHubApiOptions): Promise
   const github = createGitHubClient({ tokens: { kind: "pat", token: async () => token }, ...api });
 
   const user = await request(() => github.request("GET /user"));
+  const scopesHeader = user.headers["x-oauth-scopes"]?.toString();
+  const scopes = scopesHeader === undefined ? [] : scopesHeader.split(",").map((scope) => scope.trim()).filter(Boolean);
+  if (scopesHeader !== undefined && !scopes.includes(CLASSIC_SCOPE)) {
+    throw new GitHubPatError(
+      `Al token le falta el scope \`${CLASSIC_SCOPE}\` (tiene: ${scopes.join(", ") || "ninguno"}). Crea uno con el formulario ya marcado: ${CLASSIC_FORM_URL}`,
+    );
+  }
   const expiresAt = parseExpiration(user.headers["github-authentication-token-expiration"]?.toString());
 
   const repos = (await github.request("GET /user/repos", { per_page: 100, sort: "pushed" })).data;
@@ -77,17 +80,22 @@ export async function validatePat(token: string, api: GitHubApiOptions): Promise
     })),
   );
   const missing = PERMISSIONS.filter((_, i) => !checks[i]!.granted);
-  if (missing.length > 0) {
-    const list = missing.map((p) => `${p.label} (${p.access})`).join(", ");
+  if (missing.length > 0 && scopesHeader === undefined) {
     throw new GitHubPatError(
-      `Al token le faltan permisos: ${list}. Crea uno con el formulario ya marcado: ${githubPatForm().url}`,
+      `Los fine-grained PAT no tienen el permiso Checks, que Clanker Yard necesita para leer el CI de los repos privados. Crea un token classic con el scope \`${CLASSIC_SCOPE}\`: ${CLASSIC_FORM_URL}`,
+    );
+  }
+  if (missing.length > 0) {
+    const list = missing.map((p) => p.label).join(", ");
+    throw new GitHubPatError(
+      `El token no puede leer ${list} del repo ${repo.full_name}. Si el repo es de una organización con SSO, autoriza el token en github.com/settings/tokens (Configure SSO).`,
     );
   }
 
   return {
     login: user.data.login,
     ...(expiresAt === undefined ? {} : { expiresAt }),
-    permissions: PERMISSIONS.map((p) => p.name),
+    scopes,
   };
 }
 

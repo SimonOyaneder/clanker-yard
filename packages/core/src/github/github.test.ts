@@ -15,6 +15,8 @@ import { createGitHubClient } from "./client";
 import { healthyGitHub, recorded, startFakeGitHub, type FakeGitHub } from "./fake-github";
 import { GitHubPatError, githubPatForm } from "./pat";
 
+const CLASSIC_URL = "https://github.com/settings/tokens/new?description=Clanker%20Yard&scopes=repo";
+
 const TOKEN = "github_pat_UNIQUE-0123456789";
 /** El token de `user.ok` vence el 2026-12-20 12:00 UTC. */
 const EXPIRES_AT = Date.UTC(2026, 11, 20, 12);
@@ -57,7 +59,7 @@ describe("setPat", () => {
     expect(connection).toEqual({
       provider: "github",
       account: "octocat",
-      scopes: ["contents", "pull_requests", "issues", "checks", "statuses"],
+      scopes: ["repo"],
       status: "active",
       expiresAt: EXPIRES_AT,
       auth: "pat",
@@ -78,21 +80,47 @@ describe("setPat", () => {
     expect(probed.every((p) => p.startsWith("/repos/octocat/secret-project/"))).toBe(true);
   });
 
-  test("permiso faltante: no conecta y dice qué marcar, con el link del formulario", async () => {
+  test("classic sin el scope repo: no conecta y dice qué marcar, con el link del formulario", async () => {
+    const user = recorded("user.ok");
+    user.headers["x-oauth-scopes"] = "read:user, gist";
+    const connections = await connectionsAgainst(healthyGitHub({ "GET /user": user }));
+
+    const error = await connections.setPat(TOKEN, "ui").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(GitHubPatError);
+    expect((error as Error).message).toContain("le falta el scope `repo` (tiene: read:user, gist)");
+    expect((error as Error).message).toContain(CLASSIC_URL);
+    expect(connections.list()).toEqual([]);
+    expect(store.events.since(0)).toEqual([]);
+  });
+
+  test("classic con repo pero sin acceso de lectura a un permiso: dice cuáles y no conecta", async () => {
+    const connections = await connectionsAgainst(
+      healthyGitHub({ "GET /repos/octocat/secret-project/issues": recorded("probe.forbidden") }),
+    );
+
+    const error = await connections.setPat(TOKEN, "ui").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(GitHubPatError);
+    expect((error as Error).message).toContain("no puede leer Issues del repo octocat/secret-project");
+    expect(connections.list()).toEqual([]);
+  });
+
+  test("fine-grained (sin x-oauth-scopes) con 403 en checks: explica que no tienen Checks y manda al classic", async () => {
+    const user = recorded("user.ok");
+    delete user.headers["x-oauth-scopes"];
     const connections = await connectionsAgainst(
       healthyGitHub({
-        "GET /repos/octocat/secret-project/issues": recorded("probe.forbidden"),
+        "GET /user": user,
         "GET /repos/octocat/secret-project/commits/trunk/check-runs": recorded("probe.forbidden"),
-        "GET /repos/octocat/secret-project/commits/trunk/status": recorded("probe.forbidden"),
       }),
     );
 
     const error = await connections.setPat(TOKEN, "ui").catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(GitHubPatError);
-    expect((error as Error).message).toContain("Issues (write), Checks (read), Commit statuses (read)");
-    expect((error as Error).message).not.toContain("Contents");
-    expect((error as Error).message).toContain(githubPatForm().url);
+    expect((error as Error).message).toContain("Los fine-grained PAT no tienen el permiso Checks");
+    expect((error as Error).message).toContain(CLASSIC_URL);
     expect(connections.list()).toEqual([]);
     expect(store.events.since(0)).toEqual([]);
   });
@@ -163,25 +191,14 @@ describe("vencimiento", () => {
 });
 
 describe("githubPatForm", () => {
-  test("el link trae los permisos marcados y la lista sirve para marcarlos a mano", () => {
+  test("el link abre el formulario de PAT classic con descripción y scope repo marcados", () => {
     const form = githubPatForm();
     const url = new URL(form.url);
 
-    expect(url.origin + url.pathname).toBe("https://github.com/settings/personal-access-tokens/new");
-    expect(Object.fromEntries(url.searchParams)).toMatchObject({
-      contents: "write",
-      pull_requests: "write",
-      issues: "write",
-      checks: "read",
-      statuses: "read",
-    });
-    expect(form.permissions.map((p) => `${p.name}:${p.access}`)).toEqual([
-      "contents:write",
-      "pull_requests:write",
-      "issues:write",
-      "checks:read",
-      "statuses:read",
-    ]);
+    expect(form.url).toBe(CLASSIC_URL);
+    expect(url.origin + url.pathname).toBe("https://github.com/settings/tokens/new");
+    expect(Object.fromEntries(url.searchParams)).toEqual({ description: "Clanker Yard", scopes: "repo" });
+    expect(form.scopes).toEqual(["repo"]);
   });
 });
 

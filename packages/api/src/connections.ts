@@ -7,7 +7,7 @@ import * as z from "zod";
 export const ConnectionProvider = z.enum(["github", "linear", "claude"]);
 export type ConnectionProvider = z.infer<typeof ConnectionProvider>;
 
-/** Cómo se conectó GitHub: con un fine-grained PAT pegado a mano o con el device flow de la GitHub App. */
+/** Cómo se conectó GitHub: con un PAT classic pegado a mano o con el device flow de la GitHub App. */
 export const GitHubAuth = z.enum(["pat", "app"]);
 export type GitHubAuth = z.infer<typeof GitHubAuth>;
 
@@ -33,18 +33,12 @@ export const Connection = z.object({
 export type Connection = z.infer<typeof Connection>;
 
 /**
- * Cómo crear el fine-grained PAT de GitHub: un link que abre el formulario con el nombre, el
- * vencimiento y los permisos ya marcados, y la misma lista para marcarlos a mano si el link no sirve.
+ * Cómo crear el PAT classic de GitHub: un link que abre el formulario con la descripción y los scopes
+ * ya marcados, y la misma lista de scopes para marcarlos a mano si el link no sirve.
  */
 export const GitHubPatForm = z.object({
   url: z.url(),
-  permissions: z.array(
-    z.object({
-      name: z.string(),
-      label: z.string(),
-      access: z.enum(["read", "write"]),
-    }),
-  ),
+  scopes: z.array(z.string()),
 });
 export type GitHubPatForm = z.infer<typeof GitHubPatForm>;
 

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { githubPatForm } from "./pat";
+import { PERMISSIONS } from "./pat";
 
 const docs = new URL("../../../../docs/", import.meta.url);
 const manifest: Record<string, unknown> = JSON.parse(readFileSync(new URL("github-app-manifest.json", docs), "utf8"));
@@ -28,8 +28,8 @@ describe("manifiesto de la GitHub App (docs/github-app-manifest.json)", () => {
     expect(manifest.redirect_url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//);
   });
 
-  test("pide los mismos permisos que el PAT de la fase 1", () => {
-    const pat = Object.fromEntries(githubPatForm().permissions.map(({ name, access }) => [name, access]));
+  test("pide los mismos permisos que los de Clanker Yard (`PERMISSIONS`)", () => {
+    const pat = Object.fromEntries(PERMISSIONS.map(({ name, access }) => [name, access]));
     expect(manifest.default_permissions).toEqual(pat);
   });
 

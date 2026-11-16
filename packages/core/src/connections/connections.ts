@@ -117,8 +117,8 @@ export interface Connections {
    */
   connect(input: ConnectInput, origin: Origin): Promise<Connection>;
   /**
-   * Valida un fine-grained PAT de GitHub y lo conecta con la cuenta a la que pertenece (`GitHubPatError`
-   * si no sirve, sin guardar nada). Los permisos verificados quedan como `scopes`. Emite
+   * Valida un PAT classic de GitHub y lo conecta con la cuenta a la que pertenece (`GitHubPatError`
+   * si no sirve, sin guardar nada). Sus scopes quedan como `scopes`. Emite
    * `connection.changed`.
    */
   setPat(token: string, origin: Origin): Promise<Connection>;
@@ -551,9 +551,9 @@ export function createConnections(
     },
 
     async setPat(token, origin) {
-      const { login, permissions, expiresAt } = await validatePat(token, github);
+      const { login, scopes, expiresAt } = await validatePat(token, github);
       return self.connect(
-        { provider: "github", account: login, scopes: permissions, token, expiresAt },
+        { provider: "github", account: login, scopes, token, expiresAt },
         origin,
       );
     },

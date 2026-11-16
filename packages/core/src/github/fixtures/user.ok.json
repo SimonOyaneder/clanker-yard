@@ -6,6 +6,7 @@
     "x-ratelimit-used": "1",
     "x-ratelimit-reset": "1795000000",
     "x-ratelimit-resource": "core",
+    "x-oauth-scopes": "repo",
     "github-authentication-token-expiration": "2026-12-20 12:00:00 UTC"
   },
   "body": {

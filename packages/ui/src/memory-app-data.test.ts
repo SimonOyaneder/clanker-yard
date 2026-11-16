@@ -63,7 +63,7 @@ test("pegar un PAT conecta GitHub, un PAT rechazado dice por qué y no cambia na
   const data = createMemoryAppData(NOW)
 
   await expect(data.setGithubPat("bad-token")).rejects.toThrow(/rechazó el token/)
-  expect(await data.setGithubPat("github_pat_ok")).toMatchObject({ provider: "github", status: "active", scopes: expect.arrayContaining(["contents", "checks"]) })
+  expect(await data.setGithubPat("ghp_ok")).toMatchObject({ provider: "github", status: "active", scopes: ["repo"] })
   expect((await data.connections()).filter((c) => c.provider === "github")).toHaveLength(1)
 })
 

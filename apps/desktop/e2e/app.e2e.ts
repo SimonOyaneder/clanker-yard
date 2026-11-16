@@ -220,20 +220,20 @@ test("conexiones sin configurar: cada tarjeta dice qué hacer", async ({ window:
 
 test("pegar un PAT contra el GitHub falso deja el chip en verde", async ({ window: page }) => {
   const github = card(page, "GitHub");
-  await github.getByLabel("Fine-grained personal access token").fill("token-que-no-es");
+  await github.getByLabel("Personal access token (classic)").fill("token-que-no-es");
   await github.getByRole("button", { name: "Probar" }).click();
   await expect(github.getByRole("alert")).toContainText("GitHub rechazó el token");
   await expect(github.getByText("sin configurar")).toBeVisible();
 
   // El simulador solo acepta este token (`packages/testkit/scripts/demo-core.ts`).
-  await github.getByLabel("Fine-grained personal access token").fill("github_pat_demo");
+  await github.getByLabel("Personal access token (classic)").fill("ghp_demo");
   await github.getByRole("button", { name: "Probar" }).click();
 
   await expect(github.getByText("conectada", { exact: true })).toBeVisible();
   await expect(github.getByText("@octocat")).toBeVisible();
-  for (const permission of ["Contents", "Pull requests", "Issues", "Checks"]) await expect(github.getByText(new RegExp(`^${permission} · `))).toBeVisible();
+  await expect(github.getByText("repo", { exact: true })).toBeVisible();
   // Con el token aceptado el campo desaparece: no queda el secreto en pantalla.
-  await expect(github.getByLabel("Fine-grained personal access token")).toBeHidden();
+  await expect(github.getByLabel("Personal access token (classic)")).toBeHidden();
   // La tarjeta dice con qué credencial publican los agentes y cómo cambiarla.
   await expect(github.getByText("Token personal", { exact: true })).toBeVisible();
   await expect(github.getByRole("button", { name: "Cambiar a la GitHub App" })).toBeVisible();
@@ -292,7 +292,7 @@ test("con el token vencido y el login de Claude caído, los chips y el punto roj
   await claude.getByRole("button", { name: "Probar", exact: true }).click();
 
   await expect(card(page, "GitHub").getByText("vencida", { exact: true })).toBeVisible();
-  await expect(card(page, "GitHub").getByLabel("Fine-grained personal access token")).toBeVisible();
+  await expect(card(page, "GitHub").getByLabel("Personal access token (classic)")).toBeVisible();
   await expect(card(page, "Linear").getByText("vencida", { exact: true })).toBeVisible();
   await expect(claude.getByText("sesión vencida", { exact: true })).toBeVisible();
   await expect(claude.getByRole("alert")).toContainText("claude auth login");
@@ -443,7 +443,7 @@ test("conectar con la GitHub App muestra el código en vivo, y al aprobarlo la c
   await expect(github.getByText("@octocat")).toBeVisible();
   await expect(github.getByText("conectada", { exact: true })).toBeVisible();
   await expect(github.getByText("GitHub App", { exact: true })).toBeVisible();
-  await expect(github.getByLabel("Fine-grained personal access token")).toBeHidden();
+  await expect(github.getByLabel("Personal access token (classic)")).toBeHidden();
   // Instalada: no hay aviso.
   await expect(github.getByRole("alert")).toBeHidden();
   await snapBoth(page, "github-app-conectado");
@@ -451,7 +451,7 @@ test("conectar con la GitHub App muestra el código en vivo, y al aprobarlo la c
   // Volver a un token personal está en el menú y abre el campo del PAT.
   await github.getByRole("button", { name: "Más acciones de GitHub" }).click();
   await page.getByRole("menuitem", { name: "Cambiar a un token personal" }).click();
-  await expect(github.getByLabel("Fine-grained personal access token")).toBeVisible();
+  await expect(github.getByLabel("Personal access token (classic)")).toBeVisible();
 });
 
 test("si el usuario cancela en GitHub la tarjeta lo dice enseguida, sin esperar a que venza el código", async ({ home, window: page }) => {

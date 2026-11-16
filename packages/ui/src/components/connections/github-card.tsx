@@ -18,7 +18,7 @@ import { tone } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 // GitHub entra por la GitHub App (device flow: el core da un código y la cuenta aparece sola al aprobarlo en
-// github.com) o con un fine-grained PAT: se pega y [Probar] lo valida contra GitHub (usuario y una lectura por permiso).
+// github.com) o con un PAT classic con `repo`: se pega y [Probar] lo valida contra GitHub (usuario, scope y una lectura por permiso).
 export function GitHubCard({ connection, onChanged }: { connection: Connection | undefined; onChanged: () => void }) {
   const appData = useAppData()
   const host = useHost()
@@ -79,7 +79,7 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
                 hint={
                   viaApp
                     ? "Los agentes publican con la GitHub App: el token dura 8 horas y el core lo renueva solo. Para volver a un token personal, pega uno desde el menú."
-                    : "Los agentes publican con un fine-grained PAT que pegaste. Para cambiar a la GitHub App, pulsa Cambiar a la GitHub App: reemplaza este token."
+                    : "Los agentes publican con un PAT classic que pegaste. Para cambiar a la GitHub App, pulsa Cambiar a la GitHub App: reemplaza este token."
                 }
               >
                 {viaApp ? "GitHub App" : "Token personal"}
@@ -88,7 +88,7 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
             {expiry ? (
               <Pill
                 className={connection?.status !== "active" ? tone.red : connection.expiresSoon ? tone.amber : tone.neutral}
-                hint={viaApp ? "El refresh token de la GitHub App dura 6 meses y el core lo renueva solo con cada uso; si vence hay que volver a conectar." : "Los fine-grained PAT vencen en la fecha que elegiste al crearlos; hay que rotarlos a mano."}
+                hint={viaApp ? "El refresh token de la GitHub App dura 6 meses y el core lo renueva solo con cada uso; si vence hay que volver a conectar." : "Un PAT classic vence en la fecha que elegiste al crearlo (si no lo hace, este aviso no aparece); hay que rotarlo a mano."}
               >
                 {expiry}
               </Pill>
@@ -161,15 +161,15 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
           </div>
         ) : connection ? (
           <div className="flex flex-col gap-1.5">
-            <span className="text-xs text-muted-foreground">Permisos comprobados con una lectura de prueba sobre un repo visible</span>
+            <span className="text-xs text-muted-foreground">Scope comprobado al probar el token, más una lectura de prueba de cada permiso sobre un repo visible</span>
             <ul className="flex flex-wrap gap-1.5">
-              {form.data?.permissions.map((p) => {
-                const granted = connection.scopes.includes(p.name)
+              {form.data?.scopes.map((scope) => {
+                const granted = connection.scopes.includes(scope)
                 return (
-                  <li key={p.name}>
-                    <Pill className={granted ? tone.green : tone.red} hint={granted ? `El token puede usar ${p.label}.` : `Al token le falta ${p.label} (${p.access}): crea uno nuevo con el formulario ya marcado.`}>
+                  <li key={scope}>
+                    <Pill className={granted ? tone.green : tone.red} hint={granted ? `El token tiene el scope ${scope}.` : `Al token le falta el scope ${scope}: crea uno nuevo con el formulario ya marcado.`}>
                       {granted ? <Check className="size-3" /> : <X className="size-3" />}
-                      {p.label} · {p.access}
+                      {scope}
                     </Pill>
                   </li>
                 )
@@ -177,7 +177,7 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
             </ul>
           </div>
         ) : (
-          <p className="text-muted-foreground">Los agentes publican en GitHub con tu cuenta. Conecta la GitHub App (escribes un código en github.com) o crea un token con los permisos ya marcados, pégalo y pruébalo.</p>
+          <p className="text-muted-foreground">Los agentes publican en GitHub con tu cuenta. Conecta la GitHub App (escribes un código en github.com) o crea un token classic con el scope repo ya marcado, pégalo y pruébalo.</p>
         )}
         {login.failure ? (
           <div role="alert" className="flex items-center gap-2 text-xs text-destructive">
@@ -191,13 +191,13 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
         ) : null}
         {showField ? (
           <TokenField
-            label="Fine-grained personal access token"
-            placeholder="github_pat_…"
+            label="Personal access token (classic)"
+            placeholder="ghp_…"
             action="Probar"
             onSubmit={probe}
             help={
               <button type="button" onClick={createToken} disabled={!form.data} className={cn("flex w-fit items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50")}>
-                <ExternalLink className="size-3" /> Crear el token con los permisos ya marcados
+                <ExternalLink className="size-3" /> Crear el token con el scope ya marcado
               </button>
             }
           />

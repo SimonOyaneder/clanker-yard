@@ -44,8 +44,8 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
     githubPatForm: os.connections.githubPatForm.handler(() => ({
-      url: "https://github.com/settings/personal-access-tokens/new",
-      permissions: [],
+      url: "https://github.com/settings/tokens/new",
+      scopes: ["repo"],
     })),
     startDeviceFlow: os.connections.startDeviceFlow.handler(() => {
       throw new Error("no se usa en este test");
