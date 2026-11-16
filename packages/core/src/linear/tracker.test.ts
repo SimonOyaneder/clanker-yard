@@ -401,6 +401,8 @@ describe("proyectos e issues", () => {
 });
 
 describe("changesSince", () => {
+  /** Lo que devuelve `changesSince` por cada issue: su ref con el id de su proyecto (`null` sin proyecto). */
+  const changedOf = (issue: FakeIssue) => ({ ...refOf(issue), project: issue.project?.id ?? null });
   let team: FakeTeam;
   beforeEach(() => {
     team = w.addTeam("ENG", states("with-review"));
@@ -421,7 +423,7 @@ describe("changesSince", () => {
 
     w.update(c!, { title: "c2" });
     const third = await tracker().changesSince(second.cursor);
-    expect(third.changed).toEqual([refOf(c!)]);
+    expect(third.changed).toEqual([changedOf(c!)]);
     expect(await tracker().changesSince(third.cursor)).toEqual({ changed: [], cursor: third.cursor });
   });
 
@@ -439,7 +441,7 @@ describe("changesSince", () => {
 
     const issue = w.addIssue({ team, title: "nueva" });
 
-    expect((await tracker().changesSince(empty.cursor)).changed).toEqual([refOf(issue)]);
+    expect((await tracker().changesSince(empty.cursor)).changed).toEqual([changedOf(issue)]);
   });
 
   test("un cursor que no es de este tracker se rechaza con el paso a seguir", async () => {
