@@ -55,13 +55,14 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-function brief(role = "dev", project: typeof projectId | undefined = projectId): Promise<Brief> {
+function brief(role = "dev", project: typeof projectId | undefined = projectId, proposesLearnings = false): Promise<Brief> {
   return briefFor({
     run: { id: runId, subject: { type: "pr", id: "1" }, round: 1, attempt: 1 },
     nodeId: "dev",
     visit: 1,
     mode: "implement",
     role,
+    proposesLearnings,
     projectId: project,
     payload: {},
     lineage: [runId],
@@ -106,5 +107,14 @@ describe("learnings en el brief", () => {
     expect((await brief("dev")).learnings).toEqual(["para todos"]);
     expect((await brief("review-bugs")).learnings).toEqual(["solo reviewers", "para todos"]);
     expect((await brief("dev", newId("prj"))).learnings).toBeUndefined();
+  });
+
+  test("quien propone ve también los propuestos pendientes del proyecto, y quien no, no", async () => {
+    approve("aprobado");
+    propose("pendiente");
+    learnings.reject(propose("rechazado").id, "ui");
+
+    expect((await brief("dev", projectId, true)).proposedLearnings).toEqual(["pendiente"]);
+    expect((await brief("dev", projectId, false)).proposedLearnings).toBeUndefined();
   });
 });

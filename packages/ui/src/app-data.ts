@@ -30,6 +30,7 @@ import type {
   Learning,
   LearningId,
   LearningPatch,
+  LearningVerdict,
   ModelMetrics,
   NewProject,
   PackInfo,
@@ -181,6 +182,10 @@ export interface AppData {
   rejectLearning(id: LearningId): Promise<Learning>
   /** Cambia texto, roles o tags; el alcance y el estado no se editan. Uno aprobado solo lo edita la app. */
   updateLearning(patch: LearningPatch): Promise<Learning>
+  /** Revisa con el criterio los propuestos por agentes (un agente barato): un veredicto con su razón por cada uno, sin cambiar nada. */
+  screenLearnings(): Promise<LearningVerdict[]>
+  /** Los `proposed` pasan a `archived`: no entran a ningún brief y se pueden volver a aprobar. */
+  archiveLearnings(ids: LearningId[]): Promise<Learning[]>
   /** Las cuentas conectadas, sin tokens. */
   connections(): Promise<Connection[]>
   /** El link prellenado del formulario del PAT y la lista de permisos que necesita. */

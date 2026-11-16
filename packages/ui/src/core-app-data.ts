@@ -138,6 +138,8 @@ export function createCoreAppData(client: CoreClient): AppData {
     approveLearning: (id) => client.learnings.approve({ id }),
     rejectLearning: (id) => client.learnings.reject({ id }),
     updateLearning: (patch) => client.learnings.update(patch),
+    screenLearnings: () => client.learnings.screen({}),
+    archiveLearnings: (ids) => client.learnings.archive({ ids }),
     connections: () => client.connections.list(),
     githubPatForm: () => client.connections.githubPatForm(),
     setGithubPat: (token) => client.connections.setPat({ token }),

@@ -36,7 +36,7 @@ export const devRole = (prompt: string): Role => ({
   context: [],
   modes: {
     plan: { instructions: "Planifica.", report: reportSchema, outcomes: ["ok", "changes"], session: "new" },
-    implement: { instructions: "Implementa.", report: reportSchema, outcomes: ["ok", "changes"], session: "resume" },
+    implement: { instructions: "Implementa.", report: reportSchema, outcomes: ["ok", "changes"], session: "resume", learnings: true },
   },
 });
 export const devProfile = (model: string): Profile => ({ roles: { dev: { model } } });

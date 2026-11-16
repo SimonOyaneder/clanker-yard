@@ -18,6 +18,7 @@ import type { Packs } from "../packs/packs";
 import { newId } from "../store/conventions";
 import { agentSessions, agentTurns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
+import { LEARNING_PROMPT } from "../learnings/criteria";
 import { createContextResolver, type ContextResolver } from "./context";
 import { estimateCostMicros, minUsefulBudgetMicros, PREFIX_TOKENS, type TurnTokens } from "./pricing";
 import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
@@ -147,6 +148,8 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     effort: string | undefined;
     cwd: string;
     mode: RoleMode;
+    /** `mode.learnings`: solo entonces el reporte y el prompt traen learnings. */
+    proposes: boolean;
     /** Topes y TTL de caché que salen del modo y del perfil. */
     settings: Pick<ResumeSpec, "maxBudgetUsd" | "maxTurns" | "cacheTtl">;
     /** Lo resuelto al lanzar: el reintento por un reporte inválido lo reusa en vez de releerlo. */
@@ -332,6 +335,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     if (!roleDef) throw new Error(`No existe el rol "${req.role}".`);
     const role = Role.parse(roleDef.body);
     const mode = pickMode(role, req.role, req.mode, req.brief);
+    const proposes = mode.learnings === true;
     const profileRole = resolveProfileRole(req, req.profileRole ?? req.role);
     const settings = settingsOf(mode, profileRole);
 
@@ -349,13 +353,13 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       role: req.role,
       cwd: req.workspace,
       systemPrompt: role.prompt,
-      prompt: promptFor(mode, req.brief, notice),
+      prompt: promptFor(mode, req.brief, proposes, notice),
       model: profileRole.model,
       effort: profileRole.effort,
       ...resolved,
       hooks: role.hooks ?? false,
       tools: role.tools ?? "all",
-      outputSchema: outputSchemaFor(mode),
+      outputSchema: outputSchemaFor(mode, proposes),
       ...settings,
       stepRunId: req.stepRunId,
     };
@@ -372,6 +376,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
           effort: spec.effort,
           cwd: spec.cwd,
           mode,
+          proposes,
           settings,
           context: resolved,
           placement: req,
@@ -397,13 +402,14 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     if (!roleDef) throw new Error(`La sesión ${req.sessionId} apunta a un rol que ya no existe.`);
     const role = Role.parse(roleDef.body);
     const mode = pickMode(role, roleDef.slug, req.mode, req.brief);
+    const proposes = mode.learnings === true;
     const settings = settingsOf(mode, resolveProfileRole(req, roleDef.slug));
     const resolved = await resolveContext(req, roleDef.slug, role, session.cwd);
 
     const agentRun = await runtime.resume(
       { runtime: runtime.id, sessionId: session.sessionRef, cwd: session.cwd },
-      promptFor(mode, req.brief, req.notice),
-      { outputSchema: outputSchemaFor(mode), ...settings, ...resolved, stepRunId: req.stepRunId },
+      promptFor(mode, req.brief, proposes, req.notice),
+      { outputSchema: outputSchemaFor(mode, proposes), ...settings, ...resolved, stepRunId: req.stepRunId },
     );
     interruptOnAbort(req.signal, agentRun);
     return converse(
@@ -415,6 +421,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
         effort: session.effort ?? undefined,
         cwd: session.cwd,
         mode,
+        proposes,
         settings,
         context: resolved,
         placement: req,
@@ -439,7 +446,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       first.ref,
       `tu reporte no cumple el esquema: ${attempt.problem}`,
       {
-        outputSchema: outputSchemaFor(conversation.mode),
+        outputSchema: outputSchemaFor(conversation.mode, conversation.proposes),
         ...conversation.settings,
         ...conversation.context,
         stepRunId: conversation.placement.stepRunId,
@@ -522,8 +529,10 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
         }),
       );
     }
-    end(c, sessionId, "success", result.usage, turns, { report: checked.report });
-    return { kind: "done", result: { status: "success", sessionId, report: checked.report } };
+    // El esquema del modo no los pide, pero un modelo puede mandarlos igual: sin `learnings: true` no cuentan.
+    const report = c.proposes ? checked.report : { ...checked.report, learnings: undefined };
+    end(c, sessionId, "success", result.usage, turns, { report });
+    return { kind: "done", result: { status: "success", sessionId, report } };
   }
 
   /**
@@ -919,17 +928,23 @@ function scope(c: { placement: Placement; runId: Brief["run"]["id"] }) {
 }
 
 /** Las instrucciones del modo y el brief van en el mensaje: el prompt de sistema queda fijo. */
-function promptFor(mode: RoleMode, brief: Brief, notice?: string): string {
-  const message = `${mode.instructions}\n\n${JSON.stringify(brief, null, 2)}`;
+function promptFor(mode: RoleMode, brief: Brief, proposes: boolean, notice?: string): string {
+  const instructions = proposes ? `${mode.instructions}\n\n${LEARNING_PROMPT}` : mode.instructions;
+  const message = `${instructions}\n\n${JSON.stringify(brief, null, 2)}`;
   return notice === undefined ? message : `${notice}\n\n${message}`;
 }
 
-/** El esquema de salida de un modo: el sobre de `Report` con su `outcome` y su `payload`. */
-export function outputSchemaFor(mode: RoleMode): JsonSchema {
+/**
+ * El esquema de salida de un modo: el sobre de `Report` con su `outcome` y su `payload`. Sin `proposes`
+ * no lleva `learnings`: el agente no los propone.
+ */
+export function outputSchemaFor(mode: RoleMode, proposes = false): JsonSchema {
+  const properties = { ...reportEnvelope.properties };
+  if (!proposes) delete properties.learnings;
   return {
     ...reportEnvelope,
     properties: {
-      ...reportEnvelope.properties,
+      ...properties,
       outcome: { type: "string", enum: mode.outcomes },
       payload: mode.report,
     },

@@ -89,6 +89,11 @@ export const RoleMode = z.object({
   outcomes: z.array(z.string().min(1)).min(1),
   session: SessionPolicy,
   budget: Budget.optional(),
+  /**
+   * El modo propone learnings: su prompt trae el criterio y su brief los aprobados y propuestos del proyecto. En los
+   * demás modos el reporte no admite `learnings` y el core ignora los que lleguen.
+   */
+  learnings: z.boolean().optional(),
 });
 export type RoleMode = z.infer<typeof RoleMode>;
 
@@ -161,6 +166,8 @@ export const Brief = z.object({
   artifacts: z.record(z.string(), z.string()),
   /** Aprobados, ≤10 líneas. */
   learnings: z.array(z.string()).optional(),
+  /** Propuestos pendientes de revisar; solo los trae el brief de un rol que propone, para no repetirlos. */
+  proposedLearnings: z.array(z.string()).optional(),
   /** Lo valida `modes[mode].payload`. */
   payload: z.unknown(),
 });
@@ -173,7 +180,7 @@ export const Report = z.object({
   summary: z.string(),
   /** Van a la bandeja como notas que no bloquean. */
   decisions: z.array(z.object({ title: z.string(), body: z.string() })).optional(),
-  /** Propuestas: las aprueba una persona. */
+  /** Propuestas: las aprueba una persona. Solo un modo con `learnings: true` las lleva; el core guarda como mucho 1 por corrida. */
   learnings: z.array(z.string()).optional(),
   /** Lo valida `modes[mode].report`. */
   payload: z.unknown(),

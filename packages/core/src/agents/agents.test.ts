@@ -72,6 +72,13 @@ const role: Role = {
       outcomes: ["done"],
       session: "resume-if-warm",
     },
+    learn: {
+      instructions: "Aprende algo.",
+      report: { type: "object", properties: { done: { type: "boolean" } }, required: ["done"] },
+      outcomes: ["done"],
+      session: "new",
+      learnings: true,
+    },
   },
 };
 
@@ -190,6 +197,22 @@ describe("run", () => {
       ["agent.started", { sessionId: result.sessionId, role: "analyst", model: "sonnet" }],
       ["agent.ended", { sessionId: result.sessionId, status: "success" }],
     ]);
+  });
+
+  test("solo un modo con learnings los pide en el prompt y el esquema, y su reporte los conserva", async () => {
+    const withLearning = { outcome: "done", summary: "ok", learnings: ["Usa `x`"], payload: { done: true } };
+    const { agents, calls } = setup([{ result: { structured: withLearning } }, { result: { structured: withLearning } }]);
+
+    const proposing = await agents.run({ ...request(), brief: brief("learn", {}), mode: "learn" });
+    const quiet = await agents.run({ ...request(), brief: brief("fix", {}), mode: "fix" });
+
+    expect(calls.starts[0]?.prompt).toContain("máximo 1 por corrida; si dudas, no lo propongas");
+    expect(calls.starts[0]?.outputSchema.properties).toHaveProperty("learnings");
+    expect(calls.starts[1]?.prompt).not.toContain("Learnings (`learnings` del reporte)");
+    expect(calls.starts[1]?.outputSchema.properties).not.toHaveProperty("learnings");
+    expect(proposing).toMatchObject({ status: "success", report: { learnings: ["Usa `x`"] } });
+    // Un modelo que los manda sin que se los pidan: no cuentan.
+    expect(quiet).toMatchObject({ status: "success", report: { learnings: undefined } });
   });
 
   test("el prompt del rol va como sistema, el modo y el brief en el mensaje, y el reporte como JSON Schema", async () => {
@@ -383,7 +406,7 @@ describe("run", () => {
 
     await expect(agents.run({ ...request(), role: "nadie" })).rejects.toThrow('No existe el rol "nadie"');
     await expect(agents.run({ ...request(), mode: "x", brief: brief("x") })).rejects.toThrow(
-      /no tiene el modo "x" \(tiene: audit, followup, fix\)/,
+      /no tiene el modo "x" \(tiene: audit, followup, fix, learn\)/,
     );
     await expect(agents.run({ ...request(), profile: "nadie" })).rejects.toThrow('No existe el perfil "nadie"');
     await expect(agents.run({ ...request(), brief: brief("audit", { focus: 1 }) })).rejects.toThrow(

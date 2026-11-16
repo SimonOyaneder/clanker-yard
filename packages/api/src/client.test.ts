@@ -270,6 +270,12 @@ const router = os.router({
     update: os.learnings.update.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    screen: os.learnings.screen.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    archive: os.learnings.archive.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
   },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),

@@ -653,6 +653,17 @@ export function createMemoryAppData(now = Date.now()): AppData {
       Object.assign(found, changes)
       return { ...found }
     },
+    // Un veredicto de ejemplo: los de un agente que no nombran un comando o una regla concreta no pasan.
+    screenLearnings: async () =>
+      learnings
+        .filter((l) => l.status === "proposed" && l.source === "agent")
+        .map((l) => (/`/.test(l.text) ? { id: l.id, keep: true, reason: "Nombra un comando o una regla concreta." } : { id: l.id, keep: false, reason: "No cambia lo que haría un agente en otra issue." })),
+    archiveLearnings: async (ids) =>
+      ids.map((learningId) => {
+        const found = needLearning(learningId)
+        if (found.status === "proposed") found.status = "archived"
+        return { ...found }
+      }),
     connections: async () => connections.map((c) => ({ ...c })),
     githubPatForm: async () => ({
       url: "https://github.com/settings/tokens/new?description=Clanker%20Yard&scopes=repo",

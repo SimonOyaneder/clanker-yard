@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { NewLearning } from "@clanker/api";
+import { eq } from "drizzle-orm";
 import { newId } from "../store/conventions";
+import { learnings as learningsTable } from "../store/schema";
 import { openStore, type Store } from "../store/store";
-import { createLearnings, LearningNotFoundError, LearningUpdateError, type Learnings } from "./learnings";
+import type { AgentRuntime, RunSpec } from "../agents/runtime";
+import { createLearnings, LearningNotFoundError, LearningScreenError, LearningUpdateError, type Learnings } from "./learnings";
 
 let store: Store;
 let learnings: Learnings;
@@ -42,6 +45,16 @@ describe("propose", () => {
     expect(NewLearning.safeParse({ text: "x", projectId: project, repoId: repo }).success).toBe(false);
     expect(NewLearning.safeParse({ text: "   ", projectId: project }).success).toBe(false);
     expect(NewLearning.safeParse({ text: " x ", projectId: project }).data).toEqual({ text: "x", projectId: project, roles: [], tags: [] });
+  });
+});
+
+describe("repetidos", () => {
+  test("un texto casi igual (minúsculas, sin backticks ni puntuación) devuelve el existente", () => {
+    const first = propose("Usa `let_it_be` en los specs.");
+
+    expect(propose("usa let_it_be, en los SPECS").id).toBe(first.id);
+    expect(propose("Usa `let_it_be` en los specs de otro tipo").id).not.toBe(first.id);
+    expect(events("learning.proposed")).toHaveLength(2);
   });
 });
 
@@ -134,5 +147,90 @@ describe("forBrief", () => {
     expect(learnings.forBrief({ projectId: project, repoId: repo, role: "review-bugs" })).toEqual(["del repo", "solo reviewers", "del proyecto"]);
     expect(learnings.forBrief({ projectId: project, role: "dev" })).toEqual(["del proyecto"]);
     expect(learnings.forBrief({ role: "dev" })).toEqual([]);
+  });
+});
+
+describe("archive", () => {
+  test("un proposed pasa a archived y emite; uno aprobado o ya archivado queda igual", () => {
+    const proposed = propose("a");
+    const approved = learnings.approve(propose("b").id, "ui");
+
+    const archived = learnings.archive([proposed.id, approved.id], "ui");
+
+    expect(archived.map((l) => l.status)).toEqual(["archived", "approved"]);
+    expect(events("learning.rejected")).toHaveLength(1);
+    expect(learnings.archive([proposed.id], "ui")[0]!.status).toBe("archived");
+    expect(events("learning.rejected")).toHaveLength(1);
+    // No se borra: sigue ahí y se puede volver a aprobar.
+    expect(learnings.approve(proposed.id, "ui").status).toBe("approved");
+  });
+});
+
+describe("screen", () => {
+  /** Un runtime que responde `structured` y guarda lo que se le pidió. */
+  function runtimeAnswering(structured: unknown, status: "success" | "error" = "success") {
+    const specs: RunSpec[] = [];
+    const usage = { turns: 1, tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0, costMicros: 0, costSource: "estimate" } as const;
+    const runtime: AgentRuntime = {
+      id: "fake",
+      capabilities: { structuredOutput: true, costPerTurn: false, resume: false, fork: false, steer: false },
+      start: (spec) => {
+        specs.push(spec);
+        return Promise.resolve({
+          ref: { runtime: "fake", sessionId: "s", cwd: spec.cwd },
+          events: (async function* () {})(),
+          interrupt: () => Promise.resolve(),
+          result: Promise.resolve({ status, text: "", structured, usage, ...(status === "error" && { message: "sin cuota" }) }),
+        });
+      },
+      resume: () => Promise.reject(new Error("no se usa")),
+    };
+    return { runtime, specs };
+  }
+  const asAgent = (text: string) => {
+    const learning = propose(text);
+    store.db.update(learningsTable).set({ source: "agent" }).where(eq(learningsTable.id, learning.id)).run();
+    return learning;
+  };
+
+  test("revisa solo los propuestos por agentes con un modelo barato, sin cambiar nada", async () => {
+    const good = asAgent("Corre `doppler run` para tapioca");
+    const bad = asAgent("El job X se mantiene como está");
+    propose("a mano");
+    const { runtime, specs } = runtimeAnswering({
+      verdicts: [
+        { id: good.id, keep: true, reason: "reutilizable" },
+        { id: bad.id, keep: false, reason: "dato de una sola issue" },
+      ],
+    });
+
+    const verdicts = await createLearnings(store, runtime).screen();
+
+    expect(verdicts).toEqual([
+      { id: bad.id, keep: false, reason: "dato de una sola issue" },
+      { id: good.id, keep: true, reason: "reutilizable" },
+    ]);
+    expect(specs).toHaveLength(1);
+    expect(specs[0]).toMatchObject({ model: "haiku", tools: { allow: [] } });
+    expect(specs[0]!.prompt).toContain("Reutilizable");
+    expect(specs[0]!.prompt).toContain(good.text);
+    expect(specs[0]!.prompt).not.toContain("a mano");
+    expect(learnings.list().map((l) => l.status)).toEqual(["proposed", "proposed", "proposed"]);
+  });
+
+  test("un learning sin veredicto se conserva", async () => {
+    const one = asAgent("uno");
+    const { runtime } = runtimeAnswering({ verdicts: [] });
+
+    expect(await createLearnings(store, runtime).screen()).toEqual([{ id: one.id, keep: true, reason: expect.any(String) }]);
+  });
+
+  test("si el agente falla o no responde con el formato, lanza un error de dominio y no cambia nada", async () => {
+    asAgent("uno");
+
+    await expect(createLearnings(store, runtimeAnswering(undefined, "error").runtime).screen()).rejects.toThrow(LearningScreenError);
+    await expect(createLearnings(store, runtimeAnswering({ nope: 1 }).runtime).screen()).rejects.toThrow(/veredictos válidos/);
+    await expect(learnings.screen()).rejects.toThrow(LearningScreenError);
+    expect(learnings.list()[0]!.status).toBe("proposed");
   });
 });

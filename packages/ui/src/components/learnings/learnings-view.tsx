@@ -1,10 +1,11 @@
 import type { ClankerProject, Learning, LearningStatus, RepoId } from "@clanker/api"
-import { BookCheck, Check, Copy, Pencil, ScrollText, Search, SquareCheck, X } from "lucide-react"
-import { useEffect, useEffectEvent, useMemo, useRef } from "react"
+import { Archive, BookCheck, Check, Copy, Pencil, ScrollText, Search, SquareCheck, X } from "lucide-react"
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { useAppData } from "@/app-data"
 import { Ago, Hint, Shortcut } from "@/components/common"
 import { LearningDetail, type LearningPatchInput } from "@/components/learnings/learning-detail"
 import { RolesPills, scopeName, SourcePill } from "@/components/learnings/learning-parts"
+import { ScreenDialog } from "@/components/learnings/screen-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -40,6 +41,7 @@ export function LearningsView({ learnings, projects, view, onEdited }: Props) {
   const actions = useAppActions()
   const search = useRef<HTMLInputElement>(null)
   const { items, current, selected, counts, tab } = view
+  const [screening, setScreening] = useState(false)
 
   // El nombre de cada repo con learnings: solo se piden las recetas si hay alguno con alcance de repo.
   const { repos: repoIds } = useMemo(() => scopesOf(learnings), [learnings])
@@ -200,7 +202,15 @@ export function LearningsView({ learnings, projects, view, onEdited }: Props) {
             Quitar filtros
           </Button>
         ) : null}
+        {learnings.some((l) => l.status === "proposed" && l.source === "agent") ? (
+          <Hint label="Un agente revisa los propuestos por agentes con el criterio (reutilizable, no obvio, comprobado, una línea) y te muestra cuáles archivaría">
+            <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setScreening(true)}>
+              <Archive /> Filtrar con el criterio
+            </Button>
+          </Hint>
+        ) : null}
       </div>
+      <ScreenDialog open={screening} onOpenChange={setScreening} learnings={learnings} onArchived={onEdited} />
 
       {learnings.length === 0 ? (
         <NothingYet />

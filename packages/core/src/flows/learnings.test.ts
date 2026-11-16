@@ -9,21 +9,22 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-const flow = {
-  schema: 1,
-  id: "agent-learnings",
-  name: "Agente con learnings",
-  trigger: { type: "manual" },
-  start: "plan",
-  nodes: { plan: { type: "agent", role: "dev", mode: "plan", brief: {}, on: { ok: "@done", changes: "@done" } } },
-} as const satisfies FlowDef;
+const flowOf = (mode: string) =>
+  ({
+    schema: 1,
+    id: "agent-learnings",
+    name: "Agente con learnings",
+    trigger: { type: "manual" },
+    start: "plan",
+    nodes: { plan: { type: "agent", role: "dev", mode, brief: {}, on: { ok: "@done", changes: "@done" } } },
+  }) as const satisfies FlowDef;
 
-function run(learnings: string[], projectId?: ReturnType<typeof newId<"prj">>) {
+function run(learnings: string[], projectId?: ReturnType<typeof newId<"prj">>, mode = "implement") {
   const h = createHarness({
     script: () => Promise.resolve({ structured: { outcome: "ok", summary: "listo", learnings, payload: { n: 1 } } }),
   });
   cleanups.push(h.cleanup);
-  h.save(flow);
+  h.save(flowOf(mode));
   const runId = h.flows.start("agent-learnings", { type: "issue", id: "ENG-1" }, undefined, { profile: "default", ...(projectId && { projectId }) });
   return { h, runId, store: h.store };
 }
@@ -31,21 +32,71 @@ function run(learnings: string[], projectId?: ReturnType<typeof newId<"prj">>) {
 describe("Report.learnings", () => {
   test("quedan proposed en el proyecto de la corrida y la corrida sigue sin esperar a nadie", async () => {
     const projectId = newId("prj");
-    const { h, runId, store } = run(["  Los specs usan `let_it_be`  ", "El lint corre con `npm run lint`"], projectId);
+    const { h, runId, store } = run(["  Los specs usan `let_it_be`  "], projectId);
 
     await h.finished(runId);
 
     expect(h.flows.getRun(runId)).toMatchObject({ status: "done", outcome: "done" });
     expect(createLearnings(store).list({ projectId }).map(({ text, status, source, sourceRunId, repoId, roles }) => ({ text, status, source, sourceRunId, repoId, roles }))).toEqual([
-      { text: "El lint corre con `npm run lint`", status: "proposed", source: "agent", sourceRunId: runId, repoId: null, roles: [] },
       { text: "Los specs usan `let_it_be`", status: "proposed", source: "agent", sourceRunId: runId, repoId: null, roles: [] },
     ]);
-    expect(store.events.since(0, { runId, types: ["learning.proposed"] })).toHaveLength(2);
+    expect(store.events.since(0, { runId, types: ["learning.proposed"] })).toHaveLength(1);
+  });
+
+  test("máximo 1 por corrida: guarda el primero y avisa del resto sin fallar", async () => {
+    const projectId = newId("prj");
+    const { h, runId, store } = run(["Primero", "Segundo", "Tercero"], projectId);
+
+    await h.finished(runId);
+
+    expect(h.flows.getRun(runId)).toMatchObject({ status: "done" });
+    expect(createLearnings(store).list({ projectId }).map((l) => l.text)).toEqual(["Primero"]);
+    expect(store.events.since(0, { runId, types: ["error"] }).map((e) => e.payload)).toEqual([
+      { scope: "learnings", message: expect.stringContaining("se descartaron 2") },
+    ]);
+  });
+
+  test("un propuesto casi igual a uno existente (minúsculas, backticks, puntuación) se descarta", async () => {
+    const projectId = newId("prj");
+    const first = run(["Usa `let_it_be`."], projectId);
+    await first.h.finished(first.runId);
+    const learnings = createLearnings(first.store);
+    learnings.reject(learnings.list({ projectId })[0]!.id, "ui");
+
+    const again = learnings.propose({ projectId, text: "usa let_it_be", roles: [], tags: [] }, "ui");
+
+    expect(again).toMatchObject({ text: "Usa `let_it_be`.", status: "rejected" });
+    expect(learnings.list({ projectId })).toHaveLength(1);
+  });
+
+  test("un modo que no propone (dev en plan) no deja learnings, ni se los pide al agente", async () => {
+    const projectId = newId("prj");
+    const { h, runId, store } = run(["Algo que nadie pidió"], projectId, "plan");
+
+    await h.finished(runId);
+
+    expect(createLearnings(store).list({ projectId })).toEqual([]);
+    const spec = h.calls[0]!.spec!;
+    expect(spec.prompt).not.toContain("Learnings (`learnings` del reporte)");
+    expect(spec.outputSchema.properties).not.toHaveProperty("learnings");
+  });
+
+  test("dev en implement recibe el criterio con su ejemplo bueno y malo, y el esquema acepta learnings", async () => {
+    const { h, runId } = run([], newId("prj"));
+
+    await h.finished(runId);
+
+    const spec = h.calls[0]!.spec!;
+    expect(spec.prompt).toContain("máximo 1 por corrida; si dudas, no lo propongas");
+    expect(spec.prompt).toContain("Reutilizable");
+    expect(spec.prompt).toContain("Bueno:");
+    expect(spec.prompt).toContain("Malo:");
+    expect(spec.outputSchema.properties).toHaveProperty("learnings");
   });
 
   test("uno repetido o vacío no se propone, y una corrida sin proyecto no propone nada", async () => {
     const projectId = newId("prj");
-    const first = run(["Usa el helper", "Usa el helper", "   "], projectId);
+    const first = run(["   ", "Usa el helper"], projectId);
     await first.h.finished(first.runId);
     expect(createLearnings(first.store).list({ projectId })).toHaveLength(1);
 

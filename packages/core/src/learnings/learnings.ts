@@ -1,8 +1,10 @@
-import type { Learning, LearningFilter, LearningId, LearningPatch, LearningSource, Origin, ProjectId, RepoId, RunId } from "@clanker/api";
+import type { Learning, LearningFilter, LearningVerdict, LearningId, LearningPatch, LearningSource, Origin, ProjectId, RepoId, RunId } from "@clanker/api";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import type { AgentRuntime } from "../agents/runtime";
 import { newId } from "../store/conventions";
 import { learnings } from "../store/schema";
 import type { Store, Tx } from "../store/store";
+import { LearningScreenError, screenLearnings } from "./screen";
 
 /** El learning pedido no existe. */
 export class LearningNotFoundError extends Error {
@@ -10,6 +12,8 @@ export class LearningNotFoundError extends Error {
     super(`No existe el learning ${id}.`);
   }
 }
+
+export { LearningScreenError };
 
 /** El cambio pedido no se puede hacer: no cambió nada. */
 export class LearningUpdateError extends Error {}
@@ -36,9 +40,19 @@ export interface Learnings {
    * proyecto, cada grupo del más reciente al más antiguo. El brief corta en `MAX_LEARNINGS`.
    */
   forBrief(scope: BriefScope): string[];
+  /** Los textos `proposed` del alcance, del más reciente al más antiguo: el brief de quien propone los lleva para no repetirlos. */
+  pendingFor(scope: Pick<BriefScope, "projectId" | "repoId">): string[];
+  /**
+   * Un veredicto por cada `proposed` de un agente (de `projectId` si se da), con un agente barato y el criterio de
+   * `LEARNING_CRITERIA`. No cambia nada: archivar lo que una persona confirme es `archive`.
+   */
+  screen(filter?: { projectId?: ProjectId }): Promise<LearningVerdict[]>;
+  /** Un `proposed` pasa a `archived` (se puede volver a aprobar); cualquier otro se devuelve igual. Emite `learning.rejected`. */
+  archive(ids: LearningId[], by: Origin): Learning[];
 }
 
-export function createLearnings(store: Store): Learnings {
+/** Con `runtime` el core puede filtrar los propuestos (`screen`); sin él, `screen` falla. */
+export function createLearnings(store: Store, runtime?: AgentRuntime): Learnings {
   const find = (db: Store["db"] | Tx["db"], id: LearningId) => db.select().from(learnings).where(eq(learnings.id, id)).get();
   const need = (db: Store["db"] | Tx["db"], id: LearningId) => {
     const learning = find(db, id);
@@ -57,6 +71,9 @@ export function createLearnings(store: Store): Learnings {
       return need(tx.db, id);
     });
   }
+
+  const inScope = ({ projectId, repoId }: Pick<BriefScope, "projectId" | "repoId">) =>
+    [projectId && eq(learnings.projectId, projectId), repoId && eq(learnings.repoId, repoId)].filter((c) => c !== undefined);
 
   return {
     list: (filter = {}) =>
@@ -94,9 +111,34 @@ export function createLearnings(store: Store): Learnings {
           .run();
         return need(tx.db, id);
       }),
+    screen: async ({ projectId } = {}) => {
+      if (!runtime) throw new LearningScreenError("No hay un runtime de agentes para filtrar los learnings.");
+      const proposed = store.db
+        .select()
+        .from(learnings)
+        .where(and(eq(learnings.status, "proposed"), eq(learnings.source, "agent"), projectId === undefined ? undefined : eq(learnings.projectId, projectId)))
+        .orderBy(desc(learnings.id))
+        .all();
+      return screenLearnings(runtime, proposed);
+    },
+    archive: (ids, by) =>
+      ids.map((id) =>
+        move(id, by, (status) => (status === "proposed" ? { to: "archived", type: "learning.rejected" } : undefined)),
+      ),
+    pendingFor: (scope) => {
+      const where = inScope(scope);
+      if (where.length === 0) return [];
+      return store.db
+        .select()
+        .from(learnings)
+        .where(and(eq(learnings.status, "proposed"), or(...where)))
+        .orderBy(desc(learnings.id))
+        .all()
+        .map((l) => l.text);
+    },
     forBrief: ({ projectId, repoId, role }) => {
       // Sin proyecto ni repo no hay alcance: un `or` vacío no filtraría nada y traería los de todos.
-      const scope = [projectId && eq(learnings.projectId, projectId), repoId && eq(learnings.repoId, repoId)].filter((c) => c !== undefined);
+      const scope = inScope({ projectId, repoId });
       if (scope.length === 0) return [];
       return store.db
         .select()
@@ -111,24 +153,30 @@ export function createLearnings(store: Store): Learnings {
   };
 }
 
-/** El learning con ese texto en ese alcance, si lo hay. */
+/** Minúsculas, sin backticks ni puntuación y con los espacios colapsados: dos textos que difieren solo en eso son el mismo learning. */
+export function normalizeLearning(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+}
+
+/** El learning con ese texto (normalizado) en ese alcance, si lo hay. */
 function sameText(tx: Tx, text: string, projectId: ProjectId | null, repoId: RepoId | null): Learning | undefined {
+  const wanted = normalizeLearning(text);
   return tx.db
     .select()
     .from(learnings)
     .where(
       and(
-        eq(learnings.text, text),
         projectId === null ? isNull(learnings.projectId) : eq(learnings.projectId, projectId),
         repoId === null ? isNull(learnings.repoId) : eq(learnings.repoId, repoId),
       ),
     )
-    .get();
+    .all()
+    .find((l) => normalizeLearning(l.text) === wanted);
 }
 
 /**
  * Deja un learning `proposed` en la transacción de quien lo propone y emite `learning.proposed`. Si
- * el mismo texto ya está en ese alcance (en cualquier estado) devuelve el que había y no emite: el
+ * el mismo texto (normalizado) ya está en ese alcance (en cualquier estado) devuelve el que había y no emite: el
  * reporte de un paso reintentado o la importación repetida no duplican, y lo rechazado no vuelve.
  */
 export function proposeLearning(

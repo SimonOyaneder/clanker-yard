@@ -200,7 +200,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     { types: ["breaker.opened"] },
   );
-  const learnings = createLearnings(store);
+  const learnings = createLearnings(store, runtime);
   const flows = createFlows({
     store,
     environment: { breakers, runtime: runtime.id },

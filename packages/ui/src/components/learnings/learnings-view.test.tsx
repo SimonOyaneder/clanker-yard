@@ -219,3 +219,37 @@ test("⌘K ofrece aprobar, rechazar y editar sobre lo marcado, y sirve para apro
 
   expect(approve).toHaveBeenCalledTimes(2)
 })
+
+test("«Filtrar con el criterio» muestra qué archivaría y por qué, y solo archiva al confirmar", async () => {
+  const { data } = await openLearnings()
+  const archive = vi.spyOn(data, "archiveLearnings")
+
+  fireEvent.click(screen.getByRole("button", { name: /Filtrar con el criterio/ }))
+  await act(async () => {})
+
+  const list = screen.getByRole("list", { name: "Learnings a archivar" })
+  expect(within(list).getAllByRole("listitem")).toHaveLength(1)
+  expect(list.textContent).toContain("No cambia lo que haría un agente en otra issue.")
+  expect(archive).not.toHaveBeenCalled()
+  expect((await data.learnings()).filter((l) => l.status === "archived")).toHaveLength(1)
+
+  fireEvent.click(screen.getByRole("button", { name: /Archivar 1/ }))
+  await act(async () => {})
+
+  expect(archive).toHaveBeenCalledTimes(1)
+  // El de ejemplo ya estaba archivado de antes: ahora hay dos y nada se borró.
+  expect((await data.learnings()).filter((l) => l.status === "archived")).toHaveLength(2)
+  expect((await data.learnings()).filter((l) => l.status === "proposed")).toHaveLength(5)
+})
+
+test("cancelar el filtro no archiva nada", async () => {
+  const { data } = await openLearnings()
+  const archive = vi.spyOn(data, "archiveLearnings")
+
+  fireEvent.click(screen.getByRole("button", { name: /Filtrar con el criterio/ }))
+  await act(async () => {})
+  fireEvent.click(screen.getByRole("button", { name: "Cancelar" }))
+
+  expect(archive).not.toHaveBeenCalled()
+  expect((await data.learnings()).filter((l) => l.status === "proposed")).toHaveLength(6)
+})

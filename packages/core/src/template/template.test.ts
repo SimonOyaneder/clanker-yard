@@ -11,6 +11,18 @@ afterEach(() => {
   for (const store of open.splice(0)) store.close();
 });
 
+describe("learnings", () => {
+  test("solo proponen dev (implement y fix) y triage (todos sus modos): los que viven lo que vale la pena aprender", () => {
+    const proposing = Object.entries(roles).flatMap(([slug, role]) =>
+      Object.entries(role.modes)
+        .filter(([, mode]) => mode.learnings)
+        .map(([name]) => `${slug}.${name}`),
+    );
+
+    expect(proposing.sort()).toEqual(["dev.fix", "dev.implement", "triage.bot", "triage.ci", "triage.coverage"]);
+  });
+});
+
 describe("defs", () => {
   test("todos los roles y perfiles se guardan como defs builtin", () => {
     const store = openStore({ path: ":memory:" });

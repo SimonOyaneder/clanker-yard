@@ -12,7 +12,7 @@ export const STATUS_HINT: Record<LearningStatus, string> = {
   proposed: "Propuesto por un agente, por una persona o por la importación del clanker-loop. Todavía no entra a ningún brief.",
   approved: "Entra al brief de las corridas de su alcance y de sus roles.",
   rejected: "Descartado sin haber entrado nunca a un brief. Proponer el mismo texto otra vez no lo revive.",
-  archived: "Estaba aprobado y se retiró: ya no entra a los briefs. Se puede volver a aprobar.",
+  archived: "Estaba aprobado y se retiró, o «Filtrar con el criterio» lo archivó: ya no entra a los briefs. Se puede volver a aprobar.",
 }
 
 export const STATUSES = Object.keys(STATUS_LABEL) as LearningStatus[]

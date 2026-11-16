@@ -17,7 +17,7 @@ import {
 import { Decision, DecisionFilter } from "./decisions";
 import { AgentOptions } from "./agents";
 import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefExported, DefExportToRepo, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
-import { Learning, LearningFilter, LearningPatch, NewLearning } from "./learnings";
+import { Learning, LearningFilter, LearningPatch, LearningVerdict, NewLearning } from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
@@ -626,6 +626,17 @@ const learnings = {
    * ya existe en su alcance.
    */
   update: base.input(LearningPatch).output(Learning),
+  /**
+   * Revisa con el criterio de proponer (reutilizable, no obvio, comprobado, una línea) los `proposed` de un agente,
+   * con un agente barato (haiku). No cambia nada: devuelve un veredicto por learning y la razón de cada uno. Archivar
+   * los que no cumplen es `archive`, tras la confirmación de una persona. `BAD_REQUEST` si el agente no responde.
+   */
+  screen: base.input(z.object({ projectId: ProjectId.optional() }).default({})).output(z.array(LearningVerdict)),
+  /**
+   * Un `proposed` pasa a `archived` (no entra a ningún brief y se puede volver a aprobar). Emite `learning.rejected`.
+   * Uno que ya no está `proposed` se devuelve igual, sin evento. `NOT_FOUND` si algún id no existe.
+   */
+  archive: base.input(z.object({ ids: z.array(LearningId).min(1) })).output(z.array(Learning)),
 };
 
 /** Flujos, roles, perfiles, recetas y packs: lo versionado en `defs`, leído por kind. */

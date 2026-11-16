@@ -17,7 +17,7 @@ export interface StepBriefsDeps {
   briefs: Briefs;
   artifacts: Artifacts;
   issues: Pick<Issues, "get">;
-  learnings: Pick<Learnings, "forBrief">;
+  learnings: Pick<Learnings, "forBrief" | "pendingFor">;
   /** Los adapters por id de tracker: de ahí sale el detalle de la issue del sujeto. */
   /** Para el proyecto de una corrida. */
   trackers: Trackers;
@@ -65,6 +65,7 @@ export function createStepBriefs({ store, workspaces, briefs, artifacts, issues,
       issue,
       since: lastSnapshot(request),
       learnings: learnings.forBrief({ projectId: request.projectId, repoId: held.repoId as RepoId, role: request.role }),
+      proposedLearnings: request.proposesLearnings ? learnings.pendingFor({ projectId: request.projectId, repoId: held.repoId as RepoId }) : undefined,
       payload: request.payload,
     });
     const role = `snapshot/${request.nodeId}/${request.visit}/${request.run.attempt}`;

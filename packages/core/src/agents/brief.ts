@@ -26,6 +26,7 @@ export const RUN_DIR = ".clanker-run";
 
 export const MAX_CRITERIA = 5;
 export const MAX_LEARNINGS = 10;
+export const MAX_PROPOSED_LEARNINGS = 30;
 const MAX_CRITERION_CHARS = 200;
 
 /** Un reporte de una ronda anterior, para que el agente lo lea del disco. */
@@ -50,6 +51,8 @@ export interface BriefRequest {
   since?: string;
   /** Aprobados del proyecto. Pasan los primeros `MAX_LEARNINGS`. */
   learnings?: string[];
+  /** Propuestos pendientes, solo para un rol que propone. Pasan los primeros `MAX_PROPOSED_LEARNINGS`. */
+  proposedLearnings?: string[];
   /** Lo propio del brief del modo; lo valida `Agents`. */
   payload?: unknown;
 }
@@ -81,7 +84,7 @@ export function createBriefs({
   artifacts: Artifacts;
 }): Briefs {
   return {
-    async prepare({ lease, run, mode, issue, reports = [], since, learnings, payload }) {
+    async prepare({ lease, run, mode, issue, reports = [], since, learnings, proposedLearnings, payload }) {
       workspaces.validate(lease);
       const cwd = lease.path;
       await excludeRunDir(cwd);
@@ -124,6 +127,7 @@ export function createBriefs({
         mode,
         artifacts: paths,
         ...(learnings?.length && { learnings: learnings.slice(0, MAX_LEARNINGS) }),
+        ...(proposedLearnings?.length && { proposedLearnings: proposedLearnings.slice(0, MAX_PROPOSED_LEARNINGS) }),
         payload,
       };
 

@@ -1,5 +1,6 @@
 import {
   FlowDef,
+  Role,
   type ArtifactHash,
   type Brief,
   type DecisionId,
@@ -20,6 +21,7 @@ import type { Artifacts } from "../artifacts/artifacts";
 import { GITHUB_SCOPE, repoScope, runtimeScope, type Breakers } from "../breakers/breakers";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import type { Defs } from "../defs/defs";
+import { MAX_PROPOSED_PER_RUN } from "../learnings/criteria";
 import { proposeLearning } from "../learnings/learnings";
 import { recordRunMetrics } from "../metrics/record";
 import { microsToUsd, newId, usdToMicros } from "../store/conventions";
@@ -166,6 +168,8 @@ export interface StepBriefRequest {
   mode: string;
   /** El slug del rol del nodo y el proyecto de la corrida: con el repo del worktree, deciden qué learnings entran. */
   role: string;
+  /** El modo propone learnings (`RoleMode.learnings`): su brief lleva también los propuestos pendientes. */
+  proposesLearnings: boolean;
   projectId?: ProjectId;
   /** El brief del nodo con sus refs resueltas. */
   payload: unknown;
@@ -1145,9 +1149,11 @@ export function createEngine(deps: EngineDeps): Engine {
     const profile = profileDef && defs.get("profile", profileDef.id, profileDef.version);
     if (!roleDef || !profile) return permanent(`La corrida no fijó el rol "${node.role}" o su perfil.`);
 
+    const roleBody = Role.safeParse(defs.get("role", roleDef.id, roleDef.version)?.body);
+    const proposesLearnings = roleBody.success && roleBody.data.modes[node.mode]?.learnings === true;
     const briefRun: Brief["run"] = { id: run.id, subject: { type: run.subjectType, id: run.subjectId }, round: step.round, attempt: step.attempt };
     const brief: Brief = briefFor
-      ? await briefFor({ run: briefRun, nodeId: step.nodeId, visit: step.visit, mode: node.mode, role: node.role, projectId: run.projectId ?? undefined, payload, lineage: lineage(run) })
+      ? await briefFor({ run: briefRun, nodeId: step.nodeId, visit: step.visit, mode: node.mode, role: node.role, proposesLearnings, projectId: run.projectId ?? undefined, payload, lineage: lineage(run) })
       : { run: briefRun, worktree: workspace.path, base: workspace.base, mode: node.mode, artifacts: {}, payload };
     // Tras pasarse del tope el paso reintenta con el perfil escalado y una sesión nueva con handoff.
     const escalated = step.error === ESCALATED;
@@ -1611,9 +1617,17 @@ export function createEngine(deps: EngineDeps): Engine {
     // Un learning aplica a un proyecto: la corrida sin uno no tiene a quién proponérselo.
     const { projectId } = run;
     if (projectId) {
-      for (const raw of closing.reported?.learnings ?? []) {
-        const text = raw.trim();
-        if (text) proposeLearning(tx, { projectId, text, source: "agent", sourceRunId: run.id, origin: "core" });
+      const texts = (closing.reported?.learnings ?? []).map((raw) => raw.trim()).filter((text) => text !== "");
+      for (const text of texts.slice(0, MAX_PROPOSED_PER_RUN)) {
+        proposeLearning(tx, { projectId, text, source: "agent", sourceRunId: run.id, origin: "core" });
+      }
+      if (texts.length > MAX_PROPOSED_PER_RUN) {
+        tx.emit({
+          type: "error",
+          origin: "core",
+          ...scope,
+          payload: { scope: "learnings", message: `El paso propuso ${texts.length} learnings: se guardó el primero y se descartaron ${texts.length - MAX_PROPOSED_PER_RUN} (máximo ${MAX_PROPOSED_PER_RUN} por corrida).` },
+        });
       }
     }
     if (cost > 0) {

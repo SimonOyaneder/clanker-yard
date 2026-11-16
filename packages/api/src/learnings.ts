@@ -64,3 +64,10 @@ export const LearningPatch = z.object({
   tags: Slugs.optional(),
 });
 export type LearningPatch = z.infer<typeof LearningPatch>;
+
+/** Lo que el filtro con el criterio decide de un propuesto: `keep: false` es archivarlo, con la razón. */
+export const LearningVerdict = z.object({ id: LearningId, keep: z.boolean(), reason: z.string() });
+export type LearningVerdict = z.infer<typeof LearningVerdict>;
+
+/** Lo que el modelo devuelve; el core lo completa con los que no juzgó. */
+export const LearningVerdicts = z.object({ verdicts: z.array(LearningVerdict) });

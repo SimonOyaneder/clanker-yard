@@ -14,7 +14,7 @@ import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
 import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
-import { LearningNotFoundError, LearningUpdateError, type Learnings } from "../learnings/learnings";
+import { LearningNotFoundError, LearningScreenError, LearningUpdateError, type Learnings } from "../learnings/learnings";
 import type { Engine } from "../flows/engine";
 import type { Flows } from "../flows/flows";
 import { DecisionNotFoundError, DecisionResolveError, RunCommandError, RunNotFoundError, RunStartError } from "../flows/engine";
@@ -419,6 +419,8 @@ export function createRouter(deps: RouterDeps) {
         return asApiError(() => deps.learnings.approve(input.id, context.origin));
       }),
       reject: os.learnings.reject.handler(({ input, context }) => asApiError(() => deps.learnings.reject(input.id, context.origin))),
+      screen: os.learnings.screen.handler(({ input }) => asApiErrorAsync(() => deps.learnings.screen(input))),
+      archive: os.learnings.archive.handler(({ input, context }) => asApiError(() => deps.learnings.archive(input.ids, context.origin))),
       update: os.learnings.update.handler(({ input, context }) => {
         if (context.origin !== "ui" && deps.learnings.get(input.id)?.status === "approved") {
           throw new ORPCError("FORBIDDEN", { message: "Un learning aprobado solo se edita desde la app: el texto nuevo entra a los briefs sin otra aprobación." });
@@ -503,6 +505,7 @@ function toApiError(error: unknown): unknown {
     error instanceof RunCommandError ||
     error instanceof DecisionResolveError ||
     error instanceof LearningUpdateError ||
+    error instanceof LearningScreenError ||
     error instanceof InvalidRepoError ||
     error instanceof NotAGitRepoError ||
     error instanceof PrCommandError ||

@@ -28,6 +28,7 @@ function mode(spec: {
   report: z.ZodType;
   outcomes: string[];
   session: RoleMode["session"];
+  learnings?: boolean;
 }): RoleMode {
   return {
     instructions: spec.instructions,
@@ -35,6 +36,7 @@ function mode(spec: {
     report: reportSchema(spec.report),
     outcomes: spec.outcomes,
     session: spec.session,
+    ...(spec.learnings && { learnings: true }),
   };
 }
 
@@ -64,6 +66,7 @@ const dev = Role.parse({
       report: DevWorkReport,
       outcomes: ["ok"],
       session: "resume",
+      learnings: true,
     }),
     fix: mode({
       instructions: prompts.DEV_FIX,
@@ -71,6 +74,7 @@ const dev = Role.parse({
       report: DevWorkReport,
       outcomes: ["ok"],
       session: "resume-if-warm",
+      learnings: true,
     }),
     council: mode({
       instructions: prompts.DEV_COUNCIL,
@@ -134,6 +138,7 @@ const triage = Role.parse({
       report: TriageReport,
       outcomes: ["fix", "reply"],
       session: "new",
+      learnings: true,
     }),
     coverage: mode({
       instructions: prompts.TRIAGE_COVERAGE,
@@ -141,6 +146,7 @@ const triage = Role.parse({
       report: TriageReport,
       outcomes: ["fix", "reply"],
       session: "new",
+      learnings: true,
     }),
     ci: mode({
       instructions: prompts.TRIAGE_CI,
@@ -148,6 +154,7 @@ const triage = Role.parse({
       report: TriageReport,
       outcomes: ["fix", "foreign"],
       session: "new",
+      learnings: true,
     }),
   },
 });
