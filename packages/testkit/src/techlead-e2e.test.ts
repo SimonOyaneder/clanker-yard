@@ -45,7 +45,7 @@ describe("techlead-clasico de punta a punta", () => {
     // El PR draft con los dos commits del committer; el fixup del hallazgo del bot ya quedó squasheado.
     const pr = scenario.pr();
     const [pull] = scenario.github.pulls();
-    expect(pull).toMatchObject({ number: 1, draft: true, state: "open", title: "feat(transfers): validate and round the transfer amount" });
+    expect(pull).toMatchObject({ number: 1, draft: true, state: "open", title: `[${(await client.issues.get({ id: issueId })).ref.key}] feat(transfers): validate and round the transfer amount` });
     const log = scenario.remoteLog(pull!.head.ref);
     expect(log.map((c) => c.subject).reverse()).toEqual([
       "feat(transfers): validate and round the transfer amount",

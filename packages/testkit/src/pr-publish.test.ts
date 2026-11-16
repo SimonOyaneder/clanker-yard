@@ -135,7 +135,7 @@ function write(path: string, content: string) {
 
 const remoteSha = () => repo.git("--git-dir", repo.remoteDir!, "rev-parse", `refs/heads/${BRANCH}`);
 const commitsOnBranch = () => repo.git("-C", lease.path, "log", "--format=%s", `${lease.baseSha}..HEAD`).split("\n").filter(Boolean);
-const posts = () => github.requests.filter((r) => r.method === "POST");
+const posts = () => github.requests.filter((r) => r.method === "POST" && r.path === `/repos/${REPO}/pulls`);
 
 type Plan = { commits: { message: string; hunks: string[]; tests: string[] }[]; pr: { title: string; body: string } };
 
@@ -156,11 +156,11 @@ function args(overrides: { plan?: Plan; draft?: boolean; dependsOn?: string[] } 
  * Un `ctx.once` que guarda como el motor y, si `crashAfter` es una etapa, "muere" justo después de
  * hacer su efecto y antes de guardarla: el peor corte posible.
  */
-function durableCtx(crashAfter?: string) {
+function durableCtx(crashAfter?: string, runId: RunId = newId("run")) {
   const saved = new Map<string, unknown>();
   let crash = crashAfter;
   const ctx: ActionCtx = {
-    runId: newId("run"),
+    runId,
     stepId: newId("stp"),
     key: "run:publish:1",
     signal: new AbortController().signal,
@@ -176,6 +176,33 @@ function durableCtx(crashAfter?: string) {
     },
   };
   return ctx;
+}
+
+/** Una corrida sobre una issue con esa key de un tracker cualquiera (sin pasar por el motor). Con `key` vacía, como un tracker sin key. */
+function issueRun(key: string, tracker = "linear"): RunId {
+  const runId = newId("run");
+  const issueId = newId("iss");
+  const sqlite = store.db.$client;
+  sqlite.exec("PRAGMA foreign_keys = OFF");
+  sqlite
+    .prepare(
+      `INSERT INTO issues (id, tracker, tracker_id, key, url, project_id, tracker_project, title, body, status, raw_status, priority, labels, relations, remote_updated_at)
+       VALUES (?, ?, 'x', ?, '', 'prj_x', 'x', 't', '', 'in_progress', 'In Progress', 0, '[]', '{"blocks":[],"blockedBy":[],"related":[]}', 0)`,
+    )
+    .run(issueId, tracker, key);
+  sqlite
+    .prepare(
+      `INSERT INTO runs (id, subject_type, subject_id, flow_def_id, flow_version, roles, lane, status, writes, params, rounds, started_at)
+       VALUES (?, 'issue', ?, 'def_x', 1, '{}', 'dev', 'running', 1, '{}', '{}', 0)`,
+    )
+    .run(runId, issueId);
+  sqlite.exec("PRAGMA foreign_keys = ON");
+  return runId;
+}
+
+async function publishTitled(title: string, runId: RunId) {
+  await publish.run(args({ plan: plan({ pr: { title, body: BODY } }) }), durableCtx(undefined, runId));
+  return github.pulls()[0]?.title;
 }
 
 function openedEvents() {
@@ -198,6 +225,43 @@ describe("pr.publish", () => {
     for (const request of github.requests.filter((r) => r.path === `/repos/${REPO}/pulls`)) {
       expect(request.authorization).toBe(`bearer ${TOKEN}`);
     }
+  });
+
+  test.each([
+    ["sin key en el título", "Add feature", "[ENG-9218] Add feature"],
+    ["con la key ya al inicio", "[ENG-9218] Add feature", "[ENG-9218] Add feature"],
+    ["con la key al final", "Add feature [ENG-9218]", "[ENG-9218] Add feature"],
+    ["con la key en medio", "Add [ENG-9218] feature", "[ENG-9218] Add feature"],
+    ["con otro prefijo que no es la key", "[CLA-1] Add feature", "[ENG-9218] [CLA-1] Add feature"],
+  ])("el título parte con [KEY] de la issue, %s", async (_, title, expected) => {
+    expect(await publishTitled(title, issueRun("ENG-9218"))).toBe(expected);
+  });
+
+  test("sin key (corrida sin issue o tracker sin key) el título queda como lo escribió el committer", async () => {
+    expect(await publishTitled("Add feature", newId("run"))).toBe("Add feature");
+  });
+
+  test("una issue sin key no agrega nada al título", async () => {
+    expect(await publishTitled("Add feature", issueRun("", "local"))).toBe("Add feature");
+  });
+
+  test("el PR nuevo se asigna a la cuenta con que se publica", async () => {
+    await publish.run(args(), durableCtx());
+
+    expect(github.pulls()[0]?.assignees).toEqual([{ login: ACCOUNT }]);
+  });
+
+  test("si GitHub no deja asignar, el PR se publica igual y queda una nota", async () => {
+    github.denyAssignees();
+
+    const result = await publish.run(args(), durableCtx());
+
+    expect(result).toMatchObject({ outcome: "ok", output: { pr: { number: 1 } } });
+    expect(github.pulls()[0]?.assignees).toEqual([]);
+    expect(openedEvents()).toHaveLength(1);
+    expect(store.db.$client.prepare("SELECT kind, title FROM decisions").all()).toEqual([
+      { kind: "note", title: `${REPO}#1 quedó sin assignee` },
+    ]);
   });
 
   test("el cuerpo sale sin las secciones omitidas ni firmas de una IA, y abre con la dependencia", async () => {

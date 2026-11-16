@@ -78,6 +78,7 @@ export interface SimPull {
   merged_at: string | null;
   head: { label: string; ref: string; sha: string };
   base: { label: string; ref: string; sha: string | undefined };
+  assignees: { login: string }[];
 }
 
 export interface GitHubSimOptions {
@@ -167,6 +168,8 @@ export interface GitHubSim {
   quotaRemaining(resource: QuotaResource): number;
   /** Desde ahora, todo responde 401 `Bad credentials`. */
   revokeToken(): void;
+  /** Desde ahora, asignar un PR (`POST /issues/:n/assignees`) responde 403, como una cuenta sin permiso de escritura. */
+  denyAssignees(): void;
   /** Si la GitHub App está instalada para quien llama (`GET /user/installations`); por defecto sí. */
   setAppInstalled(installed: boolean): void;
   close(): Promise<void>;
@@ -217,6 +220,7 @@ interface PrData {
   /** Checks por commit: un commit nuevo empieza sin ninguno. */
   contexts: Map<string, RawContext[]>;
   requested: Actor[];
+  assignees: Actor[];
   labels: PrNode["labels"];
   /** Cuántas lecturas de detalle por GraphQL siguen viendo la mergeabilidad en `UNKNOWN`. */
   unknownReads: number;
@@ -276,6 +280,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     search: { remaining: QUOTA_LIMITS.search, reset: QUOTA_RESET },
   };
   let revoked = false;
+  let assigneesDenied = false;
   let appInstalled = true;
   let clock = CLOCK_START;
   let nextId = 1000;
@@ -429,6 +434,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     merged_at: pr.merged?.at ?? null,
     head: { label: `${owner}:${pr.head}`, ref: pr.head, sha: headSha(pr) },
     base: { label: `${owner}:${pr.base}`, ref: pr.base, sha: branchSha(pr.base) },
+    assignees: pr.assignees.map(({ login }) => ({ login })),
   });
   const commentJson = (c: SimComment, pr: PrData) => ({
     id: c.id,
@@ -486,6 +492,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       threads: [],
       contexts: new Map(),
       requested: [],
+      assignees: [],
       labels: [],
       unknownReads: 0,
     };
@@ -696,6 +703,18 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       (_, __, pr) => {
         const found = pr();
         return found ? json(200, found.issueComments.map((c) => commentJson(c, found))) : notFound();
+      },
+    ],
+    [
+      "POST",
+      /^\/issues\/(\d+)\/assignees$/,
+      (_, { body }, pr) => {
+        const found = pr();
+        if (!found) return notFound();
+        if (assigneesDenied) return json(403, { message: "Resource not accessible by personal access token", documentation_url: DOCS, status: "403" });
+        const logins = (body as { assignees?: string[] } | undefined)?.assignees ?? [];
+        for (const login of logins) if (!found.assignees.some((a) => a.login === login)) found.assignees.push(actor(login));
+        return json(201, pullJson(found));
       },
     ],
     [
@@ -986,6 +1005,9 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     quotaRemaining: (resource) => quotas[resource].remaining,
     setQuota(resource, { remaining, resetAt }) {
       quotas[resource] = { remaining, reset: resetAt === undefined ? quotas[resource].reset : Math.floor(resetAt / 1000) };
+    },
+    denyAssignees() {
+      assigneesDenied = true;
     },
     revokeToken() {
       revoked = true;

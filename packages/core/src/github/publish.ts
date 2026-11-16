@@ -1,4 +1,4 @@
-import type { PrRef, RunId } from "@clanker/api";
+import type { IssueId, PrRef, RunId } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { and, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
@@ -11,7 +11,7 @@ import { claimPr } from "../flows/subjects";
 import type { Packs } from "../packs/packs";
 import type { Recipes } from "../recipe/recipe";
 import { newId } from "../store/conventions";
-import { type CombinedBaseParent, combinedBases, prParents, pullRequests, runs, workspaces as workspaceRows } from "../store/schema";
+import { type CombinedBaseParent, combinedBases, issues, prParents, pullRequests, runs, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
 import { RebaseError, type RepoConfig, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
@@ -50,7 +50,9 @@ export interface PrPublishDeps {
  * `pr.publish` (`docs/design.html#d-flows`, etapas y efectos externos): `commits.apply`, push con lease
  * y PR draft, cada etapa con `ctx.once`, así que un reintento tras un corte retoma donde quedó y no
  * duplica commits, push ni PR. El PR sale con la identidad de la cuenta del repo (su token) y sin
- * líneas que lo firmen como hecho por una IA.
+ * líneas que lo firmen como hecho por una IA. El título parte con `[KEY]` de la issue de la corrida (`titleWithKey`,
+ * sea cual sea su tracker) y el PR nuevo se asigna a esa misma cuenta; si GitHub no deja asignarlo, la publicación sigue
+ * y queda una nota en la Bandeja.
  *
  * - Commits: los de `commits.apply` (que ya reconoce los suyos si el corte llegó antes de guardarse).
  * - Push: `preparePush` y `workspaces.push` con lease. Un lease rechazado (alguien más pusheó) no se
@@ -99,7 +101,7 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
 
     const [owner = "", name = ""] = remote.repo.split("/");
     const pack = packs.packFor({ githubOrg: owner });
-    const title = cleanMessage(plan.pr.title).split("\n")[0]!.trim();
+    const title = titleWithKey(cleanMessage(plan.pr.title).split("\n")[0]!.trim(), issueKey(store, ctx.runId));
     const { baseRef, parents } = settled;
     const body = prBody(cleanMessage(plan.pr.body), pack.conventions.pr?.omitSections ?? [], args.dependsOn, parents);
 
@@ -110,6 +112,7 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
         const existing = await findOpenPull(client, owner, name, ws.branch);
         const pull = existing ?? (await openPull(client, owner, name, { title, body, head: ws.branch, base: baseRef, draft: args.draft }));
         recordPull(store, ctx, { repoId: row.repoId, repo: remote.repo, pull, headRef: ws.branch, baseRef, parentBranches: parents.map((p) => p.branch) });
+        if (!existing) await assignOrNote(store, client, ctx.runId, { owner, repo: name, number: pull.number, assignee: remote.account });
         return pull;
       } catch (error) {
         if (error instanceof RequestError && error.status === 401) deps.connections.markRevoked("github", remote.account, "core");
@@ -208,6 +211,46 @@ async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, r
     }),
   );
   return { head: tip, baseRef, parents };
+}
+
+/** La key de la issue de la corrida, o `undefined` si la corrida no es de una issue o su tracker no le da key. */
+function issueKey(store: Store, runId: RunId): string | undefined {
+  const run = store.db.select().from(runs).where(eq(runs.id, runId)).get();
+  if (run?.subjectType !== "issue") return undefined;
+  return store.db.select({ key: issues.key }).from(issues).where(eq(issues.id, run.subjectId as IssueId)).get()?.key || undefined;
+}
+
+/** El título como `[KEY] título`: un `[KEY]` que ya traiga, al inicio, al final o en medio, se saca y queda solo al inicio. */
+export function titleWithKey(title: string, key: string | undefined): string {
+  if (!key) return title;
+  const bare = title.replaceAll(`[${key}]`, " ").replace(/\s+/g, " ").trim();
+  return bare ? `[${key}] ${bare}` : `[${key}]`;
+}
+
+/**
+ * Asigna el PR a la cuenta con que se publicó. Un fallo (p. ej. sin permiso) no tumba la publicación: queda una nota
+ * en la Bandeja. Un 401 sí lo relanza, para que el flujo del 401 de `pr.publish` marque la conexión revocada.
+ */
+async function assignOrNote(store: Store, client: GitHubClient, runId: RunId, pr: { owner: string; repo: string; number: number; assignee: string }): Promise<void> {
+  try {
+    await client.request("POST /repos/{owner}/{repo}/issues/{issue_number}/assignees", {
+      owner: pr.owner,
+      repo: pr.repo,
+      issue_number: pr.number,
+      assignees: [pr.assignee],
+    });
+  } catch (error) {
+    if (error instanceof RequestError && error.status === 401) throw error;
+    const why = error instanceof Error ? error.message : String(error);
+    store.tx((tx) =>
+      openDecision(tx, {
+        kind: "note",
+        title: `${pr.owner}/${pr.repo}#${pr.number} quedó sin assignee`,
+        body: `No se pudo asignar el PR a ${pr.assignee}: ${why}. La publicación siguió; asígnalo a mano si hace falta.`,
+        runId,
+      }),
+    );
+  }
 }
 
 async function findOpenPull(client: GitHubClient, owner: string, repo: string, branch: string): Promise<Pull | undefined> {
