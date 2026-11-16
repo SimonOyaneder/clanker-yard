@@ -409,8 +409,8 @@ test("las resueltas guardan lo que se eligió y sin pendientes la bandeja dice q
 const openedUrl = (app: ElectronApplication) => app.evaluate(() => (globalThis as { openedUrl?: string }).openedUrl);
 const approve = async (app: ElectronApplication) => expect((await fetch((await openedUrl(app))!)).ok).toBe(true);
 const forgetOpened = (app: ElectronApplication) => app.evaluate(() => ((globalThis as { openedUrl?: string }).openedUrl = undefined));
-// El core de demo lee `demo-control.json` cada 200 ms: lo que hace "del lado de GitHub" no es instantáneo, así que lo que
-// depende de eso se reintenta (`toPass`) hasta ver el cambio en la vista, sin un sleep fijo.
+// El core de demo lee `demo-control.json` cada 200 ms (y en cada lectura del reloj): lo que hace "del lado de GitHub" no
+// es instantáneo, así que lo que depende de eso se reintenta (`toPass`) hasta ver el cambio en la vista, sin un sleep fijo.
 
 test("conectar con la GitHub App muestra el código en vivo, y al aprobarlo la cuenta aparece sola con su token", async ({ app, window: page }) => {
   await app.evaluate(({ ipcMain }) => {
@@ -513,10 +513,8 @@ test("con el refresh token de la App vencido o rechazado, la tarjeta pide volver
   await snapBoth(page, "github-app-vencido");
 
   // En el día 41 el access token (8 h) ya no sirve y GitHub rechaza el refresh: al revisar la instalación el core la deja revocada.
+  // El demo aplica el reloj y el refresh rechazado en la misma lectura: revisar la instalación ya ve los dos.
   setDemoControl(home, { clockDays: 41, githubRefresh: "rejected" });
-  // El reloj nuevo rige al instante, pero el GitHub falso invalida los refresh tokens en su tick de 200 ms y eso no se ve en
-  // ningún lado: si la tarjeta revisa antes, el refresh sale bien y la cuenta nunca se revoca. Única espera fija del archivo.
-  await page.waitForTimeout(500);
   await reload();
   await expect(github.getByText("revocada", { exact: true })).toBeVisible();
   await expect(github.getByText("GitHub rechazó la renovación del token")).toBeVisible();
