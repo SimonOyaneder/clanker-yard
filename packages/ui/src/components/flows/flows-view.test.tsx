@@ -176,8 +176,8 @@ test("sacarle el review de lore desde el canvas: se guarda con su diff y queda c
 test("la paleta explica cada tipo de paso y agregar uno lo deja elegido, suelto y marcado", async () => {
   await openCanvas()
   const palette = screen.getByRole("region", { name: "Paleta de pasos" })
-  expect(within(palette).getByText("espera una decisión tuya")).toBeTruthy()
-  expect(within(palette).getByText(/un agente hace una tarea/)).toBeTruthy()
+  expect(within(palette).getByRole("button", { name: /gate/ }).getAttribute("title")).toBe("espera una decisión tuya")
+  expect(within(palette).getByRole("button", { name: /agent/ }).getAttribute("title")).toMatch(/un agente hace una tarea/)
   fireEvent.click(within(palette).getByRole("button", { name: /gate/ }))
   const panel = await screen.findByRole("complementary", { name: "Propiedades de gate" })
   expect(within(panel).getByText("Cada opción es un botón de la decisión y una salida del paso.")).toBeTruthy()
@@ -199,8 +199,10 @@ test("un problema del core se marca en el nodo y en la lista, y lleva al paso", 
   flow.nodes.plan!.role = "no-existe"
   fireEvent.change(area, { target: { value: JSON.stringify(flow, null, 2) } })
   await showCanvas()
-  await screen.findByRole("list", { name: "Problemas por arreglar" })
   expect(await screen.findByLabelText("1 problema en plan")).toBeTruthy()
+  const bar = await screen.findByRole("button", { name: /1 error/ })
+  expect(bar.getAttribute("aria-expanded")).toBe("false")
+  fireEvent.click(bar)
   const list = await screen.findByRole("list", { name: "Problemas por arreglar" })
   expect((screen.getByRole("button", { name: /^Guardar…/ }) as HTMLButtonElement).disabled).toBe(true)
   fireEvent.click(within(list).getByRole("button", { name: /no existe el rol "no-existe"/ }))
@@ -335,4 +337,27 @@ test("una def del repo dice de qué repo, archivo y commit viene", async () => {
   expect(await screen.findByText(/Del repo api/)).toBeTruthy()
   expect(screen.getByText(".clanker/flows/del-repo.json", { selector: "span.font-mono" })).toBeTruthy()
   expect(screen.getByText("0123456", { selector: "span.font-mono" })).toBeTruthy()
+})
+
+test("al editar un flujo la vista es solo el editor: sin lista ni historial, con propiedades solo al elegir un paso y pantalla completa", async () => {
+  await openCanvas()
+  // jsdom no aplica las clases: la lista sigue montada pero escondida.
+  const listColumn = () => screen.getByRole("list", { name: /^Flujos$/, hidden: true }).parentElement!
+  expect(listColumn().className).toContain("hidden")
+  expect(screen.queryByText("Historial de versiones")).toBeNull()
+  expect(screen.queryByRole("complementary")).toBeNull()
+
+  const panel = await openStep("checks")
+  fireEvent.click(screen.getByRole("button", { name: "Cerrar propiedades" }))
+  expect(panel.isConnected).toBe(false)
+
+  fireEvent.click(screen.getByRole("button", { name: "Pantalla completa" }))
+  expect(screen.getByRole("button", { name: "Salir de pantalla completa" })).toBeTruthy()
+  fireEvent.keyDown(document.body, { key: "Escape" })
+  expect(screen.getByRole("button", { name: "Pantalla completa" })).toBeTruthy()
+  expect(screen.getByRole("button", { name: /^Guardar…/ })).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: "Cancelar" }))
+  expect(await screen.findByText("Historial de versiones")).toBeTruthy()
+  expect(listColumn().className).not.toContain("hidden")
 })

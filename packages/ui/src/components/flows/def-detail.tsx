@@ -1,6 +1,6 @@
 import { type DefRecord, type DefWrite, type DefWriteKind, FlowDef, Profile, Role } from "@clanker/api"
 import { Archive, ArchiveRestore, Braces, Copy, GitPullRequestDraft, Pencil, Undo2 } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { Ago } from "@/components/common"
@@ -25,11 +25,13 @@ interface Props {
   defs: DefRecord[]
   /** Quien tiene la lista la relee tras cada cambio, y abre la def que se acaba de crear. */
   onChanged: (opened?: DefRecord) => void
+  /** Un flujo en edición pide toda la vista: quien tiene la lista la esconde mientras `on`. */
+  onFocusChange?: (on: boolean) => void
 }
 
 // Una def a la vista: de dónde viene, quién la usa, su contenido en la versión elegida y el historial de versiones.
 // Las acciones son las que el core acepta: duplicar cualquiera; archivar y restaurar solo lo tuyo.
-export function DefDetail({ row, defs, onChanged }: Props) {
+export function DefDetail({ row, defs, onChanged, onFocusChange }: Props) {
   const appData = useAppData()
   const { def } = row
   const [version, setVersion] = useState<number | null>(null)
@@ -45,6 +47,13 @@ export function DefDetail({ row, defs, onChanged }: Props) {
   const readOnly = isReadOnly(def)
   const archived = def.archivedAt !== null
   const editable = !readOnly && !archived
+
+  const focused = editing === "json" && kind === "flow"
+  useEffect(() => {
+    if (!focused) return
+    onFocusChange?.(true)
+    return () => onFocusChange?.(false)
+  }, [focused, onFocusChange])
 
   const duplicate = async () => {
     const copy = duplicateOf(def, defs)
@@ -102,6 +111,8 @@ export function DefDetail({ row, defs, onChanged }: Props) {
     )
   // Archivar lo que un proyecto usa y nada más lo reemplaza lo deja sin eso: antes se pregunta.
   const askArchive = () => (row.projects.length > 0 && row.overrides === null ? setConfirmArchive(true) : void archive())
+
+  if (focused) return <DefEditor def={def} kind={kind} onCancel={() => setEditing(null)} onSaved={saved} />
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto px-6 py-5">

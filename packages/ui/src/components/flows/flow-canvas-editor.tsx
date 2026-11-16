@@ -1,7 +1,7 @@
 import { type DefIssue, FlowDef, type Node, Role } from "@clanker/api"
 import { Background, BackgroundVariant, Controls, type Connection, type Edge as FlowEdgeType, MarkerType, type NodeChange, ReactFlow, ReactFlowProvider, type EdgeChange } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { LayoutGrid } from "lucide-react"
+import { ChevronUp, Info, LayoutGrid, TriangleAlert, X } from "lucide-react"
 import { useMemo, useRef, useState } from "react"
 import { useAppData } from "@/app-data"
 import { CanvasNode, type CanvasFlowNode } from "@/components/flows/canvas-node"
@@ -16,6 +16,7 @@ import { addStep, branchOwners, connect, edgeSpec, ENDS, marksOf, NODE_SUMMARY, 
 import { describePath, plain } from "@/lib/def-edit"
 import { readPref, writePref } from "@/lib/prefs"
 import { shapeOf } from "@/lib/run-graph"
+import { cn } from "@/lib/utils"
 
 const nodeTypes = { step: CanvasNode }
 const edgeTypes = { flow: FlowEdge }
@@ -179,35 +180,34 @@ function Editor({ defId, flow, onChange, errors, warnings }: Props) {
   const select = (id: string) => setSelection({ nodes: [id], edges: [] })
 
   return (
-    <div className="flex flex-col gap-3">
-      <section aria-label="Paleta de pasos" className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-[13px] font-medium">Agregar un paso</h3>
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <section aria-label="Paleta de pasos" className="flex flex-none flex-wrap items-center gap-1.5">
+        <span className="text-xs font-medium">Agregar paso</span>
+        {NODE_TYPES.map((type) => {
+          const { Icon } = KIND[type]
+          return (
+            <button key={type} type="button" title={NODE_SUMMARY[type]} aria-description={NODE_SUMMARY[type]} onClick={() => add(type)} className="flex items-center gap-1.5 rounded-md border px-2 py-1 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none">
+              <Icon className="size-3.5 flex-none text-muted-foreground" aria-hidden />
+              <span className="font-mono text-xs">{type}</span>
+            </button>
+          )
+        })}
+        <div className="ml-auto flex items-center gap-1.5">
+          <Hint label="Arrastra el punto de una salida (abajo de cada paso) hasta otro paso para conectarlos. Con un paso o una línea elegidos, Suprimir o Retroceso los borra. Mover un paso no crea una versión: solo guardar los cambios del flujo la crea.">
+            <Button size="icon-sm" variant="ghost" aria-label="Cómo se conectan los pasos">
+              <Info />
+            </Button>
+          </Hint>
           <Hint label="Vuelve a acomodar todos los pasos como al abrir. La posición que tenían se pierde.">
             <Button size="sm" variant="secondary" onClick={() => place({})}>
               <LayoutGrid /> Ordenar solo
             </Button>
           </Hint>
         </div>
-        <div className="grid grid-cols-3 gap-1.5">
-          {NODE_TYPES.map((type) => {
-            const { Icon } = KIND[type]
-            return (
-              <button key={type} type="button" onClick={() => add(type)} className="flex items-start gap-2 rounded-md border p-2 text-left hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none">
-                <Icon className="mt-0.5 size-4 flex-none text-muted-foreground" aria-hidden />
-                <span className="flex min-w-0 flex-col">
-                  <span className="font-mono text-xs">{type}</span>
-                  <span className="text-[11px] text-pretty text-muted-foreground">{NODE_SUMMARY[type]}</span>
-                </span>
-              </button>
-            )
-          })}
-        </div>
-        <p className="text-xs text-muted-foreground">Arrastra el punto de una salida (abajo de cada paso) hasta otro paso para conectarlos. Con un paso o una línea elegidos, Suprimir o Retroceso los borra.</p>
       </section>
 
-      <div className="grid h-[600px] grid-cols-[minmax(0,1fr)_288px] overflow-hidden rounded-lg border">
-        <div role="group" aria-label={`Canvas del flujo ${flow.id}`} className="min-h-0 min-w-0 border-r">
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border">
+        <div role="group" aria-label={`Canvas del flujo ${flow.id}`} className="min-h-0 min-w-0 flex-1">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -240,33 +240,35 @@ function Editor({ defId, flow, onChange, errors, warnings }: Props) {
           </ReactFlow>
         </div>
 
-        <div className="overflow-y-auto p-3">
-          {selectedId && selectedNode ? (
-            <NodePanel
-              key={selectedId}
-              id={selectedId}
-              node={selectedNode}
-              flow={flow}
-              roles={roles}
-              flows={library.map((l) => l.slug)}
-              actions={hints.actions}
-              events={hints.events}
-              marks={marks.nodes.get(selectedId) ?? []}
-              onChange={(next) => apply((f) => setNode(f, selectedId, next))}
-              onStart={() => apply((f) => setStart(f, selectedId))}
-              onRemove={() => {
-                apply((f) => removeNodes(f, [selectedId]))
-                setSelection({ nodes: [], edges: [] })
-              }}
-            />
-          ) : (
-            <div className="flex flex-col gap-2 text-[13px] text-muted-foreground">
-              <p className="font-medium text-foreground">Propiedades</p>
-              <p>Elige un paso para cambiar su rol, su brief, sus rondas máximas y a dónde va según cada resultado.</p>
-              <p>Cada campo dice para qué sirve. Mover un paso no crea una versión: solo guardar los cambios del flujo la crea.</p>
+        {selectedId && selectedNode ? (
+          <div className="flex w-[300px] flex-none flex-col border-l">
+            <div className="flex flex-none items-center justify-between border-b px-3 py-1">
+              <span className="text-xs font-medium text-muted-foreground">Propiedades</span>
+              <Button size="icon-sm" variant="ghost" aria-label="Cerrar propiedades" onClick={() => setSelection({ nodes: [], edges: [] })}>
+                <X />
+              </Button>
             </div>
-          )}
-        </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              <NodePanel
+                key={selectedId}
+                id={selectedId}
+                node={selectedNode}
+                flow={flow}
+                roles={roles}
+                flows={library.map((l) => l.slug)}
+                actions={hints.actions}
+                events={hints.events}
+                marks={marks.nodes.get(selectedId) ?? []}
+                onChange={(next) => apply((f) => setNode(f, selectedId, next))}
+                onStart={() => apply((f) => setStart(f, selectedId))}
+                onRemove={() => {
+                  apply((f) => removeNodes(f, [selectedId]))
+                  setSelection({ nodes: [], edges: [] })
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <Problems errors={errors} warnings={warnings} onSelect={select} />
@@ -274,8 +276,9 @@ function Editor({ defId, flow, onChange, errors, warnings }: Props) {
   )
 }
 
-/** Todo lo que el core objeta, en claro; un clic lleva al paso del que habla. */
+/** Todo lo que el core objeta, en claro; una barra compacta con el conteo que se expande, y un clic lleva al paso del que habla. */
 export function Problems({ errors, warnings, onSelect }: { errors: readonly DefIssue[]; warnings: readonly DefIssue[]; onSelect: (id: string) => void }) {
+  const [open, setOpen] = useState(false)
   if (errors.length === 0 && warnings.length === 0) return null
   const row = (issue: DefIssue, tone: "error" | "warning") => {
     const step = /^nodes\.([^.]+)/.exec(issue.path)?.[1]
@@ -292,10 +295,21 @@ export function Problems({ errors, warnings, onSelect }: { errors: readonly DefI
       </li>
     )
   }
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  const summary = [errors.length > 0 ? count(errors.length, "error", "errores") : null, warnings.length > 0 ? count(warnings.length, "aviso", "avisos") : null].filter(Boolean).join(" y ")
   return (
-    <ul aria-label="Problemas por arreglar" className="flex flex-col gap-1 rounded-lg border p-3 text-[13px]">
-      {errors.map((e) => row(e, "error"))}
-      {warnings.map((w) => row(w, "warning"))}
-    </ul>
+    <section aria-label="Problemas del flujo" className="flex-none overflow-hidden rounded-lg border text-[13px]">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={cn("flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent", errors.length > 0 ? "text-destructive" : "text-amber-700 dark:text-amber-300")}>
+        <TriangleAlert className="size-3.5 flex-none" aria-hidden />
+        <span className="flex-1 font-medium">{summary}</span>
+        <ChevronUp className={cn("size-3.5 flex-none transition-transform", open && "rotate-180")} aria-hidden />
+      </button>
+      {open ? (
+        <ul aria-label="Problemas por arreglar" className="flex max-h-36 flex-col gap-1 overflow-y-auto border-t p-3">
+          {errors.map((e) => row(e, "error"))}
+          {warnings.map((w) => row(w, "warning"))}
+        </ul>
+      ) : null}
+    </section>
   )
 }

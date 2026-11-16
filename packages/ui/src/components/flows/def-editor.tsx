@@ -1,4 +1,5 @@
 import { type DefRecord, type DefWrite, type DefWriteKind, FlowDef } from "@clanker/api"
+import { Maximize2, Minimize2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { lineIssues, type LineIssue, syntaxIssue } from "@/lib/def-edit"
 import { messageOf } from "@/lib/undoable"
+import { cn } from "@/lib/utils"
 
 const DEBOUNCE_MS = 300
 
@@ -38,6 +40,7 @@ export function DefEditor({ def, kind, onSaved, onCancel }: Props) {
   const [review, setReview] = useState(false)
   const [saving, setSaving] = useState(false)
   const [mode, setMode] = useState<"canvas" | "json">(kind === "flow" ? "canvas" : "json")
+  const [fullscreen, setFullscreen] = useState(false)
   const latest = useRef(0)
   // El flujo que el canvas dibuja: el texto, si es JSON y tiene la forma de un flujo.
   const flow = useMemo(() => {
@@ -79,6 +82,16 @@ export function DefEditor({ def, kind, onSaved, onCancel }: Props) {
     return () => clearTimeout(timer)
   }, [text, appData, kind, def.id])
 
+  // Escape sale de pantalla completa (no de la edición: no se pierde lo escrito). Un menú o diálogo abierto se queda con su Escape.
+  useEffect(() => {
+    if (!fullscreen || review) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) setFullscreen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [fullscreen, review])
+
   const save = async () => {
     setSaving(true)
     try {
@@ -96,42 +109,60 @@ export function DefEditor({ def, kind, onSaved, onCancel }: Props) {
   const unchanged = text === original || (dry !== null && !dry.changed)
   const status = issues.length > 0 ? `${issues.length} ${issues.length === 1 ? "problema" : "problemas"} por arreglar` : checking || !dry ? "Revisando…" : unchanged ? "Sin cambios" : `${dry.diff.length} ${dry.diff.length === 1 ? "cambio" : "cambios"} por guardar`
 
+  // Un flujo se edita enfocado: el canvas toma todo el alto y los botones van arriba, siempre a la vista.
+  const focused = kind === "flow"
+  const actions = (
+    <div className="flex flex-none items-center gap-2">
+      <Button size="sm" disabled={issues.length > 0 || checking || !dry || unchanged || saving} onClick={() => setReview(true)}>
+        Guardar…
+      </Button>
+      <Button size="sm" variant="secondary" onClick={onCancel}>
+        Cancelar
+      </Button>
+      <span role="status" className="text-xs text-muted-foreground">
+        {status}
+      </span>
+    </div>
+  )
+  const note = <p className={cn("text-[13px] text-muted-foreground", focused && "min-w-0 flex-1 truncate")} title="Las corridas en curso siguen con la versión con que empezaron: lo que guardes vale para las corridas nuevas.">Las corridas en curso siguen con la versión con que empezaron: lo que guardes vale para las corridas nuevas.</p>
+
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-[13px] text-muted-foreground">Las corridas en curso siguen con la versión con que empezaron: lo que guardes vale para las corridas nuevas.</p>
-      {kind === "flow" ? (
-        <Tabs value={mode} onValueChange={(m) => setMode(m as typeof mode)}>
-          <TabsList>
-            <TabsTrigger value="canvas">Canvas</TabsTrigger>
-            <TabsTrigger value="json">JSON</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      ) : null}
-      {mode === "canvas" && flow ? (
-        <FlowCanvasEditor defId={def.id} flow={flow} onChange={(next) => setText(JSON.stringify(next, null, 2))} errors={dry?.errors ?? []} warnings={dry?.warnings ?? []} />
-      ) : mode === "canvas" ? (
-        <div className="flex flex-col gap-2 text-[13px]">
-          <p>El flujo no se puede dibujar todavía: su contenido no tiene la forma de un flujo. Arréglalo en la pestaña JSON.</p>
-          <ul aria-label="Problemas por arreglar" className="flex flex-col gap-1 rounded-lg border p-3 text-destructive">
-            {issues.map((i) => (
-              <li key={`${i.line}:${i.message}`}>{i.message}</li>
-            ))}
-          </ul>
+    <div className={cn("flex flex-col gap-3", focused && "h-full min-h-0 gap-2 p-3", fullscreen && "fixed inset-0 z-50 h-auto bg-background")}>
+      {focused ? (
+        <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="font-mono text-xs">{def.slug}</span>
+          <Tabs value={mode} onValueChange={(m) => setMode(m as typeof mode)}>
+            <TabsList>
+              <TabsTrigger value="canvas">Canvas</TabsTrigger>
+              <TabsTrigger value="json">JSON</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {note}
+          {actions}
+          <Button size="sm" variant="secondary" aria-pressed={fullscreen} onClick={() => setFullscreen(!fullscreen)}>
+            {fullscreen ? <Minimize2 /> : <Maximize2 />} {fullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+          </Button>
         </div>
       ) : (
-        <JsonEditor label={`Contenido de ${def.slug} en JSON`} value={text} onChange={setText} issues={issues} />
+        note
       )}
-      <div className="flex items-center gap-2">
-        <Button size="sm" disabled={issues.length > 0 || checking || !dry || unchanged || saving} onClick={() => setReview(true)}>
-          Guardar…
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onCancel}>
-          Cancelar
-        </Button>
-        <span role="status" className="text-xs text-muted-foreground">
-          {status}
-        </span>
+      <div className={cn(focused && "min-h-0 flex-1")}>
+        {mode === "canvas" && flow ? (
+          <FlowCanvasEditor defId={def.id} flow={flow} onChange={(next) => setText(JSON.stringify(next, null, 2))} errors={dry?.errors ?? []} warnings={dry?.warnings ?? []} />
+        ) : mode === "canvas" ? (
+          <div className="flex flex-col gap-2 text-[13px]">
+            <p>El flujo no se puede dibujar todavía: su contenido no tiene la forma de un flujo. Arréglalo en la pestaña JSON.</p>
+            <ul aria-label="Problemas por arreglar" className="flex flex-col gap-1 rounded-lg border p-3 text-destructive">
+              {issues.map((i) => (
+                <li key={`${i.line}:${i.message}`}>{i.message}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <JsonEditor label={`Contenido de ${def.slug} en JSON`} value={text} onChange={setText} issues={issues} fill={focused} />
+        )}
       </div>
+      {focused ? null : actions}
       {review && dry ? <ChangeDialog title={`Guardar ${def.slug}`} confirmLabel="Guardar versión nueva" write={dry} kind={kind} onConfirm={() => void save()} onCancel={() => setReview(false)} /> : null}
     </div>
   )

@@ -11,13 +11,15 @@ interface Props {
   /** Problemas ya ubicados en una línea (`lib/def-edit`): cada uno se marca en su línea y se lista debajo. */
   issues: readonly LineIssue[]
   label: string
+  /** Ocupa el alto que le dé quien lo contiene, con scroll propio, en vez de crecer hasta 480 px. */
+  fill?: boolean
 }
 
 /**
  * Editor de JSON sin dependencias: un textarea con números de línea y las líneas con problema marcadas.
  * No sabe de flujos ni de roles: quien lo usa valida y le pasa los problemas.
  */
-export function JsonEditor({ value, onChange, issues, label }: Props) {
+export function JsonEditor({ value, onChange, issues, label, fill }: Props) {
   const area = useRef<HTMLTextAreaElement>(null)
   const count = value.split("\n").length
   const byLine = new Map<number, string[]>()
@@ -32,8 +34,8 @@ export function JsonEditor({ value, onChange, issues, label }: Props) {
   }
 
   return (
-    <div className="flex min-h-0 flex-col gap-2">
-      <div className="max-h-[480px] min-h-40 overflow-auto rounded-lg border bg-muted/20 font-mono text-xs">
+    <div className={cn("flex min-h-0 flex-col gap-2", fill && "h-full")}>
+      <div className={cn("overflow-auto rounded-lg border bg-muted/20 font-mono text-xs", fill ? "min-h-0 flex-1" : "max-h-[480px] min-h-40")}>
         <div className="relative flex min-w-max" style={{ lineHeight: `${LINE}px` }}>
           <ol aria-hidden className="sticky left-0 z-10 flex-none border-r bg-muted py-2 text-right text-muted-foreground tabular-nums select-none">
             {Array.from({ length: count }, (_, i) => (

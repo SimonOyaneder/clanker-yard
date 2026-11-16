@@ -38,6 +38,8 @@ export function FlowsView({ projects }: { projects: ClankerProject[] }) {
   const [showArchived, setShowArchived] = useState(false)
   const [showInternal, setShowInternal] = useState(false)
   const [creatingProfile, setCreatingProfile] = useState(false)
+  // Editando un flujo la vista es solo el editor: sin pestañas ni lista.
+  const [editingFlow, setEditingFlow] = useState(false)
 
   const flows = useLiveQuery("library:flow", () => appData.defs("flow", { includeArchived: true }))
   const roles = useLiveQuery("library:role", () => appData.defs("role", { includeArchived: true }))
@@ -66,7 +68,7 @@ export function FlowsView({ projects }: { projects: ClankerProject[] }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-none flex-wrap items-center gap-3 border-b px-4 py-2">
+      <div className={cn("flex flex-none flex-wrap items-center gap-3 border-b px-4 py-2", editingFlow && "hidden")}>
         <Tabs value={tab} onValueChange={(v) => (setTab(v as DefWriteKind), setSelectedId(null))} className="gap-0">
           <TabsList>
             {KINDS.map((kind) => (
@@ -106,8 +108,8 @@ export function FlowsView({ projects }: { projects: ClankerProject[] }) {
       ) : defs.length === 0 ? (
         <Message>{NOTHING_YET[tab]}</Message>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(340px,480px)_minmax(0,1fr)]">
-          <div className="min-h-0 overflow-y-auto border-r">
+        <div className={cn("grid min-h-0 flex-1", editingFlow ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[minmax(340px,480px)_minmax(0,1fr)]")}>
+          <div className={cn("min-h-0 overflow-y-auto border-r", editingFlow && "hidden")}>
             {rows.length === 0 ? <p className="px-4 py-6 text-[13px] text-muted-foreground">No hay nada que mostrar con los archivados ocultos.</p> : null}
             <ul aria-label={KIND_LABEL[tab].plural} className="divide-y">
               {choosable.map((row) => (
@@ -141,7 +143,7 @@ export function FlowsView({ projects }: { projects: ClankerProject[] }) {
           </div>
           <div className="min-h-0 min-w-0">
             {current ? (
-              <DefDetail key={current.def.id} row={current} defs={defs} onChanged={open} />
+              <DefDetail key={current.def.id} row={current} defs={defs} onChanged={open} onFocusChange={setEditingFlow} />
             ) : (
               <p className="px-6 py-6 text-[13px] text-muted-foreground">Elige un {KIND_LABEL[tab].singular} de la lista para ver su contenido y sus versiones.</p>
             )}
