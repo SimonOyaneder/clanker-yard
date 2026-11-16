@@ -129,6 +129,7 @@ type Issue {
   description: String
   priority: Float!
   estimate: Float
+  branchName: String!
   labels(first: Int, after: String): IssueLabelConnection!
   assignee: User
   state: WorkflowState!

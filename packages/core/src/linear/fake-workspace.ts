@@ -276,6 +276,7 @@ export function createFakeWorkspace({ workspace = "clanker-yard" }: { workspace?
       description: issue.description,
       priority: issue.priority,
       estimate: issue.estimate,
+      branchName: `fake/${issue.identifier.toLowerCase()}-${issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`,
       labels: (page: Page) => connection(issue.labels.map((name) => ({ id: `label:${name}`, name })), page),
       assignee: userNode(issue.assignee),
       state: stateNode(issue.state),

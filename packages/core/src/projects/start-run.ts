@@ -10,6 +10,7 @@ import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../workspaces/repos";
 import { ProjectNotFoundError, type Projects } from "./projects";
 import type { IssuePlan } from "./issue-repos";
+import { issueBranch } from "./branch-name";
 import { issuePlan } from "./repo-question";
 
 /** La issue no está en el caché de issues. */
@@ -33,6 +34,9 @@ export interface RunStarter {
    * Reclama la issue en su tracker y lanza el flujo del proyecto (o `flow`) sobre ella. El flujo recibe
    * `repo` y `base` (su branch por defecto) si los declara; `flowParams` del proyecto (solo con su flujo por
    * defecto; su `repo` solo en un proyecto sin repos) y `params` los pisan, en ese orden (`dependsOn` se ignora si el flujo no lo declara).
+   *
+   * Si el flujo declara `branch`, la pone el core (`issueBranch`): el nombre de la issue como `eng-1234-slug`, el
+   * mismo en cada corrida de la issue.
    *
    * El repo es el que le toca a la issue (`planIssue`): el siguiente de su cadena si sus labels calzan con
    * varios repos (el flujo debe declarar `repo`), el único del proyecto o el que se eligió. Una issue
@@ -99,6 +103,11 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
         throw new RunStartError(
           `El flujo "${flow}" necesita un repo y el proyecto ${project.slug} no tiene ninguno: regístralo con repos.add y agrégalo a \`repos\` con projects.update.`,
         );
+      }
+
+      // Un flujo que declara `branch` trabaja en la branch de la issue; los que no (de proyectos viejos) siguen con su id.
+      if ("branch" in declared && params.branch === undefined) {
+        params.branch = await issueBranch(store, issue, repoId === undefined ? undefined : repos.config(repoId).path);
       }
 
       let tracker: Tracker | undefined;

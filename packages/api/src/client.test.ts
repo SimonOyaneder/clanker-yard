@@ -216,6 +216,9 @@ const router = os.router({
     byStep: os.metrics.byStep.handler(() => []),
     byIssue: os.metrics.byIssue.handler(() => []),
   },
+  branches: {
+    renameLegacy: os.branches.renameLegacy.handler(() => []),
+  },
   imports: {
     legacy: os.imports.legacy.handler(() => {
       throw new Error("no se usa en este test");

@@ -1,4 +1,5 @@
 import type { Client } from "@clanker/api";
+import { branchesRenameLegacy } from "./branches";
 import { events } from "./events";
 import { importLegacy } from "./import";
 import { mcp } from "./mcp";
@@ -34,6 +35,7 @@ const commands: Record<string, Command> = {
   "events tail": events,
   "metrics compare": metricsCompareCommand,
   "import legacy": importLegacy,
+  "branches rename-legacy": branchesRenameLegacy,
   mcp,
 };
 

@@ -4,7 +4,7 @@ import type { FlowDef, Node } from "@clanker/api";
 // datos que usan los roles de esta plantilla; el core no las nombra. Las acciones y waits que citan los
 // registran sus módulos (Workspaces, CodeHost), así que `installBuiltins` las guardará cuando existan todas.
 //
-// Desvío del diseño: `workspace.acquire` recibe `branch` (el id de la issue, como en `juguete`) en lugar de `issue`.
+// Desvío del diseño: `workspace.acquire` recibe `branch` (`$run.params.branch`, que pone el core) en lugar de `issue`.
 
 /** "Techlead clásico": el flujo del techlead sin LLM orquestador (el slug sigue siendo `techlead-clasico`: los proyectos lo citan). Llama a `pr-feedback` para el tramo externo. */
 export const TECHLEAD_CLASICO: FlowDef = {
@@ -17,6 +17,8 @@ export const TECHLEAD_CLASICO: FlowDef = {
   params: {
     repo: "RepoRef",
     base: "string",
+    /** La branch de la issue (`eng-1234-slug`): la pone el core al lanzar la corrida (`issueBranch`). */
+    branch: "string",
     /** `repo#n` de los PRs de otros repos de los que depende (los pone el Scheduler desde la cola): abren el body del PR. */
     dependsOn: { type: "string[]", default: [] },
     reviewRounds: { type: "number", default: 3 },
@@ -29,7 +31,7 @@ export const TECHLEAD_CLASICO: FlowDef = {
     ws: {
       type: "action",
       action: "workspace.acquire",
-      args: { repo: "$run.params.repo", branch: "$run.subject.id", base: "$run.params.base" },
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
       on: { ok: "plan" },
     },
     plan: {

@@ -91,6 +91,8 @@ export const Issue = z.object({
   labels: z.array(z.string()),
   assignee: Person.optional(),
   estimate: z.number().nonnegative().optional(),
+  /** El nombre de branch que sugiere el tracker (Linear: `usuario/eng-1234-slug`). */
+  branchName: z.string().min(1).optional(),
   parent: IssueRef.optional(),
   milestone: Milestone.optional(),
   relations: z.object({

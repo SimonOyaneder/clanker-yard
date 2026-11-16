@@ -483,6 +483,7 @@ export const issues = sqliteTable(
     assignee: text({ mode: "json" }).$type<Person>(),
     labels: text({ mode: "json" }).$type<string[]>().notNull(),
     estimate: real(),
+    branchName: text("branch_name"),
     parent: text({ mode: "json" }).$type<IssueRef>(),
     milestone: text({ mode: "json" }).$type<Milestone>(),
     relations: text({ mode: "json" })

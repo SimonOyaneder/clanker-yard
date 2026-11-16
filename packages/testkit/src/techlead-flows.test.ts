@@ -175,7 +175,7 @@ function finished(store: Store, runId: RunId): Promise<void> {
 }
 
 async function runTechlead(flows: Flows, store: Store, params: Record<string, unknown> = {}) {
-  const runId = flows.start("techlead-clasico", { type: "issue", id: "CLA-1" }, { repo: "rep_1", base: "main", ...params }, { profile: "eco" });
+  const runId = flows.start("techlead-clasico", { type: "issue", id: "CLA-1" }, { repo: "rep_1", base: "main", branch: "cla-1", ...params }, { profile: "eco" });
   await finished(store, runId);
   return { runId, run: flows.getRun(runId), nodes: topLevel(flows.getRun(runId)) };
 }

@@ -29,10 +29,10 @@ describe("la noche", () => {
     const sql = <T>(query: string, ...args: string[]) => night.store.db.$client.prepare(query).all(...args) as T[];
     const commentsOf = (pr: { number: number }) => github.pr(pr.number).node().comments.map((c) => c.body.split("\n")[0]);
     const issueOf = async (key: string) => (await night.client.issues.list({ projectId })).find((i) => i.ref.key === key)!;
-    /** El PR de la issue `key`: su branch lleva el id de la issue. */
+    /** El PR de la issue `key`: su branch es el `branch` de la corrida. */
     const prOf = async (key: string) => {
-      const issue = await issueOf(key);
-      return github.pulls().find((p) => p.head.ref === issue.id)!;
+      const { params } = await runOf(key);
+      return github.pulls().find((p) => p.head.ref === params.branch)!;
     };
     /** La corrida raíz de dev de la issue `key`. */
     const runOf = async (key: string) => {

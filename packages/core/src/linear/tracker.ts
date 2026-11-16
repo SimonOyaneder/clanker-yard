@@ -47,7 +47,7 @@ export interface LinearTrackerOptions {
 }
 
 const ISSUE_FIELDS = `
-  id identifier url title description priority estimate updatedAt
+  id identifier url title description priority estimate branchName updatedAt
   state { name type }
   team { id }
   assignee { id name }
@@ -133,6 +133,7 @@ interface RawIssue extends RawRef {
   description: string | null;
   priority: number;
   estimate: number | null;
+  branchName: string;
   updatedAt: string;
   state: { name: string; type: string };
   team: { id: string };
@@ -236,6 +237,7 @@ export function createLinearTracker({
       labels: raw.labels.nodes.map((l) => l.name),
       ...(raw.assignee === null ? {} : { assignee: { id: raw.assignee.id, name: raw.assignee.name } }),
       ...(raw.estimate === null ? {} : { estimate: raw.estimate }),
+      branchName: raw.branchName,
       ...(raw.parent === null ? {} : { parent: toRef(raw.parent) }),
       ...(raw.projectMilestone === null
         ? {}

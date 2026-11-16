@@ -128,7 +128,8 @@ describe("runs sobre el runtime fake", () => {
 
     // Lo que la UI necesita para dibujar la corrida: su flujo, el worktree que tomó y lo que consumió.
     expect(run.flowDef).toMatchObject({ id: "juguete", start: "acquire" });
-    expect(run.workspace).toEqual({ repo: "demo", branch: issue.id, base: "main" });
+    expect(run.params.branch).toMatch(/^prj-.*-.+/);
+    expect(run.workspace).toEqual({ repo: "demo", branch: run.params.branch, base: "main" });
     expect(run.usage).toMatchObject({ input: expect.any(Number), output: expect.any(Number) });
     expect(run.usage.input + run.usage.output).toBeGreaterThan(0);
     expect(run.steps.every((s) => s.startedAt !== null && s.endedAt !== null)).toBe(true);
@@ -181,7 +182,7 @@ describe("runs.start con los repos del proyecto", () => {
 
     const run = await client.runs.start({ projectId: project.id, issueId: frontend.id });
 
-    expect(run.params).toEqual({ repo: front.id, base: "master" });
+    expect(run.params).toEqual({ repo: front.id, base: "master", branch: expect.stringMatching(/-boton$/) });
     expect(await nextClaimed()).toMatchObject({ subject: { type: "issue", id: frontend.id }, payload: { issueId: frontend.id } });
     expect(await client.issues.get({ id: frontend.id })).toMatchObject({
       status: "in_progress",
@@ -210,7 +211,7 @@ describe("runs.start con los repos del proyecto", () => {
     const ignored = await client.runs.start({ projectId: project.id, issueId: second.id, params });
 
     expect(declared.params).toMatchObject({ dependsOn: ["api#7"] });
-    expect(ignored.params).toEqual({ repo: registered.id, base: "main" });
+    expect(ignored.params).toEqual({ repo: registered.id, base: "main", branch: expect.any(String) });
   });
 
   test("los flowParams del proyecto pisan los defaults del flujo y lo que pasa quien lanza pisa a los dos", async () => {
@@ -233,8 +234,8 @@ describe("runs.start con los repos del proyecto", () => {
     const byCaller = await client.runs.start({ projectId: project.id, issueId: second.id, params: { base: "staging" } });
 
     // El default del flujo es `main`: el flowParams del proyecto lo pisa.
-    expect(byProject.params).toEqual({ repo: registered.id, base: "release" });
-    expect(byCaller.params).toEqual({ repo: registered.id, base: "staging" });
+    expect(byProject.params).toEqual({ repo: registered.id, base: "release", branch: expect.any(String) });
+    expect(byCaller.params).toEqual({ repo: registered.id, base: "staging", branch: expect.any(String) });
   });
 
   test("un flowParam que el flujo por defecto no declara (la política de otro flujo) no rompe runs.start", async () => {

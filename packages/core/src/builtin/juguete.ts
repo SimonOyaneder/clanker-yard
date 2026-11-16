@@ -12,14 +12,14 @@ export const JUGUETE_FLOW: FlowDef = {
   trigger: { type: "manual" },
   effects: "local",
   /** `repo` y `base` los pone `runs.start` desde los repos del proyecto; `flowParams` puede fijarlos. */
-  params: { repo: "string", base: { type: "string", default: "main" } },
+  params: { repo: "string", branch: "string", base: { type: "string", default: "main" } },
   start: "acquire",
   nodes: {
     acquire: {
       type: "action",
       action: "workspace.acquire",
       // La branch es el id de la issue: único por sujeto y siempre un nombre de branch válido.
-      args: { repo: "$run.params.repo", branch: "$run.subject.id", base: "$run.params.base" },
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
       on: { ok: "saludar" },
     },
     saludar: {

@@ -1,5 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
+import { BranchRename, RenameLegacyInput } from "./branches";
 import { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubDeviceFlow, GitHubInstallations, GitHubPatForm } from "./connections";
 import {
   ArtifactHash,
@@ -732,5 +733,14 @@ const defs = {
   exportToRepo: base.input(DefExportToRepo).output(DefExported),
 };
 
-export const contract = { system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, metrics, defs, imports };
+const branches = {
+  /**
+   * Renombra las branches `iss_...` de los PRs abiertos al nombre de la issue (`eng-1234-slug`): la branch remota
+   * por la API de GitHub (que mueve el PR y la base de los PRs apilados), la local de su worktree y lo que el core
+   * guardó con el nombre viejo. Salta la issue con una corrida viva. Con `dryRun` solo lista `from → to`.
+   */
+  renameLegacy: base.input(RenameLegacyInput).output(z.array(BranchRename)),
+};
+
+export const contract = { system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, metrics, defs, imports, branches };
 export type Contract = typeof contract;
