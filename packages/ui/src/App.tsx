@@ -443,6 +443,10 @@ function Shell() {
         setSettingsFocus("queue")
         go({ module: "projects", runId: null, tab: "settings" })
       },
+      editFlow: () => {
+        setSettingsFocus("flow")
+        go({ module: "projects", runId: null, tab: "settings" })
+      },
       openExternal: host.openExternal,
       refresh,
     }),
@@ -764,6 +768,10 @@ function Shell() {
       <NewProjectDialog
         open={newProjectOpen}
         onOpenChange={setNewProjectOpen}
+        onOpenConnections={() => {
+          setNewProjectOpen(false)
+          goConnections()
+        }}
         onCreated={(created) => {
           setNewProjectOpen(false)
           live.refresh()

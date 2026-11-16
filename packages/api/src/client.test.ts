@@ -82,6 +82,11 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
   },
+  trackers: {
+    projects: os.trackers.projects.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+  },
   projects: {
     list: os.projects.list.handler(() => []),
     get: os.projects.get.handler(() => {

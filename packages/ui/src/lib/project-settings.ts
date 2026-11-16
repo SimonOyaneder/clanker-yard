@@ -110,6 +110,8 @@ export interface ConventionsDraft {
 }
 
 export interface Draft {
+  /** El proyecto del tracker (`trackerRef`); en un proyecto local no se edita. */
+  trackerRef: string
   repos: { repoId: string; labels: string[] }[]
   status: StatusCategory[]
   labels: string[]
@@ -133,6 +135,7 @@ export const managedParams = (flows: readonly DefRecord[]): string[] => allParam
 export function draftOf(project: ClankerProject, managed: readonly string[]): Draft {
   const c = project.conventions
   return {
+    trackerRef: project.trackerRef,
     repos: project.repos.map((r) => ({ repoId: r.repoId, labels: [...r.labels] })),
     status: [...(project.queueFilter.status ?? [])],
     labels: [...(project.queueFilter.labels ?? [])],
@@ -247,6 +250,7 @@ function paramValue(spec: ParamSpec | undefined, text: string): string | number 
  */
 export function patchOf(draft: Draft, base: Draft, project: ClankerProject, specs: readonly ParamSpec[]): ProjectPatch {
   const patch: ProjectPatch = {}
+  if (project.tracker !== "local" && draft.trackerRef !== base.trackerRef) patch.trackerRef = draft.trackerRef
   if (!same(draft.repos, base.repos)) patch.repos = draft.repos.map((r) => ({ repoId: r.repoId as ClankerProject["repos"][number]["repoId"], labels: r.labels }))
   if (!same([draft.status, draft.labels, draft.excludeLabels], [base.status, base.labels, base.excludeLabels])) {
     patch.queueFilter = {
@@ -290,6 +294,7 @@ export function undoPatch(project: ClankerProject, patch: ProjectPatch): Project
 /** Cada campo que cambió, con el nombre de la sección en que se edita, para el toast. */
 export function changedSections(patch: ProjectPatch): string[] {
   const names: [keyof ProjectPatch, string][] = [
+    ["trackerRef", "proyecto del tracker"],
     ["repos", "repos"],
     ["queueFilter", "filtros de la cola"],
     ["statusMapping", "mapeo de estados"],

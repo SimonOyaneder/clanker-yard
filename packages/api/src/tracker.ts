@@ -50,8 +50,16 @@ export type ProjectRef = z.infer<typeof ProjectRef>;
 export const Project = z.object({
   ref: ProjectRef,
   name: z.string().min(1),
+  /** La persona de la conexión es la lead o miembro del proyecto. Un tracker que no lo sabe lo omite. */
+  mine: z.boolean().optional(),
 });
 export type Project = z.infer<typeof Project>;
+
+/** Un proyecto del tracker como lo ofrece el selector de `projects.create`: con la cuenta (workspace) de la que sale. */
+export const TrackerProject = Project.extend({
+  account: z.string().min(1),
+});
+export type TrackerProject = z.infer<typeof TrackerProject>;
 
 export const Person = z.object({
   id: z.string().min(1),

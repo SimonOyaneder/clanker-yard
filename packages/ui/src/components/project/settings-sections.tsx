@@ -3,6 +3,8 @@ import { Ellipsis, Plus } from "lucide-react"
 import { useState } from "react"
 import type { RepoRow } from "@/app-data"
 import { Hint, Pill } from "@/components/common"
+import { DefOption } from "@/components/def-option"
+import { listsProjects, TrackerProjectPicker } from "@/components/tracker-project-picker"
 import { ChipsInput, Field, Section } from "@/components/project/settings-fields"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -12,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useAppActions } from "@/lib/app-context"
+import { defName } from "@/lib/defs"
 import { tone } from "@/lib/format"
 import {
   CATEGORY_LABELS,
@@ -47,6 +50,26 @@ const TRACKER_NAMES = { local: "el tracker local", linear: "Linear", "github-iss
 const describedBy = (id: string, hint: boolean, error: string | undefined) => [hint ? `${id}-hint` : null, error ? `${id}-error` : null].filter(Boolean).join(" ") || undefined
 
 // ───────────────────────── Repos
+
+export function TrackerSection({ draft, update, project }: SectionProps & { project: ClankerProject }) {
+  const actions = useAppActions()
+  const label = project.tracker
+  return (
+    <Section
+      id="tracker"
+      title="Proyecto del tracker"
+      description={`De qué proyecto de ${label} sale la cola. Cambiarlo solo se puede mientras el proyecto no tenga issues en el caché; con issues, crea un proyecto nuevo.`}
+    >
+      <Field id="tracker-project" label="Proyecto del tracker">
+        {listsProjects(project.tracker) ? (
+          <TrackerProjectPicker id="tracker-project" tracker={project.tracker} value={draft.trackerRef} onChange={(trackerRef) => update({ trackerRef })} onOpenConnections={actions.goConnections} />
+        ) : (
+          <Input id="tracker-project" value={draft.trackerRef} onChange={(e) => update({ trackerRef: e.target.value })} />
+        )}
+      </Field>
+    </Section>
+  )
+}
 
 export function ReposSection({ draft, update, problems, project, registered }: SectionProps & { project: ClankerProject; registered: RepoRow[] }) {
   const actions = useAppActions()
@@ -363,6 +386,7 @@ export function FlowSection({
   profiles,
   groups,
 }: SectionProps & { flows: DefRecord[]; profiles: DefRecord[]; groups: FlowParamGroups }) {
+  const flowOf = flows.find((f) => f.slug === draft.defaultFlowId)
   return (
     <Section
       id="flow"
@@ -373,13 +397,13 @@ export function FlowSection({
         <Field id="default-flow" label="Flujo por defecto" hint="El que corre una issue si no se pide otro.">
           <Select value={draft.defaultFlowId ?? NONE} onValueChange={(v) => update({ defaultFlowId: v === NONE ? null : v })}>
             <SelectTrigger id="default-flow" size="sm" className="w-full">
-              <SelectValue />
+              <SelectValue>{flowOf ? defName(flowOf) : (draft.defaultFlowId ?? "Sin flujo")}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NONE}>Sin flujo</SelectItem>
               {flows.map((f) => (
                 <SelectItem key={f.slug} value={f.slug}>
-                  {f.slug}
+                  <DefOption def={f} />
                 </SelectItem>
               ))}
             </SelectContent>
@@ -388,13 +412,13 @@ export function FlowSection({
         <Field id="default-profile" label="Perfil por defecto" hint="Con el que corren los pasos de agente.">
           <Select value={draft.defaultProfileId ?? NONE} onValueChange={(v) => update({ defaultProfileId: v === NONE ? null : v })}>
             <SelectTrigger id="default-profile" size="sm" className="w-full">
-              <SelectValue />
+              <SelectValue>{draft.defaultProfileId ?? "Sin perfil"}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NONE}>Sin perfil</SelectItem>
               {profiles.map((p) => (
                 <SelectItem key={p.slug} value={p.slug}>
-                  {p.slug}
+                  <DefOption def={p} />
                 </SelectItem>
               ))}
             </SelectContent>

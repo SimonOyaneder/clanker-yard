@@ -20,6 +20,9 @@ export const NO_PROJECT = "no-project";
 
 /** Lo que una issue trae por página y por lista anidada (labels, relaciones): acotado por el costo de la query. */
 const ISSUES_PER_PAGE = 25;
+/** Proyectos por página y miembros por proyecto al listar proyectos: acotados por el costo de la query. */
+const PROJECTS_PER_PAGE = 50;
+const MEMBERS_PER_PROJECT = 25;
 const NESTED_PER_ISSUE = 25;
 
 /** Todo comentario de Clanker Yard en Linear empieza así (sale con la identidad de la persona). */
@@ -59,8 +62,12 @@ const ISSUE_FIELDS = `
 const QUERIES = {
   viewer: `query Viewer { viewer { id name } }`,
   projects: `query Projects($after: String) {
-    projects(first: 100, after: $after) { nodes { id name } pageInfo { hasNextPage endCursor } }
+    projects(first: ${PROJECTS_PER_PAGE}, after: $after) {
+      nodes { id name lead { id } members(first: ${MEMBERS_PER_PROJECT}) { nodes { id } } }
+      pageInfo { hasNextPage endCursor }
+    }
   }`,
+  project: `query ProjectByRef($id: String!) { project(id: $id) { id name } }`,
   issues: `query Issues($filter: IssueFilter, $after: String) {
     issues(filter: $filter, first: ${ISSUES_PER_PAGE}, after: $after, orderBy: updatedAt) {
       nodes { ${ISSUE_FIELDS} } pageInfo { hasNextPage endCursor }
@@ -91,6 +98,13 @@ const QUERIES = {
 interface Page<T> {
   nodes: T[];
   pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
+interface RawProject {
+  id: string;
+  name: string;
+  lead: { id: string } | null;
+  members: { nodes: { id: string }[] };
 }
 
 interface RawRef {
@@ -137,13 +151,33 @@ interface RawIssue extends RawRef {
  * de la issue. `changesSince` usa `updatedAt` de las issues como cursor; no ve los comentarios, que no
  * cambian la issue.
  */
+/** El `Tracker` de Linear, que además resuelve lo que una persona pega para nombrar un proyecto. */
+export type LinearTracker = Tracker & {
+  /**
+   * El proyecto que `ref` nombra: su id (UUID), su slugId (`e12b20e7b4ad`), su identificador (`P-ENG-1525`) o la URL
+   * del proyecto (`https://linear.app/acme/project/mi-proyecto-e12b20e7b4ad/overview`), todo vía `project(id:)`.
+   * `undefined` si el workspace no lo tiene.
+   */
+  resolveProject(ref: string): Promise<Project | undefined>;
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isLinearId = (ref: string): boolean => UUID.test(ref);
+
+/** Lo que `project(id:)` recibe: de una URL de proyecto, su slugId (lo que sigue al último guion del slug). */
+function projectToken(ref: string): string {
+  const text = ref.trim();
+  const slug = /^https?:\/\/[^/]+\/[^/]+\/project\/([^/?#]+)/.exec(text)?.[1];
+  return slug === undefined ? text : (slug.split("-").at(-1) ?? slug);
+}
+
 export function createLinearTracker({
   connections,
   account,
   endpoint = LINEAR_ENDPOINTS.graphql,
   fetch,
   statusMapping,
-}: LinearTrackerOptions): Tracker {
+}: LinearTrackerOptions): LinearTracker {
   const gql: LinearGraphql = createLinearGraphql({ endpoint, fetch, token: () => connections.token("linear", accountName()) });
 
   function accountName(): string {
@@ -254,12 +288,40 @@ export function createLinearTracker({
     id: "linear",
     capabilities: { relations: true, subIssues: true, milestones: true, priorities: true, estimates: true },
 
+    /**
+     * `mine` es que la persona de la conexión lidera el proyecto o está entre sus primeros
+     * `MEMBERS_PER_PROJECT` miembros (leer todos los miembros de todos los proyectos no cabe en una query).
+     */
     async listProjects() {
-      const projects = await all((after) => gql<{ projects: Page<{ id: string; name: string }> }>(QUERIES.projects, { after }).then((d) => d.projects));
-      return projects.map((p): Project => ({ ref: { tracker: "linear", id: p.id }, name: p.name }));
+      const [me, projects] = await Promise.all([
+        viewer(),
+        all((after) => gql<{ projects: Page<RawProject> }>(QUERIES.projects, { after }).then((d) => d.projects)),
+      ]);
+      return projects.map(
+        (p): Project => ({
+          ref: { tracker: "linear", id: p.id },
+          name: p.name,
+          mine: p.lead?.id === me.id || p.members.nodes.some((m) => m.id === me.id),
+        }),
+      );
+    },
+
+    async resolveProject(ref) {
+      try {
+        const { project } = await gql<{ project: { id: string; name: string } }>(QUERIES.project, { id: projectToken(ref) });
+        return { ref: { tracker: "linear", id: project.id }, name: project.name };
+      } catch (error) {
+        if (error instanceof LinearApiError && /Entity not found/i.test(error.message)) return undefined;
+        throw error;
+      }
     },
 
     async listIssues(project: ProjectRef, filter: IssueFilter) {
+      if (!isLinearId(project.id)) {
+        throw new LinearApiError(
+          `El proyecto del tracker "${project.id}" no es el id de un proyecto de Linear (un UUID): elígelo de nuevo en Ajustes, en "Proyecto del tracker".`,
+        );
+      }
       const raw = await all((after) =>
         gql<{ issues: Page<RawIssue> }>(QUERIES.issues, { filter: { project: { id: { eq: project.id } } }, after }).then((d) => d.issues),
       );

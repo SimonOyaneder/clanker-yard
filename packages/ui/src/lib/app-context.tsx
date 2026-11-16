@@ -20,6 +20,8 @@ export interface AppActions {
   boostIssue: (project: ClankerProject, issue: CachedIssue) => Promise<void>
   /** Abre Ajustes del proyecto en la sección de filtros de la cola. */
   editQueueFilters: () => void
+  /** Abre Ajustes del proyecto en Flujo y parámetros, donde se elige el flujo y el perfil por defecto. */
+  editFlow: () => void
   openExternal: (url: string) => void
   refresh: () => void
   goConnections: () => void

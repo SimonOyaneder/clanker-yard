@@ -11,6 +11,14 @@ import { seedStep, transcriptPage, type StepSeed } from "@/seed-steps"
 // Ids con la forma de los del core (prefijo + 26 caracteres de ULID).
 const id = <P extends string>(prefix: P, n: number) => `${prefix}_${String(n).padStart(26, "0")}` as `${P}_${string}`
 
+// Los proyectos de Linear de ejemplo: los de la persona primero, como los ordena el core.
+const TRACKER_PROJECTS = [
+  { ref: { tracker: "linear" as const, id: "5d1c0a52-7a58-4f43-9a0e-0c7f5b2f1a01" }, name: "Boundaries de engines", mine: true },
+  { ref: { tracker: "linear" as const, id: "0a9e3c1b-2f6d-4b88-8d57-7e0d4c9a3b02" }, name: "Clanker Yard MVP", mine: true },
+  { ref: { tracker: "linear" as const, id: "c43b8e70-91d2-4e0c-a6f5-3b1e8d2f6c03" }, name: "Facturación mensual", mine: false },
+  { ref: { tracker: "linear" as const, id: "9e72d4a8-6b15-4c39-b0a2-5f8c1d7e4a04" }, name: "Limpieza de feature flags", mine: false },
+]
+
 export function createMemoryAppData(now = Date.now()): AppData {
   const min = (m: number) => now - m * 60_000
   let nextId = 100
@@ -333,6 +341,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
     def("role", "dev", roleBody("Eres quien implementa la issue.", "implement")),
     def("role", "review-bugs", roleBody("Buscas bugs de producción en el cambio.", "review")),
     def("role", "juguete", roleBody("Saludas.", "saludar")),
+    def("profile", "eco", { roles: { dev: { model: "sonnet", effort: "high" }, "review-bugs": { model: "sonnet" }, "review-tests": { model: "haiku" } } }),
     def("profile", "medio", { roles: { dev: { model: "claude-sonnet-5", effort: "medium" }, "review-bugs": { model: "claude-sonnet-5" } } }),
     def("profile", "juguete", { roles: { juguete: { model: "claude-haiku-4" } } }),
   ]
@@ -696,6 +705,12 @@ export function createMemoryAppData(now = Date.now()): AppData {
       const found = writableDef(kind, defId)
       found.archivedAt = null
       return { ...found }
+    },
+    trackerProjects: async (tracker) => {
+      if (tracker !== "linear") throw new Error(`Clanker Yard no sabe listar los proyectos de ${tracker}: escribe el id del proyecto a mano.`)
+      const linear = connections.filter((c) => c.provider === "linear")
+      if (linear.length === 0) throw new Error("Linear no está conectado: conéctalo en Conexiones para elegir un proyecto.")
+      return linear.flatMap((c) => TRACKER_PROJECTS.map((p) => ({ ...p, account: c.account })))
     },
     repos: async () => repoRows.map((r) => ({ ...r })),
     testRecipe: async (repoId) => {

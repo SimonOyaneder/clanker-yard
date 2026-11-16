@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import type * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
-import { projectRepos, projects, repos, syncCursors } from "../store/schema";
+import { issues, projectRepos, projects, repos, syncCursors } from "../store/schema";
 import { issuesCursorKey } from "../tracker/issues";
 import type { Store, Tx } from "../store/store";
 
@@ -168,6 +168,20 @@ export function createProjects(store: Store, defs: Defs): Projects {
         const changes = Object.fromEntries(
           Object.entries(columns).filter(([field, value]) => value !== undefined && !isDeepStrictEqual(current[field as keyof ProjectRow], value)),
         ) as Partial<ProjectColumns>;
+        if (changes.trackerRef !== undefined) {
+          if (current.tracker === "local") {
+            throw new InvalidProjectError("Un proyecto local no cambia de trackerRef: es el id del proyecto.");
+          }
+          if (tx.db.select({ id: projects.id }).from(projects).where(and(eq(projects.tracker, current.tracker), eq(projects.trackerRef, changes.trackerRef))).get()) {
+            throw new InvalidProjectError(`Ya hay un proyecto de ${current.tracker} para "${changes.trackerRef}".`);
+          }
+          if (tx.db.select({ id: issues.id }).from(issues).where(eq(issues.projectId, id)).get()) {
+            throw new InvalidProjectError(
+              `${current.name} ya tiene issues de "${current.trackerRef}" en el caché: para trabajar sobre otro proyecto de ${current.tracker} crea un proyecto nuevo.`,
+            );
+          }
+          tx.db.delete(syncCursors).where(eq(syncCursors.key, issuesCursorKey(current.tracker, current.trackerRef))).run();
+        }
         const reposChanged = newRepos !== undefined && !isDeepStrictEqual(boundRepos(tx.db, id), newRepos);
         if (Object.keys(changes).length === 0 && !reposChanged) return withRepos(tx.db, current);
         if (newRepos !== undefined && reposChanged) {

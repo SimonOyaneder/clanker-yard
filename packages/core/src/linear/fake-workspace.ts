@@ -34,6 +34,12 @@ export interface FakeTeam {
 export interface FakeProject {
   id: string;
   name: string;
+  /** Los 12 caracteres hex del final de la URL del proyecto. */
+  slugId: string;
+  /** El identificador visible (`P-ENG-1525`) que algunos workspaces muestran; Linear lo acepta en `project(id:)`. */
+  identifier: string | null;
+  lead: FakeUser | null;
+  members: FakeUser[];
 }
 
 export interface FakeIssue {
@@ -100,7 +106,7 @@ export interface FakeWorkspace {
   addUser(name: string): FakeUser;
   /** Los estados salen de una lista de `{ name, type }` en el orden del equipo (`fixtures/states.*.json`). */
   addTeam(key: string, states: readonly { name: string; type: string }[]): FakeTeam;
-  addProject(name: string): FakeProject;
+  addProject(name: string, extra?: { lead?: FakeUser; members?: FakeUser[]; identifier?: string }): FakeProject;
   addIssue(input: NewFakeIssue): FakeIssue;
   /** `from` bloquea a `to`, o ambas quedan relacionadas. */
   relate(from: FakeIssue, type: "blocks" | "related", to: FakeIssue): void;
@@ -139,8 +145,9 @@ export function createFakeWorkspace({ workspace = "clanker-yard" }: { workspace?
       teams.push(team);
       return team;
     },
-    addProject(name) {
-      const project = { id: randomUUID(), name };
+    addProject(name, { lead, members = [], identifier } = {}) {
+      const id = randomUUID();
+      const project = { id, name, slugId: id.replaceAll("-", "").slice(0, 12), identifier: identifier ?? null, lead: lead ?? null, members };
       projects.push(project);
       return project;
     },
@@ -243,6 +250,13 @@ export function createFakeWorkspace({ workspace = "clanker-yard" }: { workspace?
   }
 
   const iso = (ms: number) => new Date(ms).toISOString();
+  const projectNode = (p: FakeProject) => ({
+    id: p.id,
+    name: p.name,
+    slugId: p.slugId,
+    lead: userNode(p.lead),
+    members: (members: Page) => connection(p.members.map(userNode), members),
+  });
   const userNode = (user: FakeUser | null) => user && { id: user.id, name: user.name };
   const teamNode = (team: FakeTeam) => ({ id: team.id, key: team.key });
   const stateNode = (state: FakeState) => ({ id: state.id, name: state.name, type: state.type, position: state.position, team: teamNode(state.team) });
@@ -296,7 +310,12 @@ export function createFakeWorkspace({ workspace = "clanker-yard" }: { workspace?
     viewer: () => userNode(fake.viewer),
     organization: () => ({ urlKey: workspace }),
     issue: ({ id }: { id: string }) => issueNode(findIssue(id)),
-    projects: (page: Page) => connection(projects, page),
+    project: ({ id }: { id: string }) => {
+      const found = projects.find((p) => p.id === id || p.slugId === id || p.identifier === id);
+      if (!found) throw new GraphQLError("Entity not found: Project - Could not find referenced Project.");
+      return projectNode(found);
+    },
+    projects: (page: Page) => connection(projects.map(projectNode), page),
     workflowStates: ({ filter, ...page }: Page & { filter?: { team?: { id?: { eq?: string } } } }) => {
       const teamId = filter?.team?.id?.eq;
       const states = teams.filter((t) => teamId === undefined || t.id === teamId).flatMap((t) => t.states);

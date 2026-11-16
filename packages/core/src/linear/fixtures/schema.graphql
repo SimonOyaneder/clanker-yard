@@ -19,6 +19,7 @@ enum PaginationOrderBy {
 type Query {
   issues(after: String, filter: IssueFilter, first: Int, orderBy: PaginationOrderBy): IssueConnection!
   issue(id: String!): Issue!
+  project(id: String!): Project!
   projects(after: String, first: Int): ProjectConnection!
   viewer: User!
   workflowStates(after: String, filter: WorkflowStateFilter, first: Int): WorkflowStateConnection!
@@ -55,6 +56,14 @@ type WorkflowState {
 type Project {
   id: ID!
   name: String!
+  slugId: String!
+  lead: User
+  members(after: String, first: Int): UserConnection!
+}
+
+type UserConnection {
+  nodes: [User!]!
+  pageInfo: PageInfo!
 }
 
 type WorkflowStateConnection {

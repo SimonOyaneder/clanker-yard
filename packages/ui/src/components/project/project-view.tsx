@@ -57,6 +57,13 @@ export const issuesById = (issues: CachedIssue[]) => new Map<string, CachedIssue
 // datos, así que una que no se puede leer (la cola de un proyecto importado sin su tracker conectado) no esconde a las otras.
 export function ProjectFrame({ project, tab, onTab, children }: { project: ClankerProject; tab: ProjectTab; onTab: (tab: ProjectTab) => void; children: ReactNode }) {
   const status = PROJECT_STATUS[project.status]
+  const { editFlow } = useAppActions()
+  // Sin flujo o sin perfil, el texto lleva a Ajustes a elegirlo.
+  const choose = (missing: string) => (
+    <button type="button" className="underline underline-offset-2" onClick={editFlow}>
+      {missing}
+    </button>
+  )
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
@@ -69,10 +76,10 @@ export function ProjectFrame({ project, tab, onTab, children }: { project: Clank
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <Pill className={tone.neutral} hint="Flujo con que corre una issue si no se pide otro.">
-            flujo: {project.defaultFlowId ?? "sin flujo"}
+            flujo: {project.defaultFlowId ?? choose("sin flujo")}
           </Pill>
           <Pill className={tone.neutral} hint="Perfil con que corren los pasos de agente.">
-            perfil: {project.defaultProfileId ?? "sin perfil"}
+            perfil: {project.defaultProfileId ?? choose("sin perfil")}
           </Pill>
           <Pill className={tone.neutral} hint="De dónde salen las issues del proyecto.">
             {project.tracker === "local" ? "tracker local" : `${project.tracker} · ${project.trackerRef}`}

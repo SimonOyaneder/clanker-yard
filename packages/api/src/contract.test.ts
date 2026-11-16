@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 import { type Contract, type Event, contract } from "./index";
 
 describe("contrato", () => {
-  test("exporta los routers system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, learnings, defs, metrics e imports con sus procedimientos", () => {
+  test("exporta los routers system, events, connections, artifacts, issues, trackers, projects, prs, repos, runs, decisions, learnings, defs, metrics e imports con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual([
       "artifacts",
       "connections",
@@ -19,12 +19,14 @@ describe("contrato", () => {
       "repos",
       "runs",
       "system",
+      "trackers",
     ]);
     expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm", "startDeviceFlow", "githubInstallations", "linearAuth", "testClaude", "setClaudeApiKey", "disconnect"]);
     expect(Object.keys(contract.system).sort()).toEqual(["breakers", "health", "info", "lanes", "setLanes", "shutdown"]);
     expect(Object.keys(contract.events).sort()).toEqual(["list", "stream"]);
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);
     expect(Object.keys(contract.issues).sort()).toEqual(["createLocal", "get", "list"]);
+    expect(Object.keys(contract.trackers)).toEqual(["projects"]);
     expect(Object.keys(contract.projects).sort()).toEqual(["boostIssue", "create", "get", "list", "pause", "queue", "resume", "setParallel", "skipIssue", "summary", "update"]);
     expect(Object.keys(contract.prs)).toEqual(["get", "list", "refresh", "setHold", "merge", "requestReview", "rebase"]);
     expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "testRecipe"]);
@@ -39,6 +41,7 @@ describe("contrato", () => {
       ...Object.values(contract.events),
       ...Object.values(contract.artifacts),
       ...Object.values(contract.issues),
+      ...Object.values(contract.trackers),
       ...Object.values(contract.projects),
       ...Object.values(contract.prs),
       ...Object.values(contract.repos),

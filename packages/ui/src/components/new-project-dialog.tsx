@@ -1,4 +1,4 @@
-import type { ClankerProject, NewProject, TrackerId } from "@clanker/api"
+import type { ClankerProject, DefRecord, NewProject, TrackerId } from "@clanker/api"
 import { useState } from "react"
 import { useAppData } from "@/app-data"
 import { Button } from "@/components/ui/button"
@@ -6,6 +6,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
+import { DefOption } from "@/components/def-option"
+import { listsProjects, TrackerProjectPicker } from "@/components/tracker-project-picker"
+import { useLiveQuery } from "@/hooks/use-live"
+import { defaultFlowSlug, defaultProfileSlug, defName } from "@/lib/defs"
 
 const TRACKERS: { id: TrackerId; label: string }[] = [
   { id: "local", label: "Local" },
@@ -27,31 +32,38 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: (project: ClankerProject) => void
+  /** El tracker no está conectado o falló: lleva a Conexiones (el diálogo se cierra). */
+  onOpenConnections: () => void
 }
 
-export function NewProjectDialog({ open, onOpenChange, onCreated }: Props) {
+export function NewProjectDialog({ open, onOpenChange, onCreated, onOpenConnections }: Props) {
   // Se monta de nuevo en cada apertura: el formulario siempre parte vacío.
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[460px]">{open ? <Form onCreated={onCreated} onCancel={() => onOpenChange(false)} /> : null}</DialogContent>
+      <DialogContent className="sm:max-w-[460px]">{open ? <Form onCreated={onCreated} onCancel={() => onOpenChange(false)} onOpenConnections={onOpenConnections} /> : null}</DialogContent>
     </Dialog>
   )
 }
 
-function Form({ onCreated, onCancel }: { onCreated: (project: ClankerProject) => void; onCancel: () => void }) {
+function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project: ClankerProject) => void; onCancel: () => void; onOpenConnections: () => void }) {
   const appData = useAppData()
   const [name, setName] = useState("")
   const [slug, setSlug] = useState<string | null>(null)
   const [tracker, setTracker] = useState<TrackerId>("local")
   const [trackerRef, setTrackerRef] = useState("")
-  const [flow, setFlow] = useState("")
-  const [profile, setProfile] = useState("")
+  // `null` es "no tocado": vale el default de lo que haya llegado.
+  const [pickedFlow, setPickedFlow] = useState<string | null>(null)
+  const [pickedProfile, setPickedProfile] = useState<string | null>(null)
+  const defs = useLiveQuery("new-project:defs", async () => ({ flows: await appData.defs("flow"), profiles: await appData.defs("profile") }), { live: false })
+  const flow = pickedFlow ?? defaultFlowSlug(defs.data?.flows ?? [])
+  const profile = pickedProfile ?? defaultProfileSlug(defs.data?.profiles ?? [])
   const [parallel, setParallel] = useState("1")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const shownSlug = slug ?? slugOf(name)
   const local = tracker === "local"
+  const picker = listsProjects(tracker)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -61,8 +73,8 @@ function Form({ onCreated, onCancel }: { onCreated: (project: ClankerProject) =>
       tracker,
       parallel: Number(parallel),
       ...(local ? {} : { trackerRef: trackerRef.trim() }),
-      ...(flow.trim() ? { defaultFlowId: flow.trim() } : {}),
-      ...(profile.trim() ? { defaultProfileId: profile.trim() } : {}),
+      ...(flow ? { defaultFlowId: flow } : {}),
+      ...(profile ? { defaultProfileId: profile } : {}),
     }
     setSaving(true)
     setError(null)
@@ -92,9 +104,15 @@ function Form({ onCreated, onCancel }: { onCreated: (project: ClankerProject) =>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
-          <Label>Tracker</Label>
-          <Select value={tracker} onValueChange={(v) => setTracker(v as TrackerId)}>
-            <SelectTrigger>
+          <Label htmlFor="project-tracker">Tracker</Label>
+          <Select
+            value={tracker}
+            onValueChange={(v) => {
+              setTracker(v as TrackerId)
+              setTrackerRef("")
+            }}
+          >
+            <SelectTrigger id="project-tracker">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -114,19 +132,19 @@ function Form({ onCreated, onCancel }: { onCreated: (project: ClankerProject) =>
       {local ? null : (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="project-ref">Proyecto del tracker</Label>
-          <Input id="project-ref" value={trackerRef} onChange={(e) => setTrackerRef(e.target.value)} required />
-          <p className="text-xs text-muted-foreground">El id del proyecto dentro de {TRACKERS.find((t) => t.id === tracker)?.label} del que sale la cola.</p>
+          {picker ? (
+            <TrackerProjectPicker id="project-ref" tracker={tracker} value={trackerRef} onChange={setTrackerRef} onOpenConnections={onOpenConnections} />
+          ) : (
+            <>
+              <Input id="project-ref" value={trackerRef} onChange={(e) => setTrackerRef(e.target.value)} required />
+              <p className="text-xs text-muted-foreground">El id del proyecto dentro de {TRACKERS.find((t) => t.id === tracker)?.label} del que sale la cola.</p>
+            </>
+          )}
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="project-flow">Flujo por defecto</Label>
-          <Input id="project-flow" className="font-mono" value={flow} onChange={(e) => setFlow(e.target.value)} placeholder="juguete" />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="project-profile">Perfil por defecto</Label>
-          <Input id="project-profile" className="font-mono" value={profile} onChange={(e) => setProfile(e.target.value)} placeholder="juguete" />
-        </div>
+        <DefSelect id="project-flow" label="Flujo por defecto" noun="flujos" query={defs} defs={defs.data?.flows} value={flow} onChange={setPickedFlow} />
+        <DefSelect id="project-profile" label="Perfil por defecto" noun="perfiles" query={defs} defs={defs.data?.profiles} value={profile} onChange={setPickedProfile} />
       </div>
 
       {error ? (
@@ -138,10 +156,61 @@ function Form({ onCreated, onCancel }: { onCreated: (project: ClankerProject) =>
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancelar
         </Button>
-        <Button type="submit" disabled={saving || !name.trim() || !shownSlug}>
+        <Button type="submit" disabled={saving || !name.trim() || !shownSlug || (!local && !trackerRef.trim())}>
           Crear proyecto
         </Button>
       </DialogFooter>
     </form>
+  )
+}
+
+// Un flujo o perfil por defecto: el nombre y, más chico y en mono, el slug que usan la CLI y el MCP.
+function DefSelect({
+  id,
+  label,
+  noun,
+  query,
+  defs,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  noun: string
+  query: { error?: string | null; reload: () => void }
+  defs: DefRecord[] | undefined
+  value: string
+  onChange: (slug: string) => void
+}) {
+  const selected = defs?.find((d) => d.slug === value)
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      {query.error ? (
+        <p role="alert" className="text-xs text-destructive">
+          No pude leer los {noun}: {query.error}{" "}
+          <button type="button" className="underline" onClick={query.reload}>
+            Reintentar
+          </button>
+        </p>
+      ) : !defs ? (
+        <Skeleton aria-label={`Cargando ${noun}`} className="h-9 w-full" />
+      ) : defs.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No hay {noun}: el proyecto se crea sin uno por defecto.</p>
+      ) : (
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger id={id} className="w-full">
+            <SelectValue>{selected ? defName(selected) : null}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {defs.map((d) => (
+              <SelectItem key={d.slug} value={d.slug}>
+                <DefOption def={d} />
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
   )
 }

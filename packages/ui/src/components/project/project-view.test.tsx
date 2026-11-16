@@ -38,6 +38,7 @@ async function setup({ entries = () => [], queueError, runs = () => [], decision
     boostIssue: vi.fn(() => Promise.resolve()),
     refresh: () => {},
     editQueueFilters: vi.fn(),
+    editFlow: vi.fn(),
     openRun: vi.fn(),
     openExternal: vi.fn(),
   }
@@ -59,6 +60,15 @@ async function setup({ entries = () => [], queueError, runs = () => [], decision
 
 const ready = (issue: QueueEntry["issue"]): QueueEntry => ({ issue, state: "ready", reason: "lista sobre la branch por defecto", base: { kind: "default" }, dependsOn: [] })
 const stat = (label: string) => within(screen.getByLabelText("Métricas")).getByText(label).parentElement!
+
+test("un proyecto sin flujo ni perfil los ofrece elegir en Ajustes", async () => {
+  const { actions } = await setup({ project: { defaultFlowId: null, defaultProfileId: null } })
+
+  fireEvent.click(screen.getByRole("button", { name: "sin flujo" }))
+  fireEvent.click(screen.getByRole("button", { name: "sin perfil" }))
+
+  expect(actions.editFlow).toHaveBeenCalledTimes(2)
+})
 
 test("En cola muestra la cola del core: cada issue con su estado y solo las listas se pueden lanzar", async () => {
   const { actions, issues } = await setup({

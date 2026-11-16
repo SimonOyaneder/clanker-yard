@@ -353,7 +353,28 @@ describe("proyectos e issues", () => {
     const projects = await tracker().listProjects();
 
     expect(projects).toHaveLength(120);
-    expect(projects[0]).toEqual({ ref: { tracker: "linear", id: expect.any(String) }, name: "P1" });
+    expect(projects[0]).toEqual({ ref: { tracker: "linear", id: expect.any(String) }, name: "P1", mine: false });
+  });
+
+  test("listProjects marca los que la persona lidera o de los que es miembro", async () => {
+    const other = w.addUser("Otra");
+    w.addProject("Ajeno", { lead: other, members: [other] });
+    w.addProject("Lidero", { lead: w.viewer });
+    w.addProject("Miembro", { lead: other, members: [other, w.viewer] });
+    w.addProject("Sin lead");
+
+    const projects = await tracker().listProjects();
+
+    expect(projects.map((p) => [p.name, p.mine])).toEqual([
+      ["Ajeno", false],
+      ["Lidero", true],
+      ["Miembro", true],
+      ["Sin lead", false],
+    ]);
+  });
+
+  test("listIssues con un ref que no es UUID (el identificador visible) dice que se vuelva a elegir el proyecto", async () => {
+    await expect(tracker().listIssues({ tracker: "linear", id: "P-ENG-1525" }, {})).rejects.toThrow(/no es el id de un proyecto de Linear.*Ajustes/);
   });
 
   test("listIssues trae solo las del proyecto, de todas las páginas, y aplica el filtro normalizado", async () => {

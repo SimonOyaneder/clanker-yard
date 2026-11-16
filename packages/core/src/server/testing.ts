@@ -33,7 +33,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -77,6 +77,8 @@ export function apiDeps(
     recipeTester: createRecipeTester({ store, repos, slots: createSlots({ store }), dataDir }),
     runs,
     queue: scheduler.queue,
+    // Sin Linear: los trackerRef se guardan tal cual, como los tests de proyectos los escriben.
+    trackerProjects: { list: () => Promise.reject(new Error("este core de pruebas no lista proyectos")), resolve: (_tracker, ref) => Promise.resolve(ref) },
     scheduler,
     lanes,
     breakers: { list: () => [] },

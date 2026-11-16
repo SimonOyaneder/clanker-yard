@@ -121,6 +121,8 @@ function unknownFieldMessage(issue: z.core.$ZodRawIssue): string | undefined {
 
 const patchShape = {
   name: z.string().min(1).optional(),
+  /** Solo en un proyecto de un tracker externo y mientras no tenga issues en el caché; el core lo normaliza como en `create`. */
+  trackerRef: z.string().min(1).optional(),
   defaultFlowId: z.string().min(1).nullable().optional(),
   defaultProfileId: z.string().min(1).nullable().optional(),
   /** Reemplaza la lista entera. */

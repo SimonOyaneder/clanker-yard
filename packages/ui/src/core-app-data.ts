@@ -2,7 +2,7 @@ import type { Client, EventType } from "@clanker/api"
 import type { AppData } from "@/app-data"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
-export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "learnings" | "connections" | "repos" | "metrics" | "defs">
+export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "learnings" | "connections" | "repos" | "metrics" | "defs" | "trackers">
 
 // Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos, las sesiones de agente que el
 // panel del paso y su transcript siguen en vivo, las decisiones de la bandeja, los learnings, conexiones y pruebas de receta).
@@ -152,6 +152,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     updateDef: (input) => client.defs.update(input),
     archiveDef: (kind, id) => client.defs.archive({ kind, id }),
     restoreDef: (kind, id) => client.defs.restore({ kind, id }),
+    trackerProjects: (tracker) => client.trackers.projects({ tracker }),
     repos: async () => {
       const [repos, tests] = await Promise.all([client.repos.list(), lastRecipeTests(client)])
       return Promise.all(

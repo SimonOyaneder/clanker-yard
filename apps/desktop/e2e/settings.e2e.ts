@@ -12,7 +12,7 @@ const sidebar = (page: Page) => page.locator("[data-sidebar=sidebar]");
 const section = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
 const select = async (page: Page, name: string, option: string | RegExp) => {
   await page.getByRole("combobox", { name }).click();
-  await page.getByRole("option", { name: option, exact: true }).click();
+  await page.getByRole("option", { name: option, exact: typeof option === "string" }).click();
 };
 
 // Ajustes es más alto que cualquier pantalla: cada vista se captura arriba y abajo, con el scroll de su contenedor.
@@ -54,7 +54,7 @@ test("⇧⌘3 abre Ajustes, y cambiar reviewRounds se ve en el siguiente runs.st
   await expect(section(page, "Flujo y parámetros").getByText("El flujo juguete no declara parámetros con default.")).toBeVisible();
 
   // El flujo por defecto trae sus parámetros con el default como placeholder.
-  await select(page, "Flujo por defecto", "techlead-clasico");
+  await select(page, "Flujo por defecto", /techlead-clasico/);
   await expect(page.getByLabel("Rondas de review")).toHaveAttribute("placeholder", "3");
   await expect(page.getByText(/También lo leen: council \(default 2\), rebase-conflicto/).first()).toBeVisible();
 
@@ -126,7 +126,7 @@ test("los filtros de la cola se editan desde 'Filtros de la cola' y la cola vac�
 
 test("el mapeo de estados de un proyecto de Linear se ajusta por estado", async ({ window: page, home }) => {
   const client = coreClient(home);
-  const linear = await client.projects.create({ slug: "ajustes-linear", name: "Ajustes Linear", tracker: "linear", trackerRef: "boundaries", defaultFlowId: "juguete" });
+  const linear = await client.projects.create({ slug: "ajustes-linear", name: "Ajustes Linear", tracker: "linear", trackerRef: "c43b8e70-91d2-4e0c-a6f5-3b1e8d2f6c03", defaultFlowId: "juguete" });
   await sidebar(page).getByRole("button", { name: /Ajustes Linear/ }).click();
   await page.keyboard.press("Meta+Shift+3");
 

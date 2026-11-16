@@ -46,6 +46,8 @@ import type {
   StepDetail,
   StepMetrics,
   StepRunId,
+  TrackerId,
+  TrackerProject,
   TranscriptPage,
 } from "@clanker/api"
 import { createContext, useContext } from "react"
@@ -189,6 +191,8 @@ export interface AppData {
   /** La def deja de resolverse por slug pero conserva sus versiones. Solo las tuyas y las del repo. */
   archiveDef(kind: DefWriteKind, id: string): Promise<DefRecord>
   restoreDef(kind: DefWriteKind, id: string): Promise<DefRecord>
+  /** Los proyectos del tracker de las cuentas conectadas, los de la persona primero. Rechaza (con el paso a seguir) si no hay cuenta conectada. */
+  trackerProjects(tracker: TrackerId): Promise<TrackerProject[]>
   repos(): Promise<RepoRow[]>
   /** Corre la receta del repo en un worktree desechable y vuelve al terminar; la salida llega mientras tanto como eventos `recipe.test_output`. */
   testRecipe(repoId: RepoId): Promise<RecipeTestResult>

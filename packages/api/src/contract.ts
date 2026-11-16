@@ -25,7 +25,7 @@ import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
 import { Breaker, Lanes, LanesPatch, Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
-import { CachedIssue, IssueFilter, NewLocalIssue } from "./tracker";
+import { CachedIssue, IssueFilter, NewLocalIssue, TrackerId, TrackerProject } from "./tracker";
 
 /**
  * Versión mayor de la API. Sube cuando el contrato cambia de forma incompatible; el core la
@@ -203,6 +203,16 @@ const issues = {
   createLocal: base
     .input(NewLocalIssue.extend({ projectId: ProjectId }))
     .output(CachedIssue),
+};
+
+const trackers = {
+  /**
+   * Los proyectos que el tracker tiene para elegir uno al crear un proyecto (`trackerRef` es el `ref.id`), de cada
+   * cuenta conectada: la de Linear es un workspace. Con `mine` primero los de la persona. `BAD_REQUEST` si el
+   * tracker no tiene adapter en el core, si no hay una cuenta conectada (el mensaje manda a Conexiones) o si el
+   * tracker no responde.
+   */
+  projects: base.input(z.object({ tracker: TrackerId })).output(z.array(TrackerProject)),
 };
 
 const projects = {
@@ -614,5 +624,5 @@ const defs = {
   restore: base.input(DefArchive).output(DefRecord),
 };
 
-export const contract = { system, events, connections, artifacts, issues, projects, prs, repos, runs, decisions, learnings, metrics, defs, imports };
+export const contract = { system, events, connections, artifacts, issues, trackers, projects, prs, repos, runs, decisions, learnings, metrics, defs, imports };
 export type Contract = typeof contract;

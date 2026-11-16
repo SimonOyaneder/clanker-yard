@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type RepoRow, useAppData } from "@/app-data"
 import { Shortcut } from "@/components/common"
 import { SettingsNav, type SettingsNavItem } from "@/components/project/settings-nav"
-import { ConventionsSection, FlowSection, LimitsSection, QueueSection, ReposSection, StatusMappingSection } from "@/components/project/settings-sections"
+import { ConventionsSection, FlowSection, LimitsSection, QueueSection, ReposSection, StatusMappingSection, TrackerSection } from "@/components/project/settings-sections"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useLive, useLiveQuery } from "@/hooks/use-live"
@@ -62,8 +62,9 @@ interface Loaded {
   issues: CachedIssue[]
 }
 
-const NAV: SettingsNavItem[] = [
+const navOf = (project: ClankerProject): SettingsNavItem[] => [
   { id: "repos", label: "Repos" },
+  ...(project.tracker === "local" ? [] : [{ id: "tracker", label: "Proyecto del tracker" }]),
   { id: "queue", label: "Filtros de la cola" },
   { id: "status", label: "Mapeo de estados" },
   { id: "flow", label: "Flujo y parámetros" },
@@ -151,7 +152,7 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
       }
       const section = document.getElementById(`settings-${focus}`)
       section?.scrollIntoView({ block: "start" })
-      section?.querySelector<HTMLElement>("input")?.focus({ preventScroll: true })
+      section?.querySelector<HTMLElement>("input, [role=combobox]")?.focus({ preventScroll: true })
       onFocused()
     }
     frame = requestAnimationFrame(arrive)
@@ -162,9 +163,10 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
   return (
     <div className="@container w-full">
       <div className="mx-auto flex max-w-[1108px] flex-col gap-4 @4xl:flex-row @4xl:gap-8">
-        <SettingsNav items={NAV} />
+        <SettingsNav items={navOf(project)} />
         <div className="@container flex max-w-[900px] min-w-0 flex-1 flex-col gap-4">
           <ReposSection {...shared} project={project} registered={repos} />
+          {project.tracker === "local" ? null : <TrackerSection {...shared} project={project} />}
           <QueueSection {...shared} />
           <StatusMappingSection {...shared} project={project} observed={observed} />
           <FlowSection {...shared} flows={flows} profiles={profiles} groups={groups} />

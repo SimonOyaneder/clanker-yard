@@ -228,6 +228,17 @@ describe("update", () => {
     ]);
   });
 
+  test("trackerRef cambia en un proyecto de tracker externo, suelta su cursor y no se repite entre proyectos", () => {
+    const linear = create({ slug: "lin", name: "Lin", tracker: "linear", trackerRef: "old", parallel: 1, flowParams: {} }, "ui");
+    create({ slug: "otro", name: "Otro", tracker: "linear", trackerRef: "taken", parallel: 1, flowParams: {} }, "ui");
+    store.db.insert(syncCursors).values({ key: "issues:linear:old", cursor: "c", checkedAt: 1 }).run();
+
+    expect(() => projects.update(linear.id, { trackerRef: "taken" }, "ui")).toThrow(/Ya hay un proyecto de linear/);
+    expect(projects.update(linear.id, { trackerRef: "new" }, "ui").trackerRef).toBe("new");
+    expect(store.db.select().from(syncCursors).all()).toEqual([]);
+    expect(() => projects.update(project.id, { trackerRef: "x" }, "ui")).toThrow(InvalidProjectError);
+  });
+
   test("un cambio de estado emite el evento de ese estado y un patch sin cambios no emite nada", () => {
     projects.update(project.id, { status: "paused" }, "ui");
     projects.update(project.id, { status: "active" }, "ui");

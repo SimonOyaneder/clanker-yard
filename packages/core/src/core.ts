@@ -36,6 +36,7 @@ import {
 import { githubRemote } from "./github/remote-config";
 import { createPacks } from "./packs/packs";
 import { createLinearTracker } from "./linear/tracker";
+import { createTrackerProjects } from "./tracker/tracker-projects";
 import { createProcs, type Procs } from "./procs/procs";
 import { createProjects } from "./projects/projects";
 import { createRunStarter } from "./projects/start-run";
@@ -323,6 +324,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
     runs,
     queue: scheduler.queue,
+    trackerProjects: createTrackerProjects({
+      connections: opts.connections,
+      linear: (account) => createLinearTracker({ connections: opts.connections, account, endpoint: opts.linearEndpoint }),
+    }),
     scheduler,
     lanes,
     breakers,

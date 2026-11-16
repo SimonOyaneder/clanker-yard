@@ -69,6 +69,24 @@ test("cambiar reviewRounds y guardar manda solo flowParams, con un toast que lo 
   await waitFor(() => expect(update).toHaveBeenLastCalledWith(project.id, { flowParams: { repo: "repo_x" } }))
 })
 
+test("el proyecto del tracker se cambia con el mismo selector y se guarda como trackerRef", async () => {
+  const { project, update } = await setup()
+  const section = screen.getByRole("region", { name: "Proyecto del tracker" })
+  expect(await within(section).findByText(/El proyecto guardado \(boundaries\) no está en la lista/)).toBeTruthy()
+
+  fireEvent.click(within(section).getByRole("combobox", { name: "Proyecto del tracker" }))
+  fireEvent.click(await screen.findByRole("option", { name: "Facturación mensual" }))
+  save()
+
+  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { trackerRef: "c43b8e70-91d2-4e0c-a6f5-3b1e8d2f6c03" }))
+})
+
+test("un proyecto local no muestra el proyecto del tracker", async () => {
+  await setup({ tracker: "local" })
+
+  expect(screen.queryByRole("region", { name: "Proyecto del tracker" })).toBeNull()
+})
+
 test("un valor inválido dice qué escribir y no deja guardar", async () => {
   const { update } = await setup()
 
@@ -106,7 +124,7 @@ test("el índice lleva a cada sección y marca la que se clicó", async () => {
 
   expect(scrolled).toEqual(["settings-limits"])
   expect(within(nav).getByRole("button", { name: "Apilado y gasto" }).getAttribute("aria-current")).toBe("location")
-  expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Repos", "Filtros de la cola", "Mapeo de estados", "Flujo y parámetros", "Apilado y gasto", "Convenciones"])
+  expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Repos", "Proyecto del tracker", "Filtros de la cola", "Mapeo de estados", "Flujo y parámetros", "Apilado y gasto", "Convenciones"])
 })
 
 test("la ayuda de un parámetro avisa que otro flujo lo lee con otro default", async () => {

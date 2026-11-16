@@ -33,6 +33,7 @@ import { RecipeTestError, type RecipeTester } from "../recipe/recipe-test";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
+import { TrackerProjectsError, type TrackerProjects } from "../tracker/tracker-projects";
 import { defaultLogDir } from "../workspaces/exec";
 import { NotAGitRepoError } from "../workspaces/inspect";
 import { InvalidRepoError, RepoNotFoundError, type Repos } from "../workspaces/repos";
@@ -57,6 +58,8 @@ export interface RouterDeps {
   runs: RunStarter;
   /** `projects.queue`. */
   queue: ProjectQueue;
+  /** `trackers.projects`. */
+  trackerProjects: TrackerProjects;
   /** `projects.skipIssue`, y el tick que `system.setLanes` y `projects.setParallel` piden para repartir el cupo que liberaron. */
   scheduler: Pick<Scheduler, "skipIssue" | "boostIssue" | "tick">;
   /** `system.lanes` y `system.setLanes`. */
@@ -260,14 +263,26 @@ export function createRouter(deps: RouterDeps) {
         return deps.issues.createLocal(input, context.origin);
       }),
     },
+    trackers: {
+      projects: os.trackers.projects.handler(({ input }) => asApiErrorAsync(() => deps.trackerProjects.list(input.tracker))),
+    },
     projects: {
       list: os.projects.list.handler(() => projects.list()),
       get: os.projects.get.handler(({ input }) => projectOrNotFound(input.id)),
       create: os.projects.create.handler(({ input, context }) =>
-        asApiError(() => projects.create(input, context.origin)),
+        asApiErrorAsync(async () =>
+          projects.create(
+            input.trackerRef === undefined ? input : { ...input, trackerRef: await deps.trackerProjects.resolve(input.tracker, input.trackerRef) },
+            context.origin,
+          ),
+        ),
       ),
       update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
-        asApiError(() => projects.update(id, patch, context.origin)),
+        asApiErrorAsync(async () => {
+          const { tracker } = projectOrNotFound(id);
+          const trackerRef = patch.trackerRef === undefined ? undefined : await deps.trackerProjects.resolve(tracker, patch.trackerRef);
+          return projects.update(id, trackerRef === undefined ? patch : { ...patch, trackerRef }, context.origin);
+        }),
       ),
       pause: os.projects.pause.handler(({ input, context }) => asApiError(() => projects.pause(input.id, context.origin))),
       resume: os.projects.resume.handler(({ input, context }) => asApiError(() => projects.resume(input.id, context.origin))),
@@ -443,6 +458,7 @@ function toApiError(error: unknown): unknown {
     error instanceof InvalidProjectError ||
     error instanceof IssueNotInProjectError ||
     error instanceof QueueUnavailableError ||
+    error instanceof TrackerProjectsError ||
     error instanceof RunStartError ||
     error instanceof RunCommandError ||
     error instanceof DecisionResolveError ||
