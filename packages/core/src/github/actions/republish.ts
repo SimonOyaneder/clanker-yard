@@ -30,7 +30,11 @@ const ReplayArgs = z.object({
  * movió es ese mismo cambio sobre la base nueva. Lanza `PermanentActionError` (el PR viejo se queda como está)
  * si el merge conflictúa o si el cambio no toca los mismos archivos que el original (algo del PR ya estaba en la base).
  */
-export function prReplayAction({ workspaces }: { workspaces: Workspaces }): ActionDef<typeof ReplayArgs> {
+export function prReplayAction({
+  workspaces,
+}: {
+  workspaces: Workspaces;
+}): ActionDef<typeof ReplayArgs> {
   return {
     name: "pr.replay",
     args: ReplayArgs,
@@ -38,10 +42,36 @@ export function prReplayAction({ workspaces }: { workspaces: Workspaces }): Acti
     effects: "local",
     async run({ ws, head, base }) {
       const files = async (from: string, to: string) =>
-        (await workspaces.git(ws, "diff", "--name-only", "--no-renames", from, to)).split("\n").filter(Boolean).sort();
+        (
+          await workspaces.git(
+            ws,
+            "diff",
+            "--name-only",
+            "--no-renames",
+            from,
+            to,
+          )
+        )
+          .split("\n")
+          .filter(Boolean)
+          .sort();
       try {
-        const mergeBase = await workspaces.git(ws, "merge-base", head, `refs/remotes/origin/${base}`);
-        const merged = (await workspaces.git(ws, "merge-tree", "--write-tree", `--merge-base=${mergeBase}`, "HEAD", head)).split("\n")[0]!;
+        const mergeBase = await workspaces.git(
+          ws,
+          "merge-base",
+          head,
+          `refs/remotes/origin/${base}`,
+        );
+        const merged = (
+          await workspaces.git(
+            ws,
+            "merge-tree",
+            "--write-tree",
+            `--merge-base=${mergeBase}`,
+            "HEAD",
+            head,
+          )
+        ).split("\n")[0]!;
         const expected = await files(mergeBase, head);
         const actual = await files("HEAD", merged);
         if (expected.join("\n") !== actual.join("\n")) {
@@ -53,7 +83,10 @@ export function prReplayAction({ workspaces }: { workspaces: Workspaces }): Acti
         return { outcome: "ok", output: { tree: merged } };
       } catch (error) {
         if (!(error instanceof GitError)) throw error;
-        throw new PermanentActionError(`El cambio del PR viejo no se pudo aplicar sobre la base nueva: ${excerpt(error.output)}`, { cause: error });
+        throw new PermanentActionError(
+          `El cambio del PR viejo no se pudo aplicar sobre la base nueva: ${excerpt(error.output)}`,
+          { cause: error },
+        );
       }
     },
   };
@@ -84,7 +117,10 @@ export interface PrSupersedeDeps {
  *
  * Outcomes: `draft` y `ready`, según el estado del viejo.
  */
-export function prSupersedeAction({ store, connections }: PrSupersedeDeps): ActionDef<typeof SupersedeArgs> {
+export function prSupersedeAction({
+  store,
+  connections,
+}: PrSupersedeDeps): ActionDef<typeof SupersedeArgs> {
   return {
     name: "pr.supersede",
     args: SupersedeArgs,
@@ -94,66 +130,168 @@ export function prSupersedeAction({ store, connections }: PrSupersedeDeps): Acti
       const [owner = "", repo = ""] = pr.repo.split("/");
       const client = connections.githubClient(pr.account);
       await ctx.once("comment", async () => {
-        await client.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", { owner, repo, issue_number: oldNumber, body: `Reemplazado por #${pr.number}` });
+        await client.request(
+          "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+          {
+            owner,
+            repo,
+            issue_number: oldNumber,
+            body: `Reemplazado por #${pr.number}`,
+          },
+        );
         return true;
       });
       await ctx.once("close", async () => {
-        await client.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo, pull_number: oldNumber, state: "closed" });
+        await client.request(
+          "PATCH /repos/{owner}/{repo}/pulls/{pull_number}",
+          { owner, repo, pull_number: oldNumber, state: "closed" },
+        );
         return true;
       });
       const row = store.db
         .select({ repoId: pullRequests.repoId })
         .from(pullRequests)
-        .where(and(eq(pullRequests.runId, ctx.runId), eq(pullRequests.number, pr.number)))
+        .where(
+          and(
+            eq(pullRequests.runId, ctx.runId),
+            eq(pullRequests.number, pr.number),
+          ),
+        )
         .get();
-      if (!row) throw new PermanentActionError(`El core no registró el PR nuevo ${pr.repo}#${pr.number}.`);
+      if (!row)
+        throw new PermanentActionError(
+          `El core no registró el PR nuevo ${pr.repo}#${pr.number}.`,
+        );
       const parentHead = supersededParent(store, row.repoId, oldBase);
       await ctx.once("branches", async () => {
-        for (const branch of [oldHead, ...(parentHead ? [parentHead] : [])]) await deleteUnlessBase(client, owner, repo, branch);
+        for (const branch of [oldHead, ...(parentHead ? [parentHead] : [])])
+          await deleteUnlessBase(client, owner, repo, branch);
         return true;
       });
-      followNew(store, row.repoId, oldNumber, pr.number);
+      followNew(store, ctx.runId, row.repoId, oldNumber, pr.number);
       return { outcome: draft ? "draft" : "ready" };
     },
   };
 }
 
 /** `branch` si es el head de un PR cerrado cuya issue ya tiene otro PR abierto (un padre que ya se rehízo), `undefined` si no. */
-function supersededParent(store: Store, repoId: RepoId, branch: string): string | undefined {
+function supersededParent(
+  store: Store,
+  repoId: RepoId,
+  branch: string,
+): string | undefined {
   const closed = store.db
     .select({ issueId: pullRequests.issueId })
     .from(pullRequests)
-    .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.headRef, branch), eq(pullRequests.state, "closed")))
+    .where(
+      and(
+        eq(pullRequests.repoId, repoId),
+        eq(pullRequests.headRef, branch),
+        eq(pullRequests.state, "closed"),
+      ),
+    )
     .get();
   if (!closed?.issueId) return undefined;
   const replacement = store.db
     .select({ id: pullRequests.id })
     .from(pullRequests)
-    .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.issueId, closed.issueId), eq(pullRequests.state, "open")))
+    .where(
+      and(
+        eq(pullRequests.repoId, repoId),
+        eq(pullRequests.issueId, closed.issueId),
+        eq(pullRequests.state, "open"),
+      ),
+    )
     .get();
   return replacement ? branch : undefined;
 }
 
 /** GitHub cierra los PRs de una branch borrada, también los que la tienen de base: antes se mira que ninguno esté abierto. */
-async function deleteUnlessBase(client: GitHubClient, owner: string, repo: string, branch: string): Promise<void> {
-  const { data } = await client.request("GET /repos/{owner}/{repo}/pulls", { owner, repo, base: branch, state: "open", per_page: 1 });
+async function deleteUnlessBase(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<void> {
+  const { data } = await client.request("GET /repos/{owner}/{repo}/pulls", {
+    owner,
+    repo,
+    base: branch,
+    state: "open",
+    per_page: 1,
+  });
   if (Array.isArray(data) && data.length > 0) return;
   try {
-    await client.request("DELETE /repos/{owner}/{repo}/git/refs/{ref}", { owner, repo, ref: `heads/${branch}` });
+    await client.request("DELETE /repos/{owner}/{repo}/git/refs/{ref}", {
+      owner,
+      repo,
+      ref: `heads/${branch}`,
+    });
   } catch (error) {
     // Ya no estaba (alguien la borró, o GitHub la borró al cerrar el PR): el resultado es el mismo.
-    if (!(error instanceof RequestError && (error.status === 404 || error.status === 422))) throw error;
+    if (!(
+      error instanceof RequestError &&
+      (error.status === 404 || error.status === 422)
+    ))
+      throw error;
   }
 }
 
-/** El viejo queda cerrado en el caché, y lo que lo seguía (corridas que lo tenían, PRs apilados sobre él) pasa al nuevo. */
-function followNew(store: Store, repoId: RepoId, oldNumber: number, newNumber: number): void {
+/**
+ * El viejo queda cerrado en el caché, y lo que lo seguía (corridas que lo tenían, PRs apilados sobre él) pasa al nuevo.
+ * El nuevo hereda sus padres: los mismos si el padre no se rehízo, o el PR nuevo del padre si ya se rehízo (su
+ * `followNew` repuntó antes la fila del viejo). `pr.publish` solo los deduce de la base si el padre figura abierto en el caché.
+ */
+function followNew(
+  store: Store,
+  runId: string,
+  repoId: RepoId,
+  oldNumber: number,
+  newNumber: number,
+): void {
   store.tx(({ db }) => {
-    const old = db.select({ id: pullRequests.id }).from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, oldNumber))).get();
-    const fresh = db.select({ id: pullRequests.id }).from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, newNumber))).get();
+    const old = db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(
+        and(
+          eq(pullRequests.repoId, repoId),
+          eq(pullRequests.number, oldNumber),
+        ),
+      )
+      .get();
+    const fresh = db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(
+        and(
+          eq(pullRequests.repoId, repoId),
+          eq(pullRequests.number, newNumber),
+        ),
+      )
+      .get();
     if (!old || !fresh) return;
-    db.update(pullRequests).set({ state: "closed" }).where(eq(pullRequests.id, old.id)).run();
-    db.update(runs).set({ claimedPrId: fresh.id }).where(eq(runs.claimedPrId, old.id)).run();
-    db.update(prParents).set({ parentId: fresh.id }).where(eq(prParents.parentId, old.id)).run();
+    db.update(pullRequests)
+      .set({ state: "closed" })
+      .where(eq(pullRequests.id, old.id))
+      .run();
+    db.update(runs)
+      .set({ claimedPrId: fresh.id })
+      .where(eq(runs.claimedPrId, old.id))
+      .run();
+    db.update(prParents)
+      .set({ parentId: fresh.id })
+      .where(eq(prParents.parentId, old.id))
+      .run();
+    for (const { parentId } of db
+      .select({ parentId: prParents.parentId })
+      .from(prParents)
+      .where(eq(prParents.childId, old.id))
+      .all()) {
+      db.insert(prParents)
+        .values({ childId: fresh.id, parentId })
+        .onConflictDoNothing()
+        .run();
+    }
   });
 }

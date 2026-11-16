@@ -11,7 +11,8 @@ export const TECHLEAD_CLASICO: FlowDef = {
   schema: 1,
   id: "techlead-clasico",
   name: "Techlead clásico",
-  description: "De la issue al PR con review: implementa, revisa en rondas, corre los checks, abre el PR y atiende el feedback hasta dejarlo listo.",
+  description:
+    "De la issue al PR con review: implementa, revisa en rondas, corre los checks, abre el PR y atiende el feedback hasta dejarlo listo.",
   trigger: { type: "issue.queued" },
   lane: "dev",
   params: {
@@ -31,7 +32,11 @@ export const TECHLEAD_CLASICO: FlowDef = {
     ws: {
       type: "action",
       action: "workspace.acquire",
-      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      args: {
+        repo: "$run.params.repo",
+        branch: "$run.params.branch",
+        base: "$run.params.base",
+      },
       on: { ok: "plan" },
     },
     plan: {
@@ -47,7 +52,10 @@ export const TECHLEAD_CLASICO: FlowDef = {
       mode: "check",
       when: "$plan.issueDoubts",
       brief: { plan: "$plan" },
-      on: { ok: "implement", changes: { to: "plan", maxRounds: 2, exhausted: "implement" } },
+      on: {
+        ok: "implement",
+        changes: { to: "plan", maxRounds: 2, exhausted: "implement" },
+      },
     },
     implement: {
       type: "agent",
@@ -85,21 +93,51 @@ export const TECHLEAD_CLASICO: FlowDef = {
       branches: ["rv-bugs", "rv-tests", "rv-patterns", "rv-lore"],
       rerun: "not-ok",
       onBranchError: "ignore",
-      join: { fn: "items.merge", args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"] } },
+      join: {
+        fn: "items.merge",
+        args: {
+          items: "findings",
+          rank: "severity",
+          changesIf: ["red", "yellow"],
+        },
+      },
       on: {
         ok: "sync",
         changes: {
           to: "fix",
           counter: "review",
           maxRounds: "$run.params.reviewRounds",
-          exhausted: { to: "sync", note: "Quedan 🔴/🟡 tras las rondas de review" },
+          exhausted: {
+            to: "sync",
+            note: "Quedan 🔴/🟡 tras las rondas de review",
+          },
         },
       },
     },
-    "rv-bugs": { type: "agent", role: "review-bugs", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$self" } },
-    "rv-tests": { type: "agent", role: "review-tests", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$self" } },
-    "rv-patterns": { type: "agent", role: "review-patterns", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$self" } },
-    "rv-lore": { type: "agent", role: "review-lore", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$self" } },
+    "rv-bugs": {
+      type: "agent",
+      role: "review-bugs",
+      mode: "review",
+      brief: { ws: "$ws", plan: "$plan", previous: "$self" },
+    },
+    "rv-tests": {
+      type: "agent",
+      role: "review-tests",
+      mode: "review",
+      brief: { ws: "$ws", plan: "$plan", previous: "$self" },
+    },
+    "rv-patterns": {
+      type: "agent",
+      role: "review-patterns",
+      mode: "review",
+      brief: { ws: "$ws", plan: "$plan", previous: "$self" },
+    },
+    "rv-lore": {
+      type: "agent",
+      role: "review-lore",
+      mode: "review",
+      brief: { ws: "$ws", plan: "$plan", previous: "$self" },
+    },
     sync: {
       type: "action",
       action: "workspace.syncBase",
@@ -120,13 +158,25 @@ export const TECHLEAD_CLASICO: FlowDef = {
     publish: {
       type: "action",
       action: "pr.publish",
-      args: { ws: "$ws", plan: "$commit", draft: true, dependsOn: "$run.params.dependsOn" },
-      on: { ok: "feedback", replan: { to: "commit", maxRounds: 2, exhausted: "@failed" } },
+      args: {
+        ws: "$ws",
+        plan: "$commit",
+        draft: true,
+        dependsOn: "$run.params.dependsOn",
+      },
+      on: {
+        ok: "feedback",
+        replan: { to: "commit", maxRounds: 2, exhausted: "@failed" },
+      },
     },
     feedback: {
       type: "flow",
       flow: "pr-feedback",
-      params: { ws: "$ws", pr: "$publish.pr", externalRounds: "$run.params.externalRounds" },
+      params: {
+        ws: "$ws",
+        pr: "$publish.pr",
+        externalRounds: "$run.params.externalRounds",
+      },
       on: { done: "@done", blocked: "@blocked", failed: "@failed" },
     },
   },
@@ -142,7 +192,11 @@ export const PR_FEEDBACK: FlowDef = {
   name: "Feedback del PR",
   internal: true,
   trigger: { type: "subflow" },
-  params: { ws: "Workspace", pr: "PrRef", externalRounds: { type: "number", default: 3 } },
+  params: {
+    ws: "Workspace",
+    pr: "PrRef",
+    externalRounds: { type: "number", default: 3 },
+  },
   start: "bot-req",
   nodes: {
     "bot-req": {
@@ -156,7 +210,11 @@ export const PR_FEEDBACK: FlowDef = {
       event: "pr.botReview",
       args: { pr: "$run.params.pr", after: "$prev.requestedAt" },
       timeoutSec: 540,
-      on: { lgtm: "ci-wait", findings: "triage", timeout: { to: "ci-wait", note: "El bot no respondió" } },
+      on: {
+        lgtm: "ci-wait",
+        findings: "triage",
+        timeout: { to: "ci-wait", note: "El bot no respondió" },
+      },
     },
     triage: {
       type: "agent",
@@ -185,15 +243,33 @@ export const PR_FEEDBACK: FlowDef = {
       type: "action",
       action: "recipe.check",
       args: { ws: "$run.params.ws", scope: "changed" },
-      on: { ok: "light", fail: { to: "fix", maxRounds: 2, exhausted: "light" } },
+      on: {
+        ok: "light",
+        fail: { to: "fix", maxRounds: 2, exhausted: "light" },
+      },
     },
     light: {
       type: "parallel",
       branches: ["lr-bugs", "lr-tests"],
-      join: { fn: "items.merge", args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"] } },
-      on: { ok: "fixups", changes: { to: "fix", maxRounds: 1, exhausted: "fixups" } },
+      join: {
+        fn: "items.merge",
+        args: {
+          items: "findings",
+          rank: "severity",
+          changesIf: ["red", "yellow"],
+        },
+      },
+      on: {
+        ok: "fixups",
+        changes: { to: "fix", maxRounds: 1, exhausted: "fixups" },
+      },
     },
-    "lr-bugs": { type: "agent", role: "review-bugs", mode: "re-review", brief: { ws: "$run.params.ws" } },
+    "lr-bugs": {
+      type: "agent",
+      role: "review-bugs",
+      mode: "re-review",
+      brief: { ws: "$run.params.ws" },
+    },
     "lr-tests": {
       type: "agent",
       role: "review-tests",
@@ -207,7 +283,10 @@ export const PR_FEEDBACK: FlowDef = {
       // `items` son los hallazgos del bot (sin ellos, p. ej. tras un CI rojo, es null y la acción lo toma como
       // ninguno); `route` es el reporte del committer, que solo existe cuando la acción ya devolvió `route`.
       args: { ws: "$run.params.ws", items: "$bot-wait.items", route: "$route" },
-      on: { ok: "reply-fixed", route: { to: "route", maxRounds: 1, exhausted: "@failed" } },
+      on: {
+        ok: "reply-fixed",
+        route: { to: "route", maxRounds: 1, exhausted: "@failed" },
+      },
     },
     route: {
       type: "agent",
@@ -219,7 +298,12 @@ export const PR_FEEDBACK: FlowDef = {
     "reply-fixed": {
       type: "action",
       action: "pr.reply",
-      args: { pr: "$run.params.pr", triage: "$triage", shas: "$fixups.byItem", rerequestBot: true },
+      args: {
+        pr: "$run.params.pr",
+        triage: "$triage",
+        shas: "$fixups.byItem",
+        rerequestBot: true,
+      },
       on: { ok: "bot-wait" },
     },
     reply: {
@@ -233,7 +317,11 @@ export const PR_FEEDBACK: FlowDef = {
       event: "pr.ci",
       args: { pr: "$run.params.pr" },
       timeoutSec: 5400,
-      on: { ok: "@done", fail: "ci-triage", timeout: { to: "@done", note: "CI sigue corriendo" } },
+      on: {
+        ok: "@done",
+        fail: "ci-triage",
+        timeout: { to: "@done", note: "CI sigue corriendo" },
+      },
     },
     "ci-triage": {
       type: "agent",
@@ -294,7 +382,11 @@ export const REBASE_CONFLICTO: FlowDef = {
     ws: {
       type: "action",
       action: "workspace.attach",
-      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      args: {
+        repo: "$run.params.repo",
+        branch: "$run.params.branch",
+        base: "$run.params.base",
+      },
       on: { ok: "rebase" },
     },
     rebase: {
@@ -303,7 +395,12 @@ export const REBASE_CONFLICTO: FlowDef = {
       args: { ws: "$ws", base: "$run.params.base" },
       on: {
         clean: "checks",
-        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: REBASE_ROUNDS_EXHAUSTED },
+        conflict: {
+          to: "resolve",
+          counter: "conflict",
+          maxRounds: "$run.params.conflictRounds",
+          exhausted: REBASE_ROUNDS_EXHAUSTED,
+        },
         error: "rebase-error",
       },
     },
@@ -315,7 +412,10 @@ export const REBASE_CONFLICTO: FlowDef = {
         { id: "retry", label: "Reintentar el rebase" },
         { id: "leave", label: "Dejar el PR en conflicto" },
       ],
-      on: { retry: { to: "rebase", maxRounds: 2, exhausted: "@blocked" }, leave: "@blocked" },
+      on: {
+        retry: { to: "rebase", maxRounds: 2, exhausted: "@blocked" },
+        leave: "@blocked",
+      },
     },
     resolve: {
       type: "agent",
@@ -327,21 +427,33 @@ export const REBASE_CONFLICTO: FlowDef = {
     policy: {
       type: "action",
       action: "pr.rebaseApproval",
-      args: { pr: "$run.params.pr", behavior: false, policy: "$run.params.rebaseNonDraft" },
+      args: {
+        pr: "$run.params.pr",
+        behavior: false,
+        policy: "$run.params.rebaseNonDraft",
+      },
       on: { proceed: "continue", ask: "ask" },
     },
     "behavior-check": {
       type: "action",
       action: "pr.rebaseApproval",
-      args: { pr: "$run.params.pr", behavior: true, policy: "$run.params.rebaseNonDraft" },
+      args: {
+        pr: "$run.params.pr",
+        behavior: true,
+        policy: "$run.params.rebaseNonDraft",
+      },
       on: {
-        proceed: { to: "continue", note: "Resolver el conflicto exigía decidir comportamiento: se aplicó la resolución más conservadora, revísala" },
+        proceed: {
+          to: "continue",
+          note: "Resolver el conflicto exigía decidir comportamiento: se aplicó la resolución más conservadora, revísala",
+        },
         ask: "behavior-gate",
       },
     },
     ask: {
       type: "gate",
-      question: "El PR ya no está en draft y el proyecto pide confirmar antes de rebasearlo (rebaseNonDraft: ask). El conflicto ya está resuelto en el worktree. ¿Sigo con el rebase?",
+      question:
+        "El PR ya no está en draft y el proyecto pide confirmar antes de rebasearlo (rebaseNonDraft: ask). El conflicto ya está resuelto en el worktree. ¿Sigo con el rebase?",
       options: [
         { id: "continue", label: "Seguir con el rebase" },
         { id: "abort", label: "Dejar el PR en conflicto" },
@@ -364,7 +476,12 @@ export const REBASE_CONFLICTO: FlowDef = {
       args: { ws: "$ws", base: "$run.params.base", continue: true },
       on: {
         clean: "checks",
-        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: REBASE_ROUNDS_EXHAUSTED },
+        conflict: {
+          to: "resolve",
+          counter: "conflict",
+          maxRounds: "$run.params.conflictRounds",
+          exhausted: REBASE_ROUNDS_EXHAUSTED,
+        },
         error: "rebase-error",
       },
     },
@@ -374,7 +491,14 @@ export const REBASE_CONFLICTO: FlowDef = {
       args: { ws: "$ws", scope: "changed", afterRebase: true },
       on: {
         ok: "commit",
-        fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "commit", note: "Tests o lint siguen rojos tras el rebase" } },
+        fail: {
+          to: "fix",
+          maxRounds: "$run.params.checkRounds",
+          exhausted: {
+            to: "commit",
+            note: "Tests o lint siguen rojos tras el rebase",
+          },
+        },
       },
     },
     fix: {
@@ -394,12 +518,22 @@ export const REBASE_CONFLICTO: FlowDef = {
       type: "action",
       action: "pr.pushLease",
       args: { ws: "$ws" },
-      on: { draft: "feedback", ready: { to: "@done", note: "Pide /review: el PR salió del conflicto y ya no está en draft" } },
+      on: {
+        draft: "feedback",
+        ready: {
+          to: "@done",
+          note: "Pide /review: el PR salió del conflicto y ya no está en draft",
+        },
+      },
     },
     feedback: {
       type: "flow",
       flow: "pr-feedback",
-      params: { ws: "$ws", pr: "$run.params.pr", externalRounds: "$run.params.externalRounds" },
+      params: {
+        ws: "$ws",
+        pr: "$run.params.pr",
+        externalRounds: "$run.params.externalRounds",
+      },
       on: { done: "@done", blocked: "@blocked", failed: "@failed" },
     },
     abort: {
@@ -460,13 +594,21 @@ export const RESTACK_FEEDBACK: FlowDef = {
     ws: {
       type: "action",
       action: "workspace.attach",
-      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      args: {
+        repo: "$run.params.repo",
+        branch: "$run.params.branch",
+        base: "$run.params.base",
+      },
       on: { ok: "feedback" },
     },
     feedback: {
       type: "flow",
       flow: "pr-feedback",
-      params: { ws: "$ws", pr: "$run.params.pr", externalRounds: "$run.params.externalRounds" },
+      params: {
+        ws: "$ws",
+        pr: "$run.params.pr",
+        externalRounds: "$run.params.externalRounds",
+      },
       on: { done: "@done", blocked: "@blocked", failed: "@failed" },
     },
   },
@@ -486,7 +628,11 @@ export const RESTACK: FlowDef = {
   internal: true,
   trigger: { type: "pr.merged" },
   lane: "maintenance",
-  params: { pr: "PrRef", repo: "RepoRef", externalRounds: { type: "number", default: 3 } },
+  params: {
+    pr: "PrRef",
+    repo: "RepoRef",
+    externalRounds: { type: "number", default: 3 },
+  },
   limits: { maxCostUsd: null, maxSteps: 50 },
   start: "restack",
   nodes: {
@@ -494,7 +640,13 @@ export const RESTACK: FlowDef = {
       type: "action",
       action: "stack.restack",
       args: { pr: "$run.params.pr" },
-      on: { ok: "feedback", conflict: { to: "feedback", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
+      on: {
+        ok: "feedback",
+        conflict: {
+          to: "feedback",
+          note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma",
+        },
+      },
     },
     feedback: FEEDBACK_CHANGED_DRAFTS,
   },
@@ -513,15 +665,31 @@ export const RESTACK_REWRITTEN: FlowDef = {
   internal: true,
   trigger: { type: "pr.base_rewritten" },
   lane: "maintenance",
-  params: { pr: "PrRef", repo: "RepoRef", from: "string", to: "string", externalRounds: { type: "number", default: 3 } },
+  params: {
+    pr: "PrRef",
+    repo: "RepoRef",
+    from: "string",
+    to: "string",
+    externalRounds: { type: "number", default: 3 },
+  },
   limits: { maxCostUsd: null, maxSteps: 50 },
   start: "restack",
   nodes: {
     restack: {
       type: "action",
       action: "stack.restackRewritten",
-      args: { pr: "$run.params.pr", from: "$run.params.from", to: "$run.params.to" },
-      on: { ok: "feedback", conflict: { to: "feedback", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
+      args: {
+        pr: "$run.params.pr",
+        from: "$run.params.from",
+        to: "$run.params.to",
+      },
+      on: {
+        ok: "feedback",
+        conflict: {
+          to: "feedback",
+          note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma",
+        },
+      },
     },
     feedback: FEEDBACK_CHANGED_DRAFTS,
   },
@@ -556,7 +724,11 @@ export const COUNCIL: FlowDef = {
     ws: {
       type: "action",
       action: "workspace.attach",
-      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      args: {
+        repo: "$run.params.repo",
+        branch: "$run.params.branch",
+        base: "$run.params.base",
+      },
       on: { ok: "threads" },
     },
     threads: {
@@ -578,7 +750,11 @@ export const COUNCIL: FlowDef = {
       args: { ws: "$ws", scope: "changed" },
       on: {
         ok: "light",
-        fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "light", note: "Tests o lint siguen rojos" } },
+        fail: {
+          to: "fix",
+          maxRounds: "$run.params.checkRounds",
+          exhausted: { to: "light", note: "Tests o lint siguen rojos" },
+        },
       },
     },
     fix: {
@@ -592,17 +768,41 @@ export const COUNCIL: FlowDef = {
     light: {
       type: "parallel",
       branches: ["lr-bugs", "lr-tests"],
-      join: { fn: "items.merge", args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"] } },
-      on: { ok: "fixups", changes: { to: "fix", maxRounds: 1, exhausted: "fixups" } },
+      join: {
+        fn: "items.merge",
+        args: {
+          items: "findings",
+          rank: "severity",
+          changesIf: ["red", "yellow"],
+        },
+      },
+      on: {
+        ok: "fixups",
+        changes: { to: "fix", maxRounds: 1, exhausted: "fixups" },
+      },
     },
-    "lr-bugs": { type: "agent", role: "review-bugs", mode: "re-review", brief: { ws: "$ws" } },
-    "lr-tests": { type: "agent", role: "review-tests", mode: "re-review", when: "$checks.specsChanged", brief: { ws: "$ws" } },
+    "lr-bugs": {
+      type: "agent",
+      role: "review-bugs",
+      mode: "re-review",
+      brief: { ws: "$ws" },
+    },
+    "lr-tests": {
+      type: "agent",
+      role: "review-tests",
+      mode: "re-review",
+      when: "$checks.specsChanged",
+      brief: { ws: "$ws" },
+    },
     fixups: {
       type: "action",
       action: "pr.pushFixups",
       // `route` es el reporte del committer, que solo existe cuando la acción ya devolvió `route`.
       args: { ws: "$ws", items: "$threads.items", route: "$route" },
-      on: { ok: "reply", route: { to: "route", maxRounds: 1, exhausted: "@failed" } },
+      on: {
+        ok: "reply",
+        route: { to: "route", maxRounds: 1, exhausted: "@failed" },
+      },
     },
     route: {
       type: "agent",
@@ -614,7 +814,12 @@ export const COUNCIL: FlowDef = {
     reply: {
       type: "action",
       action: "pr.reply",
-      args: { pr: "$run.params.pr", triage: "$threads", shas: "$fixups.byItem", rejected: "$work.rejected" },
+      args: {
+        pr: "$run.params.pr",
+        triage: "$threads",
+        shas: "$fixups.byItem",
+        rejected: "$work.rejected",
+      },
       on: { ok: "ci-wait" },
     },
     "ci-wait": {
@@ -622,7 +827,11 @@ export const COUNCIL: FlowDef = {
       event: "pr.ci",
       args: { pr: "$run.params.pr" },
       timeoutSec: 5400,
-      on: { ok: "@done", fail: "ci-triage", timeout: { to: "@done", note: "CI sigue corriendo" } },
+      on: {
+        ok: "@done",
+        fail: "ci-triage",
+        timeout: { to: "@done", note: "CI sigue corriendo" },
+      },
     },
     "ci-triage": {
       type: "agent",
@@ -648,7 +857,8 @@ export const COUNCIL: FlowDef = {
  * PR padre ya republicado), `replay` le deja el cambio del PR viejo (`head` es su sha) sin commits, el committer lo
  * corta en modo `plan` y `pr.publish` lo pushea y abre el PR nuevo con el título y cuerpo del viejo (`title` y `body`
  * ya traen "Reemplaza a #n"), exigiendo el árbol de `replay`. Recién entonces `supersede` cierra el viejo, así que un
- * fallo antes deja todo como estaba. Un PR que estaba en draft sigue a `pr-feedback` (`/review`), como el PR de
+ * fallo antes deja todo como estaba: la corrida termina `failed` (no estacionada) y `discard` suelta el worktree y borra
+ * la branch local si nunca se pusheó, para que el reintento use el mismo nombre. Un PR que estaba en draft sigue a `pr-feedback` (`/review`), como el PR de
  * cualquier corrida del flujo normal. Lo lanza `prs.republish`; nada lo dispara solo.
  */
 export const REPUBLISH_PR: FlowDef = {
@@ -677,43 +887,77 @@ export const REPUBLISH_PR: FlowDef = {
     ws: {
       type: "action",
       action: "workspace.acquire",
-      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      args: {
+        repo: "$run.params.repo",
+        branch: "$run.params.branch",
+        base: "$run.params.base",
+      },
       on: { ok: "replay" },
     },
     replay: {
       type: "action",
       action: "pr.replay",
-      args: { ws: "$ws", head: "$run.params.head", base: "$run.params.oldBase" },
-      on: { ok: "commit" },
+      args: {
+        ws: "$ws",
+        head: "$run.params.head",
+        base: "$run.params.oldBase",
+      },
+      on: { ok: "commit", error: "discard" },
     },
     commit: {
       type: "agent",
       role: "committer",
       mode: "plan",
       brief: { ws: "$ws", cuts: [], issue: "$run.subject" },
-      on: { ok: "publish" },
+      on: { ok: "publish", error: "discard" },
     },
     publish: {
       type: "action",
       action: "pr.publish",
       args: {
         ws: "$ws",
-        plan: { commits: "$commit.commits", pr: { title: "$run.params.title", body: "$run.params.body" } },
+        plan: {
+          commits: "$commit.commits",
+          pr: { title: "$run.params.title", body: "$run.params.body" },
+        },
         draft: "$run.params.draft",
         expectTree: "$replay.tree",
       },
-      on: { ok: "supersede", replan: { to: "commit", maxRounds: 2, exhausted: "@failed" } },
+      on: {
+        ok: "supersede",
+        replan: { to: "commit", maxRounds: 2, exhausted: "discard" },
+        error: "discard",
+      },
+    },
+    discard: {
+      type: "action",
+      action: "workspace.discard",
+      args: {
+        workspaceId: "$ws.workspaceId",
+        fencingToken: "$ws.fencingToken",
+      },
+      on: { ok: "@failed" },
     },
     supersede: {
       type: "action",
       action: "pr.supersede",
-      args: { pr: "$publish.pr", oldNumber: "$run.params.oldNumber", oldHead: "$run.params.oldHead", oldBase: "$run.params.oldBase", draft: "$run.params.draft" },
+      args: {
+        pr: "$publish.pr",
+        oldNumber: "$run.params.oldNumber",
+        oldHead: "$run.params.oldHead",
+        oldBase: "$run.params.oldBase",
+        draft: "$run.params.draft",
+      },
       on: { draft: "feedback", ready: "@done" },
     },
     feedback: {
       type: "flow",
       flow: "pr-feedback",
-      params: { ws: "$ws", pr: "$publish.pr", externalRounds: "$run.params.externalRounds" },
+      params: {
+        ws: "$ws",
+        pr: "$publish.pr",
+        externalRounds: "$run.params.externalRounds",
+      },
       on: { done: "@done", blocked: "@blocked", failed: "@failed" },
     },
   },

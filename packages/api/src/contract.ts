@@ -1,6 +1,14 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
-import { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubDeviceFlow, GitHubInstallations, GitHubPatForm } from "./connections";
+import {
+  ClaudeMode,
+  ClaudeStatus,
+  Connection,
+  ConnectionProvider,
+  GitHubDeviceFlow,
+  GitHubInstallations,
+  GitHubPatForm,
+} from "./connections";
 import {
   ArtifactHash,
   ArtifactKind,
@@ -16,18 +24,84 @@ import {
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
 import { AgentOptions } from "./agents";
-import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefExported, DefExportToRepo, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
-import { Learning, LearningFilter, LearningPatch, LearningVerdict, NewLearning } from "./learnings";
+import {
+  DEF_WRITE_KINDS,
+  DefArchive,
+  DefCreate,
+  DefExported,
+  DefExportToRepo,
+  DefFilter,
+  DefRecord,
+  DefRef,
+  DefUpdate,
+  DefWrite,
+} from "./defs";
+import {
+  Learning,
+  LearningFilter,
+  LearningPatch,
+  LearningVerdict,
+  NewLearning,
+} from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
-import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
+import {
+  DayMetrics,
+  DayMetricsFilter,
+  IssueMetrics,
+  MetricsFilter,
+  ModelMetrics,
+  ProjectSummary,
+  ProjectSummaryFilter,
+  RoleMetrics,
+  StepMetrics,
+} from "./metrics";
 import { PackInfo } from "./pack";
-import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
-import { CachedPr, PrFilter, PrRef, PrRepublish, PrState, RepublishInput } from "./prs";
+import {
+  ClankerProject,
+  NewProject,
+  ProjectConfig,
+  ProjectDefaults,
+  ProjectDefaultsPatch,
+  ProjectImportResult,
+  ProjectUpdate,
+} from "./projects";
+import {
+  CachedPr,
+  PrFilter,
+  PrRef,
+  PrState,
+  RepublishInput,
+  RepublishProgress,
+} from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
-import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync, RepoOverview } from "./repos";
-import { Breaker, Lanes, LanesPatch, Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
-import { CachedIssue, IssueFilter, NewLocalIssue, TrackerId, TrackerProject } from "./tracker";
+import {
+  DetectedRepo,
+  NewRepo,
+  RecipeTestResult,
+  Repo,
+  RepoConfigSync,
+  RepoOverview,
+} from "./repos";
+import {
+  Breaker,
+  Lanes,
+  LanesPatch,
+  Run,
+  RunDetail,
+  RunFilter,
+  StartRun,
+  StepDetail,
+  TranscriptPage,
+  TranscriptQuery,
+} from "./runs";
+import {
+  CachedIssue,
+  IssueFilter,
+  NewLocalIssue,
+  TrackerId,
+  TrackerProject,
+} from "./tracker";
 
 /**
  * Versión mayor de la API. Sube cuando el contrato cambia de forma incompatible; el core la
@@ -44,7 +118,11 @@ const base = oc.$meta<ContractMeta>({});
 const SAFE = { destructiveHint: false, openWorldHint: false } as const;
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
 const SAFE_IDEMPOTENT = { ...SAFE, idempotentHint: true } as const;
-const DESTRUCTIVE_IDEMPOTENT = { destructiveHint: true, idempotentHint: true, openWorldHint: false } as const;
+const DESTRUCTIVE_IDEMPOTENT = {
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
 
 /** Los kinds de `defs` que `list` y `get` sirven: los que ya tienen esquema (`context` no). */
 const DEF_MCP_KINDS = ["flow", "role", "profile", "recipe", "pack"] as const;
@@ -90,7 +168,8 @@ const system = {
     .meta({
       mcp: {
         action: "set_lanes",
-        description: "Cambia cuántas corridas caben a la vez en el carril `dev` y en el de `maintenance`; lo que no se pasa no cambia. Rige de inmediato y nunca interrumpe lo que ya corre.",
+        description:
+          "Cambia cuántas corridas caben a la vez en el carril `dev` y en el de `maintenance`; lo que no se pasa no cambia. Rige de inmediato y nunca interrumpe lo que ya corre.",
         annotations: SAFE_IDEMPOTENT,
       },
     })
@@ -169,17 +248,23 @@ const connections = {
    * cuota, así que la UI la llama al pulsar [Probar], no al pintar. `BAD_REQUEST` si pide `api-key` sin
    * tener una guardada. Sin `meta.mcp`: un agente no debe gastar la cuota de la persona.
    */
-  testClaude: base.input(z.object({ mode: ClaudeMode.optional() }).default({})).output(ClaudeStatus),
+  testClaude: base
+    .input(z.object({ mode: ClaudeMode.optional() }).default({}))
+    .output(ClaudeStatus),
   /**
    * Guarda una API key de Anthropic como alternativa a la suscripción (en `Secrets`, nunca en la base) y
    * la deja activa: desde entonces los agentes la usan. Antes la prueba con una llamada mínima y no
    * guarda nada si Anthropic la rechaza (`BAD_REQUEST`). Para volver a la suscripción:
    * `disconnect({ provider: "claude", account: "api-key" })`. Sin `meta.mcp`: un token no pasa por el MCP.
    */
-  setClaudeApiKey: base.input(z.object({ key: z.string().min(1) })).output(Connection),
+  setClaudeApiKey: base
+    .input(z.object({ key: z.string().min(1) }))
+    .output(Connection),
   /** Borra el token y la cuenta; no hace nada si no estaba conectada. Emite `connection.changed`. */
   disconnect: base
-    .input(z.object({ provider: ConnectionProvider, account: z.string().min(1) }))
+    .input(
+      z.object({ provider: ConnectionProvider, account: z.string().min(1) }),
+    )
     .output(z.void()),
 };
 
@@ -219,11 +304,15 @@ const trackers = {
    * tracker no tiene adapter en el core, si no hay una cuenta conectada (el mensaje manda a Conexiones) o si el
    * tracker no responde.
    */
-  projects: base.input(z.object({ tracker: TrackerId })).output(z.array(TrackerProject)),
+  projects: base
+    .input(z.object({ tracker: TrackerId }))
+    .output(z.array(TrackerProject)),
 };
 
 const projects = {
-  list: base.meta({ mcp: { tool: "list", kind: "project" } }).output(z.array(ClankerProject)),
+  list: base
+    .meta({ mcp: { tool: "list", kind: "project" } })
+    .output(z.array(ClankerProject)),
   /** Falla con `NOT_FOUND` si no existe. */
   get: base
     .meta({ mcp: { tool: "get", kind: "project" } })
@@ -269,7 +358,15 @@ const projects = {
    * repetidos, un label en dos repos) impiden escribir: sin `dryRun` son `BAD_REQUEST`. El nombre, el tracker y su
    * proyecto no se importan. `NOT_FOUND` si el proyecto no existe.
    */
-  importConfig: base.input(z.object({ id: ProjectId, config: z.unknown(), dryRun: z.boolean().default(false) })).output(ProjectImportResult),
+  importConfig: base
+    .input(
+      z.object({
+        id: ProjectId,
+        config: z.unknown(),
+        dryRun: z.boolean().default(false),
+      }),
+    )
+    .output(ProjectImportResult),
   /**
    * Pausa el proyecto: el Scheduler deja de lanzar sus issues. No toca a otros proyectos ni lo que ya corre (sus
    * corridas y el carril de mantenimiento siguen). Emite `project.paused` con el actor. `NOT_FOUND` si no existe;
@@ -279,7 +376,8 @@ const projects = {
     .meta({
       mcp: {
         action: "pause_loop",
-        description: "Pausa el loop de un proyecto: deja de lanzar sus issues, sin tocar lo que ya corre ni a otros proyectos.",
+        description:
+          "Pausa el loop de un proyecto: deja de lanzar sus issues, sin tocar lo que ya corre ni a otros proyectos.",
         annotations: SAFE_IDEMPOTENT,
       },
     })
@@ -290,7 +388,8 @@ const projects = {
     .meta({
       mcp: {
         action: "start_loop",
-        description: "Inicia o retoma el loop de un proyecto: vuelve a lanzar sus issues según la cola y sus carriles.",
+        description:
+          "Inicia o retoma el loop de un proyecto: vuelve a lanzar sus issues según la cola y sus carriles.",
         annotations: SAFE_IDEMPOTENT,
       },
     })
@@ -301,13 +400,25 @@ const projects = {
    * cola como `blocked` con el motivo y emite `issue.skipped`. Con `false` vuelve a la cola (`issue.queued`).
    * `NOT_FOUND` si el proyecto no existe; `BAD_REQUEST` si la issue no es de ese proyecto.
    */
-  skipIssue: base.input(z.object({ id: ProjectId, issueId: IssueId, skipped: z.boolean().default(true) })),
+  skipIssue: base.input(
+    z.object({
+      id: ProjectId,
+      issueId: IssueId,
+      skipped: z.boolean().default(true),
+    }),
+  ),
   /**
    * Con `boosted: true` (por defecto) la issue pasa al principio de la cola: el Scheduler la lanza antes que
    * las demás `ready`, la última subida primero; sigue sujeta a lo que la bloquea. Con `false` vuelve a su
    * lugar. Emite `issue.queued`. Los mismos errores que `skipIssue`.
    */
-  boostIssue: base.input(z.object({ id: ProjectId, issueId: IssueId, boosted: z.boolean().default(true) })),
+  boostIssue: base.input(
+    z.object({
+      id: ProjectId,
+      issueId: IssueId,
+      boosted: z.boolean().default(true),
+    }),
+  ),
   /**
    * La cola del proyecto, calculada por el core a partir del caché de issues, sus corridas y sus PRs:
    * primero las `ready` (en el orden en que se lanzarían), luego `waiting` y `blocked`, cada una con su
@@ -317,7 +428,8 @@ const projects = {
     .meta({
       mcp: {
         action: "project_queue",
-        description: "La cola de un proyecto: cada issue con su estado (`ready`, `blocked`, `running`...) y el motivo, en el orden en que el Scheduler la lanzaría.",
+        description:
+          "La cola de un proyecto: cada issue con su estado (`ready`, `blocked`, `running`...) y el motivo, en el orden en que el Scheduler la lanzaría.",
         annotations: READ_ONLY,
       },
     })
@@ -352,7 +464,9 @@ const prs = {
    * `merge` de abajo lo rechaza. `BAD_REQUEST` si el core no conoce el PR (solo los que Watch o `pr.publish`
    * registraron) o la cuenta no está conectada.
    */
-  setHold: base.input(z.object({ ref: PrRef, hold: z.boolean() })).output(PrState),
+  setHold: base
+    .input(z.object({ ref: PrRef, hold: z.boolean() }))
+    .output(PrState),
   /**
    * Mergea el PR según la estrategia del pack: comenta su comando desde la cuenta del PR y lo devuelve releído
    * (con `merge.queue: "queued"`). Solo lo pide una persona desde la app (`origin: "ui"`). `BAD_REQUEST` si el
@@ -377,9 +491,14 @@ const prs = {
    * viejo cerrado. No cambia la implementación: el árbol del PR nuevo es el del viejo o ese PR se aborta. Salta (y
    * lo dice) un PR con una corrida viva, con threads de council o comentarios humanos sin resolver, con base
    * combinada o que ya reemplaza a otro. Un PR que falla no frena a los demás, solo a sus hijos. Con `draftOnly` solo los que están en draft. Con `dryRun` no toca nada ni corre al
-   * committer. Espera a que termine cada corrida, así que puede tardar.
+   * committer. Lanza las corridas que ya pueden salir y vuelve sin esperarlas; el resto (un hijo cuyo padre aún no
+   * publicó su PR nuevo) sale en `republishProgress`, que la CLI consulta hasta que `done`.
    */
-  republish: base.input(RepublishInput).output(z.array(PrRepublish)),
+  republish: base.input(RepublishInput).output(RepublishProgress),
+  /** Avanza la republicación `id`: lanza lo que ya puede salir y devuelve el estado de cada PR. */
+  republishProgress: base
+    .input(z.object({ id: z.string().min(1) }))
+    .output(RepublishProgress),
 };
 
 const repos = {
@@ -400,7 +519,9 @@ const repos = {
    * Los repos de git que hay en `folder` (la propia carpeta si es un repo; si no, sus subcarpetas
    * directas), cada uno con su receta: encontrada, falta o inválida. No registra nada.
    */
-  detect: base.input(z.object({ folder: z.string().min(1) })).output(z.array(DetectedRepo)),
+  detect: base
+    .input(z.object({ folder: z.string().min(1) }))
+    .output(z.array(DetectedRepo)),
   /**
    * Corre la receta de un repo sobre un worktree desechable: `requires`, `setup.worktree`, `setup.guard`
    * y `setup.slot`, con un slot libre del pool de mantenimiento (si la receta define `slots`). La salida va en vivo por los eventos
@@ -475,9 +596,14 @@ const runs = {
     .meta({
       mcp: {
         action: "run_issue",
-        description: "Lanza el flujo del proyecto (o `flow`) sobre una issue y vuelve sin esperar; el avance está en `clanker://run/<id>/timeline`. Reclama la issue en su tracker. Si ya hay una corrida viva de ese flujo sobre ella, devuelve esa.",
+        description:
+          "Lanza el flujo del proyecto (o `flow`) sobre una issue y vuelve sin esperar; el avance está en `clanker://run/<id>/timeline`. Reclama la issue en su tracker. Si ya hay una corrida viva de ese flujo sobre ella, devuelve esa.",
         // Reclama la issue en Linear o GitHub: asignada y en progreso.
-        annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
+        annotations: {
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
       },
     })
     .input(StartRun)
@@ -492,7 +618,8 @@ const runs = {
     .meta({
       mcp: {
         action: "pause_run",
-        description: "Pausa una corrida: no se despachan pasos nuevos y los agentes en curso terminan lo suyo (con `now`, se interrumpen y su sesión queda lista para retomarse).",
+        description:
+          "Pausa una corrida: no se despachan pasos nuevos y los agentes en curso terminan lo suyo (con `now`, se interrumpen y su sesión queda lista para retomarse).",
         annotations: SAFE_IDEMPOTENT,
       },
     })
@@ -500,7 +627,13 @@ const runs = {
     .output(RunDetail),
   /** Retoma una corrida pausada; una que ya corre no cambia. `NOT_FOUND` si no existe; `BAD_REQUEST` en cualquier otro estado. */
   resume: base
-    .meta({ mcp: { action: "resume_run", description: "Retoma una corrida pausada; una que ya corre no cambia.", annotations: SAFE_IDEMPOTENT } })
+    .meta({
+      mcp: {
+        action: "resume_run",
+        description: "Retoma una corrida pausada; una que ya corre no cambia.",
+        annotations: SAFE_IDEMPOTENT,
+      },
+    })
     .input(z.object({ id: RunId }))
     .output(RunDetail),
   /**
@@ -513,7 +646,8 @@ const runs = {
     .meta({
       mcp: {
         action: "cancel_run",
-        description: "Cancela una corrida y sus hijas: los agentes se interrumpen y sus pasos quedan `canceled`. No se puede retomar; el historial se conserva.",
+        description:
+          "Cancela una corrida y sus hijas: los agentes se interrumpen y sus pasos quedan `canceled`. No se puede retomar; el historial se conserva.",
         annotations: DESTRUCTIVE_IDEMPOTENT,
       },
     })
@@ -527,7 +661,8 @@ const runs = {
     .meta({
       mcp: {
         action: "interrupt_run",
-        description: "Interrumpe ya al agente en curso de una corrida (la pausa con `now`). Su sesión queda guardada y `resume_run` la retoma donde iba.",
+        description:
+          "Interrumpe ya al agente en curso de una corrida (la pausa con `now`). Su sesión queda guardada y `resume_run` la retoma donde iba.",
         annotations: DESTRUCTIVE_IDEMPOTENT,
       },
     })
@@ -543,7 +678,8 @@ const runs = {
     .meta({
       mcp: {
         action: "retry_step",
-        description: "Reintenta desde un paso: su nodo corre de nuevo con sesión nueva y lo que la corrida tenía en marcha se cancela. Cierra la decisión que la estacionaba.",
+        description:
+          "Reintenta desde un paso: su nodo corre de nuevo con sesión nueva y lo que la corrida tenía en marcha se cancela. Cierra la decisión que la estacionaba.",
         annotations: { ...SAFE, idempotentHint: false },
       },
     })
@@ -558,7 +694,8 @@ const runs = {
     .meta({
       mcp: {
         action: "steer_step",
-        description: "Le deja un mensaje al agente de un paso y retoma su sesión con él (si está en curso, lo interrumpe).",
+        description:
+          "Le deja un mensaje al agente de un paso y retoma su sesión con él (si está en curso, lo interrumpe).",
         annotations: { ...SAFE, idempotentHint: false },
       },
     })
@@ -569,7 +706,9 @@ const runs = {
    * (decisión #44) y solo un `outcome` que el nodo declara. `BAD_REQUEST` con un agente, una rama de parallel, un
    * outcome que el nodo no declara o un paso que la corrida ya no tiene en marcha.
    */
-  forceOutcome: base.input(z.object({ stepId: StepRunId, outcome: z.string().min(1) })).output(RunDetail),
+  forceOutcome: base
+    .input(z.object({ stepId: StepRunId, outcome: z.string().min(1) }))
+    .output(RunDetail),
 };
 
 const imports = {
@@ -587,7 +726,9 @@ const metrics = {
   /** Por costo, de más a menos. */
   byRole: base.input(MetricsFilter.default({})).output(z.array(RoleMetrics)),
   /** Por día de cierre, del más antiguo al más reciente. */
-  byDay: base.input(DayMetricsFilter.default({ utcOffsetMinutes: 0 })).output(z.array(DayMetrics)),
+  byDay: base
+    .input(DayMetricsFilter.default({ utcOffsetMinutes: 0 }))
+    .output(z.array(DayMetrics)),
   /** Por costo, de más a menos. */
   byModel: base.input(MetricsFilter.default({})).output(z.array(ModelMetrics)),
   /** Por costo, de más a menos: lo que gastó cada nodo de cada flujo. Sin las corridas importadas. */
@@ -620,9 +761,14 @@ const decisions = {
     .meta({
       mcp: {
         action: "resolve_decision",
-        description: "Resuelve una decisión pendiente con una de sus `options` (`get` o `list` de kind `decision` las muestran); la corrida estacionada sigue. Una decisión resuelta no se puede resolver otra vez.",
+        description:
+          "Resuelve una decisión pendiente con una de sus `options` (`get` o `list` de kind `decision` las muestran); la corrida estacionada sigue. Una decisión resuelta no se puede resolver otra vez.",
         // Un gate guarda justo los pasos que publican (merge, push): elegir su outcome los deja correr.
-        annotations: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
+        annotations: {
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
       },
     })
     .input(z.object({ id: DecisionId, option: z.string().min(1) }))
@@ -631,7 +777,10 @@ const decisions = {
 
 const learnings = {
   /** De la más reciente a la más antigua. Sin filtro trae todos, rechazados y archivados incluidos. */
-  list: base.meta({ mcp: { tool: "list", kind: "learning" } }).input(LearningFilter.default({})).output(z.array(Learning)),
+  list: base
+    .meta({ mcp: { tool: "list", kind: "learning" } })
+    .input(LearningFilter.default({}))
+    .output(z.array(Learning)),
   /** `NOT_FOUND` si no existe. */
   get: base
     .meta({ mcp: { tool: "get", kind: "learning" } })
@@ -648,7 +797,11 @@ const learnings = {
         action: "propose_learning",
         description:
           "Propone un learning (una línea que un agente futuro necesita saber) para un proyecto o un repo, con `projectId` o `repoId`. Queda `proposed`: una persona lo aprueba en la app y recién entonces entra a los briefs. Si el texto ya existe en ese alcance devuelve el que había.",
-        annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        annotations: {
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
       },
     })
     .input(NewLearning)
@@ -676,12 +829,16 @@ const learnings = {
    * con un agente barato (haiku). No cambia nada: devuelve un veredicto por learning y la razón de cada uno. Archivar
    * los que no cumplen es `archive`, tras la confirmación de una persona. `BAD_REQUEST` si el agente no responde.
    */
-  screen: base.input(z.object({ projectId: ProjectId.optional() }).default({})).output(z.array(LearningVerdict)),
+  screen: base
+    .input(z.object({ projectId: ProjectId.optional() }).default({}))
+    .output(z.array(LearningVerdict)),
   /**
    * Un `proposed` pasa a `archived` (no entra a ningún brief y se puede volver a aprobar). Emite `learning.rejected`.
    * Uno que ya no está `proposed` se devuelve igual, sin evento. `NOT_FOUND` si algún id no existe.
    */
-  archive: base.input(z.object({ ids: z.array(LearningId).min(1) })).output(z.array(Learning)),
+  archive: base
+    .input(z.object({ ids: z.array(LearningId).min(1) }))
+    .output(z.array(Learning)),
 };
 
 /** Flujos, roles, perfiles, recetas y packs: lo versionado en `defs`, leído por kind. */
@@ -744,5 +901,22 @@ const defs = {
   exportToRepo: base.input(DefExportToRepo).output(DefExported),
 };
 
-export const contract = { system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, metrics, defs, imports };
+export const contract = {
+  system,
+  events,
+  connections,
+  artifacts,
+  issues,
+  trackers,
+  projects,
+  packs,
+  prs,
+  repos,
+  runs,
+  decisions,
+  learnings,
+  metrics,
+  defs,
+  imports,
+};
 export type Contract = typeof contract;
