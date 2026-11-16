@@ -1,9 +1,10 @@
 name: CI
 
+# Solo PRs que no están en draft: los agentes trabajan en draft y `merge.sh` lo marca listo justo antes de mergear,
+# así la CI corre una vez por PR sobre el main exacto. Sin `push` a main: el squash deja el mismo árbol que ya pasó.
 on:
   pull_request:
-  push:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -14,6 +15,7 @@ concurrency:
 
 jobs:
   check:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +31,7 @@ jobs:
   # E2E de la app de escritorio con Playwright `_electron` bajo xvfb. Va en su propio job para no alargar
   # `check`; deja los screenshots claro y oscuro como artefacto.
   e2e:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
