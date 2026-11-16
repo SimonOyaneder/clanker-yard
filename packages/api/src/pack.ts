@@ -213,6 +213,19 @@ export type Pack = z.infer<typeof Pack>;
 /** El JSON Schema del `pack.json` tal como se escribe (los defaults son opcionales). */
 export const packJsonSchema = z.toJSONSchema(Pack, { io: "input" });
 
+/** De dónde sale el pack que está activo: `factory` viene con la app, `installed` es una carpeta en `<dataDir>/packs`. */
+export const PackOrigin = z.enum(["factory", "installed"]);
+export type PackOrigin = z.infer<typeof PackOrigin>;
+
+/** Un pack activo tal como lo lista Ajustes: su versión, a quién cubre y de dónde sale. */
+export const PackInfo = z.object({
+  id: z.string(),
+  version: z.int().positive(),
+  origin: PackOrigin,
+  activate: Activate,
+});
+export type PackInfo = z.infer<typeof PackInfo>;
+
 /** A quién se le pregunta por su pack: lo que se sabe de un repo o de un proyecto. */
 export const PackScope = z.object({
   githubOrg: z.string().min(1).optional(),

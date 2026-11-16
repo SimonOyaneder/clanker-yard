@@ -8,6 +8,7 @@ import { CommandPalette } from "@/components/command-palette"
 import { Shortcut } from "@/components/common"
 import { ConnectionsView } from "@/components/connections/connections-view"
 import { InboxView } from "@/components/inbox/inbox-view"
+import { AppSettingsView } from "@/components/app-settings/app-settings-view"
 import { FlowsView } from "@/components/flows/flows-view"
 import { LearningsView } from "@/components/learnings/learnings-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
@@ -50,7 +51,7 @@ import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 import { Hint } from "./components/common"
 
-type Module = "projects" | "prs" | "connections" | "inbox" | "learnings" | "flows"
+type Module = "projects" | "prs" | "connections" | "inbox" | "learnings" | "flows" | "settings"
 // Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`
 // y `tab` el `:tab` de `/p/:proyecto/:tab`.
 type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null; tab: ProjectTab }
@@ -58,7 +59,7 @@ type Loc = { module: Module; slug: string | null; runId: RunId | null; decision:
 const sameLoc = (a: Loc, b: Loc) =>
   a.module === b.module && (a.module === "inbox" ? a.decision === b.decision : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId && a.tab === b.tab))
 
-const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox", "learnings", "flows"]
+const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox", "learnings", "flows", "settings"]
 
 // Estas decisiones avisan con una notificación nativa: alguien las tiene que atender. Las notas esperan en la bandeja.
 const NOTIFY_KINDS = new Set(["gate", "needs_human", "alert"])
@@ -308,6 +309,7 @@ function Shell() {
   const goInbox = useCallback(() => go({ module: "inbox", decision: null }), [go])
   const goLearnings = useCallback(() => go({ module: "learnings" }), [go])
   const goFlows = useCallback(() => go({ module: "flows" }), [go])
+  const goSettings = useCallback(() => go({ module: "settings" }), [go])
   const openDecision = useCallback((id: DecisionId) => go({ module: "inbox", decision: id }), [go])
   // J y K recorren la lista sin llenar el historial de atrás/adelante: reemplazan el lugar en vez de sumar uno.
   const selectDecision = useCallback(
@@ -587,6 +589,8 @@ function Shell() {
           onSelectConnections={goConnections}
           flowsActive={module === "flows"}
           onSelectFlows={goFlows}
+          settingsActive={module === "settings"}
+          onSelectSettings={goSettings}
           plan={claudePlan}
           prsBadge={prsQuery.data ? (prsNeedingAction ? { count: prsNeedingAction, tone: "red" } : prsReady ? { count: prsReady, tone: "green" } : { count: openPrs.length, tone: "muted" }) : null}
           onSelectPrs={() => go({ module: "prs" })}
@@ -623,6 +627,8 @@ function Shell() {
                 <span className="truncate px-1.5 font-medium">Conexiones</span>
               ) : module === "flows" ? (
                 <span className="truncate px-1.5 font-medium">Flujos</span>
+              ) : module === "settings" ? (
+                <span className="truncate px-1.5 font-medium">Ajustes</span>
               ) : project ? (
                 runId ? (
                   <>
@@ -684,6 +690,12 @@ function Shell() {
           ) : module === "flows" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
               <FlowsView projects={projects} />
+            </main>
+          ) : module === "settings" ? (
+            <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>
+              <div className="px-6 pt-5 pb-10">
+                <AppSettingsView />
+              </div>
             </main>
           ) : module === "connections" ? (
             <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>

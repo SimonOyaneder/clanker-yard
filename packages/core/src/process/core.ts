@@ -25,6 +25,8 @@ export interface RunCoreOptions {
   logDir: string;
   /** Carpeta de drizzle-kit con las migraciones empaquetadas junto al core. */
   migrationsFolder: string;
+  /** Carpeta con los packs que vienen con la app, junto al bundle del core. */
+  factoryPacksDir?: string;
   /** Con `CLANKER_HOME` el core no toca el Keychain: los secretos van a un archivo en `dataDir`. */
   isolated: boolean;
   /**
@@ -98,6 +100,7 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
     const core = await startCore({
       store,
       dataDir: opts.dataDir,
+      factoryPacksDir: opts.factoryPacksDir,
       connections,
       procs,
       runtimes: [

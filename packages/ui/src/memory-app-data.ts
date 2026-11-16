@@ -1,4 +1,4 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, Profile, type PrRef, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type PackInfo, Profile, type PrRef, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildOpenPrs } from "@/seed-prs"
@@ -394,6 +394,8 @@ export function createMemoryAppData(now = Date.now()): AppData {
   const skipped = new Set<IssueId>()
   // Los topes por defecto del core: dev 4, mantenimiento 2.
   const capacities = { dev: 4, maintenance: 2 }
+  const defaults: ProjectDefaults = { defaultFlowId: null, defaultProfileId: null, parallel: 1, maxCostUsd: null }
+  let packsStore: PackInfo[] = [{ id: "base", version: 2, origin: "factory", activate: { githubOrgs: ["base-org"], trackerWorkspaces: ["base"] } }]
   const lanesNow = (): Lanes => {
     const holding = (lane: Run["lane"]) => runs.filter((r) => r.lane === lane && (r.status === "running" || r.status === "waiting" || r.status === "paused")).length
     return { dev: { active: holding("dev"), capacity: capacities.dev }, maintenance: { active: holding("maintenance"), capacity: capacities.maintenance } }
@@ -447,17 +449,17 @@ export function createMemoryAppData(now = Date.now()): AppData {
         tracker: input.tracker,
         trackerRef: input.trackerRef ?? projectId,
         trackerAccount: input.trackerAccount ?? null,
-        defaultFlowId: input.defaultFlowId ?? null,
-        defaultProfileId: input.defaultProfileId ?? null,
+        defaultFlowId: input.defaultFlowId ?? defaults.defaultFlowId,
+        defaultProfileId: input.defaultProfileId ?? defaults.defaultProfileId,
         repos: input.repos?.map(({ repoId, labels = [] }) => ({ repoId, labels })) ?? [],
         queueFilter: input.queueFilter ?? {},
         conventions: input.conventions ?? {},
-        parallel: input.parallel ?? 1,
+        parallel: input.parallel ?? defaults.parallel,
         stackOn: input.stackOn ?? "ci_green",
         statusMapping: input.statusMapping ?? {},
         status: "active",
         flowParams: input.flowParams ?? {},
-        maxCostUsd: input.maxCostUsd ?? null,
+        maxCostUsd: input.maxCostUsd === undefined ? defaults.maxCostUsd : input.maxCostUsd,
       }
       projects.push(created)
       return created
@@ -484,6 +486,25 @@ export function createMemoryAppData(now = Date.now()): AppData {
       }
       return lanesNow()
     },
+    projectDefaults: async () => ({ ...defaults }),
+    setProjectDefaults: async (patch) => {
+      Object.assign(defaults, Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)))
+      return { ...defaults }
+    },
+    packs: async () => packsStore.map((p) => ({ ...p })),
+    installPack: async (path) => {
+      if (path.trim() === "") throw new Error("Falta la carpeta del pack.")
+      const installed: PackInfo = { id: "acme", version: 1, origin: "installed", activate: { githubOrgs: ["acme"] } }
+      packsStore = [...packsStore.filter((p) => p.id !== installed.id), installed].sort((a, b) => a.id.localeCompare(b.id))
+      return { ...installed }
+    },
+    removePack: async (packId) => {
+      const found = packsStore.find((p) => p.id === packId)
+      if (!found) throw new Error(`El pack "${packId}" no está instalado.`)
+      if (found.origin === "factory") throw new Error(`El pack "${packId}" viene con la app: no se puede quitar.`)
+      packsStore = packsStore.filter((p) => p.id !== packId)
+    },
+    coreInfo: async () => ({ dataDir: "/Users/ana/Library/Application Support/Clanker Yard", linearClientId: "60358f9aaddae2ba3a9c09e1419c2579" }),
     breakers: async () => breakers.map((b) => ({ ...b })),
     openPrs: async () => prs.map((p) => ({ ...p })),
     refreshPrs: async () => {},

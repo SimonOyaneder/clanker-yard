@@ -1,9 +1,9 @@
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
-import { createConnections, createFileSecrets, createProcs, createRepos, JUGUETE_FLOW, newId, openStore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createProcs, createRepos, JUGUETE_FLOW, newId, openStore, type Core, type StartCoreOptions, type Store } from "@clanker/core";
 import { startCore } from "./start-core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -38,8 +38,9 @@ afterEach(async () => {
   home.cleanup();
 });
 
-async function boot(env: Record<string, string> = { CORE_RUNTIME: "fake" }): Promise<Client> {
+async function boot(env: Record<string, string> = { CORE_RUNTIME: "fake" }, extra: Partial<StartCoreOptions> = {}): Promise<Client> {
   core = await startCore({
+    ...extra,
     store,
     dataDir: home.path,
     connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
@@ -405,6 +406,39 @@ describe("arranque", () => {
     expect(store.events.since(0, { types: ["error"] })).toMatchObject([
       { origin: "core", payload: { scope: "packs.load", message: expect.stringContaining("roto") } },
     ]);
+  });
+
+  test("el pack de fábrica no pisa el que ya estaba copiado a mano con el mismo id y versión: ni duplica ni crea versiones, también al reiniciar", async () => {
+    const factory = fileURLToPath(new URL("../../../packs", import.meta.url));
+    cpSync(join(factory, "acme"), join(home.path, "packs", "acme"), { recursive: true });
+    const versions = () => store.db.$client.prepare("SELECT d.kind, d.slug, d.current_version AS v FROM defs d ORDER BY d.kind, d.slug").all();
+
+    let client = await boot(undefined, { factoryPacksDir: factory });
+    const first = versions();
+    await core?.close();
+    client = await boot(undefined, { factoryPacksDir: factory });
+
+    expect(await client.packs.list()).toMatchObject([{ id: "acme", origin: "installed" }]);
+    expect(versions()).toEqual(first);
+    expect(first.filter((d) => (d as { kind: string }).kind === "pack")).toHaveLength(1);
+  });
+
+  test("sin pack instalado el de fábrica rige; instalar y quitar un pack desde la API se aplica sin reiniciar", async () => {
+    const factory = fileURLToPath(new URL("../../../packs", import.meta.url));
+    const client = await boot(undefined, { factoryPacksDir: factory });
+    expect(await client.packs.list()).toMatchObject([{ id: "acme", origin: "factory" }]);
+    await expect(client.packs.remove({ id: "acme" })).rejects.toThrow(/viene con la app/);
+
+    const src = join(home.path, "mi-pack");
+    mkdirSync(src);
+    writeFileSync(join(src, "pack.json"), JSON.stringify({ id: "acme", version: 1, activate: { githubOrgs: ["acme-co"] } }));
+    const installed = await client.packs.install({ path: src });
+    expect(installed).toMatchObject({ id: "acme", origin: "installed" });
+    expect((await client.packs.list()).map((p) => p.id)).toEqual(["acme", "acme"]);
+
+    await client.packs.remove({ id: "acme" });
+    expect((await client.packs.list()).map((p) => p.id)).toEqual(["acme"]);
+    await expect(client.packs.install({ path: join(home.path, "no-existe") })).rejects.toThrow(/pack\.json/);
   });
 
   test("CORE_RUNTIME que no está registrado hace fallar el arranque diciendo cuáles hay", async () => {

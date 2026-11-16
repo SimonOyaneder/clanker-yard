@@ -31,7 +31,10 @@ import type {
   LearningPatch,
   ModelMetrics,
   NewProject,
+  PackInfo,
   PrRef,
+  ProjectDefaults,
+  ProjectDefaultsPatch,
   ProjectId,
   ProjectPatch,
   ProjectSummary,
@@ -95,6 +98,18 @@ export interface AppData {
   lanes(): Promise<Lanes>
   /** Cambia la capacidad de los carriles de la máquina; rige al instante y nunca interrumpe lo que corre. */
   setLanes(patch: LanesPatch): Promise<Lanes>
+  /** Lo que un proyecto nuevo toma si no se pide otra cosa: flujo, perfil, corridas en paralelo y tope de gasto. */
+  projectDefaults(): Promise<ProjectDefaults>
+  /** Cambia los defaults de proyectos nuevos; lo que no se pasa no cambia, rige sin reiniciar el core y no toca los proyectos que ya existen. */
+  setProjectDefaults(patch: ProjectDefaultsPatch): Promise<ProjectDefaults>
+  /** Los packs activos (reglas de una organización) con su versión, su alcance y si vienen con la app. */
+  packs(): Promise<PackInfo[]>
+  /** Instala (o actualiza) el pack de una carpeta; rige sin reiniciar el core. El mensaje del rechazo dice qué archivo y campo fallan. */
+  installPack(path: string): Promise<PackInfo>
+  /** Quita un pack instalado; uno que viene con la app no se puede quitar. */
+  removePack(id: string): Promise<void>
+  /** Dónde guarda el core sus datos y con qué client_id de Linear se conecta. */
+  coreInfo(): Promise<{ dataDir: string; linearClientId: string }>
   /** Los circuit breakers abiertos: qué está en pausa y cuándo se vuelve a probar. */
   breakers(): Promise<Breaker[]>
   /** Los PRs abiertos que Watch conoce (los que abrió el sistema y los de tu búsqueda), con su estado ya leído y las señales de su pack. */

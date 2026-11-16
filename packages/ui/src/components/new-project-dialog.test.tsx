@@ -158,3 +158,18 @@ test("con dos workspaces, el proyecto que se elige guarda la cuenta de su worksp
   await waitFor(() => expect(createProject).toHaveBeenCalled())
   expect(sent(createProject)).toMatchObject({ tracker: "linear", trackerRef: "b1", trackerAccount: "clanker-yard" })
 })
+
+test("los defaults de proyectos nuevos de Ajustes mandan sobre los de siempre", async () => {
+  const data = createMemoryAppData(NOW)
+  await data.setProjectDefaults({ defaultFlowId: "juguete", defaultProfileId: "medio", parallel: 3 })
+  const { createProject } = setup({ projectDefaults: data.projectDefaults })
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Flujo por defecto" }).textContent).toBe("Juguete"))
+  expect(screen.getByRole("combobox", { name: "Perfil por defecto" }).textContent).toBe("medio")
+  expect((screen.getByLabelText("Corridas en paralelo") as HTMLInputElement).value).toBe("3")
+
+  fillName("Tres")
+  create()
+
+  await waitFor(() => expect(createProject).toHaveBeenCalled())
+  expect(sent(createProject)).toMatchObject({ defaultFlowId: "juguete", defaultProfileId: "medio", parallel: 3 })
+})

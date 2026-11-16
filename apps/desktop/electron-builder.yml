@@ -8,7 +8,7 @@ files:
   - package.json
   - out
   - "!node_modules"
-# El core, sus migraciones y la CLI van fuera del asar: el core lo ejecuta el binario de Electron con
+# El core, sus migraciones, los packs de fábrica (`packs/`, que el core lee de `../packs` de su bundle) y la CLI van fuera del asar: el core lo ejecuta el binario de Electron con
 # ELECTRON_RUN_AS_NODE (`ensureCore`) y lee las migraciones de `../migrations` de su bundle.
 # `npm run build:mac` deja los bundles construidos antes de empaquetar.
 extraResources:
@@ -16,6 +16,8 @@ extraResources:
     to: core/dist/main.js
   - from: ../../packages/core/migrations
     to: core/migrations
+  - from: ../../packs
+    to: core/packs
   - from: ../cli/dist/clanker.js
     to: cli/clanker.js
   - from: resources/clanker

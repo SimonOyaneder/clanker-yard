@@ -1,7 +1,7 @@
 import type { CachedIssue, ClankerProject, DefRecord } from "@clanker/api"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type RepoRow, useAppData } from "@/app-data"
-import { Shortcut } from "@/components/common"
+import { SaveBar, useSaveShortcut } from "@/components/project/settings-fields"
 import { SettingsNav, type SettingsNavItem } from "@/components/project/settings-nav"
 import { ConventionsSection, FlowSection, LimitsSection, QueueSection, ReposSection, StatusMappingSection, TrackerSection } from "@/components/project/settings-sections"
 import { Button } from "@/components/ui/button"
@@ -122,18 +122,10 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
     setSaveError(null)
   }, [])
 
-  // ⌘S guarda desde cualquier campo; la paleta usa los mismos controles.
+  // La paleta usa los mismos controles que ⌘S.
   const latest = useRef({ save, discard })
   latest.current = { save, discard }
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.shiftKey || e.altKey || e.ctrlKey || e.code !== "KeyS") return
-      e.preventDefault()
-      void latest.current.save()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  useSaveShortcut(() => void latest.current.save())
   const blocked = dirty && problemList.length > 0
   useEffect(() => {
     onControls({ dirty, blocked, save: () => void latest.current.save(), discard: () => latest.current.discard() })
@@ -174,24 +166,15 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
           <ConventionsSection {...shared} hasContext={project.conventions.context !== undefined} />
 
           {dirty ? (
-            <div
-              role="region"
-              aria-label="Cambios sin guardar"
-              className="sticky bottom-4 z-10 flex items-center gap-3 rounded-lg border bg-background/95 px-4 py-3 shadow-sm backdrop-blur"
-            >
-              <p className={problemList.length || saveError ? "text-[13px] text-destructive" : "text-[13px] text-muted-foreground"} role={saveError ? "alert" : undefined}>
-                {saveError ?? (problemList.length ? `${problemList.length === 1 ? "Un campo necesita" : `${problemList.length} campos necesitan`} corrección para guardar. Está marcado arriba.` : `Cambios sin guardar en ${changedSections(patch).join(", ")}.`)}
-              </p>
-              <div className="ml-auto flex items-center gap-2">
-                <Button size="sm" variant="ghost" onClick={discard} disabled={saving}>
-                  Descartar
-                </Button>
-                <Button size="sm" onClick={() => void save()} disabled={saving || problemList.length > 0}>
-                  Guardar cambios
-                  <Shortcut keys="⌘S" className="ml-1 opacity-70" />
-                </Button>
-              </div>
-            </div>
+            <SaveBar
+              message={saveError ?? (problemList.length ? `${problemList.length === 1 ? "Un campo necesita" : `${problemList.length} campos necesitan`} corrección para guardar. Está marcado arriba.` : `Cambios sin guardar en ${changedSections(patch).join(", ")}.`)}
+              error={problemList.length > 0 || saveError !== null}
+              alert={saveError !== null}
+              saving={saving}
+              canSave={problemList.length === 0}
+              onDiscard={discard}
+              onSave={() => void save()}
+            />
           ) : null}
         </div>
       </div>

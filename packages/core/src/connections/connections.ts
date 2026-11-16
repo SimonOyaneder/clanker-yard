@@ -111,6 +111,8 @@ export interface ConnectionsOptions {
 }
 
 export interface Connections {
+  /** El client_id de la OAuth app de Linear con que este core inicia y refresca el login. */
+  readonly linearClientId: string;
   /**
    * Guarda el token en `Secrets` y la cuenta en la base. Si la cuenta ya estaba conectada, reemplaza
    * token, scopes y vencimiento y la deja `active`. Emite `connection.changed`. GitHub queda con
@@ -250,6 +252,7 @@ export function createConnections(
 ): Connections {
   const githubClients = new Map<string, GitHubClient>();
   const endpoints = linear.endpoints ?? LINEAR_ENDPOINTS;
+  const linearClientId = linear.clientId ?? LINEAR_DEFAULT_CLIENT_ID;
   const refreshes = new Map<string, Promise<string>>();
   const locks = new Map<string, Promise<unknown>>();
   /** Tokens que el proveedor ya rotó y `Secrets` no pudo guardar: valen más que los del almacén, que ya invalidó. */
@@ -378,7 +381,7 @@ export function createConnections(
    */
   function refresher(provider: RotatingProvider): (refreshToken: string) => Promise<Refreshed> {
     if (provider === "linear") {
-      const clientId = linear.clientId ?? LINEAR_DEFAULT_CLIENT_ID;
+      const clientId = linearClientId;
       return async (refreshToken) => {
         const at = now();
         const tokens = await refreshTokens(endpoints, { clientId, refreshToken }, at);
@@ -530,6 +533,7 @@ export function createConnections(
   }
 
   const self: Connections = {
+    linearClientId,
     async connect({ provider, account, scopes, token, expiresAt }, origin) {
       if (account === "" || token === "") {
         throw new Error(`Conectar ${provider} necesita una cuenta y un token no vacíos.`);
@@ -585,7 +589,7 @@ export function createConnections(
     },
 
     async linearAuth(origin) {
-      const clientId = linear.clientId ?? LINEAR_DEFAULT_CLIENT_ID;
+      const clientId = linearClientId;
       await pendingLogin?.cancel("Se inició otra conexión con Linear.");
       const login = await startLinearLogin(
         {

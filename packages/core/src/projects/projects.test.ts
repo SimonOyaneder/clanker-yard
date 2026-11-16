@@ -107,6 +107,68 @@ describe("create", () => {
   });
 });
 
+describe("defaults de proyectos nuevos", () => {
+  const local = { name: "Demo", tracker: "local" } as const;
+
+  test("sin nada guardado: sin flujo ni perfil, 1 en paralelo y sin tope", () => {
+    expect(projects.defaults()).toEqual({ defaultFlowId: null, defaultProfileId: null, parallel: 1, maxCostUsd: null });
+  });
+
+  test("un proyecto nuevo toma los defaults que no pidió y lo que pide manda; los existentes no cambian", () => {
+    defs.save({ kind: "flow", slug: "techlead", scope: "builtin", body: {}, source: "builtin" });
+    defs.save({ kind: "profile", slug: "max", scope: "user", body: {}, source: "ui" });
+    const before = create({ ...local, slug: "antes" }, "ui");
+
+    const saved = projects.setDefaults({ defaultFlowId: "techlead", defaultProfileId: "max", parallel: 3, maxCostUsd: 5 });
+    const inherits = create({ ...local, slug: "hereda" }, "ui");
+    const overrides = create({ ...local, slug: "pide", parallel: 2, maxCostUsd: null }, "ui");
+
+    expect(projects.defaults()).toEqual(saved);
+    expect(inherits).toMatchObject({ defaultFlowId: "techlead", defaultProfileId: "max", parallel: 3, maxCostUsd: 5 });
+    expect(overrides).toMatchObject({ parallel: 2, maxCostUsd: null, defaultFlowId: "techlead", defaultProfileId: "max" });
+    expect(projects.get(before.id)).toMatchObject({ defaultFlowId: null, parallel: 1, maxCostUsd: null });
+  });
+
+  test("lo que no se pasa no cambia, null quita el flujo y uno que no existe se rechaza sin guardar", () => {
+    defs.save({ kind: "flow", slug: "techlead", scope: "builtin", body: {}, source: "builtin" });
+    projects.setDefaults({ defaultFlowId: "techlead", parallel: 2 });
+
+    expect(projects.setDefaults({ maxCostUsd: 1 })).toEqual({ defaultFlowId: "techlead", defaultProfileId: null, parallel: 2, maxCostUsd: 1 });
+    expect(projects.setDefaults({ defaultFlowId: null }).defaultFlowId).toBeNull();
+    expect(() => projects.setDefaults({ defaultFlowId: "nope" })).toThrow(InvalidProjectError);
+    expect(projects.defaults().parallel).toBe(2);
+  });
+
+  test("un flujo por defecto que ya no existe se ignora al crear en vez de impedirlo", () => {
+    const flow = defs.save({ kind: "flow", slug: "techlead", scope: "user", body: {}, source: "ui" });
+    projects.setDefaults({ defaultFlowId: "techlead" });
+    defs.archive("flow", flow.id, "ui");
+
+    expect(create({ ...local, slug: "demo" }, "ui").defaultFlowId).toBeNull();
+  });
+
+  test("llegan por la API", async () => {
+    const client = createRouterClient(
+      createRouter({
+        store,
+        connections: {} as never,
+        issues: createIssues(store),
+        ...apiDeps(store, "/tmp/clanker"),
+        coreVersion: "0",
+        bootId: "boot",
+        startedAt: 0,
+        dataDir: "/tmp/clanker",
+        onShutdown: () => {},
+      }),
+      { context: { origin: "ui" } },
+    );
+
+    expect(await client.projects.setDefaults({ parallel: 4 })).toMatchObject({ parallel: 4 });
+    expect((await client.projects.create({ slug: "demo", name: "Demo", tracker: "local" })).parallel).toBe(4);
+    await expect(client.projects.setDefaults({ defaultProfileId: "nope" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
 describe("repos, cola, convenciones y tope", () => {
   let api: RepoId;
   let web: RepoId;

@@ -2,7 +2,7 @@ import type { Client, EventType } from "@clanker/api"
 import type { AppData } from "@/app-data"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
-export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "learnings" | "connections" | "repos" | "metrics" | "defs" | "trackers">
+export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "learnings" | "connections" | "repos" | "metrics" | "defs" | "trackers" | "packs">
 
 // Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos, las sesiones de agente que el
 // panel del paso y su transcript siguen en vivo, las decisiones de la bandeja, los learnings, conexiones y pruebas de receta).
@@ -79,6 +79,15 @@ export function createCoreAppData(client: CoreClient): AppData {
     boostIssue: async (id, issueId, boosted) => void (await client.projects.boostIssue({ id, issueId, boosted })),
     lanes: () => client.system.lanes(),
     setLanes: (patch) => client.system.setLanes(patch),
+    projectDefaults: () => client.projects.defaults(),
+    setProjectDefaults: (patch) => client.projects.setDefaults(patch),
+    packs: () => client.packs.list(),
+    installPack: (path) => client.packs.install({ path }),
+    removePack: (id) => client.packs.remove({ id }),
+    coreInfo: async () => {
+      const { dataDir, linearClientId } = await client.system.info()
+      return { dataDir, linearClientId }
+    },
     breakers: () => client.system.breakers(),
     openPrs: () => client.prs.list({ state: "open" }),
     refreshPrs: async (refs) => {

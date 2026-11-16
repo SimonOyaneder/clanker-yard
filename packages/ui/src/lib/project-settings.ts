@@ -174,6 +174,18 @@ export function same(a: unknown, b: unknown): boolean {
 
 export type Problems = Record<string, string>
 
+/** Qué corregir en las corridas a la vez de un proyecto, o `undefined` si el texto sirve. */
+export function parallelProblem(text: string): string | undefined {
+  return /^[1-9]\d*$/.test(text.trim()) ? undefined : "Escribe un entero de 1 en adelante: cuántas corridas del proyecto pueden ir a la vez."
+}
+
+/** Qué corregir en el tope de gasto por corrida, o `undefined` si el texto sirve (vacío es sin tope). */
+export function maxCostProblem(text: string): string | undefined {
+  const cost = text.trim()
+  if (cost === "" || (Number(cost) > 0 && Number.isFinite(Number(cost)))) return undefined
+  return "Escribe un monto en dólares mayor que 0 (por ejemplo 5), o déjalo vacío para no poner tope."
+}
+
 /** Qué impide guardar y cómo arreglarlo, por campo (`repo:<id>`, `labels`, `param:<nombre>`...). Sin problemas, `{}`. */
 export function validate(draft: Draft, params: readonly ParamSpec[]): Problems {
   const problems: Problems = {}
@@ -209,13 +221,10 @@ export function validate(draft: Draft, params: readonly ParamSpec[]): Problems {
     }
   }
 
-  const parallel = draft.parallel.trim()
-  if (!/^[1-9]\d*$/.test(parallel)) problems.parallel = "Escribe un entero de 1 en adelante: cuántas corridas del proyecto pueden ir a la vez."
-
-  const cost = draft.maxCostUsd.trim()
-  if (cost !== "" && !(Number(cost) > 0 && Number.isFinite(Number(cost)))) {
-    problems.maxCostUsd = "Escribe un monto en dólares mayor que 0 (por ejemplo 5), o déjalo vacío para no poner tope."
-  }
+  const parallel = parallelProblem(draft.parallel)
+  if (parallel) problems.parallel = parallel
+  const cost = maxCostProblem(draft.maxCostUsd)
+  if (cost) problems.maxCostUsd = cost
 
   const template = draft.conventions.prTemplate.trim()
   if (template && (template.startsWith("/") || template.split("/").includes(".."))) {

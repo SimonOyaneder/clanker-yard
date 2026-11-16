@@ -1,5 +1,7 @@
 import { X } from "lucide-react"
-import { useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import { Shortcut } from "@/components/common"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 
@@ -103,6 +105,57 @@ export function ChipsInput({
         onBlur={() => commit(text)}
         className="h-5 min-w-24 flex-1 bg-transparent px-1 text-[13px] outline-none placeholder:text-muted-foreground"
       />
+    </div>
+  )
+}
+
+/** ⌘S guarda desde cualquier campo de la página. */
+export function useSaveShortcut(save: () => void) {
+  const latest = useRef(save)
+  latest.current = save
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.shiftKey || e.altKey || e.ctrlKey || e.code !== "KeyS") return
+      e.preventDefault()
+      latest.current()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+}
+
+/** La barra que queda abajo mientras hay cambios sin guardar. `error` (rojo) es lo que impide o hizo fallar el guardado; `alert` además lo anuncia. */
+export function SaveBar({
+  message,
+  error,
+  alert,
+  saving,
+  canSave,
+  onDiscard,
+  onSave,
+}: {
+  message: string
+  error: boolean
+  alert: boolean
+  saving: boolean
+  canSave: boolean
+  onDiscard: () => void
+  onSave: () => void
+}) {
+  return (
+    <div role="region" aria-label="Cambios sin guardar" className="sticky bottom-4 z-10 flex items-center gap-3 rounded-lg border bg-background/95 px-4 py-3 shadow-sm backdrop-blur">
+      <p className={error ? "text-[13px] text-destructive" : "text-[13px] text-muted-foreground"} role={alert ? "alert" : undefined}>
+        {message}
+      </p>
+      <div className="ml-auto flex items-center gap-2">
+        <Button size="sm" variant="ghost" onClick={onDiscard} disabled={saving}>
+          Descartar
+        </Button>
+        <Button size="sm" onClick={onSave} disabled={saving || !canSave}>
+          Guardar cambios
+          <Shortcut keys="⌘S" className="ml-1 opacity-70" />
+        </Button>
+      </div>
     </div>
   )
 }

@@ -90,16 +90,19 @@ export const NewProject = z
     trackerRef: z.string().min(1).optional(),
     /** La cuenta (workspace) del tracker a la que pertenece `trackerRef`; sin ella se usa la única conectada. */
     trackerAccount: z.string().min(1).optional(),
+    /** Sin valor rige el default de Ajustes. */
     defaultFlowId: z.string().min(1).optional(),
     defaultProfileId: z.string().min(1).optional(),
     repos: ProjectRepos.default([]),
     queueFilter: IssueFilter.default({}),
     conventions: Conventions.default({}),
-    parallel: z.int().positive().default(1),
+    /** Sin valor rige el default de proyectos nuevos de Ajustes (`ProjectDefaults`). */
+    parallel: z.int().positive().optional(),
     stackOn: StackOn.default("ci_green"),
     statusMapping: StatusMapping.default({}),
     flowParams: z.record(z.string(), z.unknown()).default({}),
-    maxCostUsd: MaxCostUsd.default(null),
+    /** Sin valor rige el default de Ajustes; `null` es sin tope. */
+    maxCostUsd: MaxCostUsd.optional(),
   })
   .superRefine((project, ctx) => {
     const isLocal = project.tracker === "local";
@@ -159,3 +162,19 @@ export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
 /** La entrada de `projects.update`: el `id` y los campos de `ProjectPatch`. */
 export const ProjectUpdate = z.strictObject({ ...patchShape, id: ProjectId }, { error: unknownFieldMessage });
+
+/**
+ * Lo que un proyecto nuevo toma cuando quien lo crea no dice otra cosa (Ajustes de la app). Cambiarlo no toca los
+ * proyectos que ya existen.
+ */
+export const ProjectDefaults = z.object({
+  defaultFlowId: z.string().min(1).nullable(),
+  defaultProfileId: z.string().min(1).nullable(),
+  parallel: z.int().positive(),
+  maxCostUsd: MaxCostUsd,
+});
+export type ProjectDefaults = z.infer<typeof ProjectDefaults>;
+
+/** Los campos de `ProjectDefaults` a cambiar; lo que no se pasa no cambia. */
+export const ProjectDefaultsPatch = ProjectDefaults.partial();
+export type ProjectDefaultsPatch = z.infer<typeof ProjectDefaultsPatch>;

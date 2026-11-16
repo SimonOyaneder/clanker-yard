@@ -32,6 +32,7 @@ const router = os.router({
       startedAt: 0,
       dataDir: "/tmp/clanker",
       platform: "linux" as const,
+      linearClientId: "linear-client",
     })),
     lanes: os.system.lanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
     setLanes: os.system.setLanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
@@ -95,6 +96,10 @@ const router = os.router({
     create: os.projects.create.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    defaults: os.projects.defaults.handler(() => ({ defaultFlowId: null, defaultProfileId: null, parallel: 1, maxCostUsd: null })),
+    setDefaults: os.projects.setDefaults.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     update: os.projects.update.handler(() => {
       throw new Error("no se usa en este test");
     }),
@@ -119,6 +124,13 @@ const router = os.router({
     summary: os.projects.summary.handler(() => {
       throw new Error("no se usa en este test");
     }),
+  },
+  packs: {
+    list: os.packs.list.handler(() => []),
+    install: os.packs.install.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    remove: os.packs.remove.handler(() => {}),
   },
   prs: {
     get: os.prs.get.handler(() => {

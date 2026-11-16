@@ -30,6 +30,7 @@ const result = await runCore({
   dataDir,
   logDir: values["log-dir"] ?? clankerDirs().logDir,
   migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
+  factoryPacksDir: fileURLToPath(new URL("../packs", import.meta.url)),
   isolated: home !== undefined,
 });
 if (result === "running") process.exit(0);

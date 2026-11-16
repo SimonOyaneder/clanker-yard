@@ -100,6 +100,8 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   procs?: Procs;
   /** Carpeta de packs instalados (una subcarpeta por pack). Por defecto, `<dataDir>/packs`. */
   packsDir?: string;
+  /** Carpeta de packs que vienen con la app (una subcarpeta por pack). Sin ella, solo rigen los instalados. */
+  factoryPacksDir?: string;
   /** La URL de git de un repo de GitHub `owner/name`. Por defecto `https://github.com/<repo>.git`; un test la apunta a un bare local. */
   gitUrl?: (repo: string) => string;
   /**
@@ -143,7 +145,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const { bootId } = procs;
   const runtime = selectRuntime(opts.runtimes, opts.env);
   const defs = createDefs(store);
-  const packs = createPacks({ defs });
+  const packs = createPacks({ defs, installedDir: opts.packsDir ?? join(dataDir, "packs"), factoryDir: opts.factoryPacksDir });
   const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
   const agents = createAgents({ store, defs, runtime, packs, remoteOf: (repoId) => repos.get(repoId)?.remote });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
@@ -250,7 +252,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   for (const wait of Object.values(prWaits(prs, { headSeen }))) flows.registerWait(wait);
   installBuiltins({ defs, flows, extra: opts.builtins });
   // Los flujos de un pack citan acciones y waits, así que se cargan con todo registrado. Un pack roto no tumba el arranque.
-  const { errors } = await packs.loadAll(opts.packsDir ?? join(dataDir, "packs"));
+  const { errors } = await packs.reload();
   for (const error of errors) {
     store.tx((tx) => tx.emit({ type: "error", origin: "core", payload: { scope: "packs.load", message: error.message } }));
   }

@@ -56,10 +56,17 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
   // `null` es "no tocado": vale el default de lo que haya llegado.
   const [pickedFlow, setPickedFlow] = useState<string | null>(null)
   const [pickedProfile, setPickedProfile] = useState<string | null>(null)
-  const defs = useLiveQuery("new-project:defs", async () => ({ flows: selectableFlows(await appData.defs("flow")), profiles: await appData.defs("profile") }), { live: false })
-  const flow = pickedFlow ?? defaultFlowSlug(defs.data?.flows ?? [])
-  const profile = pickedProfile ?? defaultProfileSlug(defs.data?.profiles ?? [])
-  const [parallel, setParallel] = useState("1")
+  const [pickedParallel, setPickedParallel] = useState<string | null>(null)
+  // Lo que se preselecciona son los defaults de proyectos nuevos de Ajustes; sin ellos, lo de siempre.
+  const defs = useLiveQuery(
+    "new-project:defs",
+    async () => ({ flows: selectableFlows(await appData.defs("flow")), profiles: await appData.defs("profile"), defaults: await appData.projectDefaults() }),
+    { live: false },
+  )
+  const flow = pickedFlow ?? defs.data?.defaults.defaultFlowId ?? defaultFlowSlug(defs.data?.flows ?? [])
+  const profile = pickedProfile ?? defs.data?.defaults.defaultProfileId ?? defaultProfileSlug(defs.data?.profiles ?? [])
+  const parallel = pickedParallel ?? String(defs.data?.defaults.parallel ?? 1)
+  const setParallel = setPickedParallel
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 

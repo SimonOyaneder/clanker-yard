@@ -36,7 +36,8 @@ export function LanesControl({ lanes }: { lanes: Lanes }) {
   )
 }
 
-function LaneStepper({ lane, usage }: { lane: Lane; usage: Lanes[Lane] }) {
+/** El stepper de capacidad de un carril: el mismo en el popover de Operación y en Ajustes. */
+export function LaneStepper({ lane, usage }: { lane: Lane; usage: Lanes[Lane] }) {
   const actions = useAppActions()
   const set = (capacity: number) => void actions.setLanes(lane, capacity, usage.capacity)
   const name = LANE_NAME[lane].toLowerCase()

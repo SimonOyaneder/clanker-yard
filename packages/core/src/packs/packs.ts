@@ -1,6 +1,6 @@
-import { readdir, readFile } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
-import { NodeId, Pack, PackSettings, type DefKind, type PackScope, type ResolvedPack } from "@clanker/api";
+import { cp, readdir, readFile, rm } from "node:fs/promises";
+import { basename, extname, join, resolve } from "node:path";
+import { NodeId, Pack, PackSettings, type DefKind, type PackInfo, type PackOrigin, type PackScope, type ResolvedPack } from "@clanker/api";
 import * as z from "zod";
 import { DefValidationError, type DefIssue, type Defs } from "../defs/defs";
 
@@ -21,6 +21,9 @@ export class PackLoadError extends Error {
   }
 }
 
+/** Instalar o quitar un pack no se puede: el mensaje dice qué cambiar. */
+export class PackInstallError extends Error {}
+
 export interface Packs {
   /**
    * Lee `<dir>/pack.json` con los flujos, roles y paquetes de contexto que lista y los guarda como defs: el pack con scope
@@ -30,10 +33,25 @@ export interface Packs {
    */
   load(dir: string): Promise<{ id: string; version: number; changed: boolean }>;
   /**
-   * `load` de cada subcarpeta de `root` (la carpeta de packs instalados; que no exista es no tener packs).
-   * Un pack roto no impide cargar los demás: sale en `errors` con su carpeta.
+   * Deja activos los packs de la app (`factoryDir`) y los instalados (`installedDir`): de cada id, la versión más
+   * alta, y a igual versión el instalado, para no pisar con el de fábrica lo que alguien copió a mano ni crear
+   * versiones nuevas por cargar dos copias del mismo pack. Que una carpeta no exista es no tener packs. Un pack
+   * roto no impide cargar los demás: sale en `errors` con su carpeta. Lo que ya no está en ninguna carpeta no se
+   * archiva (para eso, `remove`).
    */
-  loadAll(root: string): Promise<{ errors: PackLoadError[] }>;
+  reload(): Promise<{ errors: PackLoadError[] }>;
+  /** Los packs activos, por id. */
+  list(): PackInfo[];
+  /**
+   * Valida el pack de `dir`, lo copia a `installedDir` (sobre su carpeta si ya estaba instalado) y lo activa.
+   * Falla con `PackLoadError` si no es válido y con `PackInstallError` si ya hay una versión más nueva activa.
+   */
+  install(dir: string): Promise<PackInfo>;
+  /**
+   * Borra el pack instalado `id`; si la app trae otro con ese id vuelve a regir ese, y si no sus defs se archivan.
+   * Falla con `PackInstallError` si no está instalado.
+   */
+  remove(id: string): Promise<void>;
   /**
    * El pack que se activa para este repo o proyecto (por org de GitHub, workspace del tracker o proyecto), o
    * los defaults neutros si ninguno cubre el alcance. Si dos packs lo cubren gana el de menor id.
@@ -52,7 +70,15 @@ interface PackedDef {
   body: unknown;
 }
 
-export function createPacks({ defs }: { defs: Defs }): Packs {
+interface Candidate {
+  id: string;
+  version: number;
+  origin: PackOrigin;
+  dir: string;
+}
+
+/** `factoryDir` e `installedDir` son carpetas con una subcarpeta por pack; sin ellas (un test) no hay qué recargar ni instalar. */
+export function createPacks({ defs, factoryDir, installedDir }: { defs: Defs; factoryDir?: string; installedDir?: string }): Packs {
   defs.register("pack", Pack);
 
   async function readJson(dir: string, file: string): Promise<unknown> {
@@ -110,18 +136,35 @@ export function createPacks({ defs }: { defs: Defs }): Packs {
     return out;
   }
 
+  /** Lee y valida el pack de `dir` entero (manifiesto y archivos) sin escribir nada. */
+  async function read(dir: string) {
+    const manifest = await readJson(dir, "pack.json");
+    const parsed = Pack.safeParse(manifest);
+    if (!parsed.success) {
+      throw new PackLoadError(dir, "pack.json", parsed.error.issues.map(({ path, message }) => ({ path, message })));
+    }
+    return { pack: parsed.data, manifest, packed: await readPacked(dir, parsed.data) };
+  }
+
+  /** Las carpetas de packs de `root`; que no exista es no tener packs. */
+  async function packDirs(root: string): Promise<string[]> {
+    const entries = await readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+    return entries.filter((e) => e.isDirectory()).map((e) => join(root, e.name)).sort();
+  }
+
+  /** Lo que encontró el último `reload`, para que `install` y `remove` sepan qué carpeta es de quién. */
+  let candidates: Candidate[] = [];
+  const origins = new Map<string, PackOrigin>();
+
   const self: Packs = {
     async load(dir) {
-      const manifest = await readJson(dir, "pack.json");
-      const parsed = Pack.safeParse(manifest);
-      if (!parsed.success) {
-        throw new PackLoadError(dir, "pack.json", parsed.error.issues.map(({ path, message }) => ({ path, message })));
-      }
-      const pack = parsed.data;
+      const { pack, manifest, packed } = await read(dir);
       const source = `pack:${pack.id}@${pack.version}`;
       const mine = (existingSource: string) => existingSource.startsWith(`pack:${pack.id}@`);
 
-      const packed = await readPacked(dir, pack);
       const existing = PACKED_KINDS.flatMap((kind) =>
         defs.list(kind, { includeArchived: true }).filter((d) => d.scope === "pack"),
       );
@@ -147,6 +190,12 @@ export function createPacks({ defs }: { defs: Defs }): Packs {
           changed = true;
         }
       }
+      // Un pack que se quitó y vuelve (`remove` archiva también su manifiesto).
+      const archivedManifest = defs.list("pack", { includeArchived: true }).find((d) => d.slug === pack.id && d.archivedAt !== null);
+      if (archivedManifest) {
+        defs.restore("pack", archivedManifest.id, "core");
+        changed = true;
+      }
 
       for (const def of packed) {
         changed = defs.save({ kind: def.kind, slug: def.slug, body: def.body, scope: "pack", source }).changed || changed;
@@ -155,21 +204,80 @@ export function createPacks({ defs }: { defs: Defs }): Packs {
       return { id: pack.id, version: pack.version, changed: changed || saved.changed };
     },
 
-    async loadAll(root) {
-      const entries = await readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return [];
-        throw error;
-      });
+    async reload() {
       const errors: PackLoadError[] = [];
-      for (const entry of entries.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+      const found: Candidate[] = [];
+      for (const [origin, root] of [["factory", factoryDir], ["installed", installedDir]] as const) {
+        if (root === undefined) continue;
+        for (const dir of await packDirs(root)) {
+          try {
+            const { pack } = await read(dir);
+            found.push({ id: pack.id, version: pack.version, origin, dir });
+          } catch (error) {
+            if (!(error instanceof PackLoadError)) throw error;
+            errors.push(error);
+          }
+        }
+      }
+      candidates = found;
+      for (const winner of winners(found)) {
         try {
-          await self.load(join(root, entry.name));
+          await self.load(winner.dir);
+          origins.set(winner.id, winner.origin);
         } catch (error) {
           if (!(error instanceof PackLoadError)) throw error;
           errors.push(error);
         }
       }
       return { errors };
+    },
+
+    list() {
+      return defs.list("pack").map((def) => {
+        const pack = Pack.parse(def.body);
+        return { id: pack.id, version: pack.version, origin: origins.get(pack.id) ?? "installed", activate: pack.activate };
+      });
+    },
+
+    async install(dir) {
+      if (installedDir === undefined) throw new PackInstallError("Este core no tiene una carpeta de packs instalados.");
+      const { pack } = await read(dir);
+      const active = defs.list("pack").map((d) => Pack.parse(d.body)).find((p) => p.id === pack.id);
+      if (active && active.version > pack.version) {
+        throw new PackInstallError(
+          `Ya está activa la versión ${active.version} del pack "${pack.id}", más nueva que la ${pack.version} de esa carpeta.`,
+        );
+      }
+      const previous = candidates.find((c) => c.origin === "installed" && c.id === pack.id);
+      const dest = previous?.dir ?? join(installedDir, pack.id);
+      if (resolve(dir) !== resolve(dest)) {
+        await rm(dest, { recursive: true, force: true });
+        await cp(dir, dest, { recursive: true });
+      }
+      await self.reload();
+      const installed = self.list().find((p) => p.id === pack.id);
+      if (!installed) throw new PackInstallError(`El pack "${pack.id}" quedó copiado en ${dest} pero no se pudo activar: revisa el error de arranque.`);
+      return installed;
+    },
+
+    async remove(id) {
+      const installed = candidates.filter((c) => c.origin === "installed" && c.id === id);
+      if (installed.length === 0) {
+        const bundled = candidates.some((c) => c.id === id);
+        throw new PackInstallError(
+          bundled ? `El pack "${id}" viene con la app: no se puede quitar.` : `El pack "${id}" no está instalado.`,
+        );
+      }
+      for (const { dir } of installed) await rm(dir, { recursive: true, force: true });
+      await self.reload();
+      if (candidates.some((c) => c.id === id)) return;
+      // Sin otra copia que lo reemplace, sus defs salen de `resolve`.
+      for (const kind of [...PACKED_KINDS, "pack"] as const) {
+        for (const def of defs.list(kind).filter((d) => d.scope === "pack" && d.source.startsWith(`pack:${id}@`))) {
+          defs.archive(kind, def.id, "core");
+        }
+      }
+      origins.delete(id);
     },
 
     packFor(scope) {
@@ -191,4 +299,16 @@ function covers(activate: Pack["activate"], scope: PackScope): boolean {
     listed(activate.trackerWorkspaces, scope.trackerWorkspace) ||
     (scope.projectId !== undefined && (activate.projects ?? []).includes(scope.projectId))
   );
+}
+
+/** De cada id, la versión más alta; a igual versión gana el instalado. */
+function winners(found: Candidate[]): Candidate[] {
+  const best = new Map<string, Candidate>();
+  for (const c of found) {
+    const current = best.get(c.id);
+    if (!current || c.version > current.version || (c.version === current.version && c.origin === "installed" && current.origin === "factory")) {
+      best.set(c.id, c);
+    }
+  }
+  return [...best.values()];
 }

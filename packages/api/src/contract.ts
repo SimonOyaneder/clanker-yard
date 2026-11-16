@@ -20,7 +20,8 @@ import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefFilter, DefRecord, DefRef, D
 import { Learning, LearningFilter, LearningPatch, NewLearning } from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
-import { ClankerProject, NewProject, ProjectUpdate } from "./projects";
+import { PackInfo } from "./pack";
+import { ClankerProject, NewProject, ProjectDefaults, ProjectDefaultsPatch, ProjectUpdate } from "./projects";
 import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
@@ -68,6 +69,8 @@ const system = {
       startedAt: z.int().nonnegative(),
       dataDir: z.string(),
       platform: z.enum(["darwin", "linux", "win32"]),
+      /** El client_id de la OAuth app de Linear que usa este core: el incluido, o el de `config.json` o el entorno. */
+      linearClientId: z.string(),
     }),
   ),
   /** Con `drain` el core no toma pasos nuevos y espera las acciones en curso antes de salir. */
@@ -229,6 +232,13 @@ const projects = {
    * un label con otro repo del proyecto.
    */
   create: base.input(NewProject).output(ClankerProject),
+  /** Lo que un proyecto nuevo toma si `create` no lo dice: flujo, perfil, corridas en paralelo y tope de gasto. */
+  defaults: base.output(ProjectDefaults),
+  /**
+   * Cambia los defaults de proyectos nuevos; lo que no se pasa no cambia. Rige en el próximo `create`, sin
+   * reiniciar el core, y no toca proyectos existentes. `BAD_REQUEST` si el flujo o el perfil no existen.
+   */
+  setDefaults: base.input(ProjectDefaultsPatch).output(ProjectDefaults),
   /**
    * Cambia solo los campos presentes, planos junto al `id` (`{ id, name }`, no `{ id, patch: { name } }`); las
    * mismas validaciones que `create`. Un campo que no existe es `BAD_REQUEST`.
@@ -352,6 +362,24 @@ const repos = {
    * prueba en curso de ese repo, o si los slots de mantenimiento están ocupados; `NOT_FOUND` si no está registrado.
    */
   testRecipe: base.input(z.object({ repoId: RepoId })).output(RecipeTestResult),
+};
+
+const packs = {
+  /** Los packs activos, por id: su versión, a quién cubren y si vienen con la app o están instalados. */
+  list: base.output(z.array(PackInfo)),
+  /**
+   * Instala el pack de la carpeta `path` (la que tiene su `pack.json`): lo valida entero, lo copia a
+   * `<dataDir>/packs/<id>` y lo aplica sin reiniciar el core. Sirve también para actualizarlo. Instalar uno con
+   * el mismo id y versión que el activo no crea versiones nuevas. `BAD_REQUEST` si la carpeta no es un pack
+   * válido (dice qué archivo y campo fallan) o si ya hay una versión más nueva activa.
+   */
+  install: base.input(z.object({ path: z.string().min(1) })).output(PackInfo),
+  /**
+   * Quita el pack instalado `id` (borra su carpeta). Si la app trae uno con ese id vuelve a regir el de la app;
+   * si no, sus flujos, roles y contextos se archivan. `BAD_REQUEST` si el pack viene con la app y no está
+   * instalado, o no existe.
+   */
+  remove: base.input(z.object({ id: z.string().min(1) })).output(z.void()),
 };
 
 const runs = {
@@ -631,5 +659,5 @@ const defs = {
   agentOptions: base.output(AgentOptions),
 };
 
-export const contract = { system, events, connections, artifacts, issues, trackers, projects, prs, repos, runs, decisions, learnings, metrics, defs, imports };
+export const contract = { system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, metrics, defs, imports };
 export type Contract = typeof contract;

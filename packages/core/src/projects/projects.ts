@@ -1,10 +1,10 @@
-import type { ClankerProject, NewProject, Origin, ProjectId, ProjectPatch, ProjectRepo } from "@clanker/api";
+import type { ClankerProject, NewProject, Origin, ProjectDefaults, ProjectDefaultsPatch, ProjectId, ProjectPatch, ProjectRepo } from "@clanker/api";
 import { and, asc, eq } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import type * as z from "zod";
 import type { Defs } from "../defs/defs";
 import { newId } from "../store/conventions";
-import { issues, projectRepos, projects, repos, syncCursors } from "../store/schema";
+import { issues, meta, projectRepos, projects, repos, syncCursors } from "../store/schema";
 import { issuesCursorKey } from "../tracker/issues";
 import type { Store, Tx } from "../store/store";
 
@@ -33,6 +33,14 @@ export interface Projects {
    */
   create(input: z.output<typeof NewProject>, origin: Origin): ClankerProject;
   /**
+   * Lo que `create` usa para el flujo, el perfil, `parallel` y `maxCostUsd` que no se pidieron: lo guardado en
+   * Ajustes o, sin nada guardado, sin flujo ni perfil, 1 en paralelo y sin tope. Un flujo o perfil por defecto que
+   * ya no existe se ignora al crear.
+   */
+  defaults(): ProjectDefaults;
+  /** Cambia los defaults de proyectos nuevos (lo que no se pasa no cambia) sin tocar proyectos existentes. Lanza `InvalidProjectError` si el flujo o el perfil no existen. */
+  setDefaults(patch: ProjectDefaultsPatch): ProjectDefaults;
+  /**
    * Cambia solo los campos presentes (`repos` reemplaza la lista). Emite `project.updated` con lo que
    * cambió y, si cambió el estado, `project.paused`, `project.resumed` o `project.archived`; sin cambios no emite nada.
    */
@@ -52,6 +60,9 @@ const STATUS_EVENT = {
   paused: "project.paused",
   archived: "project.archived",
 } as const;
+
+const DEFAULTS_KEY = "project_defaults";
+const BASE_DEFAULTS: ProjectDefaults = { defaultFlowId: null, defaultProfileId: null, parallel: 1, maxCostUsd: null };
 
 export function createProjects(store: Store, defs: Defs): Projects {
   /** El flujo y el perfil por defecto se guardan por slug: tienen que resolver a una def viva. */
@@ -110,8 +121,25 @@ export function createProjects(store: Store, defs: Defs): Projects {
       return row && withRepos(store.db, row);
     },
 
+    defaults() {
+      const saved = store.db.select().from(meta).where(eq(meta.key, DEFAULTS_KEY)).get();
+      return { ...BASE_DEFAULTS, ...(saved && (JSON.parse(saved.value) as Partial<ProjectDefaults>)) };
+    },
+
+    setDefaults(patch) {
+      assertDefaults(patch);
+      const next: ProjectDefaults = { ...projectsApi.defaults(), ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) };
+      const value = JSON.stringify(next);
+      store.tx((tx) => tx.db.insert(meta).values({ key: DEFAULTS_KEY, value }).onConflictDoUpdate({ target: meta.key, set: { value } }).run());
+      return next;
+    },
+
     create(input, origin) {
-      assertDefaults(input);
+      const fallback = projectsApi.defaults();
+      const live = (kind: "flow" | "profile", slug: string | null) => (slug !== null && defs.resolve(kind, slug) ? slug : null);
+      const defaultFlowId = input.defaultFlowId ?? live("flow", fallback.defaultFlowId);
+      const defaultProfileId = input.defaultProfileId ?? live("profile", fallback.defaultProfileId);
+      assertDefaults({ defaultFlowId, defaultProfileId });
       return store.tx((tx) => {
         const id = newId("prj");
         const trackerRef = input.tracker === "local" ? id : input.trackerRef;
@@ -137,16 +165,16 @@ export function createProjects(store: Store, defs: Defs): Projects {
           tracker: input.tracker,
           trackerRef,
           trackerAccount: input.trackerAccount ?? null,
-          defaultFlowId: input.defaultFlowId ?? null,
-          defaultProfileId: input.defaultProfileId ?? null,
-          parallel: input.parallel,
+          defaultFlowId,
+          defaultProfileId,
+          parallel: input.parallel ?? fallback.parallel,
           stackOn: input.stackOn,
           statusMapping: input.statusMapping,
           status: "active",
           flowParams: input.flowParams,
           queueFilter: input.queueFilter,
           conventions: input.conventions,
-          maxCostUsd: input.maxCostUsd,
+          maxCostUsd: input.maxCostUsd === undefined ? fallback.maxCostUsd : input.maxCostUsd,
         };
         const row = tx.db.insert(projects).values({ ...values, id }).returning().get();
         setRepos(tx, id, input.repos);

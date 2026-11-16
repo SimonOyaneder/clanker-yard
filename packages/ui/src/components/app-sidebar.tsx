@@ -1,5 +1,5 @@
 import type { ClankerProject, Run } from "@clanker/api"
-import { BookCheck, ChevronRight, Copy, GitPullRequest, Inbox, Keyboard, Plug, Plus, RefreshCw, Search, Workflow } from "lucide-react"
+import { BookCheck, ChevronRight, Copy, GitPullRequest, Inbox, Keyboard, Plug, Plus, RefreshCw, Search, Settings, Workflow } from "lucide-react"
 import { PlanUsage } from "@/components/connections/plan-usage"
 import type { ClaudePlan } from "@/hooks/use-claude-plan"
 import type { CoreState } from "@/host"
@@ -43,6 +43,8 @@ interface Props {
   connectionsActive: boolean
   flowsActive: boolean
   onSelectFlows: () => void
+  settingsActive: boolean
+  onSelectSettings: () => void
   /** Algo está vencido o caído: enciende el punto rojo de Conexiones. */
   connectionsAlert: boolean
   onSelectConnections: () => void
@@ -102,7 +104,7 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, learningsActive, learningsBadge, onSelectLearnings, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, flowsActive, onSelectFlows, plan, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
+export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, learningsActive, learningsBadge, onSelectLearnings, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, flowsActive, onSelectFlows, settingsActive, onSelectSettings, plan, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
   const actions = useAppActions()
   const status = footerStatus(core, { error, connected })
   const inBar = barProjects(projects)
@@ -114,7 +116,7 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
   const archived = group("archived")
 
   const item = (p: ClankerProject, index: number | null) => (
-    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!inboxActive && !learningsActive && !prsActive && !connectionsActive && !flowsActive && p.slug === selected} />
+    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!inboxActive && !learningsActive && !prsActive && !connectionsActive && !flowsActive && !settingsActive && p.slug === selected} />
   )
 
   return (
@@ -250,6 +252,12 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
                 <SidebarMenuButton isActive={flowsActive} onClick={onSelectFlows} title="Flujos, roles y perfiles" className="h-8">
                   <Workflow className="size-4" />
                   <span>Flujos</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={settingsActive} onClick={onSelectSettings} title="Carriles, packs y defaults de proyectos nuevos" className="h-8">
+                  <Settings className="size-4" />
+                  <span>Ajustes</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

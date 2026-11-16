@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -15,7 +15,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function setup(): { defs: Defs; packs: Packs } {
+function setup(dirs: { factoryDir?: string; installedDir?: string } = {}): { defs: Defs; packs: Packs } {
   const store = openStore({ path: ":memory:" });
   stores.push(store);
   const defs = createDefs(store);
@@ -23,7 +23,7 @@ function setup(): { defs: Defs; packs: Packs } {
   defs.register("flow", FlowDef.omit({ version: true }));
   defs.register("role", Role);
   defs.register("context", ContextPackage);
-  return { defs, packs: createPacks({ defs }) };
+  return { defs, packs: createPacks({ defs, ...dirs }) };
 }
 
 function flow(id: string): FlowDefType {
@@ -272,9 +272,9 @@ describe("load", () => {
   });
 });
 
-describe("loadAll", () => {
-  /** Una carpeta de packs instalados: una subcarpeta por pack. */
-  function installed(packs: Record<string, Files>): string {
+describe("reload", () => {
+  /** Una carpeta de packs: una subcarpeta por pack. */
+  function packsRoot(packs: Record<string, Files>): string {
     const root = mkdtempSync(join(tmpdir(), "clanker-packs-"));
     dirs.push(root);
     for (const [name, files] of Object.entries(packs)) {
@@ -286,26 +286,159 @@ describe("loadAll", () => {
     return root;
   }
 
-  test("carga cada subcarpeta y deja la de un pack roto en errors sin impedir las demás", async () => {
-    const { packs } = setup();
-    const root = installed({
-      acme: { "pack.json": { id: "acme", version: 1, activate: { githubOrgs: ["acme-co"] } } },
-      roto: { "pack.json": { id: "roto", version: 1, activate: "no" } },
-      zeta: { "pack.json": { id: "zeta", version: 1, activate: { githubOrgs: ["zeta-co"] } } },
-    });
+  const light = (id: string, version: number, org = `${id}-co`): Files => ({
+    "pack.json": { id, version, activate: { githubOrgs: [org] } },
+  });
 
-    const { errors } = await packs.loadAll(root);
+  test("carga cada subcarpeta y deja la de un pack roto en errors sin impedir las demás", async () => {
+    const installedDir = packsRoot({
+      acme: light("acme", 1),
+      roto: { "pack.json": { id: "roto", version: 1, activate: "no" } },
+      zeta: light("zeta", 1),
+    });
+    const { packs } = setup({ installedDir });
+
+    const { errors } = await packs.reload();
 
     expect(errors).toHaveLength(1);
     expect(errors[0]).toBeInstanceOf(PackLoadError);
-    expect(errors[0]!.dir).toBe(join(root, "roto"));
+    expect(errors[0]!.dir).toBe(join(installedDir, "roto"));
     expect(packs.packFor({ githubOrg: "acme-co" }).id).toBe("acme");
     expect(packs.packFor({ githubOrg: "zeta-co" }).id).toBe("zeta");
   });
 
   test("una carpeta de packs que no existe es no tener packs", async () => {
-    const { packs } = setup();
+    const { packs } = setup({ installedDir: join(tmpdir(), "clanker-sin-packs-aqui") });
 
-    expect(await packs.loadAll(join(tmpdir(), "clanker-sin-packs-aqui"))).toEqual({ errors: [] });
+    expect(await packs.reload()).toEqual({ errors: [] });
+    expect(packs.list()).toEqual([]);
+  });
+
+  test("un pack de fábrica rige y se lista como de fábrica", async () => {
+    const { packs } = setup({ factoryDir: packsRoot({ acme: light("acme", 2) }), installedDir: packsRoot({}) });
+
+    await packs.reload();
+
+    expect(packs.list()).toEqual([{ id: "acme", version: 2, origin: "factory", activate: { githubOrgs: ["acme-co"] } }]);
+  });
+
+  test("el mismo id y versión de fábrica y a mano no crea versiones nuevas ni toca la copia a mano", async () => {
+    const files = { ...acme(), "pack.json": { ...manifest, version: 2 } };
+    const installedDir = packsRoot({ acme: files });
+    const { defs, packs } = setup({ factoryDir: packsRoot({ acme: files }), installedDir });
+    // Lo que había antes de que la app trajera su copia: el pack cargado a mano.
+    await packs.load(join(installedDir, "acme"));
+    const before = defs.list("flow").map((d) => [d.id, d.currentVersion]);
+
+    const { errors } = await packs.reload();
+    await packs.reload();
+
+    expect(errors).toEqual([]);
+    expect(defs.list("flow").map((d) => [d.id, d.currentVersion])).toEqual(before);
+    expect(defs.list("pack")).toHaveLength(1);
+    expect(packs.list().map((p) => [p.id, p.version, p.origin])).toEqual([["acme", 2, "installed"]]);
+  });
+
+  test("con el mismo id gana la versión más alta, de donde venga", async () => {
+    const factoryDir = packsRoot({ acme: light("acme", 3) });
+    const { packs } = setup({ factoryDir, installedDir: packsRoot({ acme: light("acme", 2) }) });
+
+    await packs.reload();
+
+    expect(packs.list().map((p) => [p.version, p.origin])).toEqual([[3, "factory"]]);
+
+    const { packs: newer } = setup({ factoryDir, installedDir: packsRoot({ acme: light("acme", 4) }) });
+    await newer.reload();
+
+    expect(newer.list().map((p) => [p.version, p.origin])).toEqual([[4, "installed"]]);
   });
 });
+
+describe("install y remove", () => {
+  function installedRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), "clanker-installed-"));
+    dirs.push(root);
+    return root;
+  }
+
+  test("instala una carpeta: la copia, la activa y reinstalar la misma versión no crea versiones", async () => {
+    const installedDir = installedRoot();
+    const { defs, packs } = setup({ installedDir });
+    const src = packDir(acme());
+
+    const info = await packs.install(src);
+    const versions = defs.list("flow").map((d) => d.currentVersion);
+    await packs.install(src);
+
+    expect(info).toEqual({ id: "acme", version: 1, origin: "installed", activate: manifest.activate });
+    expect(readdirSync(join(installedDir, "acme")).sort()).toEqual(["flows", "pack.json", "roles"]);
+    expect(packs.packFor({ githubOrg: "acme-co" }).id).toBe("acme");
+    expect(defs.list("flow").map((d) => d.currentVersion)).toEqual(versions);
+  });
+
+  test("actualiza: una versión nueva reemplaza la carpeta instalada", async () => {
+    const installedDir = installedRoot();
+    const { defs, packs } = setup({ installedDir });
+    await packs.install(packDir(acme()));
+
+    await packs.install(packDir({ ...acme(), "pack.json": { ...manifest, version: 2 }, "flows/techlead.json": { ...flow("techlead"), name: "nuevo" } }));
+
+    expect(packs.list().map((p) => p.version)).toEqual([2]);
+    expect(defs.list("flow")[0]!.currentVersion).toBe(2);
+    expect(JSON.parse(readFileSync(join(installedDir, "acme", "pack.json"), "utf8")).version).toBe(2);
+  });
+
+  test("rechaza una carpeta inválida sin copiar nada, y una versión más vieja que la activa", async () => {
+    const installedDir = installedRoot();
+    const { packs } = setup({ installedDir });
+
+    await expect(packs.install(packDir({ "pack.json": { id: "acme" } }))).rejects.toBeInstanceOf(PackLoadError);
+    expect(readdirSync(installedDir)).toEqual([]);
+
+    await packs.install(packDir({ ...acme(), "pack.json": { ...manifest, version: 3 } }));
+    await expect(packs.install(packDir(acme()))).rejects.toThrow("Ya está activa la versión 3");
+  });
+
+  test("quitar borra la carpeta y archiva los flujos, roles y el manifiesto; reinstalarlo los restaura", async () => {
+    const installedDir = installedRoot();
+    const { defs, packs } = setup({ installedDir });
+    await packs.install(packDir(acme()));
+
+    await packs.remove("acme");
+
+    expect(existsSync(join(installedDir, "acme"))).toBe(false);
+    expect(packs.list()).toEqual([]);
+    expect(packs.packFor({ githubOrg: "acme-co" }).id).toBeNull();
+    expect(defs.resolve("flow", "techlead")).toBeUndefined();
+
+    await packs.install(packDir(acme()));
+
+    expect(packs.packFor({ githubOrg: "acme-co" }).id).toBe("acme");
+    expect(defs.resolve("flow", "techlead")).toBeDefined();
+  });
+
+  test("quitar el pack instalado de uno que la app trae devuelve el de la app", async () => {
+    const files = { ...acme(), "pack.json": { ...manifest, version: 2 } };
+    const factoryDir = installedRoot();
+    mkdirSync(join(factoryDir, "acme", "flows"), { recursive: true });
+    mkdirSync(join(factoryDir, "acme", "roles"), { recursive: true });
+    for (const [file, content] of Object.entries(files)) writeFileSync(join(factoryDir, "acme", file), JSON.stringify(content));
+    const { packs } = setup({ factoryDir, installedDir: installedRoot() });
+    await packs.reload();
+
+    await expect(packs.remove("acme")).rejects.toThrow("viene con la app");
+    await packs.install(packDir({ ...files, "pack.json": { ...manifest, version: 3 } }));
+    expect(packs.list().map((p) => [p.version, p.origin])).toEqual([[3, "installed"]]);
+
+    await packs.remove("acme");
+
+    expect(packs.list().map((p) => [p.version, p.origin])).toEqual([[2, "factory"]]);
+  });
+
+  test("quitar un pack que no está instalado dice que no está", async () => {
+    const { packs } = setup({ installedDir: installedRoot() });
+
+    await expect(packs.remove("nada")).rejects.toThrow('"nada" no está instalado');
+  });
+});
+

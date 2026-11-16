@@ -21,7 +21,7 @@ import { DecisionNotFoundError, DecisionResolveError, RunCommandError, RunNotFou
 import { createStepDetails, StepNotFoundError } from "../flows/step-detail";
 import { LegacyImportError, type LegacyImporter } from "../import/legacy";
 import { createMetrics } from "../metrics/metrics";
-import type { Packs } from "../packs/packs";
+import { PackInstallError, PackLoadError, type Packs } from "../packs/packs";
 import { DefValidationError, type Defs } from "../defs/defs";
 import { createDefWriter, DefNotFoundError, DefWriteError } from "../defs/write";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
@@ -148,6 +148,7 @@ export function createRouter(deps: RouterDeps) {
         startedAt: deps.startedAt,
         dataDir: deps.dataDir,
         platform,
+        linearClientId: deps.connections.linearClientId,
       })),
       lanes: os.system.lanes.handler(() => deps.lanes.usage()),
       breakers: os.system.breakers.handler(() => deps.breakers.list()),
@@ -278,6 +279,8 @@ export function createRouter(deps: RouterDeps) {
           ),
         ),
       ),
+      defaults: os.projects.defaults.handler(() => projects.defaults()),
+      setDefaults: os.projects.setDefaults.handler(({ input }) => asApiError(() => projects.setDefaults(input))),
       update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
         asApiErrorAsync(async () => {
           const { tracker } = projectOrNotFound(id);
@@ -298,6 +301,11 @@ export function createRouter(deps: RouterDeps) {
       ),
       queue: os.projects.queue.handler(({ input }) => asApiErrorAsync(() => deps.queue.of(input.id))),
       summary: os.projects.summary.handler(({ input: { id, ...filter } }) => metrics.summary(projectOrNotFound(id).id, filter)),
+    },
+    packs: {
+      list: os.packs.list.handler(() => deps.packs.list()),
+      install: os.packs.install.handler(({ input }) => asApiErrorAsync(() => deps.packs.install(input.path))),
+      remove: os.packs.remove.handler(({ input }) => asApiErrorAsync(() => deps.packs.remove(input.id))),
     },
     prs: {
       get: os.prs.get.handler(({ input }) => readPr(input, prs.get)),
@@ -472,7 +480,9 @@ function toApiError(error: unknown): unknown {
     error instanceof RecipeSyntaxError ||
     error instanceof DefValidationError ||
     error instanceof DefWriteError ||
-    error instanceof LegacyImportError
+    error instanceof LegacyImportError ||
+    error instanceof PackLoadError ||
+    error instanceof PackInstallError
   ) {
     return new ORPCError("BAD_REQUEST", { message: error.message, cause: error });
   }

@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 import { type Contract, type Event, contract } from "./index";
 
 describe("contrato", () => {
-  test("exporta los routers system, events, connections, artifacts, issues, trackers, projects, prs, repos, runs, decisions, learnings, defs, metrics e imports con sus procedimientos", () => {
+  test("exporta los routers system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, defs, metrics e imports con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual([
       "artifacts",
       "connections",
@@ -14,6 +14,7 @@ describe("contrato", () => {
       "issues",
       "learnings",
       "metrics",
+      "packs",
       "projects",
       "prs",
       "repos",
@@ -27,7 +28,8 @@ describe("contrato", () => {
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);
     expect(Object.keys(contract.issues).sort()).toEqual(["createLocal", "get", "list"]);
     expect(Object.keys(contract.trackers)).toEqual(["projects"]);
-    expect(Object.keys(contract.projects).sort()).toEqual(["boostIssue", "create", "get", "list", "pause", "queue", "resume", "setParallel", "skipIssue", "summary", "update"]);
+    expect(Object.keys(contract.projects).sort()).toEqual(["boostIssue", "create", "defaults", "get", "list", "pause", "queue", "resume", "setDefaults", "setParallel", "skipIssue", "summary", "update"]);
+    expect(Object.keys(contract.packs)).toEqual(["list", "install", "remove"]);
     expect(Object.keys(contract.prs)).toEqual(["get", "list", "refresh", "setHold", "merge", "requestReview", "rebase"]);
     expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "testRecipe"]);
     expect(Object.keys(contract.runs).sort()).toEqual(["cancel", "forceOutcome", "get", "interrupt", "list", "pause", "resume", "retryStep", "start", "steerStep", "step", "transcript"]);
@@ -43,6 +45,7 @@ describe("contrato", () => {
       ...Object.values(contract.issues),
       ...Object.values(contract.trackers),
       ...Object.values(contract.projects),
+      ...Object.values(contract.packs),
       ...Object.values(contract.prs),
       ...Object.values(contract.repos),
       ...Object.values(contract.runs),
@@ -67,7 +70,7 @@ describe("contrato", () => {
     const base = { slug: "demo", name: "Demo" };
 
     expect(await schema.validate({ ...base, tracker: "local" })).toMatchObject({
-      value: { parallel: 1, stackOn: "ci_green", flowParams: {}, repos: [], queueFilter: {}, conventions: {}, maxCostUsd: null },
+      value: { stackOn: "ci_green", flowParams: {}, repos: [], queueFilter: {}, conventions: {} },
     });
     expect(await schema.validate({ ...base, tracker: "local", maxCostUsd: 0 })).toHaveProperty("issues");
     expect(await schema.validate({ ...base, tracker: "local", trackerRef: "x" })).toHaveProperty("issues");
