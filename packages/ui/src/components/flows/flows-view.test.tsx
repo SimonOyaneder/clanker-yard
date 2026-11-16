@@ -84,12 +84,28 @@ test("sin flujos explica por qué y qué revisar", async () => {
   expect(await screen.findByText(/Todavía no hay flujos/)).toBeTruthy()
 })
 
-// Duplica el flujo incluido (queda uno tuyo, editable), abre el editor y devuelve su textarea.
-async function openEditor() {
+// Duplica el flujo incluido (queda uno tuyo, editable) y abre el editor, en el canvas.
+async function openCanvas() {
   await openFlows()
+  fireEvent.click(within(await waitFor(() => rowOf("techlead-clasico"))).getByRole("button"))
   fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
-  fireEvent.click(await screen.findByRole("button", { name: /Editar JSON/ }))
+  fireEvent.click(await screen.findByRole("button", { name: /^Editar$/ }))
+  return await screen.findByRole("group", { name: /^Canvas del flujo/ })
+}
+
+const showJson = async () => {
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "JSON" }), { button: 0 })
   return (await screen.findByRole("textbox", { name: /en JSON/ })) as HTMLTextAreaElement
+}
+const showCanvas = async () => {
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Canvas" }), { button: 0 })
+  await screen.findByRole("group", { name: /^Canvas del flujo/ })
+}
+
+// Lo mismo, y devuelve el textarea de la pestaña JSON.
+async function openEditor() {
+  await openCanvas()
+  return await showJson()
 }
 
 const withName = (area: HTMLTextAreaElement, name: string) => JSON.stringify({ ...JSON.parse(area.value), name }, null, 2)
@@ -138,7 +154,67 @@ test("un JSON roto dice en qué línea y no llama al core", async () => {
 test("un incluido no ofrece editar JSON", async () => {
   await openFlows()
   await screen.findByRole("button", { name: /Duplicar para editar/ })
-  expect(screen.queryByRole("button", { name: /Editar JSON/ })).toBeNull()
+  expect(screen.queryByRole("button", { name: /^Editar/ })).toBeNull()
+})
+
+const openStep = async (id: string) => {
+  fireEvent.click(await screen.findByText(id, { selector: "span.font-mono" }))
+  return await screen.findByRole("complementary", { name: `Propiedades de ${id}` })
+}
+
+test("sacarle el review de lore desde el canvas: se guarda con su diff y queda como versión nueva", async () => {
+  await openCanvas()
+  const panel = await openStep("rv-lore")
+  fireEvent.click(within(panel).getByRole("button", { name: "Eliminar rv-lore" }))
+  await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/cambios? por guardar/))
+
+  fireEvent.click(screen.getByRole("button", { name: /^Guardar…/ }))
+  const dialog = await screen.findByRole("alertdialog")
+  expect(within(dialog).getByRole("list", { name: "Cambios" }).textContent).toContain("paso `rv-lore`")
+  fireEvent.click(within(dialog).getByRole("button", { name: "Guardar versión nueva" }))
+  expect(await screen.findByText("versión 2", { selector: "span.text-xs" })).toBeTruthy()
+  expect(screen.queryByText("rv-lore", { selector: "span.font-mono" })).toBeNull()
+})
+
+test("la paleta explica cada tipo de paso y agregar uno lo deja elegido, suelto y marcado", async () => {
+  await openCanvas()
+  const palette = screen.getByRole("region", { name: "Paleta de pasos" })
+  expect(within(palette).getByText("espera una decisión tuya")).toBeTruthy()
+  expect(within(palette).getByText(/un agente hace una tarea/)).toBeTruthy()
+  fireEvent.click(within(palette).getByRole("button", { name: /gate/ }))
+  const panel = await screen.findByRole("complementary", { name: "Propiedades de gate" })
+  expect(within(panel).getByText("Cada opción es un botón de la decisión y una salida del paso.")).toBeTruthy()
+})
+
+test("cambiar un campo del panel cambia el mismo JSON", async () => {
+  await openCanvas()
+  const panel = await openStep("checks")
+  fireEvent.change(within(panel).getByLabelText("Rondas máximas de fail"), { target: { value: "5" } })
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("1 cambio por guardar"))
+  const area = await showJson()
+  expect((JSON.parse(area.value) as { nodes: { checks: { on: { fail: { maxRounds: number } } } } }).nodes.checks.on.fail.maxRounds).toBe(5)
+  await showCanvas()
+})
+
+test("un problema del core se marca en el nodo y en la lista, y lleva al paso", async () => {
+  const area = await openEditor()
+  const flow = JSON.parse(area.value) as { nodes: Record<string, { role?: string }> }
+  flow.nodes.plan!.role = "no-existe"
+  fireEvent.change(area, { target: { value: JSON.stringify(flow, null, 2) } })
+  await showCanvas()
+  await screen.findByRole("list", { name: "Problemas por arreglar" })
+  expect(await screen.findByLabelText("1 problema en plan")).toBeTruthy()
+  const list = await screen.findByRole("list", { name: "Problemas por arreglar" })
+  expect((screen.getByRole("button", { name: /^Guardar…/ }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(within(list).getByRole("button", { name: /no existe el rol "no-existe"/ }))
+  expect(within(await screen.findByRole("complementary", { name: "Propiedades de plan" })).getByRole("list", { name: "Problemas de este paso" })).toBeTruthy()
+})
+
+test("abrir el canvas no cambia el flujo ni le agrega un layout: las posiciones viven fuera del body", async () => {
+  await openCanvas()
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Sin cambios"))
+  const area = await showJson()
+  expect(area.value).not.toContain("layout")
 })
 
 const openTab = async (name: RegExp, slug: string) => {
@@ -195,6 +271,7 @@ test("el nombre de un perfil nuevo no puede repetir uno existente", async () => 
 test("un rol tuyo se edita con su prompt, herramientas y paquetes de contexto; los modos quedan como estaban", async () => {
   const data = await openFlows()
   await openTab(/Roles/, "dev")
+  fireEvent.click(within(rowOf("dev")).getByRole("button"))
   fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
   fireEvent.click(await screen.findByRole("button", { name: /^Editar$/ }))
 

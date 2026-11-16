@@ -119,7 +119,7 @@ export function DefDetail({ row, defs, onChanged }: Props) {
             ) : null}
             {editable && !editing ? (
               <Button size="sm" variant={kind === "flow" ? "default" : "secondary"} onClick={() => setEditing("json")}>
-                {kind === "flow" ? <Pencil /> : <Braces />} Editar JSON{kind === "flow" ? "" : " (avanzado)"}
+                {kind === "flow" ? <Pencil /> : <Braces />} {kind === "flow" ? "Editar" : "Editar JSON (avanzado)"}
               </Button>
             ) : null}
             {editable ? (
@@ -210,7 +210,8 @@ export function DefDetail({ row, defs, onChanged }: Props) {
   )
 }
 
-const EDIT_HINT: Record<DefWriteKind, string> = { flow: '"Editar JSON"', role: '"Editar"', profile: '"Editar"' }
+// Un flujo se edita dibujándolo o como JSON desde el mismo botón.
+const EDIT_HINT: Record<DefWriteKind, string> = { flow: '"Editar"', role: '"Editar"', profile: '"Editar"' }
 
 /** Qué significa el estado de esta def y qué pasa si se toca. */
 function explain(row: LibraryRow, kind: DefWriteKind): string {

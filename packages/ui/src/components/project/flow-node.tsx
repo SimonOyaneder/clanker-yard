@@ -35,7 +35,7 @@ export interface FlowNodeData extends Record<string, unknown> {
   commands?: NodeCommands
 }
 
-const KIND: Record<GraphNodeKind, { Icon: LucideIcon; hint: string }> = {
+export const KIND: Record<GraphNodeKind, { Icon: LucideIcon; hint: string }> = {
   agent: { Icon: Bot, hint: "Agente: un rol del flujo trabaja en el worktree y entrega un reporte." },
   action: { Icon: Terminal, hint: "Acción: código del core que corre sin agente (checks, git, publicar)." },
   parallel: { Icon: GitFork, hint: "Parallel: lanza sus ramas a la vez y espera a todas." },

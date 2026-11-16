@@ -26,14 +26,19 @@ test("los flujos incluidos se ven con su grafo y su historial de versiones", asy
   await snapBoth(page, "flujos-biblioteca");
 });
 
-test("duplicar un incluido da uno tuyo, se edita como JSON con diff e historial, y archivarlo lo saca de la lista", async ({ window: page }) => {
+test("duplicar un incluido da uno tuyo, se edita en el canvas y como JSON, con diff e historial, y archivarlo lo saca de la lista", async ({ window: page }) => {
   await page.getByRole("button", { name: "Duplicar para editar" }).click();
   const list = page.getByRole("list", { name: "Flujos", exact: true });
   await expect(list.getByRole("listitem").filter({ hasText: "manda sobre el incluido" })).toHaveCount(1);
   await expect(list.getByRole("listitem").filter({ hasText: "reemplazado por el tuyo" })).toHaveCount(1);
 
   // Editar: un campo inválido se marca en su línea; arreglado, Guardar muestra el diff y crea la versión 2.
-  await page.getByRole("button", { name: "Editar JSON" }).click();
+  await page.getByRole("button", { name: "Editar", exact: true }).click();
+  await expect(page.getByRole("group", { name: /^Canvas del flujo/ })).toBeVisible();
+  await page.getByText("plan", { exact: true }).first().click();
+  await expect(page.getByRole("complementary", { name: "Propiedades de plan" })).toBeVisible();
+  await snapBoth(page, "flujos-canvas");
+  await page.getByRole("tab", { name: "JSON" }).click();
   const editor = page.getByRole("textbox", { name: /en JSON/ });
   const original = await editor.inputValue();
   const broken = JSON.stringify({ ...JSON.parse(original), name: 42 }, null, 2);
