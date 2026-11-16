@@ -114,7 +114,7 @@ beforeEach(async () => {
     packs,
   };
   publish = prPublishAction(deps);
-  lease = await workspaces.acquire({ repo: "repo_r1", branch: BRANCH, base: "main", runId: newId("run") });
+  lease = await workspaces.acquire({ repo: "repo_00000000000000000000000001", branch: BRANCH, base: "main", runId: newId("run") });
   write("feature.txt", "una feature\n");
 });
 
@@ -330,7 +330,7 @@ describe("pr.publish", () => {
 
   test("un PR que Watch ya había descubierto (sin owned) se adopta: queda del sistema y con pr.opened", async () => {
     store.db.$client
-      .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'r1', 1, '', ?, 'main', '', 'open', 1, 0)")
+      .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'repo_00000000000000000000000001', 1, '', ?, 'main', '', 'open', 1, 0)")
       .run(newId("pr"), BRANCH);
 
     const ctx = durableCtx();
@@ -430,7 +430,7 @@ describe("en un flujo", () => {
           ws: {
             type: "action",
             action: "workspace.acquire",
-            args: { repo: "r1", branch: "cla-53-flow", base: "main" },
+            args: { repo: "repo_00000000000000000000000001", branch: "cla-53-flow", base: "main" },
             on: { ok: "edit" },
           },
           edit: { type: "action", action: "test.edit", args: {}, on: { ok: "publish" } },
@@ -470,7 +470,7 @@ describe("en un flujo", () => {
       .prepare("SELECT id, repo_id, number, head_ref, base_ref, state, is_draft, issue_id, run_id, owned FROM pull_requests")
       .all() as { id: string; run_id: string }[];
     expect(row).toMatchObject({
-      repo_id: "r1",
+      repo_id: "repo_00000000000000000000000001",
       number: 1,
       head_ref: "cla-53-flow",
       base_ref: "main",

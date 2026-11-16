@@ -80,7 +80,7 @@ beforeEach(() => {
       return { outcome: "ok" };
     },
   });
-  const acquire = { type: "action", action: "workspace.acquire", args: { repo: "r1", branch: "cla-1", base: "main" } } as const;
+  const acquire = { type: "action", action: "workspace.acquire", args: { repo: "repo_00000000000000000000000001", branch: "cla-1", base: "main" } } as const;
   flows.save(
     FlowDef.parse({
       schema: 1,

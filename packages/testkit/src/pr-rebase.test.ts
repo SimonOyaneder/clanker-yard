@@ -104,7 +104,7 @@ beforeEach(async () => {
   abort = workspaceRebaseAbortAction(workspaces);
 
   // El PR ya publicado: un commit sobre a.txt.
-  const lease = await workspaces.acquire({ repo: "repo_r1", branch: BRANCH, base: "main", runId: newId("run") });
+  const lease = await workspaces.acquire({ repo: "repo_00000000000000000000000001", branch: BRANCH, base: "main", runId: newId("run") });
   writeFileSync(join(lease.path, "a.txt"), "a1\nmine\na3\n");
   const publish = prPublishAction({ store, workspaces, recipes, repoConfig: repos, connections, packs });
   const { workspaceId, path, branch, baseSha, fencingToken } = lease;
@@ -162,7 +162,7 @@ function elsewhere(branch: string, files: Record<string, string>): string {
 /** `workspace.attach` como la corrida de mantenimiento, y el `$ws` que los demás nodos reciben. */
 async function attach() {
   const run = ctx();
-  const result = await attachAction.run(attachAction.args.parse({ repo: "r1", branch: BRANCH, base: "main" }), run);
+  const result = await attachAction.run(attachAction.args.parse({ repo: "repo_00000000000000000000000001", branch: BRANCH, base: "main" }), run);
   expect(result.outcome).toBe("ok");
   const { workspaceId, path, branch, baseSha, fencingToken } = result.output as { workspaceId: string; path: string; branch: string; baseSha: string; fencingToken: number };
   return { workspaceId, path, branch, baseSha, fencingToken };

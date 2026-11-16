@@ -91,7 +91,7 @@ describe("learnings en el brief", () => {
 
   test("entran a lo más 10, los del repo del worktree primero y luego los más recientes del proyecto", async () => {
     for (let i = 1; i <= 12; i++) approve(`del proyecto ${i}`);
-    approve("del repo", { repoId: "r1" });
+    approve("del repo", { repoId: "repo_r1" });
 
     const { learnings: entered } = await brief();
 
