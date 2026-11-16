@@ -16,13 +16,7 @@ afterEach(() => store?.close());
 /** Solo se guardan defs: ningún paso corre. */
 const unusedRuntime: AgentRuntime = {
   id: "fake",
-  capabilities: {
-    structuredOutput: true,
-    costPerTurn: true,
-    resume: true,
-    fork: false,
-    steer: false,
-  },
+  capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
   start: () => Promise.reject(new Error("no se usa")),
   resume: () => Promise.reject(new Error("no se usa")),
 };
@@ -64,43 +58,21 @@ function setup() {
       const def = defs.resolve("role", id);
       if (!def) return undefined;
       const { modes } = Role.parse(def.body);
-      return {
-        modes: Object.fromEntries(
-          Object.entries(modes).map(([name, { outcomes }]) => [
-            name,
-            { outcomes },
-          ]),
-        ),
-      };
+      return { modes: Object.fromEntries(Object.entries(modes).map(([name, { outcomes }]) => [name, { outcomes }])) };
     },
   });
   const args = z.record(z.string(), z.unknown());
   for (const [name, outcomes] of Object.entries(ACTIONS)) {
-    flows.registerAction({
-      name,
-      outcomes,
-      effects: "local",
-      args,
-      run: () => Promise.reject(new Error("no se usa")),
-    });
+    flows.registerAction({ name, outcomes, effects: "local", args, run: () => Promise.reject(new Error("no se usa")) });
   }
   for (const [name, outcomes] of Object.entries(WAITS)) {
-    flows.registerWait({
-      name,
-      outcomes,
-      args,
-      key: () => name,
-      match: () => undefined,
-      probe: () => Promise.reject(new Error("no se usa")),
-    });
+    flows.registerWait({ name, outcomes, args, key: () => name, match: () => undefined, probe: () => Promise.reject(new Error("no se usa")) });
   }
   return { defs, flows };
 }
 
 const builtin = (defs: Defs, kind: "role" | "flow", slug: string) =>
-  defs
-    .list(kind, { includeArchived: true })
-    .find((d) => d.scope === "builtin" && d.slug === slug)!;
+  defs.list(kind, { includeArchived: true }).find((d) => d.scope === "builtin" && d.slug === slug)!;
 
 test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-clasico, pr-feedback, rebase-conflicto, restack-feedback, restack, restack-rewritten, council y republish-pr) y repetirlo no suma versiones", () => {
   const { defs, flows } = setup();
@@ -109,53 +81,22 @@ test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-
   const versions = store!.events.since(0, { types: ["def.versioned"] }).length;
   installBuiltins({ defs, flows });
 
-  expect(defs.resolve("flow", "techlead-clasico")).toMatchObject({
-    scope: "builtin",
-  });
-  expect(defs.resolve("flow", "pr-feedback")).toMatchObject({
-    scope: "builtin",
-  });
-  expect(defs.resolve("flow", "rebase-conflicto")).toMatchObject({
-    scope: "builtin",
-  });
-  expect(defs.resolve("flow", "restack-feedback")).toMatchObject({
-    scope: "builtin",
-  });
+  expect(defs.resolve("flow", "techlead-clasico")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("flow", "pr-feedback")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("flow", "rebase-conflicto")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("flow", "restack-feedback")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "restack")).toMatchObject({ scope: "builtin" });
-  expect(defs.resolve("flow", "restack-rewritten")).toMatchObject({
-    scope: "builtin",
-  });
+  expect(defs.resolve("flow", "restack-rewritten")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "council")).toMatchObject({ scope: "builtin" });
-  expect(defs.resolve("flow", "republish-pr")).toMatchObject({
-    scope: "builtin",
-  });
+  expect(defs.resolve("flow", "republish-pr")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "juguete")).toBeUndefined();
-  expect(defs.resolve("flow", "techlead-clasico")?.body).toMatchObject({
-    name: "Techlead clásico",
-    description: expect.any(String),
-  });
-  expect(defs.resolve("flow", "techlead-clasico")?.body).not.toHaveProperty(
-    "internal",
-  );
-  const internal = defs
-    .list("flow")
-    .filter((d) => (d.body as { internal?: boolean }).internal === true)
-    .map((d) => d.slug)
-    .sort();
-  expect(internal).toEqual([
-    "council",
-    "pr-feedback",
-    "rebase-conflicto",
-    "republish-pr",
-    "restack",
-    "restack-feedback",
-    "restack-rewritten",
-  ]);
+  expect(defs.resolve("flow", "techlead-clasico")?.body).toMatchObject({ name: "Techlead clásico", description: expect.any(String) });
+  expect(defs.resolve("flow", "techlead-clasico")?.body).not.toHaveProperty("internal");
+  const internal = defs.list("flow").filter((d) => (d.body as { internal?: boolean }).internal === true).map((d) => d.slug).sort();
+  expect(internal).toEqual(["council", "pr-feedback", "rebase-conflicto", "republish-pr", "restack", "restack-feedback", "restack-rewritten"]);
   expect(defs.resolve("role", "committer")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("profile", "eco")).toMatchObject({ scope: "builtin" });
-  expect(store!.events.since(0, { types: ["def.versioned"] })).toHaveLength(
-    versions,
-  );
+  expect(store!.events.since(0, { types: ["def.versioned"] })).toHaveLength(versions);
 });
 
 test.each([
@@ -163,16 +104,13 @@ test.each([
   ["flow", "juguete"],
   ["role", "committer"],
   ["flow", "pr-feedback"],
-] as const)(
-  "con su %s %s archivado, el arranque deja esa plantilla fuera en vez de lanzar",
-  (kind, slug) => {
-    const { defs, flows } = setup();
-    const extra = [JUGUETE_TEMPLATE];
-    installBuiltins({ defs, flows, extra });
-    defs.archive(kind, builtin(defs, kind, slug).id, "ui");
+] as const)("con su %s %s archivado, el arranque deja esa plantilla fuera en vez de lanzar", (kind, slug) => {
+  const { defs, flows } = setup();
+  const extra = [JUGUETE_TEMPLATE];
+  installBuiltins({ defs, flows, extra });
+  defs.archive(kind, builtin(defs, kind, slug).id, "ui");
 
-    expect(() => installBuiltins({ defs, flows, extra })).not.toThrow();
-    expect(builtin(defs, kind, slug).archivedAt).not.toBeNull();
-    expect(defs.resolve(kind, slug)).toBeUndefined();
-  },
-);
+  expect(() => installBuiltins({ defs, flows, extra })).not.toThrow();
+  expect(builtin(defs, kind, slug).archivedAt).not.toBeNull();
+  expect(defs.resolve(kind, slug)).toBeUndefined();
+});

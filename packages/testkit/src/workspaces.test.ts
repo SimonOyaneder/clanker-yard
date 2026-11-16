@@ -1,10 +1,4 @@
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,9 +31,7 @@ import { tempGitRepo, type TempGitRepo, type TempGitRepoOptions } from "./git";
 // Workspaces se prueba aquí y no en el core: testkit puede importar el core, y el core no puede
 // importar testkit (AGENTS.md, límites entre paquetes).
 
-const demoFixtures = fileURLToPath(
-  new URL("../fixtures/runs/demo", import.meta.url),
-);
+const demoFixtures = fileURLToPath(new URL("../fixtures/runs/demo", import.meta.url));
 
 const runA = newId("run");
 const runB = newId("run");
@@ -62,18 +54,11 @@ beforeEach(() => {
   workspaces = workspacesOn(store);
 });
 
-function workspacesOn(
-  store: Store,
-  worktreeSetup?: (dir: string) => readonly string[],
-): Workspaces {
+function workspacesOn(store: Store, worktreeSetup?: (dir: string) => readonly string[]): Workspaces {
   return createWorkspaces({
     store,
     dataDir,
-    repoConfig: (id) => ({
-      path: repoById.get(id)!.dir,
-      defaultBranch: "main",
-      protectedBranches: ["release"],
-    }),
+    repoConfig: (id) => ({ path: repoById.get(id)!.dir, defaultBranch: "main", protectedBranches: ["release"] }),
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     worktreeSetup,
     now: () => clock,
@@ -88,10 +73,7 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-function repo(
-  name: string,
-  opts: TempGitRepoOptions = { remote: true },
-): RepoId {
+function repo(name: string, opts: TempGitRepoOptions = { remote: true }): RepoId {
   const id: RepoId = `repo_${name}`;
   const created = tempGitRepo(opts);
   repos.push(created);
@@ -99,12 +81,7 @@ function repo(
   return id;
 }
 
-async function acquire(
-  repoId: RepoId,
-  branch: string,
-  runId: RunId = runA,
-  base = "main",
-) {
+async function acquire(repoId: RepoId, branch: string, runId: RunId = runA, base = "main") {
   const lease = await workspaces.acquire({ repo: repoId, branch, base, runId });
   leases.push(lease);
   return lease;
@@ -114,19 +91,11 @@ describe("acquire", () => {
   test("dos acquires de la misma branch: gana uno y el otro ve que está ocupada", async () => {
     const id = repo("r1");
 
-    const results = await Promise.allSettled([
-      acquire(id, "cla-1", runA),
-      acquire(id, "cla-1", runB),
-    ]);
+    const results = await Promise.allSettled([acquire(id, "cla-1", runA), acquire(id, "cla-1", runB)]);
 
-    expect(results.map((r) => r.status).sort()).toEqual([
-      "fulfilled",
-      "rejected",
-    ]);
+    expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
     const loser = results.find((r) => r.status === "rejected");
-    expect((loser as PromiseRejectedResult).reason).toBeInstanceOf(
-      WorkspaceBusyError,
-    );
+    expect((loser as PromiseRejectedResult).reason).toBeInstanceOf(WorkspaceBusyError);
   });
 
   test("crea el worktree bloqueado en worktrees/<repo>/<branch> con la branch sobre la base", async () => {
@@ -134,24 +103,17 @@ describe("acquire", () => {
 
     const lease = await acquire(id, "feat/cla-1");
 
-    expect(lease.path).toBe(
-      join(dataDir, "worktrees", "repo_r1", "feat", "cla-1"),
-    );
+    expect(lease.path).toBe(join(dataDir, "worktrees", "repo_r1", "feat", "cla-1"));
     const main = repoById.get(id)!.git("rev-parse", "main");
     expect(lease.baseSha).toBe(main);
     const listing = repoById.get(id)!.git("worktree", "list", "--porcelain");
     expect(listing).toContain(`worktree ${realpathSync(lease.path)}`);
     expect(listing).toContain("locked clanker-yard");
-    expect(store.events.since(0).map((e) => e.type)).toEqual([
-      "lease.acquired",
-    ]);
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired"]);
   });
 
   test("origin/main y main dan la misma base, y es la punta del remoto aunque main local esté atrás", async () => {
-    const id = repo("r1", {
-      remote: true,
-      commits: [{ message: "one" }, { message: "two" }],
-    });
+    const id = repo("r1", { remote: true, commits: [{ message: "one" }, { message: "two" }] });
     const r = repoById.get(id)!;
     const originMain = r.git("rev-parse", "origin/main");
     r.git("reset", "--hard", "HEAD~1");
@@ -167,10 +129,7 @@ describe("acquire", () => {
   });
 
   test(".git/config queda igual al crear un worktree, de una branch nueva o remota", async () => {
-    const id = repo("r1", {
-      remote: true,
-      branches: { "cla-2": [{ message: "work" }] },
-    });
+    const id = repo("r1", { remote: true, branches: { "cla-2": [{ message: "work" }] } });
     // Solo queda la branch remota: el caso de retomar un PR que no tiene worktree local.
     repoById.get(id)!.git("branch", "--delete", "--force", "cla-2");
     const configPath = join(repoById.get(id)!.dir, ".git", "config");
@@ -182,9 +141,7 @@ describe("acquire", () => {
     expect(readFileSync(configPath, "utf8")).toBe(before);
     // La branch remota se retoma desde su punta, no desde la base.
     expect(remote.baseSha).toBe(fresh.baseSha);
-    expect(repoById.get(id)!.git("rev-parse", "cla-2")).toBe(
-      repoById.get(id)!.git("rev-parse", "origin/cla-2"),
-    );
+    expect(repoById.get(id)!.git("rev-parse", "cla-2")).toBe(repoById.get(id)!.git("rev-parse", "origin/cla-2"));
   });
 
   test("funciona sin remoto, con la base local", async () => {
@@ -199,33 +156,20 @@ describe("acquire", () => {
     const id = repo("r1");
 
     for (const branch of ["main", "refs/heads/main", "release", "mala..rama"]) {
-      await expect(acquire(id, branch)).rejects.toBeInstanceOf(
-        BranchNotAllowedError,
-      );
+      await expect(acquire(id, branch)).rejects.toBeInstanceOf(BranchNotAllowedError);
     }
     expect(store.events.since(0)).toEqual([]);
   });
 
   test("no se apropia de una branch local que no creó el sistema, y no deja la fila", async () => {
-    const id = repo("r1", {
-      remote: true,
-      branches: { mine: [{ message: "mine" }] },
-    });
+    const id = repo("r1", { remote: true, branches: { mine: [{ message: "mine" }] } });
     repoById.get(id)!.git("push", "origin", "--delete", "mine");
 
-    await expect(acquire(id, "mine")).rejects.toThrow(
-      /no la creó Clanker Yard/,
-    );
+    await expect(acquire(id, "mine")).rejects.toThrow(/no la creó Clanker Yard/);
     // El lease que alcanzó a tomarse queda soltado también en la línea de tiempo.
     const [acquired, released] = store.events.since(0);
-    expect([acquired?.type, released?.type]).toEqual([
-      "lease.acquired",
-      "lease.released",
-    ]);
-    expect(released?.payload).toMatchObject({
-      id: acquired?.payload.id,
-      token: acquired?.payload.token,
-    });
+    expect([acquired?.type, released?.type]).toEqual(["lease.acquired", "lease.released"]);
+    expect(released?.payload).toMatchObject({ id: acquired?.payload.id, token: acquired?.payload.token });
     // Sin fila huérfana, la branch libre se puede tomar después.
     await expect(acquire(id, "other")).resolves.toBeDefined();
   });
@@ -236,15 +180,9 @@ describe("acquire", () => {
     const path = join(dataDir, "worktrees", "repo_r1", "cla-1");
     repoById.get(id)!.git("worktree", "add", "-b", "otra", path);
 
-    await expect(acquire(id, "cla-1")).rejects.toBeInstanceOf(
-      BranchNotAllowedError,
-    );
-    expect(
-      store.db.$client.prepare("SELECT count(*) AS n FROM workspaces").get(),
-    ).toEqual({ n: 0 });
-    expect(
-      repoById.get(id)!.git("-C", path, "rev-parse", "--abbrev-ref", "HEAD"),
-    ).toBe("otra");
+    await expect(acquire(id, "cla-1")).rejects.toBeInstanceOf(BranchNotAllowedError);
+    expect(store.db.$client.prepare("SELECT count(*) AS n FROM workspaces").get()).toEqual({ n: 0 });
+    expect(repoById.get(id)!.git("-C", path, "rev-parse", "--abbrev-ref", "HEAD")).toBe("otra");
   });
 
   test("tras release se reusa el mismo worktree con un token nuevo y la branch queda idle", async () => {
@@ -276,9 +214,7 @@ describe("acquire", () => {
 
     expect(second.path).toBe(first.path);
     expect(await workspaces.git(second, "rev-parse", "HEAD")).toBe(head);
-    expect(repoById.get(id)!.git("worktree", "list", "--porcelain")).toContain(
-      "locked clanker-yard",
-    );
+    expect(repoById.get(id)!.git("worktree", "list", "--porcelain")).toContain("locked clanker-yard");
   });
 
   test("un lease vencido se puede tomar y deja un evento lease.expired del anterior", async () => {
@@ -289,13 +225,8 @@ describe("acquire", () => {
     const taken = await acquire(id, "cla-1", runB);
 
     expect(taken.fencingToken).toBe(stale.fencingToken + 1);
-    const expired = store.events
-      .since(0)
-      .find((e) => e.type === "lease.expired");
-    expect(expired?.payload).toMatchObject({
-      runId: runA,
-      token: stale.fencingToken,
-    });
+    const expired = store.events.since(0).find((e) => e.type === "lease.expired");
+    expect(expired?.payload).toMatchObject({ runId: runA, token: stale.fencingToken });
   });
 });
 
@@ -312,19 +243,12 @@ describe("setup.worktree", () => {
 
   test("corre al crear el worktree, dentro de él, y no al volver a tomar uno que ya existe", async () => {
     const id = repo("r1");
-    const dirs = withSetup([
-      "echo instalado > installed.txt",
-      "pwd -P > where.txt",
-    ]);
+    const dirs = withSetup(["echo instalado > installed.txt", "pwd -P > where.txt"]);
 
     const lease = await acquire(id, "cla-1");
 
-    expect(readFileSync(join(lease.path, "installed.txt"), "utf8")).toBe(
-      "instalado\n",
-    );
-    expect(readFileSync(join(lease.path, "where.txt"), "utf8").trim()).toBe(
-      realpathSync(lease.path),
-    );
+    expect(readFileSync(join(lease.path, "installed.txt"), "utf8")).toBe("instalado\n");
+    expect(readFileSync(join(lease.path, "where.txt"), "utf8").trim()).toBe(realpathSync(lease.path));
     workspaces.release(lease);
     await acquire(id, "cla-1", runB);
     expect(dirs).toEqual([lease.path]);
@@ -338,26 +262,15 @@ describe("setup.worktree", () => {
     const error = await acquire(id, "cla-1").catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(WorktreeSetupError);
-    expect((error as Error).message).toMatch(
-      /setup\.worktree falló en .*: echo 'sin red' >&2; exit 7 \(exit 7\)\nsin red/,
-    );
-    expect(existsSync(join(dataDir, "worktrees", "repo_r1", "cla-1"))).toBe(
-      false,
-    );
+    expect((error as Error).message).toMatch(/setup\.worktree falló en .*: echo 'sin red' >&2; exit 7 \(exit 7\)\nsin red/);
+    expect(existsSync(join(dataDir, "worktrees", "repo_r1", "cla-1"))).toBe(false);
     expect(r.git("branch", "--list", "cla-1")).toBe("");
-    expect(
-      r.git("worktree", "list", "--porcelain").match(/^worktree /gm),
-    ).toHaveLength(1);
-    expect(store.events.since(0).map((e) => e.type)).toEqual([
-      "lease.acquired",
-      "lease.released",
-    ]);
+    expect(r.git("worktree", "list", "--porcelain").match(/^worktree /gm)).toHaveLength(1);
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
 
     withSetup(["echo ok > installed.txt"]);
     const retry = await acquire(id, "cla-1");
-    expect(readFileSync(join(retry.path, "installed.txt"), "utf8")).toBe(
-      "ok\n",
-    );
+    expect(readFileSync(join(retry.path, "installed.txt"), "utf8")).toBe("ok\n");
   });
 
   test("un corte a medio setup deja la fila en creating y el siguiente acquire lo corre de nuevo", async () => {
@@ -371,9 +284,7 @@ describe("setup.worktree", () => {
 
     const retry = await acquire(id, "cla-1", runB);
 
-    expect(readFileSync(join(retry.path, "installed.txt"), "utf8")).toBe(
-      "instalado\n",
-    );
+    expect(readFileSync(join(retry.path, "installed.txt"), "utf8")).toBe("instalado\n");
     expect(dirs).toEqual([lease.path, lease.path]);
   });
 
@@ -394,15 +305,11 @@ describe("fencing", () => {
     const current = await acquire(id, "cla-1", runB);
 
     expect(() => workspaces.validate(stale)).toThrow(StaleLeaseError);
-    await expect(
-      workspaces.git(stale, "commit", "--allow-empty", "-m", "zombi"),
-    ).rejects.toBeInstanceOf(StaleLeaseError);
-    expect(repoById.get(id)!.git("log", "--format=%s", "cla-1")).not.toContain(
-      "zombi",
+    await expect(workspaces.git(stale, "commit", "--allow-empty", "-m", "zombi")).rejects.toBeInstanceOf(
+      StaleLeaseError,
     );
-    await expect(workspaces.git(current, "status", "--short")).resolves.toBe(
-      "",
-    );
+    expect(repoById.get(id)!.git("log", "--format=%s", "cla-1")).not.toContain("zombi");
+    await expect(workspaces.git(current, "status", "--short")).resolves.toBe("");
   });
 
   test("release con un token viejo no suelta el lease de la corrida vigente", async () => {
@@ -414,9 +321,7 @@ describe("fencing", () => {
     workspaces.release(stale);
 
     expect(() => workspaces.validate(current)).not.toThrow();
-    await expect(acquire(id, "cla-1", runA)).rejects.toBeInstanceOf(
-      WorkspaceBusyError,
-    );
+    await expect(acquire(id, "cla-1", runA)).rejects.toBeInstanceOf(WorkspaceBusyError);
   });
 
   test("git corre con autor y committer del sistema", async () => {
@@ -425,30 +330,17 @@ describe("fencing", () => {
 
     await workspaces.git(lease, "commit", "--allow-empty", "-m", "feat: algo");
 
-    const who = await workspaces.git(
-      lease,
-      "log",
-      "-1",
-      "--format=%an <%ae> / %cn <%ce>",
-    );
-    expect(who).toBe(
-      "Ana Pérez <ana@example.com> / Ana Pérez <ana@example.com>",
-    );
+    const who = await workspaces.git(lease, "log", "-1", "--format=%an <%ae> / %cn <%ce>");
+    expect(who).toBe("Ana Pérez <ana@example.com> / Ana Pérez <ana@example.com>");
   });
 });
 
 describe("heartbeat", () => {
-  beforeEach(() =>
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }),
-  );
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }));
   afterEach(() => vi.useRealTimers());
 
   const leaseUntil = (workspaceId: string) =>
-    (
-      store.db.$client
-        .prepare("SELECT lease_until AS t FROM workspaces WHERE id = ?")
-        .get(workspaceId) as { t: number }
-    ).t;
+    (store.db.$client.prepare("SELECT lease_until AS t FROM workspaces WHERE id = ?").get(workspaceId) as { t: number }).t;
 
   test("renueva el lease cada ttl/3", async () => {
     const lease = await acquire(repo("r1"), "cla-1");
@@ -494,12 +386,7 @@ describe("heartbeat", () => {
   test("si la base falla al renovar, aborta `lost` con el error en vez de lanzar desde el timer", async () => {
     const id = repo("r1");
     const closing = openStore({ path: ":memory:", now: () => clock });
-    const lease = await workspacesOn(closing).acquire({
-      repo: id,
-      branch: "cla-1",
-      base: "main",
-      runId: runA,
-    });
+    const lease = await workspacesOn(closing).acquire({ repo: id, branch: "cla-1", base: "main", runId: runA });
     closing.close();
 
     expect(() => vi.advanceTimersByTime(LEASE_TTL_MS / 3)).not.toThrow();
@@ -514,39 +401,24 @@ describe("workspace.acquire", () => {
     const flows = createFlows({
       store,
       defs,
-      agents: createAgents({
-        store,
-        defs,
-        runtime: createFakeRuntime({ fixtures: demoFixtures }),
-      }),
+      agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures: demoFixtures }) }),
       artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }),
       roles: () => undefined,
     });
 
-    expect(() =>
-      flows.registerAction(workspaceAcquireAction(workspaces)),
-    ).not.toThrow();
-    expect(() =>
-      flows.registerAction(workspaceAcquireAction(workspaces)),
-    ).toThrow(/workspace\.acquire/);
+    expect(() => flows.registerAction(workspaceAcquireAction(workspaces))).not.toThrow();
+    expect(() => flows.registerAction(workspaceAcquireAction(workspaces))).toThrow(/workspace\.acquire/);
   });
 
   test("la acción toma el worktree para la corrida y devuelve el lease sin la señal", async () => {
     const id = repo("r1");
     const action = workspaceAcquireAction(workspaces);
 
-    const result = await action.run(
-      { repo: id, branch: "cla-1", base: "origin/main" },
-      { runId: runA },
-    );
+    const result = await action.run({ repo: id, branch: "cla-1", base: "origin/main" }, { runId: runA });
 
     expect(action.name).toBe("workspace.acquire");
     expect(result.outcome).toBe("ok");
-    expect(result.output).toMatchObject({
-      branch: "cla-1",
-      baseRef: "main",
-      fencingToken: 1,
-    });
+    expect(result.output).toMatchObject({ branch: "cla-1", baseRef: "main", fencingToken: 1 });
     expect(result.output).not.toHaveProperty("lost");
   });
 
@@ -554,18 +426,10 @@ describe("workspace.acquire", () => {
     const id = repo("r1");
     const action = workspaceAcquireAction(workspaces);
 
-    await expect(
-      action.run(
-        { repo: id, branch: "release", base: "main" },
-        { runId: runA },
-      ),
-    ).rejects.toBeInstanceOf(PermanentActionError);
+    await expect(action.run({ repo: id, branch: "release", base: "main" }, { runId: runA })).rejects.toBeInstanceOf(PermanentActionError);
 
     await acquire(id, "cla-1", runA);
-    const busy = action.run(
-      { repo: id, branch: "cla-1", base: "main" },
-      { runId: runB },
-    );
+    const busy = action.run({ repo: id, branch: "cla-1", base: "main" }, { runId: runB });
     await expect(busy).rejects.toBeInstanceOf(WorkspaceBusyError);
     await expect(busy).rejects.not.toBeInstanceOf(PermanentActionError);
   });
@@ -601,33 +465,19 @@ describe("held y workspace.release", () => {
 
     expect(workspaces.held(runA)).toBeUndefined();
     expect(workspaces.held(runB)).toMatchObject({ branch: "cla-2" });
-    expect(
-      store.events.since(0, { runId: runA, types: ["lease.released"] }),
-    ).toHaveLength(1);
+    expect(store.events.since(0, { runId: runA, types: ["lease.released"] })).toHaveLength(1);
   });
 
   test("la acción suelta el lease que acquire devolvió, solo con el id y el token", async () => {
     const id = repo("r1");
-    const acquired = await workspaceAcquireAction(workspaces).run(
-      { repo: id, branch: "cla-1", base: "main" },
-      { runId: runA },
-    );
-    const { workspaceId, fencingToken } = acquired.output as {
-      workspaceId: string;
-      fencingToken: number;
-    };
+    const acquired = await workspaceAcquireAction(workspaces).run({ repo: id, branch: "cla-1", base: "main" }, { runId: runA });
+    const { workspaceId, fencingToken } = acquired.output as { workspaceId: string; fencingToken: number };
 
-    const released = await workspaceReleaseAction(workspaces).run(
-      { workspaceId, fencingToken },
-      { runId: runA },
-    );
+    const released = await workspaceReleaseAction(workspaces).run({ workspaceId, fencingToken }, { runId: runA });
 
     expect(released.outcome).toBe("ok");
     expect(workspaces.held(runA)).toBeUndefined();
-    expect(store.events.since(0).map((e) => e.type)).toEqual([
-      "lease.acquired",
-      "lease.released",
-    ]);
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
   });
 });
 
@@ -640,9 +490,7 @@ describe("discard", () => {
 
     expect(existsSync(lease.path)).toBe(false);
     expect(repoById.get(id)!.git("branch", "--list", "cla-1")).toBe("");
-    expect(
-      store.db.$client.prepare("SELECT COUNT(*) AS n FROM workspaces").get(),
-    ).toEqual({ n: 0 });
+    expect(store.db.$client.prepare("SELECT COUNT(*) AS n FROM workspaces").get()).toEqual({ n: 0 });
     expect(workspaces.held(runA)).toBeUndefined();
     // El mismo nombre se puede volver a tomar.
     await acquire(id, "cla-1", runB);
@@ -651,36 +499,21 @@ describe("discard", () => {
   test("con la branch en el remoto solo suelta el lease y no borra nada", async () => {
     const id = repo("r1");
     const lease = await acquire(id, "cla-1");
-    repoById
-      .get(id)!
-      .git("update-ref", "refs/remotes/origin/cla-1", "refs/heads/cla-1");
+    repoById.get(id)!.git("update-ref", "refs/remotes/origin/cla-1", "refs/heads/cla-1");
 
     await expect(workspaces.discard(lease)).resolves.toBe("released");
 
     expect(existsSync(lease.path)).toBe(true);
-    expect(repoById.get(id)!.git("branch", "--list", "cla-1")).toContain(
-      "cla-1",
-    );
-    expect(
-      store.db.$client
-        .prepare("SELECT state, holder_run_id AS holder FROM workspaces")
-        .get(),
-    ).toEqual({ state: "idle", holder: null });
+    expect(repoById.get(id)!.git("branch", "--list", "cla-1")).toContain("cla-1");
+    expect(store.db.$client.prepare("SELECT state, holder_run_id AS holder FROM workspaces").get()).toEqual({ state: "idle", holder: null });
   });
 });
 
 describe("handOver y reread", () => {
   const rowOf = (lease: WorkspaceLease) =>
     store.db.$client
-      .prepare(
-        "SELECT holder_run_id AS holder, fencing_token AS token, head_sha AS head, lease_until AS until FROM workspaces WHERE id = ?",
-      )
-      .get(lease.workspaceId) as {
-      holder: string;
-      token: number;
-      head: string;
-      until: number;
-    };
+      .prepare("SELECT holder_run_id AS holder, fencing_token AS token, head_sha AS head, lease_until AS until FROM workspaces WHERE id = ?")
+      .get(lease.workspaceId) as { holder: string; token: number; head: string; until: number };
 
   test("pasa el worktree a otra corrida con fencing + 1: lo que tenía la anterior ya no valida", async () => {
     const id = repo("r1");
@@ -688,21 +521,11 @@ describe("handOver y reread", () => {
 
     store.tx((tx) => workspaces.handOver(tx, runA, runB));
 
-    expect(rowOf(lease)).toMatchObject({
-      holder: runB,
-      token: lease.fencingToken + 1,
-    });
+    expect(rowOf(lease)).toMatchObject({ holder: runB, token: lease.fencingToken + 1 });
     expect(workspaces.held(runA)).toBeUndefined();
-    expect(workspaces.held(runB)).toMatchObject({
-      workspaceId: lease.workspaceId,
-      fencingToken: lease.fencingToken + 1,
-    });
+    expect(workspaces.held(runB)).toMatchObject({ workspaceId: lease.workspaceId, fencingToken: lease.fencingToken + 1 });
     expect(() => workspaces.validate(lease)).toThrow(StaleLeaseError);
-    expect(
-      store.events
-        .since(0, { types: ["lease.released", "lease.acquired"] })
-        .map((e) => [e.type, e.runId, e.payload.token]),
-    ).toEqual([
+    expect(store.events.since(0, { types: ["lease.released", "lease.acquired"] }).map((e) => [e.type, e.runId, e.payload.token])).toEqual([
       ["lease.acquired", runA, 1],
       ["lease.released", runA, 1],
       ["lease.acquired", runB, 2],
@@ -715,10 +538,7 @@ describe("handOver y reread", () => {
 
     store.tx((tx) => workspaces.handOver(tx, runB, newId("run")));
 
-    expect(rowOf(lease)).toMatchObject({
-      holder: runA,
-      token: lease.fencingToken,
-    });
+    expect(rowOf(lease)).toMatchObject({ holder: runA, token: lease.fencingToken });
   });
 
   test("reread deja el head_sha de la fila en el HEAD que tiene el worktree", async () => {
@@ -726,13 +546,7 @@ describe("handOver y reread", () => {
     const lease = await acquire(id, "cla-1", runA);
     const before = rowOf(lease).head;
 
-    await workspaces.git(
-      lease,
-      "commit",
-      "--allow-empty",
-      "-m",
-      "rebase de otra corrida",
-    );
+    await workspaces.git(lease, "commit", "--allow-empty", "-m", "rebase de otra corrida");
     await workspaces.reread(runA);
 
     const head = repoById.get(id)!.git("rev-parse", "cla-1");
@@ -756,11 +570,7 @@ describe("recover y extendLeases", () => {
   }
 
   const row = (workspaceId: string) =>
-    store.db.$client
-      .prepare(
-        "SELECT state, holder_run_id AS holder, lease_until AS leaseUntil, fencing_token AS token FROM workspaces WHERE id = ?",
-      )
-      .get(workspaceId) as {
+    store.db.$client.prepare("SELECT state, holder_run_id AS holder, lease_until AS leaseUntil, fencing_token AS token FROM workspaces WHERE id = ?").get(workspaceId) as {
       state: string;
       holder: string | null;
       leaseUntil: number | null;
@@ -777,22 +587,10 @@ describe("recover y extendLeases", () => {
     const rebooted = workspacesOn(store);
     expect(rebooted.recover()).toBe(1);
 
-    expect(row(lease.workspaceId)).toMatchObject({
-      state: "leased",
-      holder: runA,
-      token: lease.fencingToken,
-      leaseUntil: clock + LEASE_TTL_MS,
-    });
+    expect(row(lease.workspaceId)).toMatchObject({ state: "leased", holder: runA, token: lease.fencingToken, leaseUntil: clock + LEASE_TTL_MS });
     expect(rebooted.held(runA)).toMatchObject({ path: lease.path });
     expect(() => rebooted.validate(lease)).not.toThrow();
-    await expect(
-      rebooted.acquire({
-        repo: id,
-        branch: "cla-1",
-        base: "main",
-        runId: runB,
-      }),
-    ).rejects.toBeInstanceOf(WorkspaceBusyError);
+    await expect(rebooted.acquire({ repo: id, branch: "cla-1", base: "main", runId: runB })).rejects.toBeInstanceOf(WorkspaceBusyError);
   });
 
   test("el worktree de una corrida que ya terminó se suelta", async () => {
@@ -802,39 +600,21 @@ describe("recover y extendLeases", () => {
 
     expect(workspacesOn(store).recover()).toBe(1);
 
-    expect(row(lease.workspaceId)).toMatchObject({
-      state: "idle",
-      holder: null,
-      leaseUntil: null,
-    });
-    expect(store.events.since(0).map((e) => e.type)).toEqual([
-      "lease.acquired",
-      "lease.released",
-    ]);
-    await expect(acquire(id, "cla-1", runB)).resolves.toMatchObject({
-      fencingToken: lease.fencingToken + 1,
-    });
+    expect(row(lease.workspaceId)).toMatchObject({ state: "idle", holder: null, leaseUntil: null });
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.released"]);
+    await expect(acquire(id, "cla-1", runB)).resolves.toMatchObject({ fencingToken: lease.fencingToken + 1 });
   });
 
   test("uno que se quedó a medio crear pierde el lease para que su paso lo tome de nuevo", async () => {
     const id = repo("r1");
     seedRun(runA, "running");
     const lease = await acquire(id, "cla-1", runA);
-    store.db.$client
-      .prepare("UPDATE workspaces SET state = 'creating' WHERE id = ?")
-      .run(lease.workspaceId);
+    store.db.$client.prepare("UPDATE workspaces SET state = 'creating' WHERE id = ?").run(lease.workspaceId);
 
     workspacesOn(store).recover();
 
-    expect(row(lease.workspaceId)).toMatchObject({
-      state: "creating",
-      holder: null,
-      leaseUntil: null,
-    });
-    expect(store.events.since(0).at(-1)).toMatchObject({
-      type: "lease.expired",
-      payload: { runId: runA, token: lease.fencingToken },
-    });
+    expect(row(lease.workspaceId)).toMatchObject({ state: "creating", holder: null, leaseUntil: null });
+    expect(store.events.since(0).at(-1)).toMatchObject({ type: "lease.expired", payload: { runId: runA, token: lease.fencingToken } });
   });
 
   test("la corrida que ya tiene el worktree lo vuelve a tomar con un token nuevo, sin avisar un vencimiento", async () => {
@@ -845,13 +625,8 @@ describe("recover y extendLeases", () => {
 
     expect(again.fencingToken).toBe(first.fencingToken + 1);
     expect(again.path).toBe(first.path);
-    expect(store.events.since(0).map((e) => e.type)).toEqual([
-      "lease.acquired",
-      "lease.acquired",
-    ]);
-    await expect(acquire(id, "cla-1", runB)).rejects.toBeInstanceOf(
-      WorkspaceBusyError,
-    );
+    expect(store.events.since(0).map((e) => e.type)).toEqual(["lease.acquired", "lease.acquired"]);
+    await expect(acquire(id, "cla-1", runB)).rejects.toBeInstanceOf(WorkspaceBusyError);
   });
 
   test("extendLeases renueva ya los leases de este core: dormir no los pierde", async () => {
@@ -863,9 +638,7 @@ describe("recover y extendLeases", () => {
     workspaces.extendLeases();
 
     expect(row(lease.workspaceId).leaseUntil).toBe(clock + LEASE_TTL_MS);
-    await expect(acquire(id, "cla-1", runB)).rejects.toBeInstanceOf(
-      WorkspaceBusyError,
-    );
+    await expect(acquire(id, "cla-1", runB)).rejects.toBeInstanceOf(WorkspaceBusyError);
   });
 
   test("exec registra el comando en procs mientras corre", async () => {
@@ -875,29 +648,15 @@ describe("recover y extendLeases", () => {
     const withProcs = createWorkspaces({
       store,
       dataDir,
-      repoConfig: (repoId) => ({
-        path: repoById.get(repoId)!.dir,
-        defaultBranch: "main",
-        protectedBranches: [],
-      }),
+      repoConfig: (repoId) => ({ path: repoById.get(repoId)!.dir, defaultBranch: "main", protectedBranches: [] }),
       identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
       procs,
       now: () => clock,
     });
-    const procRows = () =>
-      store.db.$client
-        .prepare(
-          "SELECT boot_id AS bootId, kind, step_run_id AS stepRunId FROM procs",
-        )
-        .all();
+    const procRows = () => store.db.$client.prepare("SELECT boot_id AS bootId, kind, step_run_id AS stepRunId FROM procs").all();
 
-    const running = withProcs.exec(lease, "sleep 0.3", {
-      runId: runA,
-      stepId: "stp_1",
-    });
-    expect(procRows()).toEqual([
-      { bootId: "boot_now", kind: "recipe", stepRunId: "stp_1" },
-    ]);
+    const running = withProcs.exec(lease, "sleep 0.3", { runId: runA, stepId: "stp_1" });
+    expect(procRows()).toEqual([{ bootId: "boot_now", kind: "recipe", stepRunId: "stp_1" }]);
     await running;
 
     expect(procRows()).toEqual([]);

@@ -48,29 +48,18 @@ const help = `Uso:\n${Object.values(commands)
 /** Ejecuta un comando; lanza con un mensaje listo para mostrar si algo falla. */
 export async function runCli(argv: string[], ctx: CliContext): Promise<void> {
   const [first, second] = argv;
-  if (
-    first === undefined ||
-    first === "--help" ||
-    first === "-h" ||
-    first === "help"
-  )
-    return ctx.write(help);
+  if (first === undefined || first === "--help" || first === "-h" || first === "help") return ctx.write(help);
 
   const name = Object.hasOwn(commands, first) ? first : `${first} ${second}`;
   const command = Object.hasOwn(commands, name) ? commands[name] : undefined;
-  if (!command)
-    throw new Error(
-      `Comando desconocido: clanker ${argv.slice(0, 2).join(" ")}\n${help}`,
-    );
+  if (!command) throw new Error(`Comando desconocido: clanker ${argv.slice(0, 2).join(" ")}\n${help}`);
 
   try {
     await command.run(argv.slice(name.split(" ").length), ctx);
   } catch (error) {
     // Un flag mal puesto (`parseArgs`) se explica mejor con el uso del comando.
     if ((error as NodeJS.ErrnoException).code?.startsWith("ERR_PARSE_ARGS")) {
-      throw new Error(
-        `${(error as Error).message.split(".")[0]}.\nUso: ${command.usage}`,
-      );
+      throw new Error(`${(error as Error).message.split(".")[0]}.\nUso: ${command.usage}`);
     }
     throw error;
   }

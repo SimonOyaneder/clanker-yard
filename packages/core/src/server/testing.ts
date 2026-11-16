@@ -35,13 +35,7 @@ import type { RouterDeps } from "./router";
 
 const noRuntime: AgentRuntime = {
   id: "fake",
-  capabilities: {
-    structuredOutput: true,
-    costPerTurn: true,
-    resume: true,
-    fork: false,
-    steer: false,
-  },
+  capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
   start: () => Promise.reject(new Error("este test no corre agentes")),
   resume: () => Promise.reject(new Error("este test no corre agentes")),
 };
@@ -49,28 +43,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<
-  RouterDeps,
-  | "projects"
-  | "packs"
-  | "repos"
-  | "repoConfigSync"
-  | "repoConfigExport"
-  | "projectConfigs"
-  | "recipeTester"
-  | "runs"
-  | "queue"
-  | "trackerProjects"
-  | "scheduler"
-  | "lanes"
-  | "breakers"
-  | "artifacts"
-  | "decisions"
-  | "learnings"
-  | "defs"
-  | "legacyImport"
-  | "republisher"
-> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -84,15 +57,7 @@ export function apiDeps(
   const repos = createRepos(store);
   const local = createLocalTracker(store);
   const issues = createIssues(store, local);
-  const runs = createRunStarter({
-    store,
-    defs,
-    projects,
-    repos,
-    issues,
-    flows,
-    trackers: trackersByKind({ local }),
-  });
+  const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers: trackersByKind({ local }) });
   const lanes = createLaneSettings(store);
   const scheduler = createScheduler({
     store,
@@ -111,11 +76,7 @@ export function apiDeps(
       prs: { get: () => Promise.reject(new Error("este test no lee PRs")) },
     }),
     // Sin repos git: este core de pruebas no arma bases combinadas.
-    workspaces: {
-      combineBase: () =>
-        Promise.reject(new Error("este core de pruebas no tiene workspaces")),
-      dissolveBase: () => Promise.resolve(),
-    },
+    workspaces: { combineBase: () => Promise.reject(new Error("este core de pruebas no tiene workspaces")), dissolveBase: () => Promise.resolve() },
     lanes,
     runtime: noRuntime.id,
   });
@@ -125,27 +86,13 @@ export function apiDeps(
     repos,
     repoConfigSync: createRepoConfigSyncer({ defs, flows, repos }),
     // Sin remoto ni cuenta de GitHub: este core de pruebas no exporta.
-    repoConfigExport: {
-      exportDef: () =>
-        Promise.reject(new Error("este core de pruebas no exporta al repo")),
-    },
+    repoConfigExport: { exportDef: () => Promise.reject(new Error("este core de pruebas no exporta al repo")) },
     projectConfigs: createProjectConfigs({ projects, repos, defs }),
-    recipeTester: createRecipeTester({
-      store,
-      repos,
-      slots: createSlots({ store }),
-      dataDir,
-    }),
+    recipeTester: createRecipeTester({ store, repos, slots: createSlots({ store }), dataDir }),
     runs,
     queue: scheduler.queue,
     // Sin Linear: los trackerRef se guardan tal cual, como los tests de proyectos los escriben.
-    trackerProjects: {
-      list: () =>
-        Promise.reject(new Error("este core de pruebas no lista proyectos")),
-      resolve: (_tracker, ref) => Promise.resolve(ref),
-      normalize: (id) => Promise.resolve(projects.get(id)!),
-      binding: storedBinding,
-    },
+    trackerProjects: { list: () => Promise.reject(new Error("este core de pruebas no lista proyectos")), resolve: (_tracker, ref) => Promise.resolve(ref), normalize: (id) => Promise.resolve(projects.get(id)!), binding: storedBinding },
     scheduler,
     lanes,
     breakers: { list: () => [] },
@@ -156,10 +103,8 @@ export function apiDeps(
     defs,
     legacyImport: createLegacyImporter({ store, defs, artifacts }),
     republisher: {
-      republish: () =>
-        Promise.reject(new Error("este core de pruebas no republica PRs")),
-      progress: () =>
-        Promise.reject(new Error("este core de pruebas no republica PRs")),
+      republish: () => Promise.reject(new Error("este core de pruebas no republica PRs")),
+      progress: () => Promise.reject(new Error("este core de pruebas no republica PRs")),
     },
   };
 }
@@ -168,19 +113,8 @@ export function apiDeps(
  * Completa las deps del router con `prs` y `prCache` armados sobre los mismos `repos`, `connections` y `packs`
  * que recibe (como hace `startCore`), así un test que pisa alguno de ellos lee los PRs con el suyo.
  */
-export function withPrs<
-  T extends {
-    store: Store;
-    repos: Repos;
-    connections: Connections;
-    packs: Packs;
-  },
->(deps: T): T & Pick<RouterDeps, "prs" | "prCache"> {
+export function withPrs<T extends { store: Store; repos: Repos; connections: Connections; packs: Packs }>(deps: T): T & Pick<RouterDeps, "prs" | "prCache"> {
   const { store, repos, connections, packs } = deps;
-  const prs = createPrs({
-    connections,
-    packs,
-    merge: createMergeScope({ store, repos, connections }),
-  });
+  const prs = createPrs({ connections, packs, merge: createMergeScope({ store, repos, connections }) });
   return { ...deps, prs, prCache: createPrCache({ store, repos, packs, prs }) };
 }

@@ -91,12 +91,7 @@ export const PrState = z.object({
   /** `unknown` mientras GitHub calcula la mergeabilidad y en PRs ya cerrados. */
   mergeable: z.enum(["clean", "conflict", "behind", "unknown"]),
   mergeCommitSha: z.string().optional(),
-  reviewDecision: z.enum([
-    "approved",
-    "changes_requested",
-    "review_required",
-    "none",
-  ]),
+  reviewDecision: z.enum(["approved", "changes_requested", "review_required", "none"]),
   /** Solo humanos (no el autor, ni bots, ni lo que el pack ignora). */
   reviewers: z.array(ReviewerState),
   /** Humanos cuya última review que opina (aprueba o pide cambios) es una aprobación, como `latestOpinionatedReviews` del vigilante. Nunca la cuenta conectada. */
@@ -158,13 +153,11 @@ export function reviewStatusOf(pr: PrState): ReviewStatus {
   if (pr.reviewDecision === "changes_requested") return "changes";
   const kinds = new Set(pr.reviewers.map((r) => r.state));
   if (kinds.has("changes_requested")) return "changes";
-  if (pr.reviewDecision === "approved" && kinds.has("approved"))
-    return "approved";
+  if (pr.reviewDecision === "approved" && kinds.has("approved")) return "approved";
   if (kinds.has("pending")) return "pending";
   if (kinds.has("commented") || pr.threads.unresolved > 0) return "changes";
   if (kinds.has("approved")) return "approved";
-  if (pr.reviewDecision === "review_required" && pr.state === "open")
-    return "pending";
+  if (pr.reviewDecision === "review_required" && pr.state === "open") return "pending";
   return "none";
 }
 
@@ -178,10 +171,7 @@ export const PrSignal = z.object({
   match: z.string(),
   flags: z.string().optional(),
   empty: z.string().optional(),
-  levels: z.record(
-    z.string(),
-    z.object({ label: z.string(), tone: SignalTone, hint: z.string() }),
-  ),
+  levels: z.record(z.string(), z.object({ label: z.string(), tone: SignalTone, hint: z.string() })),
 });
 export type PrSignal = z.infer<typeof PrSignal>;
 
@@ -243,14 +233,7 @@ export type RepublishInput = z.input<typeof RepublishInput>;
 export const PrRepublish = z.object({
   repo: z.string().min(1),
   number: z.int().positive(),
-  status: z.enum([
-    "planned",
-    "pending",
-    "running",
-    "republished",
-    "skipped",
-    "failed",
-  ]),
+  status: z.enum(["planned", "pending", "running", "republished", "skipped", "failed"]),
   branch: z.string().optional(),
   base: z.string().optional(),
   commits: z.int().nonnegative().optional(),
@@ -263,9 +246,5 @@ export type PrRepublish = z.infer<typeof PrRepublish>;
  * El avance de una republicación: `results` en orden de stack y `done` cuando ninguno quedó `pending` ni `running`.
  * `id` es lo que pide `prs.republishProgress`.
  */
-export const RepublishProgress = z.object({
-  id: z.string().min(1),
-  done: z.boolean(),
-  results: z.array(PrRepublish),
-});
+export const RepublishProgress = z.object({ id: z.string().min(1), done: z.boolean(), results: z.array(PrRepublish) });
 export type RepublishProgress = z.infer<typeof RepublishProgress>;
