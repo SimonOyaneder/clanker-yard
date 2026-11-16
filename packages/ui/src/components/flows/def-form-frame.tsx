@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { ChangeDialog } from "@/components/flows/change-dialog"
 import { Button } from "@/components/ui/button"
-import { messageOf } from "@/lib/undoable"
+import { messageOf } from "@/lib/utils"
 
 interface Props {
   def: DefRecord

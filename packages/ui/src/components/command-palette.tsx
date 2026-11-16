@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, Decision, DecisionId, QueueEntry, Run, RunId } from "@clanker/api"
+import type { CachedIssue, ClankerProject, Decision, QueueEntry, Run, RunId } from "@clanker/api"
 import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, X } from "lucide-react"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs"
@@ -45,19 +45,13 @@ interface Props {
   issues: CachedIssue[]
   /** La cola del proyecto que se ve; `null` si la vista actual no es la del proyecto. */
   queue: QueueEntry[] | null
-  onToggleSidebar: () => void
-  onOpenShortcuts: () => void
   prs: OpenPr[]
   /** Solo en Stacks de PR: las acciones del PR enfocado son acciones de la paleta. */
   prsActive: boolean
-  onGoPrs: () => void
-  onGoInbox: () => void
-  onGoLearnings: () => void
   /** Solo en Learnings: lo que se puede hacer con lo marcado o con el learning a la vista, y deshacer si hay algo que deshacer. */
   learnings: { view: LearningsView; onUndo: (() => void) | null } | null
   /** Las decisiones pendientes: ⏎ en una la abre en la bandeja. */
   pendingDecisions: Decision[]
-  onOpenDecision: (id: DecisionId) => void
   /** Solo si hay una respuesta que todavía se puede deshacer. */
   onUndoDecision: (() => void) | null
   /** Solo en la bandeja, con una decisión pendiente a la vista: sus opciones son acciones de la paleta. */
@@ -77,7 +71,7 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, prsActive, onGoPrs, onGoInbox, onGoLearnings, learnings, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, prs, prsActive, learnings, pendingDecisions, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
   const prCommands = usePrCommands()
@@ -384,7 +378,7 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <CommandSeparator />
             <CommandGroup heading="Decisiones">
               {pendingDecisions.map((d) => (
-                <CommandItem key={d.id} value={`decisión ${KIND_LABEL[d.kind]} ${d.title} ${d.id}`} onSelect={run(() => onOpenDecision(d.id))}>
+                <CommandItem key={d.id} value={`decisión ${KIND_LABEL[d.kind]} ${d.title} ${d.id}`} onSelect={run(() => actions.openDecision(d.id))}>
                   <KindIcon kind={d.kind} />
                   <span className="truncate">{d.title}</span>
                   <CommandShortcut>
@@ -415,15 +409,15 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
 
         <CommandSeparator />
         <CommandGroup heading="App">
-          <CommandItem onSelect={run(onGoInbox)}>
+          <CommandItem onSelect={run(() => actions.goModule("inbox"))}>
             <Inbox /> Ir a la Bandeja
             <CommandShortcut>⇧⌘I</CommandShortcut>
           </CommandItem>
-          <CommandItem onSelect={run(onGoLearnings)}>
+          <CommandItem onSelect={run(() => actions.goModule("learnings"))}>
             <BookCheck /> Ir a Learnings
             <CommandShortcut>⇧⌘A</CommandShortcut>
           </CommandItem>
-          <CommandItem onSelect={run(onGoPrs)}>
+          <CommandItem onSelect={run(() => actions.goModule("prs"))}>
             <GitPullRequest /> Ir a Stacks de PR
             <CommandShortcut>⇧⌘P</CommandShortcut>
           </CommandItem>
@@ -447,11 +441,11 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <RefreshCw /> Actualizar
             <CommandShortcut>⌘R</CommandShortcut>
           </CommandItem>
-          <CommandItem onSelect={run(onToggleSidebar)}>
+          <CommandItem onSelect={run(actions.toggleSidebar)}>
             <PanelLeft /> Mostrar u ocultar barra lateral
             <CommandShortcut>⌘B</CommandShortcut>
           </CommandItem>
-          <CommandItem onSelect={run(onOpenShortcuts)}>
+          <CommandItem onSelect={run(actions.openShortcuts)}>
             <Keyboard /> Atajos de teclado
             <CommandShortcut>⌘/</CommandShortcut>
           </CommandItem>

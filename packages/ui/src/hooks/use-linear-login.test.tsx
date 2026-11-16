@@ -5,7 +5,7 @@ import { afterEach, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
 import { useLinearLogin } from "@/hooks/use-linear-login"
 import { HostProvider, type Host } from "@/host"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 afterEach(cleanup)
 

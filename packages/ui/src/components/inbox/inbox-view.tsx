@@ -16,6 +16,7 @@ import { copy } from "@/lib/clipboard"
 import { ACTIONABLE_KINDS, KIND_LABEL, optionLabel, optionsOf, parksRun, resolutionText, resolvedToday, takesText } from "@/lib/decisions"
 import { tone } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { isTypingTarget, overlayOpen } from "@/lib/keys"
 
 const ALL = "all"
 
@@ -28,7 +29,6 @@ interface Props {
   onResolve: (decision: Decision, option: string) => void
 }
 
-const typing = (target: EventTarget | null) => !!(target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")
 
 // La bandeja de decisiones (`docs/design.html#d-ui`): lista a la izquierda, la decisión a la derecha. Ninguna
 // decisión detiene el loop; las que estacionan una corrida van primero.
@@ -52,8 +52,8 @@ export function InboxView({ inbox, decisions, projects, onSelect, onResolve }: P
 
   // J y K, 1 a 9, R y ⏎. Z (deshacer) vive en la app: el aviso sigue ahí aunque cambies de vista.
   const onKey = useEffectEvent((e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || typing(e.target)) return
-      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || isTypingTarget(e.target)) return
+      if (overlayOpen()) return
       const at = current ? items.findIndex((d) => d.id === current.id) : -1
       const key = e.key.toLowerCase()
       if (key === "j" || key === "k") {

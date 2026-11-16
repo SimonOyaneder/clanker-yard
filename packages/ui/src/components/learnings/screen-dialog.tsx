@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { messageOf } from "@/lib/undoable"
+import { messageOf } from "@/lib/utils"
 
 type State = { kind: "loading" } | { kind: "ready"; rejected: LearningVerdict[] } | { kind: "error"; message: string }
 

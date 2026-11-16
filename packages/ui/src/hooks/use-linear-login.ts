@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { useHost } from "@/host"
+import { messageOf } from "@/lib/utils"
 
 /** El core deja de esperar la aprobación a los 5 minutos (`LINEAR_LOGIN_TIMEOUT_MS`). */
 const LOGIN_WAIT_MS = 5 * 60_000
@@ -37,7 +38,7 @@ export function useLinearLogin(connections: Connection[], onChanged: () => void)
       setPending({ url, before: signatureOf(connections) })
       onChanged()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(messageOf(e))
     }
   }, [appData, host, connections, onChanged])
 

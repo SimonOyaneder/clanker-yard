@@ -5,7 +5,7 @@ import type { RepoRow } from "@/app-data"
 import { Hint, Pill } from "@/components/common"
 import { DefOption } from "@/components/def-option"
 import { listsProjects, TrackerProjectPicker } from "@/components/tracker-project-picker"
-import { ChipsInput, Field, Section } from "@/components/project/settings-fields"
+import { ChipsInput, Field, Section } from "@/components/settings/settings-fields"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -19,22 +19,22 @@ import { tone } from "@/lib/format"
 import {
   CATEGORY_LABELS,
   type ConventionsDraft,
-  type Draft,
+  type ProjectDraft,
   type FlowParamGroups,
   paramChoices,
   paramHelp,
   paramLabel,
   type ParamSpec,
-  type Problems,
+  type FieldProblems,
   STACK_ON_OPTIONS,
   STATUS_CATEGORIES,
 } from "@/lib/project-settings"
 
 /** Lo que cada sección edita y lee: el borrador, cómo cambiarlo y lo que impide guardar. */
 export interface SectionProps {
-  draft: Draft
-  update: (change: Partial<Draft>) => void
-  problems: Problems
+  draft: ProjectDraft
+  update: (change: Partial<ProjectDraft>) => void
+  problems: FieldProblems
 }
 
 // Radix Select no admite un valor vacío en un ítem: "sin valor" se representa con un valor propio.
@@ -465,7 +465,7 @@ export function LimitsSection({ draft, update, problems }: SectionProps) {
     >
       <div className="grid gap-4 @xl:grid-cols-2 @3xl:grid-cols-3">
         <Field id="stack-on" label="Apilar sobre el PR del bloqueante cuando" hint={option?.hint}>
-          <Select value={draft.stackOn} onValueChange={(v) => update({ stackOn: v as Draft["stackOn"] })}>
+          <Select value={draft.stackOn} onValueChange={(v) => update({ stackOn: v as ProjectDraft["stackOn"] })}>
             <SelectTrigger id="stack-on" size="sm" className="w-full">
               <SelectValue />
             </SelectTrigger>

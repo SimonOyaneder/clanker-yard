@@ -20,11 +20,11 @@ import { copy } from "@/lib/clipboard"
 import { approveLabel, capsOf, rejectLabel, rolesOf, scopeFromKey, scopeKey, scopesOf, SOURCE_LABEL, SOURCES, STATUS_HINT, STATUS_LABEL, STATUSES, type TriageAction } from "@/lib/learnings"
 import { undoable } from "@/lib/undoable"
 import { cn } from "@/lib/utils"
+import { isTypingTarget, overlayOpen } from "@/lib/keys"
 
 const ALL = "all"
 const NO_ROLE = "none"
 
-const typing = (target: EventTarget | null) => !!(target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")
 
 interface Props {
   /** Todos, con lo que espera su plazo de deshacer ya aplicado. */
@@ -59,8 +59,8 @@ export function LearningsView({ learnings, projects, view, onEdited }: Props) {
 
   // J y K, X, A, R, E, ⌘A, Esc y /. Z (deshacer) vive en la app: el aviso sigue ahí aunque cambies de vista.
   const onKey = useEffectEvent((e: KeyboardEvent) => {
-    if (e.ctrlKey || e.altKey || e.repeat || typing(e.target)) return
-    if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
+    if (e.ctrlKey || e.altKey || e.repeat || isTypingTarget(e.target)) return
+    if (overlayOpen()) return
     const key = e.key.toLowerCase()
     if (e.metaKey) {
       if (key === "a" && !e.shiftKey) {
@@ -94,7 +94,7 @@ export function LearningsView({ learnings, projects, view, onEdited }: Props) {
 
   const save = (l: Learning) => async (patch: LearningPatchInput): Promise<string | null> => {
     const before = { text: l.text, roles: l.roles, tags: l.tags }
-    // Editar no emite evento: la lista se relee a mano al guardar y al deshacer.
+    // El core emite `learning.updated`, pero los datos de ejemplo no mandan eventos: la lista también se relee al guardar y al deshacer.
     const failure = await undoable(
       "Guardé los cambios del learning",
       () => appData.updateLearning({ id: l.id, ...patch }).then(onEdited),

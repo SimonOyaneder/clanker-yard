@@ -1,9 +1,9 @@
 import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type NewLearning, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
-import { SEED_REBASE, SEED_TECHLEAD } from "@/seed-flows"
-import { buildOpenPrs } from "@/seed-prs"
-import { aggregate, seedClosedRuns } from "@/seed-metrics"
-import { seedStep, transcriptPage, type StepSeed } from "@/seed-steps"
+import { SEED_REBASE, SEED_TECHLEAD } from "@/demo/seed-flows"
+import { buildOpenPrs } from "@/demo/seed-prs"
+import { aggregate, seedClosedRuns } from "@/demo/seed-metrics"
+import { seedStep, transcriptPage, type StepSeed } from "@/demo/seed-steps"
 
 // Datos de ejemplo en memoria para desarrollar la UI sin core. Nada llega por `events`: lo que se ve es
 // lo del arranque más lo que cambia `createProject` y `startRun`.

@@ -5,7 +5,7 @@ import { AppDataProvider } from "@/app-data"
 import { ReposTable } from "@/components/connections/repos-table"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { HostProvider, type Host } from "@/host"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 afterEach(cleanup)
 

@@ -1,6 +1,6 @@
 import type { FlowDef, RunDetail } from "@clanker/api"
 import { expect, test } from "vitest"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 import { currentRound, joinId, layoutShape, nodeStates, roundsOf, shapeOf } from "./run-graph"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")

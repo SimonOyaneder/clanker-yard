@@ -6,7 +6,7 @@ import { RunCommandsProvider } from "@/components/project/run-commands"
 import { RunGraph } from "@/components/project/run-graph"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { shapeOf } from "@/lib/run-graph"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 

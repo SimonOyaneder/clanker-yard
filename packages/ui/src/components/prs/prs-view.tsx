@@ -27,6 +27,7 @@ import { usePrCommands } from "./pr-commands"
 import { PR_KEYS, PrContextMenu } from "./pr-menu"
 import { PrNotes, PrNotesContext } from "./pr-notes"
 import { StackGraph } from "./stack-graph"
+import { isTypingTarget } from "@/lib/keys"
 
 type Filter = "all" | "stacked" | "solo" | "draft" | "ready" | "mergeable" | "hold" | "approved" | "pending" | "changes" | "owned"
 type Mode = "graph" | "list"
@@ -152,7 +153,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!selected || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
-      if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable='true'], [role='dialog'], [role='alertdialog'], [role='menu']")) return
+      if (isTypingTarget(e.target, ["[role='dialog']", "[role='alertdialog']", "[role='menu']"])) return
       const caps = commands.caps(selected)
       const key = e.key.toUpperCase()
       if (key === PR_KEYS.merge && caps.merge) commands.merge(selected)

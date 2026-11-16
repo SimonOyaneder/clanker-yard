@@ -7,7 +7,7 @@ import { LinearCard, projectsOfAccount } from "@/components/connections/linear-c
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { LinearLogin } from "@/hooks/use-linear-login"
 import { HostProvider, type Host } from "@/host"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 

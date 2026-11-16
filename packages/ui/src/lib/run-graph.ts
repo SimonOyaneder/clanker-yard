@@ -55,7 +55,7 @@ function inlineBranches(steps: readonly Step[]): Map<string, string[]> {
   return new Map([...found].map(([parent, byIndex]) => [parent, [...byIndex].sort(([a], [b]) => a - b).map(([, id]) => id)]))
 }
 
-function describe(node: FlowNodeDef): { kind: GraphNodeKind; detail: string | null } {
+function nodeKindOf(node: FlowNodeDef): { kind: GraphNodeKind; detail: string | null } {
   switch (node.type) {
     case "agent":
       return { kind: "agent", detail: `${node.role} · ${node.mode}` }
@@ -107,7 +107,7 @@ export function shapeOf(def: FlowDef, steps: readonly Step[] = []): GraphShape {
   }
 
   for (const [id, node] of Object.entries(def.nodes)) {
-    nodes.push({ id, label: id, ...describe(node) })
+    nodes.push({ id, label: id, ...nodeKindOf(node) })
     if (node.type !== "parallel") {
       exits(id, node, id)
       continue
@@ -120,7 +120,7 @@ export function shapeOf(def: FlowDef, steps: readonly Step[] = []): GraphShape {
     } else {
       // La plantilla de un forEach corre una vez por ítem: hasta que haya pasos se dibuja una sola.
       branches = inline.get(id) ?? [`${id}[…]`]
-      for (const branch of branches) nodes.push({ id: branch, label: branch, ...describe(node.branches.branch) })
+      for (const branch of branches) nodes.push({ id: branch, label: branch, ...nodeKindOf(node.branches.branch) })
     }
     for (const branch of branches) {
       connect(id, branch, { label: null, branch: true })

@@ -8,7 +8,7 @@ import { AppSettingsView } from "@/components/app-settings/app-settings-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
 import { HostProvider, type Host } from "@/host"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }) }))
 

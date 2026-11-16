@@ -1,6 +1,7 @@
 import type { Event } from "@clanker/api"
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useEffectEvent, useRef, useState } from "react"
 import { useEvents } from "@/hooks/use-events"
+import { messageOf } from "@/lib/utils"
 
 interface Live {
   /** Sube cada vez que llegan eventos del core: quien lo lea vuelve a pedir lo suyo. */
@@ -61,7 +62,7 @@ export function useLiveQuery<T>(key: string, fetcher: () => Promise<T>, opts: { 
     let current = true
     load().then(
       (data) => current && setState({ key, data }),
-      (e: unknown) => current && setState((s) => ({ key, data: s.key === key ? s.data : undefined, error: e instanceof Error ? e.message : String(e) })),
+      (e: unknown) => current && setState((s) => ({ key, data: s.key === key ? s.data : undefined, error: messageOf(e) })),
     )
     return () => {
       current = false

@@ -1,6 +1,6 @@
 import type { CachedPr } from "@clanker/api"
 import { expect, test } from "vitest"
-import { buildOpenPrs } from "@/seed-prs"
+import { buildOpenPrs } from "@/demo/seed-prs"
 import { openPrsOf } from "./prs"
 import { buildStackForest, listStackGroups } from "./stack"
 

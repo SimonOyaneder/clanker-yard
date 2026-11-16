@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, expect, test } from "vitest"
 import { AppDataProvider } from "@/app-data"
 import { RunNotes } from "@/components/project/run-notes"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 afterEach(cleanup)
 

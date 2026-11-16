@@ -7,7 +7,7 @@ import { RunCommandsProvider } from "@/components/project/run-commands"
 import { ProjectFrame, ProjectView } from "@/components/project/project-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 const LANES = { dev: { active: 1, capacity: 4 }, maintenance: { active: 1, capacity: 2 } }

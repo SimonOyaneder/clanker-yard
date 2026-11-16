@@ -12,6 +12,7 @@ import type { ClaudePlan } from "@/hooks/use-claude-plan"
 import { copy } from "@/lib/clipboard"
 import { claudeLook } from "@/lib/connections"
 import { absolute, ago, tone } from "@/lib/format"
+import { messageOf } from "@/lib/utils"
 
 const details = (status: ClaudeStatus) => [status.version && `Claude Code ${status.version}`, status.plan && `plan ${status.plan}`].filter(Boolean).join(" · ")
 
@@ -40,7 +41,7 @@ export function ClaudeCard({ connection, plan, onChanged }: { connection: Connec
       onChanged()
       toast.success(apiKey ? "Volviste al login de la suscripción" : "Claude desconectado")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      toast.error(messageOf(e))
     }
   }
 

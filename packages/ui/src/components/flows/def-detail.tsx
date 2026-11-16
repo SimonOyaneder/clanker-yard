@@ -16,8 +16,8 @@ import { Button } from "@/components/ui/button"
 import { useLiveQuery } from "@/hooks/use-live"
 import { profileSummary } from "@/lib/def-form"
 import { duplicateOf, isReadOnly, KIND_LABEL, type LibraryRow, nameOf, repoOrigin, sourceLabel } from "@/lib/defs-library"
-import { messageOf, undoable } from "@/lib/undoable"
-import { cn } from "@/lib/utils"
+import { undoable } from "@/lib/undoable"
+import { cn, messageOf } from "@/lib/utils"
 
 interface Props {
   row: LibraryRow

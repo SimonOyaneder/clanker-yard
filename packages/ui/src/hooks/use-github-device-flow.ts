@@ -6,6 +6,7 @@ import { useLive } from "@/hooks/use-live"
 import { connectionSignature } from "@/hooks/use-linear-login"
 import { useHost } from "@/host"
 import { copy } from "@/lib/clipboard"
+import { messageOf } from "@/lib/utils"
 
 export interface GitHubDeviceLogin {
   /** El código para escribir en github.com mientras se espera la aprobación, con el momento (ms de esta ventana) en que vence. */
@@ -46,7 +47,7 @@ export function useGitHubDeviceFlow(connection: Connection | undefined, onChange
       setPending({ flow, expiresAt: Date.now() + flow.expiresIn * 1000, before: connectionSignature(connection) })
       onChanged()
     } catch (e) {
-      setFailure({ reason: "failed", message: e instanceof Error ? e.message : String(e) })
+      setFailure({ reason: "failed", message: messageOf(e) })
     }
   }, [appData, openGitHub, connection, onChanged])
 

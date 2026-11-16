@@ -1,6 +1,6 @@
 import type { CachedIssue, ClankerProject, Decision, DecisionId, RunDetail, RunId, Repo, RunStatus } from "@clanker/api"
 import { ChevronRight, Search } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast, Toaster } from "sonner"
 import { type AppData, AppDataProvider, useAppData } from "@/app-data"
 import { AppSidebar } from "@/components/app-sidebar"
@@ -12,11 +12,11 @@ import { AppSettingsView } from "@/components/app-settings/app-settings-view"
 import { FlowsView } from "@/components/flows/flows-view"
 import { LearningsView } from "@/components/learnings/learnings-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
-import { PROJECT_TABS, type ProjectTab, ProjectFrame, ProjectView, issuesById } from "@/components/project/project-view"
+import { type ProjectTab, ProjectFrame, ProjectView, issuesById } from "@/components/project/project-view"
 import { ProjectSettingsTab, type SettingsControls } from "@/components/project/settings-view"
 import { ProjectSummaryTab } from "@/components/project/summary-view"
 import { RunCommandsProvider, useRunCommands } from "@/components/project/run-commands"
-import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
+import type { StepTab } from "@/components/project/step-panel"
 import { RunView, type RunTab } from "@/components/project/run-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { PrsView } from "@/components/prs/prs-view"
@@ -29,6 +29,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useClaudePlan } from "@/hooks/use-claude-plan"
 import { useDecisionResolver } from "@/hooks/use-decision-resolver"
+import { useHostBridge } from "@/hooks/use-host-bridge"
+import { useNavHistory } from "@/hooks/use-nav-history"
+import { useShellShortcuts } from "@/hooks/use-shell-shortcuts"
 import { useInbox } from "@/hooks/use-inbox"
 import { useLearningsView } from "@/hooks/use-learnings-view"
 import { useLearningTriage } from "@/hooks/use-learning-triage"
@@ -36,7 +39,7 @@ import { useLinearLogin } from "@/hooks/use-linear-login"
 import { useSummaryControls } from "@/hooks/use-summary-controls"
 import { LiveProvider, useLive, useLiveQuery } from "@/hooks/use-live"
 import { type Host, HostProvider, useHost } from "@/host"
-import { type AppActions, AppActionsContext } from "@/lib/app-context"
+import { type AppActions, AppActionsContext, MODULES, type Module } from "@/lib/app-context"
 import { needsAttention } from "@/lib/connections"
 import { useCoreState } from "@/lib/core-status"
 import { ACTIONABLE_KINDS, NOTE_KINDS, parksRun } from "@/lib/decisions"
@@ -47,13 +50,13 @@ import { runCaps } from "@/lib/run-commands"
 import { shapeOf } from "@/lib/run-graph"
 import { withPending } from "@/lib/learnings"
 import { readPref, writePref } from "@/lib/prefs"
-import { messageOf, undoable } from "@/lib/undoable"
+import { undoable } from "@/lib/undoable"
 import { barProjects } from "@/lib/projects"
 import { type SetupStep, type SetupStepId, setupSteps } from "@/lib/setup"
-import { cn } from "@/lib/utils"
+import { cn, messageOf } from "@/lib/utils"
 import { Hint } from "./components/common"
+import { PageLoadError } from "@/components/page-load-error"
 
-type Module = "projects" | "prs" | "connections" | "inbox" | "learnings" | "flows" | "settings"
 // Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`
 // y `tab` el `:tab` de `/p/:proyecto/:tab`.
 type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null; tab: ProjectTab }
@@ -61,12 +64,6 @@ type Loc = { module: Module; slug: string | null; runId: RunId | null; decision:
 const sameLoc = (a: Loc, b: Loc) =>
   a.module === b.module && (a.module === "inbox" ? a.decision === b.decision : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId && a.tab === b.tab))
 
-const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox", "learnings", "flows", "settings"]
-
-// Estas decisiones avisan con una notificación nativa: alguien las tiene que atender. Las notas no entran a la bandeja: viven en su corrida y su PR.
-const NOTIFY_KINDS = new Set(["gate", "needs_human", "alert"])
-
-const MAX_HISTORY = 50
 
 const NO_REPOS: readonly Repo[] = []
 const NO_ISSUE_KEYS: ReadonlyMap<string, string> = new Map()
@@ -219,11 +216,7 @@ function Shell() {
     writePref("sidebar", open)
   }, [])
 
-  // Historial como el de un navegador: ⌘[ / ⌘] y los botones de pulgar del mouse.
-  const here = useRef<Loc>({ module, slug, runId, decision: decisionId, tab })
-  here.current = { module, slug, runId, decision: decisionId, tab }
-  const backStack = useRef<Loc[]>([])
-  const forwardStack = useRef<Loc[]>([])
+  // Historial como el de un navegador: ⌘[ / ⌘], ⌘← / ⌘→ y los botones de pulgar del mouse.
   const apply = useCallback(
     (l: Loc) => {
       setModule(l.module)
@@ -235,102 +228,17 @@ function Shell() {
     },
     [setModule],
   )
-  const go = useCallback(
-    (to: Partial<Loc>) => {
-      const cur = here.current
-      const next = { ...cur, ...to }
-      if (!sameLoc(cur, next)) {
-        backStack.current = [...backStack.current, cur].slice(-MAX_HISTORY)
-        forwardStack.current = []
-      }
-      here.current = next
-      apply(next)
-    },
-    [apply],
-  )
-  const goBack = useCallback(() => {
-    const prev = backStack.current.pop()
-    if (!prev) return
-    forwardStack.current.push(here.current)
-    here.current = prev
-    apply(prev)
-  }, [apply])
-  const goForward = useCallback(() => {
-    const next = forwardStack.current.pop()
-    if (!next) return
-    backStack.current.push(here.current)
-    here.current = next
-    apply(next)
-  }, [apply])
+  const { go, replace, goBack, goForward } = useNavHistory<Loc>({ module, slug, runId, decision: decisionId, tab }, apply, sameLoc)
 
   const selectProject = useCallback((s: string) => go({ module: "projects", slug: s, runId: null }), [go])
   const barSlugs = barProjects(projects).map((p) => p.slug)
 
-  // Botones 4 y 5 del mouse (los de pulgar de un MX Master): en el DOM son button 3 y 4.
-  useEffect(() => {
-    const isNav = (e: MouseEvent) => e.button === 3 || e.button === 4
-    const onDown = (e: MouseEvent) => {
-      if (isNav(e)) e.preventDefault()
-    }
-    const onUp = (e: MouseEvent) => {
-      if (!isNav(e)) return
-      e.preventDefault()
-      if (e.button === 3) goBack()
-      else goForward()
-    }
-    // ⌘← / ⌘→ como en Safari y Finder: en teclados como el español, [ y ] van con ⌥. En un campo de
-    // texto no: ahí ⌘← / ⌘→ mueven el cursor al inicio o al final de la línea.
-    const onKey = (e: KeyboardEvent) => {
-      // ⌘[ / ⌘] por tecla física: Logi Options+ los manda con el código de la tecla de un teclado US,
-      // que en el layout español no produce "[" ni "]".
-      if (e.metaKey && !e.ctrlKey && !e.shiftKey && (e.code === "BracketLeft" || e.code === "BracketRight")) {
-        e.preventDefault()
-        if (e.code === "BracketLeft") goBack()
-        else goForward()
-        return
-      }
-      if (!e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return
-      const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
-      const target = digit ? barSlugs[Number(digit) - 1] : undefined
-      if (target) {
-        e.preventDefault()
-        selectProject(target)
-        return
-      }
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
-      const t = e.target as HTMLElement | null
-      if (t?.closest("input, textarea, select, [contenteditable='true']")) return
-      e.preventDefault()
-      if (e.key === "ArrowLeft") goBack()
-      else goForward()
-    }
-    window.addEventListener("mousedown", onDown)
-    window.addEventListener("mouseup", onUp)
-    window.addEventListener("keydown", onKey)
-    return () => {
-      window.removeEventListener("mousedown", onDown)
-      window.removeEventListener("mouseup", onUp)
-      window.removeEventListener("keydown", onKey)
-    }
-    // `barSlugs` es un array nuevo en cada render: su contenido manda, no su identidad.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [goBack, goForward, selectProject, barSlugs.join(",")])
-
   const goConnections = useCallback(() => go({ module: "connections" }), [go])
   const goInbox = useCallback(() => go({ module: "inbox", decision: null }), [go])
   const goLearnings = useCallback(() => go({ module: "learnings" }), [go])
-  const goFlows = useCallback(() => go({ module: "flows" }), [go])
-  const goSettings = useCallback(() => go({ module: "settings" }), [go])
   const openDecision = useCallback((id: DecisionId) => go({ module: "inbox", decision: id }), [go])
   // J y K recorren la lista sin llenar el historial de atrás/adelante: reemplazan el lugar en vez de sumar uno.
-  const selectDecision = useCallback(
-    (id: DecisionId) => {
-      const next = { ...here.current, module: "inbox" as const, decision: id }
-      here.current = next
-      apply(next)
-    },
-    [apply],
-  )
+  const selectDecision = useCallback((id: DecisionId) => replace({ module: "inbox", decision: id }), [replace])
   const { items: inboxItems, current: inboxCurrent } = inbox
   const resolveDecision = useCallback(
     (d: Decision, option: string) => {
@@ -352,39 +260,6 @@ function Shell() {
     if (status) toast(`Claude: ${status.state === "ready" ? "lista" : (status.message ?? status.state)}`)
   }, [goConnections, testClaude])
 
-  // G y luego I, A o C (como en Linear) va a la Bandeja, a Learnings o a Conexiones; ⇧⌘I y ⇧⌘A también van a la Bandeja y
-  // a Learnings, ⇧⌘L conecta Linear y ⇧⌘T prueba Claude.
-  useEffect(() => {
-    let armed: ReturnType<typeof setTimeout> | undefined
-    const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "KeyL" || e.code === "KeyT" || e.code === "KeyI" || e.code === "KeyA")) {
-        e.preventDefault()
-        if (e.code === "KeyL") connectLinear()
-        else if (e.code === "KeyI") goInbox()
-        else if (e.code === "KeyA") goLearnings()
-        else void probeClaude()
-        return
-      }
-      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
-      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return
-      const key = e.key.toLowerCase()
-      if (armed && (key === "c" || key === "i" || key === "a")) {
-        e.preventDefault()
-        if (key === "c") goConnections()
-        else if (key === "a") goLearnings()
-        else goInbox()
-      }
-      clearTimeout(armed)
-      armed = key === "g" ? setTimeout(() => (armed = undefined), 1000) : undefined
-    }
-    window.addEventListener("keydown", onKey)
-    return () => {
-      clearTimeout(armed)
-      window.removeEventListener("keydown", onKey)
-    }
-  }, [goConnections, goInbox, goLearnings, connectLinear, probeClaude])
-
-  // ⇧⌘1, ⇧⌘2 y ⇧⌘3: Operación, Resumen y Ajustes del proyecto (también desde una corrida: vuelve al proyecto).
   const goTab = useCallback((to: ProjectTab) => go({ module: "projects", runId: null, tab: to }), [go])
   // Cada paso de la configuración lleva a donde se hace: Linear y Claude además arrancan el login o la prueba.
   const runSetupStep = useCallback(
@@ -396,18 +271,6 @@ function Shell() {
     },
     [connectLinear, probeClaude, goConnections],
   )
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || !e.shiftKey || e.altKey || e.ctrlKey) return
-      const target = { Digit1: PROJECT_TABS[0], Digit2: PROJECT_TABS[1], Digit3: PROJECT_TABS[2] }[e.code]
-      if (!target) return
-      e.preventDefault()
-      goTab(target)
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [goTab])
-
   const refresh = useCallback(() => {
     if (module === "prs") {
       // Relee cada PR de GitHub; los cambios llegan solos como `pr.changed`.
@@ -422,6 +285,10 @@ function Shell() {
 
   const actions = useMemo<AppActions>(
     () => ({
+      goModule: (to) => (to === "inbox" ? goInbox() : go({ module: to })),
+      openPalette: () => setPaletteOpen(true),
+      openShortcuts: () => setShortcutsOpen(true),
+      toggleSidebar: () => setSidebarOpen(!sidebarOpen),
       selectProject,
       openRun: (s, id) => go({ module: "projects", slug: s, runId: id }),
       openDecision,
@@ -478,12 +345,11 @@ function Shell() {
       openExternal: host.openExternal,
       refresh,
     }),
-    [selectProject, go, appData, host, live.refresh, refresh, goConnections, connectLinear, probeClaude, openDecision],
+    [selectProject, go, goInbox, appData, host, live.refresh, refresh, goConnections, connectLinear, probeClaude, openDecision, setSidebarOpen, sidebarOpen],
   )
 
-  // Menú nativo (accelerators) y clicks en notificaciones.
-  useEffect(() => {
-    const offMenu = host.onMenu((action) => {
+  useHostBridge({
+    onMenu: (action) => {
       if (action === "new-project") setNewProjectOpen(true)
       else if (action === "command") setPaletteOpen((o) => !o)
       else if (action === "refresh") {
@@ -496,99 +362,41 @@ function Shell() {
       else if (action === "go-prs") go({ module: "prs" })
       else if (action === "go-inbox") goInbox()
       else if (action === "go-learnings") goLearnings()
-    })
+    },
     // Una notificación de una decisión abre esa decisión y nada más; la de un proyecto abre el proyecto.
-    const offNav = host.onNavigate((target) => ("decisionId" in target ? openDecision(target.decisionId as DecisionId) : selectProject(target.slug)))
-    return () => {
-      offMenu()
-      offNav()
-    }
-  }, [refresh, go, goBack, goForward, goInbox, goLearnings, openDecision, setSidebarOpen, sidebarOpen, selectProject, host])
-
-  // Una decisión que alguien tiene que atender avisa con una notificación nativa, si la ventana no está a la vista.
-  // Solo abre la decisión: aprobar o rechazar se hace en la bandeja.
-  useEffect(
-    () =>
-      live.subscribe((event) => {
-        const { decisionId: id, kind, title } = event.payload as { decisionId?: string; kind?: string; title?: string }
-        if (event.type !== "decision.opened" || !id || !title || !NOTIFY_KINDS.has(kind ?? "") || document.hasFocus()) return
-        host.notify({ title: kind === "alert" ? "Alerta en Clanker Yard" : "Una corrida te espera", body: title, target: { decisionId: id } })
-      }),
-    [live, host],
-  )
-
-  // Z deshace la última decisión que se respondió, mientras no se haya mandado al core.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "z" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
-      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return
-      const undone = undo()
-      if (!undone) {
-        // Sin una decisión que deshacer, Z devuelve la última de learnings que todavía no se mandó.
-        if (undoLearnings()) e.preventDefault()
-        return
-      }
-      e.preventDefault()
-      if (module === "inbox") selectDecision(undone)
-      else toast("Volvió a la bandeja", { duration: 1500 })
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [undo, undoLearnings, module, selectDecision])
-
-  // Esc sube un nivel: del panel del paso a la corrida y de la corrida al proyecto, salvo que haya un diálogo o menú abierto.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || !runId || module !== "projects") return
-      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
-      if (stepNode) setStepNode(null)
-      else go({ runId: null })
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [runId, module, go, stepNode, setStepNode])
-
-  // G y L cambian entre el grafo y la línea de tiempo de la corrida abierta, como las teclas de Linear;
-  // con el panel de un paso abierto, T, B, R, A e I eligen su pestaña.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!runId || module !== "projects" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
-      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return
-      if (document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')) return
-      const key = e.key.toLowerCase()
-      const tab = key === "g" ? "graph" : key === "l" ? "timeline" : null
-      if (tab) return setRunTab(tab)
-      const step = stepNode ? STEP_TAB_KEYS[key] : undefined
-      // La pestaña principal depende del nodo (transcript o comando): `transcript` cae a la primera de las suyas.
-      if (step) setStepTab(step === "main" ? "transcript" : step)
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [runId, module, setRunTab, stepNode])
+    openDecision,
+    selectProject,
+  })
 
   // La corrida abierta, leída aquí para que sus atajos y la paleta sepan qué se le puede pedir.
   const runQuery = useLiveQuery<RunDetail | undefined>(runId ? `run:${runId}` : "no-run", () => (runId ? appData.run(runId) : Promise.resolve(undefined)))
   const openRunDetail = runId ? runQuery.data : undefined
   const caps = useMemo(() => (openRunDetail ? runCaps(openRunDetail, shapeOf(openRunDetail.flowDef, openRunDetail.steps)) : null), [openRunDetail])
 
-  // ⌘. interrumpe, ⇧⌘. pausa o retoma, ⇧⌘R reintenta el paso fallido, ⇧⌘⌫ cancela la corrida abierta y ⇧⌘Y pausa o reanuda el proyecto.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.altKey || e.ctrlKey || module !== "projects") return
-      const run = runId && openRunDetail?.id === runId ? openRunDetail : undefined
-      if (!e.shiftKey && e.code === "Period" && run && caps?.interrupt) commands.interrupt(run.id)
-      else if (e.shiftKey && e.code === "Period" && run && caps?.pause) commands.pause(run.id)
-      else if (e.shiftKey && e.code === "Period" && run && caps?.resume) commands.resume(run.id)
-      else if (e.shiftKey && e.code === "KeyR" && caps?.failedStep) commands.retry(caps.failedStep.id, caps.failedStep.nodeId)
-      else if (e.shiftKey && e.key === "Backspace" && run && caps?.cancel) commands.cancel(run.id)
-      else if (e.shiftKey && e.code === "KeyY" && !runId && project?.status === "active") commands.pauseProject(project)
-      else if (e.shiftKey && e.code === "KeyY" && !runId && project?.status === "paused") commands.resumeProject(project)
-      else return
-      e.preventDefault()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [module, runId, openRunDetail, caps, commands, project])
+  useShellShortcuts({
+    module,
+    barSlugs,
+    selectProject,
+    goInbox,
+    goLearnings,
+    goConnections,
+    goTab,
+    connectLinear,
+    probeClaude,
+    undoDecision: undo,
+    undoLearnings,
+    selectDecision,
+    runId,
+    run: openRunDetail,
+    caps,
+    commands,
+    project,
+    stepNode,
+    closeStep: () => setStepNode(null),
+    closeRun: () => go({ runId: null }),
+    setRunTab,
+    setStepTab,
+  })
 
   const detail = projectData.data
   const openRun = runId && detail ? detail.runs.find((r) => r.id === runId) : undefined
@@ -602,29 +410,16 @@ function Shell() {
           projects={projects}
           liveRuns={liveRunsQuery.data ?? []}
           selected={project?.slug ?? null}
-          inboxActive={module === "inbox"}
+          module={module}
           inboxBadge={inboxBadge}
-          onSelectInbox={goInbox}
-          learningsActive={module === "learnings"}
           learningsBadge={toReview}
-          onSelectLearnings={goLearnings}
-          prsActive={module === "prs"}
-          connectionsActive={module === "connections"}
           connectionsAlert={connectionsAlert}
-          onSelectConnections={goConnections}
-          flowsActive={module === "flows"}
-          onSelectFlows={goFlows}
-          settingsActive={module === "settings"}
-          onSelectSettings={goSettings}
           plan={claudePlan}
           setup={setup ? { steps: setup, onStep: runSetupStep } : null}
           prsBadge={prsQuery.data ? (prsNeedingAction ? { count: prsNeedingAction, tone: "red" } : prsReady ? { count: prsReady, tone: "green" } : { count: openPrs.length, tone: "muted" }) : null}
-          onSelectPrs={() => go({ module: "prs" })}
           connected={live.connected}
           error={projectsQuery.error}
           core={core}
-          onOpenPalette={() => setPaletteOpen(true)}
-          onOpenShortcuts={() => setShortcutsOpen(true)}
         />
         <SidebarInset className="min-h-0 overflow-hidden">
           {host.core && core && core.status !== "live" ? <StatusBanner core={host.core} state={core} /> : null}
@@ -683,31 +478,15 @@ function Shell() {
 
           {module === "inbox" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              {decisionsQuery.data ? (
-                <InboxView inbox={inbox} decisions={decisions} projects={projects} onSelect={selectDecision} onResolve={resolveDecision} />
-              ) : decisionsQuery.error ? (
-                <div className="px-6 pt-5">
-                  <Problem message={decisionsQuery.error} onRetry={decisionsQuery.reload} />
-                </div>
-              ) : (
-                <div className="px-6 pt-5">
-                  <Loading />
-                </div>
-              )}
+              <QueryGate query={decisionsQuery} pad>
+                {() => <InboxView inbox={inbox} decisions={decisions} projects={projects} onSelect={selectDecision} onResolve={resolveDecision} />}
+              </QueryGate>
             </main>
           ) : module === "learnings" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              {learningsQuery.data ? (
-                <LearningsView learnings={learnings} projects={projects} view={learningsView} onEdited={learningsQuery.reload} />
-              ) : learningsQuery.error ? (
-                <div className="px-6 pt-5">
-                  <Problem message={learningsQuery.error} onRetry={learningsQuery.reload} />
-                </div>
-              ) : (
-                <div className="px-6 pt-5">
-                  <Loading />
-                </div>
-              )}
+              <QueryGate query={learningsQuery} pad>
+                {() => <LearningsView learnings={learnings} projects={projects} view={learningsView} onEdited={learningsQuery.reload} />}
+              </QueryGate>
             </main>
           ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
@@ -726,48 +505,30 @@ function Shell() {
           ) : module === "connections" ? (
             <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>
               <div className="px-6 pt-5 pb-10">
-                {connectionsQuery.data ? (
-                  <ConnectionsView connections={connections} projects={projects} plan={claudePlan} linearLogin={linearLogin} onChanged={connectionsQuery.reload} />
-                ) : connectionsQuery.error ? (
-                  <Problem message={connectionsQuery.error} onRetry={connectionsQuery.reload} />
-                ) : (
-                  <Loading />
-                )}
+                <QueryGate query={connectionsQuery}>
+                  {() => <ConnectionsView connections={connections} projects={projects} plan={claudePlan} linearLogin={linearLogin} onChanged={connectionsQuery.reload} />}
+                </QueryGate>
               </div>
             </main>
           ) : (
             <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>
               <div className="px-6 pt-5 pb-10">
                 {!projectsQuery.data ? (
-                  projectsQuery.error ? (
-                    <Problem message={projectsQuery.error} onRetry={projectsQuery.reload} />
-                  ) : (
-                    <Loading />
-                  )
+                  <QueryGate query={projectsQuery}>{() => null}</QueryGate>
                 ) : !project ? (
                   <Welcome steps={setup} onStep={runSetupStep} />
                 ) : runId ? (
-                  !detail ? (
-                    projectData.error ? (
-                      <Problem message={projectData.error} onRetry={projectData.reload} />
-                    ) : (
-                      <Loading />
-                    )
-                  ) : (
-                    <RunPane key={runId} query={runQuery} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />
-                  )
+                  <QueryGate query={projectData}>
+                    {() => <RunPane key={runId} query={runQuery} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />}
+                  </QueryGate>
                 ) : (
                   <ProjectFrame project={project} tab={tab} onTab={goTab}>
                     {tab === "summary" ? (
                       <ProjectSummaryTab project={project} controls={summaryControls} onOpenOperation={() => goTab("operation")} />
                     ) : tab === "settings" ? (
                       <ProjectSettingsTab project={project} focus={settingsFocus} onFocused={clearSettingsFocus} onControls={setSettingsControls} />
-                    ) : detail ? (
-                      <ProjectView project={project} {...detail} />
-                    ) : projectData.error ? (
-                      <Problem message={projectData.error} onRetry={projectData.reload} />
                     ) : (
-                      <Loading />
+                      <QueryGate query={projectData}>{(data) => <ProjectView project={project} {...data} />}</QueryGate>
                     )}
                   </ProjectFrame>
                 )}
@@ -785,16 +546,10 @@ function Shell() {
         runs={detail?.runs ?? []}
         issues={detail?.issues ?? []}
         queue={module === "projects" && !runId ? (detail?.queue ?? []) : null}
-        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        onOpenShortcuts={() => setShortcutsOpen(true)}
         prs={openPrs}
         prsActive={module === "prs"}
-        onGoPrs={() => go({ module: "prs" })}
-        onGoInbox={goInbox}
-        onGoLearnings={goLearnings}
         learnings={module === "learnings" ? { view: learningsView, onUndo: triage.canUndo ? () => void triage.undo() : null } : null}
         pendingDecisions={inbox.pending}
-        onOpenDecision={openDecision}
         onUndoDecision={resolver.canUndo ? () => void undo() : null}
         onDecision={module === "inbox" && inbox.current?.status === "pending" ? { decision: inbox.current, onResolve: resolveDecision, onRespond: () => inbox.setResponding(true) } : null}
         projectTab={project && module === "projects" ? { tab, onTab: goTab } : null}
@@ -862,6 +617,16 @@ function RunPane({
   return <Loading />
 }
 
+/**
+ * Lo que se ve de una lectura del core: `children` con sus datos, el error con reintentar o el esqueleto mientras
+ * carga. Con `pad` el error y el esqueleto llevan el margen de una vista que ocupa todo el alto.
+ */
+function QueryGate<T>({ query, pad = false, children }: { query: { data: T | undefined; error: string | null; reload: () => void }; pad?: boolean; children: (data: NonNullable<T>) => React.ReactNode }) {
+  if (query.data !== undefined && query.data !== null) return <>{children(query.data)}</>
+  const pending = query.error ? <Problem message={query.error} onRetry={query.reload} /> : <Loading />
+  return pad ? <div className="px-6 pt-5">{pending}</div> : pending
+}
+
 function Loading() {
   return (
     <div className="flex flex-col gap-4">
@@ -873,18 +638,7 @@ function Loading() {
 }
 
 function Problem({ message, onRetry, extra }: { message: string; onRetry: () => void; extra?: React.ReactNode }) {
-  return (
-    <div role="alert" className="mx-auto mt-24 flex max-w-md flex-col items-center gap-3 text-center">
-      <h2 className="text-base font-semibold">No pude leer del core</h2>
-      <p className="text-muted-foreground">{message}</p>
-      <div className="flex gap-2">
-        <Button size="sm" onClick={onRetry}>
-          Reintentar
-        </Button>
-        {extra}
-      </div>
-    </div>
-  )
+  return <PageLoadError title="No pude leer del core" message={message} onRetry={onRetry} extra={extra} className="mt-24" />
 }
 
 // Sin proyectos: qué es la app y los pasos para lanzar la primera corrida, los mismos del pie de la barra lateral.

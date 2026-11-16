@@ -1,12 +1,13 @@
 import type { ClankerProject, RunId } from "@clanker/api"
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react"
+import { createContext, type ReactNode, useContext, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { useHost } from "@/host"
-import { useLive } from "@/hooks/use-live"
+import { usePerform } from "@/hooks/use-perform"
 import { type PrCaps, prCaps } from "@/lib/pr-commands"
 import type { OpenPr } from "@/lib/prs"
+import { messageOf } from "@/lib/utils"
 
 // Lo que una persona le pide a un PR (`prs.*` del core): mergear según la estrategia del pack, pedir la review del
 // bot, rebasear, marcar hold y abrir la corrida que lo abrió. Cada comando le habla al core, avisa el resultado
@@ -35,7 +36,6 @@ export function usePrCommands(): PrCommands {
   return commands
 }
 
-const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 interface Props {
   prs: readonly OpenPr[]
@@ -47,23 +47,10 @@ interface Props {
 export function PrCommandsProvider({ prs, projects, onOpenRun, children }: Props) {
   const appData = useAppData()
   const host = useHost()
-  const live = useLive()
   const [selectedId, select] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<OpenPr | null>(null)
 
-  const perform = useCallback(
-    async (work: () => Promise<unknown>, done: string) => {
-      try {
-        await work()
-        toast.success(done)
-      } catch (e) {
-        toast.error(messageOf(e))
-      }
-      // Los eventos del core también hacen releer; esto cubre a un core que no los manda (los datos de ejemplo).
-      live.refresh()
-    },
-    [live],
-  )
+  const perform = usePerform()
 
   const commands = useMemo<PrCommands>(
     () => ({

@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { UNDO_MS } from "@/hooks/use-decision-resolver"
 import { capsOf, triageMessage, type TriageAction } from "@/lib/learnings"
-import { messageOf } from "@/lib/undoable"
+import { messageOf } from "@/lib/utils"
 
 interface Entry {
   action: TriageAction

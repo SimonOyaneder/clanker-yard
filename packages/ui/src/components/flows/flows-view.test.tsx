@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, expect, test } from "vitest"
 import { App } from "@/App"
 import type { AppData } from "@/app-data"
 import { browserHost } from "@/browser-host"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 beforeAll(() => {
   window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false })) as typeof window.matchMedia

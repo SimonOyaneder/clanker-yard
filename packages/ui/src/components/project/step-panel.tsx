@@ -19,6 +19,7 @@ import { copy } from "@/lib/clipboard"
 import { tone } from "@/lib/format"
 import { stepCaps, type StepCaps } from "@/lib/run-commands"
 import type { GraphNode, GraphNodeKind, GraphShape } from "@/lib/run-graph"
+import { messageOf } from "@/lib/utils"
 
 export type StepTab = "transcript" | "command" | "brief" | "report" | "artifacts" | "attempts"
 
@@ -55,7 +56,7 @@ export function useCopySessionId(): (stepId: StepRunId) => void {
           if (session) copy(session.sessionRef, "el sessionId")
           else toast.error("Este paso no abrió una sesión de agente")
         },
-        (e: unknown) => toast.error(e instanceof Error ? e.message : String(e)),
+        (e: unknown) => toast.error(messageOf(e)),
       )
     },
     [appData],

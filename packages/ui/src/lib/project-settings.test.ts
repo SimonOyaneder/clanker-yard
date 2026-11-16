@@ -1,7 +1,7 @@
 import type { ClankerProject, DefRecord } from "@clanker/api"
 import { expect, test } from "vitest"
-import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
-import { allParamSpecs, changedSections, draftOf, flowParamGroups, managedParams, patchOf, undoPatch, validate } from "./project-settings"
+import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/demo/seed-flows"
+import { allParamSpecs, changedSections, draftOf, flowParamGroups, managedParams, patchOf, undoPatch, validateProjectDraft } from "./project-settings"
 
 const flow = (body: object, slug: string): DefRecord => ({
   id: slug,
@@ -73,7 +73,7 @@ test("lo que pone el core (repo, base) no se edita, y un parámetro con distinto
   expect(external.default).toBeNull()
   expect(external.flows.map((f) => f.slug).sort()).toEqual(["council", "rebase-conflicto"])
   expect(all.flatMap((f) => allParamSpecs([f], null)).map((s) => s.name)).not.toContain("base")
-  expect(validate({ ...base(project()), params: { externalRounds: "0" } }, triggered)["param:externalRounds"]).toContain("cada flujo usa el suyo")
+  expect(validateProjectDraft({ ...base(project()), params: { externalRounds: "0" } }, triggered)["param:externalRounds"]).toContain("cada flujo usa el suyo")
 })
 
 test("sin cambios no hay patch; cada sección cambiada produce solo su campo", () => {
@@ -91,8 +91,8 @@ test("las corridas a la vez del proyecto piden un entero de 1 en adelante y se g
   const p = project({ parallel: 2 })
   const b = base(p)
 
-  for (const bad of ["0", "-1", "1.5", "dos", ""]) expect(validate({ ...b, parallel: bad }, specs).parallel).toContain("entero de 1 en adelante")
-  expect(validate({ ...b, parallel: " 3 " }, specs).parallel).toBeUndefined()
+  for (const bad of ["0", "-1", "1.5", "dos", ""]) expect(validateProjectDraft({ ...b, parallel: bad }, specs).parallel).toContain("entero de 1 en adelante")
+  expect(validateProjectDraft({ ...b, parallel: " 3 " }, specs).parallel).toBeUndefined()
   expect(patchOf({ ...b, parallel: "4" }, b, p, specs)).toEqual({ parallel: 4 })
   expect(patchOf({ ...b, parallel: " 2 " }, b, p, specs)).toEqual({})
 })
@@ -162,7 +162,7 @@ test("un label en dos repos, en pedidos y excluidos, un parámetro inválido y u
     conventions: { ...b.conventions, prTemplate: "/etc/pr.md" },
   }
 
-  const problems = validate(draft, [...flowParamGroups(flows, "techlead-clasico").own, ...flowParamGroups(flows, "techlead-clasico").triggered])
+  const problems = validateProjectDraft(draft, [...flowParamGroups(flows, "techlead-clasico").own, ...flowParamGroups(flows, "techlead-clasico").triggered])
 
   expect(problems["repo:repo_b"]).toContain('"api"')
   expect(problems.excludeLabels).toContain('"clanker"')
@@ -172,5 +172,5 @@ test("un label en dos repos, en pedidos y excluidos, un parámetro inválido y u
   expect(problems["param:externalRounds"]).toBeUndefined()
   expect(problems.maxCostUsd).toContain("mayor que 0")
   expect(problems.prTemplate).toContain("relativa")
-  expect(validate(b, specs)).toEqual({})
+  expect(validateProjectDraft(b, specs)).toEqual({})
 })

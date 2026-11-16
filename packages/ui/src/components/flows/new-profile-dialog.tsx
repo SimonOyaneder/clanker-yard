@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { profileSummary, slugProblem } from "@/lib/def-form"
 import { nameOf } from "@/lib/defs-library"
-import { messageOf } from "@/lib/undoable"
+import { messageOf } from "@/lib/utils"
 
 interface Props {
   /** Los perfiles vigentes: de uno de ellos parte el nuevo. Todos los de scope `user` (archivados incluidos) ocupan su slug. */

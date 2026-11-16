@@ -1,5 +1,5 @@
 import type { PackInfo, ProjectDefaults, ProjectDefaultsPatch, Repo } from "@clanker/api"
-import { maxCostProblem, parallelProblem, type Problems } from "@/lib/project-settings"
+import { maxCostProblem, parallelProblem, type FieldProblems } from "@/lib/project-settings"
 
 /** Los defaults de proyectos nuevos tal como se editan: `parallel` y `maxCostUsd` son el texto de su campo. */
 export interface DefaultsDraft {
@@ -21,8 +21,8 @@ export function draftOfDefaults(defaults: ProjectDefaults): DefaultsDraft {
 export const sameDefaults = (a: DefaultsDraft, b: DefaultsDraft) =>
   a.defaultFlowId === b.defaultFlowId && a.defaultProfileId === b.defaultProfileId && a.parallel.trim() === b.parallel.trim() && a.maxCostUsd.trim() === b.maxCostUsd.trim()
 
-export function defaultsProblems(draft: DefaultsDraft): Problems {
-  const problems: Problems = {}
+export function defaultsProblems(draft: DefaultsDraft): FieldProblems {
+  const problems: FieldProblems = {}
   const parallel = parallelProblem(draft.parallel)
   if (parallel) problems.parallel = parallel
   const cost = maxCostProblem(draft.maxCostUsd)

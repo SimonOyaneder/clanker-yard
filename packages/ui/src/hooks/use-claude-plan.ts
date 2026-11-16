@@ -2,6 +2,7 @@ import { ClaudeStatus, type ClaudeMode, type Connection } from "@clanker/api"
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { useAppData } from "@/app-data"
 import { readPref, writePref } from "@/lib/prefs"
+import { messageOf } from "@/lib/utils"
 
 /** Cada cuánto se repite la llamada mínima que lee el uso del plan: gasta un poco de cuota, así que va espaciada. */
 export const PLAN_REFRESH_MS = 10 * 60_000
@@ -52,7 +53,7 @@ export function useClaudePlan(connections: Connection[] | undefined, onChanged: 
         onChanged()
         return status
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        setError(messageOf(e))
         return null
       } finally {
         busy.current = false

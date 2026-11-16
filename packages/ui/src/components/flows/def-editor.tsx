@@ -9,8 +9,7 @@ import { JsonEditor } from "@/components/flows/json-editor"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { lineIssues, type LineIssue, syntaxIssue } from "@/lib/def-edit"
-import { messageOf } from "@/lib/undoable"
-import { cn } from "@/lib/utils"
+import { cn, messageOf } from "@/lib/utils"
 
 const DEBOUNCE_MS = 300
 

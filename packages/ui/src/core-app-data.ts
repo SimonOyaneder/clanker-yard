@@ -1,5 +1,6 @@
 import type { Client, EventType } from "@clanker/api"
 import type { AppData } from "@/app-data"
+import { messageOf } from "@/lib/utils"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
 export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "learnings" | "connections" | "repos" | "metrics" | "defs" | "trackers" | "packs">
@@ -45,6 +46,9 @@ const LIVE_EVENTS = [
   "learning.proposed",
   "learning.approved",
   "learning.rejected",
+  "learning.updated",
+  "pack.installed",
+  "pack.removed",
   "connection.changed",
   "connection.login_failed",
   "recipe.test_started",
@@ -94,7 +98,7 @@ export function createCoreAppData(client: CoreClient): AppData {
       // El core lee de a una request: en serie y sin cortar en el primer fallo, que se reporta al final.
       const failures: string[] = []
       for (const ref of refs) {
-        await client.prs.refresh(ref).catch((e: unknown) => failures.push(`${ref.repo}#${ref.number}: ${e instanceof Error ? e.message : String(e)}`))
+        await client.prs.refresh(ref).catch((e: unknown) => failures.push(`${ref.repo}#${ref.number}: ${messageOf(e)}`))
       }
       if (failures.length) throw new Error(`No pude actualizar ${failures.length === 1 ? "un PR" : `${failures.length} PRs`}: ${failures.join("; ")}`)
     },
@@ -173,7 +177,7 @@ export function createCoreAppData(client: CoreClient): AppData {
           // `detect` sobre la propia carpeta del repo devuelve su receta; si la carpeta ya no existe, eso es lo que dice la fila.
           const recipe = await client.repos.detect({ folder: repo.path }).then(
             ([found]) => found?.recipe ?? ({ status: "missing" } as const),
-            (e: unknown) => ({ status: "invalid", message: e instanceof Error ? e.message : String(e) }) as const,
+            (e: unknown) => ({ status: "invalid", message: messageOf(e) }) as const,
           )
           return { repo, recipe, lastTest: tests.get(repo.id) ?? null }
         }),

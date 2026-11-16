@@ -7,7 +7,7 @@ import { type AppData, AppDataProvider } from "@/app-data"
 import { useGitHubDeviceFlow } from "@/hooks/use-github-device-flow"
 import { LiveProvider } from "@/hooks/use-live"
 import { HostProvider, type Host } from "@/host"
-import { createMemoryAppData } from "@/memory-app-data"
+import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 const flow: GitHubDeviceFlow = { userCode: "WDJB-MJHT", verificationUri: "https://github.com/login/device", expiresIn: 900 }

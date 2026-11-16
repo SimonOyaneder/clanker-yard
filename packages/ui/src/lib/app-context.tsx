@@ -1,8 +1,17 @@
 import type { CachedIssue, ClankerProject, DecisionId, Lane, RunId } from "@clanker/api"
 import { createContext, useContext } from "react"
 
-// Acciones globales: las usan los menús contextuales, la paleta ⌘K y los atajos.
+/** Los módulos de la app: cada uno es una vista de la barra lateral. */
+export type Module = "projects" | "prs" | "connections" | "inbox" | "learnings" | "flows" | "settings"
+export const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox", "learnings", "flows", "settings"]
+
+// Acciones globales: las usan los menús contextuales, la paleta ⌘K, la barra lateral y los atajos.
 export interface AppActions {
+  /** Va al módulo (la Bandeja, sin una decisión elegida). */
+  goModule: (module: Module) => void
+  openPalette: () => void
+  openShortcuts: () => void
+  toggleSidebar: () => void
   selectProject: (slug: string) => void
   openRun: (slug: string, runId: RunId) => void
   /** Abre la decisión en la bandeja (`/inbox/:decision`). */

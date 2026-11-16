@@ -3,6 +3,7 @@ import { type ReactNode, useId, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { messageOf } from "@/lib/utils"
 
 interface Props {
   label: string
@@ -28,7 +29,7 @@ export function TokenField({ label, placeholder, action, onSubmit, help }: Props
       await onSubmit(value.trim())
       setValue("")
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(messageOf(e))
     } finally {
       setBusy(false)
     }

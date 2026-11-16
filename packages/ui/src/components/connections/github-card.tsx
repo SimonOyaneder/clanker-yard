@@ -15,7 +15,7 @@ import { useHost } from "@/host"
 import { copy } from "@/lib/clipboard"
 import { codeCountdown, expiryLabel, statusLook } from "@/lib/connections"
 import { tone } from "@/lib/format"
-import { cn } from "@/lib/utils"
+import { cn, messageOf } from "@/lib/utils"
 
 // GitHub entra con un PAT classic con `repo`: se pega y [Probar] lo valida contra GitHub (usuario, scope y una lectura por
 // permiso). Si el core tiene el client_id de la GitHub App, también por la App (device flow: el core da un código y la cuenta
@@ -64,7 +64,7 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
       onChanged()
       toast.success("GitHub desconectado")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      toast.error(messageOf(e))
     }
   }
 
