@@ -95,8 +95,8 @@ async function ensureComment(
 
 /**
  * Pide la review al bot del pack con su comando exacto, sin prefijo ni marca HTML: el clanker-loop
- * comenta `/review` solo, y lo que el bot hace con otro texto en el comentario no está a la vista (el
- * disparador de Acme apenas exige que lo contenga). Sin marca no se puede buscar antes de publicar:
+ * comenta el comando solo, y lo que el bot hace con otro texto en el comentario no está a la vista (su
+ * disparador puede exigir apenas que lo contenga). Sin marca no se puede buscar antes de publicar:
  * que un reintento no lo duplique lo da `ctx.once`, y si el proceso muere entre el comentario y el
  * guardado, el reintento comenta otra vez. `undefined`: el pack no tiene bot.
  */

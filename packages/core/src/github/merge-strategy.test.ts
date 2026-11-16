@@ -2,8 +2,8 @@ import type { PrState } from "@clanker/api";
 import { describe, expect, test } from "vitest";
 import { evaluateMerge, GITHUB_BUTTON, type MergeFacts, type MergeRules } from "./merge-strategy";
 
-/** Las listas del pack de ejemplo (`packs/acme/pack.json`). */
-const ACME: MergeRules = {
+/** Las listas del pack de ejemplo (`packages/testkit/fixtures/packs/example`). */
+const EXAMPLE: MergeRules = {
   ready: ["notDraft", "approved", "ciGreen", "baseIsDefault", "noConflict", "noHumanOpenThreads", "notQueued"],
   offer: ["ready", "humanApprover", "noHumanTalk", "noCouncilOpen", "notHold"],
   auto: ["offer", "noHumanResolvedThreads", "noCouncilEver"],
@@ -29,7 +29,7 @@ const talk = (): PrState["talk"] => [{ kind: "comment", author: "beto", at: "202
 
 describe("ready, offer y auto", () => {
   test("un PR limpio cumple los tres niveles", () => {
-    expect(evaluateMerge(clean, ACME)).toEqual({ ready: true, blockers: [], queue: null, offer: true, auto: true });
+    expect(evaluateMerge(clean, EXAMPLE)).toEqual({ ready: true, blockers: [], queue: null, offer: true, auto: true });
   });
 
   test("los blockers salen en el orden de la lista, con el texto de Control", () => {
@@ -43,44 +43,44 @@ describe("ready, offer y auto", () => {
       threads: { ...clean.threads, humanOpen: 2 },
     });
 
-    expect(evaluateMerge(blocked, ACME)).toMatchObject({
+    expect(evaluateMerge(blocked, EXAMPLE)).toMatchObject({
       ready: false,
       offer: false,
       auto: false,
       blockers: ["es draft", "pidieron cambios", "el CI no está verde", "va sobre feat/padre, no sobre main", "tiene conflictos", "2 hilos de humanos sin resolver"],
     });
-    expect(evaluateMerge(facts({ reviewDecision: "review_required" }), ACME).blockers).toEqual(["falta aprobación"]);
+    expect(evaluateMerge(facts({ reviewDecision: "review_required" }), EXAMPLE).blockers).toEqual(["falta aprobación"]);
   });
 
   test("un PR sin checks que cuenten es CI verde, pendiente no", () => {
-    expect(evaluateMerge(facts({ ci: { state: "none", sha: "a", failing: [], flaky: [] } }), ACME).ready).toBe(true);
-    expect(evaluateMerge(facts({ ci: { state: "pending", sha: "a", failing: [], flaky: [] } }), ACME).blockers).toEqual(["el CI no está verde"]);
+    expect(evaluateMerge(facts({ ci: { state: "none", sha: "a", failing: [], flaky: [] } }), EXAMPLE).ready).toBe(true);
+    expect(evaluateMerge(facts({ ci: { state: "pending", sha: "a", failing: [], flaky: [] } }), EXAMPLE).blockers).toEqual(["el CI no está verde"]);
   });
 
   test("en cola apaga ready sin un blocker: `queue` ya lo dice", () => {
-    expect(evaluateMerge(facts({ queue: "queued" }), ACME)).toEqual({ ready: false, blockers: [], queue: "queued", offer: false, auto: false });
-    expect(evaluateMerge(facts({ queue: "failed" }), ACME)).toMatchObject({ ready: false, blockers: [], queue: "failed" });
+    expect(evaluateMerge(facts({ queue: "queued" }), EXAMPLE)).toEqual({ ready: false, blockers: [], queue: "queued", offer: false, auto: false });
+    expect(evaluateMerge(facts({ queue: "failed" }), EXAMPLE)).toMatchObject({ ready: false, blockers: [], queue: "failed" });
   });
 
   test("offer pide un humano que apruebe y que nadie haya hablado ni haya council sin atender", () => {
-    expect(evaluateMerge(facts({ approvers: [] }), ACME)).toMatchObject({ ready: true, offer: false });
-    expect(evaluateMerge(facts({ talk: talk() }), ACME)).toMatchObject({ ready: true, offer: false });
-    expect(evaluateMerge(facts({ threads: { ...clean.threads, councilOpen: [7] } }), ACME)).toMatchObject({ ready: true, offer: false });
+    expect(evaluateMerge(facts({ approvers: [] }), EXAMPLE)).toMatchObject({ ready: true, offer: false });
+    expect(evaluateMerge(facts({ talk: talk() }), EXAMPLE)).toMatchObject({ ready: true, offer: false });
+    expect(evaluateMerge(facts({ threads: { ...clean.threads, councilOpen: [7] } }), EXAMPLE)).toMatchObject({ ready: true, offer: false });
   });
 
   test("auto no tolera hilos de humanos resueltos ni council, aunque estén resueltos", () => {
-    expect(evaluateMerge(facts({ threads: { ...clean.threads, humanResolved: 1 } }), ACME)).toMatchObject({ offer: true, auto: false });
-    expect(evaluateMerge(facts({ threads: { ...clean.threads, councilEver: true } }), ACME)).toMatchObject({ offer: true, auto: false });
+    expect(evaluateMerge(facts({ threads: { ...clean.threads, humanResolved: 1 } }), EXAMPLE)).toMatchObject({ offer: true, auto: false });
+    expect(evaluateMerge(facts({ threads: { ...clean.threads, councilEver: true } }), EXAMPLE)).toMatchObject({ offer: true, auto: false });
   });
 
   test("hold apaga offer y auto sea cual sea la lista del pack, y no toca ready", () => {
-    const withoutNotHold: MergeRules = { ...ACME, offer: ["ready", "humanApprover"] };
+    const withoutNotHold: MergeRules = { ...EXAMPLE, offer: ["ready", "humanApprover"] };
 
     expect(evaluateMerge(facts({ hold: true }), withoutNotHold)).toEqual({ ready: true, blockers: [], queue: null, offer: false, auto: false });
   });
 
   test("auto implica offer aunque la lista de auto no cite a offer", () => {
-    const rules: MergeRules = { ...ACME, auto: ["noCouncilEver"] };
+    const rules: MergeRules = { ...EXAMPLE, auto: ["noCouncilEver"] };
 
     expect(evaluateMerge(facts({ approvers: [] }), rules)).toMatchObject({ offer: false, auto: false });
     expect(evaluateMerge(clean, rules)).toMatchObject({ offer: true, auto: true });
@@ -88,7 +88,7 @@ describe("ready, offer y auto", () => {
 
   test("un PR mergeado o cerrado no tiene merge", () => {
     for (const state of ["merged", "closed"] as const) {
-      expect(evaluateMerge(facts({ state, queue: "queued" }), ACME)).toEqual({ ready: false, blockers: [], queue: null, offer: false, auto: false });
+      expect(evaluateMerge(facts({ state, queue: "queued" }), EXAMPLE)).toEqual({ ready: false, blockers: [], queue: null, offer: false, auto: false });
     }
   });
 });

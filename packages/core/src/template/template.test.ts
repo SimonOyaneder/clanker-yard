@@ -79,7 +79,7 @@ describe("prompts", () => {
   });
 
   test("la plantilla base no trae nada propio de un repo o de una empresa", () => {
-    const specific = /\b(acme|api|fin[- ]review|merge-queue|coverage-bot|srb|sorbet|rails|rspec|rubocop|tapioca|linear)\b/i;
+    const specific = /\b(review-bot|merge-queue|coverage-bot|srb|sorbet|rails|rspec|rubocop|tapioca|linear)\b/i;
     for (const { where, text } of all) expect(text, where).not.toMatch(specific);
   });
 });

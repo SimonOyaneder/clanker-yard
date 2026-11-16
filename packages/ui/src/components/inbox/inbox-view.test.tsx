@@ -163,7 +163,7 @@ test("las resueltas muestran lo que se eligió", async () => {
   fireEvent.click(screen.getByRole("tab", { name: "Resueltas" }))
 
   const detail = screen.getByRole("article", { name: "¿Publico el PR de ENG-9175?" })
-  expect(within(detail).getByRole("region", { name: "Resolución" }).textContent).toMatch(/respondida.*Publicar como draft y pedir /review/)
+  expect(within(detail).getByRole("region", { name: "Resolución" }).textContent).toMatch(/respondida.*Publicar como draft y pedir \/review/)
 })
 
 // Un stream de eventos que la prueba alimenta a mano.

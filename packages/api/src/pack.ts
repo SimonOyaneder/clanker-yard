@@ -3,7 +3,7 @@ import { ContextRef } from "./agents";
 import { ProjectId } from "./domain";
 
 // El formato de un pack de convenciones: `docs/design.html#packs` y `#d-ops` ("Packs: esquema y pack
-// Acme"). Es declarativo: el core no tiene un solo `if` por organización, solo lee estas claves.
+// de ejemplo"). Es declarativo: el core no tiene un solo `if` por organización, solo lee estas claves.
 // Sin pack, cada clave toma el valor neutro de `PackSettings` (todo vacío o ausente).
 
 const IDENTIFIER = /^[A-Za-z][\w-]*$/;
@@ -31,7 +31,7 @@ const Actors = z.strictObject({
 export const SignalTone = z.enum(["ok", "warn", "bad"]);
 const Tone = SignalTone;
 
-/** Un dato de un PR que el pack saca de sus labels y la UI muestra como chip, por ejemplo el riesgo del bot de review. */
+/** Un dato de un PR que el pack saca de sus labels y la UI muestra como chip, por ejemplo el riesgo que pone un bot como label. */
 const Signal = z
   .strictObject({
     id: z.string().regex(IDENTIFIER),
@@ -63,7 +63,7 @@ const Signal = z
   });
 export type Signal = z.infer<typeof Signal>;
 
-/** El bot de review del repo (en Acme, `review-bot`). */
+/** El bot de review del repo (en el pack de ejemplo, `review-bot`). */
 const ReviewBot = z.strictObject({
   logins: z.array(z.string().min(1)).min(1),
   /** Cómo se le pide una review. */
@@ -112,7 +112,7 @@ const MergeReaction = z.enum(["gate", "act", "none"]);
 
 /**
  * Cómo se mergea. Sin estrategia: el botón de GitHub, con una decisión que estaciona solo ese PR.
- * Con `comment` se mergea comentando `command` (en Acme, `/merge`).
+ * Con `comment` se mergea comentando `command` (en el pack de ejemplo, `/merge`).
  */
 const MergeStrategy = z
   .strictObject({

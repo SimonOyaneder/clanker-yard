@@ -330,7 +330,7 @@ describe("arranque", () => {
 
   test("un proyecto con `techlead-clasico` sigue resolviendo su flujo (Techlead clásico) tras reiniciar el core", async () => {
     const client = await boot();
-    const project = await client.projects.create({ slug: "acme", name: "Acme", tracker: "local", defaultFlowId: "techlead-clasico", defaultProfileId: "juguete" });
+    const project = await client.projects.create({ slug: "equipo", name: "Equipo", tracker: "local", defaultFlowId: "techlead-clasico", defaultProfileId: "juguete" });
     await core?.close();
     core = undefined;
     const again = await boot();
@@ -411,8 +411,8 @@ describe("arranque", () => {
   });
 
   test("el pack de fábrica no pisa el que ya estaba copiado a mano con el mismo id y versión: ni duplica ni crea versiones, también al reiniciar", async () => {
-    const factory = fileURLToPath(new URL("../../../packs", import.meta.url));
-    cpSync(join(factory, "acme"), join(home.path, "packs", "acme"), { recursive: true });
+    const factory = fileURLToPath(new URL("../fixtures/packs", import.meta.url));
+    cpSync(join(factory, "example"), join(home.path, "packs", "example"), { recursive: true });
     const versions = () => store.db.$client.prepare("SELECT d.kind, d.slug, d.current_version AS v FROM defs d ORDER BY d.kind, d.slug").all();
 
     let client = await boot(undefined, { factoryPacksDir: factory });
@@ -420,26 +420,26 @@ describe("arranque", () => {
     await core?.close();
     client = await boot(undefined, { factoryPacksDir: factory });
 
-    expect(await client.packs.list()).toMatchObject([{ id: "acme", origin: "installed" }]);
+    expect(await client.packs.list()).toMatchObject([{ id: "example", origin: "installed" }]);
     expect(versions()).toEqual(first);
     expect(first.filter((d) => (d as { kind: string }).kind === "pack")).toHaveLength(1);
   });
 
   test("sin pack instalado el de fábrica rige; instalar y quitar un pack desde la API se aplica sin reiniciar", async () => {
-    const factory = fileURLToPath(new URL("../../../packs", import.meta.url));
+    const factory = fileURLToPath(new URL("../fixtures/packs", import.meta.url));
     const client = await boot(undefined, { factoryPacksDir: factory });
-    expect(await client.packs.list()).toMatchObject([{ id: "acme", origin: "factory" }]);
-    await expect(client.packs.remove({ id: "acme" })).rejects.toThrow(/viene con la app/);
+    expect(await client.packs.list()).toMatchObject([{ id: "example", origin: "factory" }]);
+    await expect(client.packs.remove({ id: "example" })).rejects.toThrow(/viene con la app/);
 
     const src = join(home.path, "mi-pack");
     mkdirSync(src);
     writeFileSync(join(src, "pack.json"), JSON.stringify({ id: "acme", version: 1, activate: { githubOrgs: ["acme-co"] } }));
     const installed = await client.packs.install({ path: src });
     expect(installed).toMatchObject({ id: "acme", origin: "installed" });
-    expect((await client.packs.list()).map((p) => p.id)).toEqual(["acme", "acme"]);
+    expect((await client.packs.list()).map((p) => p.id)).toEqual(["acme", "example"]);
 
     await client.packs.remove({ id: "acme" });
-    expect((await client.packs.list()).map((p) => p.id)).toEqual(["acme"]);
+    expect((await client.packs.list()).map((p) => p.id)).toEqual(["example"]);
     await expect(client.packs.install({ path: join(home.path, "no-existe") })).rejects.toThrow(/pack\.json/);
   });
 

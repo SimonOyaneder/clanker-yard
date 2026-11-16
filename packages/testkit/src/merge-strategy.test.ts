@@ -33,7 +33,7 @@ import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 
-// La estrategia de merge del pack de ejemplo (`packs/acme/pack.json`, tal cual salvo su alcance) sobre el
+// La estrategia de merge del pack de ejemplo (`fixtures/packs/example`, tal cual salvo su alcance) sobre el
 // GitHub simulado: qué hace el core cuando un PR queda listo (`pr.mergeReady`), con Watch, los eventos y las
 // reacciones reales (`docs/design.html#d-ops`, "Tres niveles de merge").
 
@@ -43,7 +43,7 @@ const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";
 const REPO = "octocat/secret-project";
 const SECOND = 1000;
-const ACME_PACK = new URL("../../../packs/acme/pack.json", import.meta.url);
+const EXAMPLE_PACK = new URL("../fixtures/packs/example/pack.json", import.meta.url);
 
 let dir: string;
 let store: Store;
@@ -79,13 +79,13 @@ beforeEach(async () => {
   repoId = repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
   setMergeStrategy = (override) => repos.setMergeStrategy(repoId, override);
 
-  // El pack de ejemplo real, activado para la org del simulador y sin sus flujos, roles ni contextos (esos no son de este test).
+  // El pack de ejemplo, activado para la org del simulador y sin sus flujos, roles ni contextos (esos no son de este test).
   const defs = createDefs(store);
   const packs = createPacks({ defs });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
-  const acme = JSON.parse(readFileSync(ACME_PACK, "utf8")) as Record<string, unknown>;
-  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
+  const example = JSON.parse(readFileSync(EXAMPLE_PACK, "utf8")) as Record<string, unknown>;
+  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...example, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
   await packs.load(packDir);
 
   const prs = createPrs({ connections, packs, merge: createMergeScope({ store, repos, connections }) });
@@ -150,8 +150,8 @@ const readyEvents = () => store.events.since(0, { types: ["pr.mergeReady"] }).ma
  * Un PR del sistema que Watch ya vio sin estar listo (la primera lectura solo siembra los eventos) y que
  * después queda aprobado por un humano con el CI en verde.
  */
-async function openApprovable({ merge-queue = true, own: owned = true }: { merge-queue?: boolean; own?: boolean } = {}) {
-  if (merge-queue) sim.defaultBranchCheck("merge-queue");
+async function openApprovable({ queue = true, own: owned = true }: { queue?: boolean; own?: boolean } = {}) {
+  if (queue) sim.defaultBranchCheck("merge-queue");
   const pr = sim.openPr({ head: "one" });
   pr.ci("pending");
   await wake(0);
@@ -352,7 +352,7 @@ describe("auto: el core comenta /merge solo", () => {
 
 describe("un repo sin merge-queue no aplica la estrategia", () => {
   test("no se ve merge-queue en la branch por defecto: el botón de GitHub, con una decisión y sin comentar", async () => {
-    const pr = await openApprovable({ merge-queue: false });
+    const pr = await openApprovable({ queue: false });
 
     await wake();
 
@@ -365,7 +365,7 @@ describe("un repo sin merge-queue no aplica la estrategia", () => {
   });
 
   test("lo que vio una vez se recuerda: no se vuelve a pedir la branch por defecto en cada lectura", async () => {
-    await openApprovable({ merge-queue: false });
+    await openApprovable({ queue: false });
     await wake();
     const asked = () => sim.requests.filter((r) => r.path === "/graphql" && String((r.body as { query?: string }).query).includes("DefaultBranchChecks")).length;
     expect(asked()).toBe(1);
@@ -377,7 +377,7 @@ describe("un repo sin merge-queue no aplica la estrategia", () => {
 
   test("el override del repo manda sobre lo detectado, en los dos sentidos", async () => {
     setMergeStrategy("on");
-    const pr = await openApprovable({ merge-queue: false });
+    const pr = await openApprovable({ queue: false });
     await wake();
     expect(mergeComments(pr)).toHaveLength(1);
   });

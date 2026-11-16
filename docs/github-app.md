@@ -94,7 +94,7 @@ En Conexiones, GitHub, **Conectar con la GitHub App**: la app muestra el código
 
 ## Después
 
-- Cuando el flujo funcione de punta a punta en este repo (CLA-102), el equipo de DX de Acme ayuda a registrarla e instalarla en `example-org` (decisión del diseño, fase 3). Allí la registra y instala un owner de la org: usa el mismo manifiesto, cambiando `url` y registrándola desde la org (`https://github.com/organizations/<org>/settings/apps/new`).
+- En una organización la registra e instala un owner de la org: usa el mismo manifiesto, cambiando `url` y registrándola desde la org (`https://github.com/organizations/<org>/settings/apps/new`).
 - Si cambias los permisos de una App ya instalada, el owner de cada instalación tiene que aceptar el cambio; hasta entonces los tokens siguen con los permisos viejos.
 
 ## Si el CI sale vacío

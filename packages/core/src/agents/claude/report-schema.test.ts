@@ -1,5 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { Role, type JsonSchema } from "@clanker/api";
+import type { JsonSchema } from "@clanker/api";
 import { Ajv } from "ajv";
 import { describe, expect, test } from "vitest";
 import { roles } from "../../template/roles";
@@ -9,16 +8,9 @@ import { toOptions } from "./options";
 // Claude Code compila `outputFormat.schema` al arrancar y, si no puede, sale con código 1 antes del primer turno
 // (#155: el `$schema` 2020-12 de zod daba "no schema with key or ref"). Lo valida con Ajv 8 en su modo por defecto
 // (draft-07, strict), así: `new Ajv({ allErrors: true, validateFormats: false, multipleOfPrecision: 6 })`,
-// `validateSchema` y `compile`. Cada reporte de la plantilla y del pack de ejemplo tiene que pasar igual.
+// `validateSchema` y `compile`. Cada reporte de la plantilla tiene que pasar igual.
 
-const PACK_ROLES = new URL("../../../../../packs/acme/roles/", import.meta.url);
-
-const modes = [
-  ...Object.entries(roles).flatMap(([slug, role]) => Object.entries(role.modes).map(([mode, def]) => [`${slug}.${mode}`, def] as const)),
-  ...readdirSync(PACK_ROLES).flatMap((file) =>
-    Object.entries(Role.parse(JSON.parse(readFileSync(new URL(file, PACK_ROLES), "utf8"))).modes).map(([mode, def]) => [`acme/${file}.${mode}`, def] as const),
-  ),
-];
+const modes = Object.entries(roles).flatMap(([slug, role]) => Object.entries(role.modes).map(([mode, def]) => [`${slug}.${mode}`, def] as const));
 
 function compileLikeClaudeCode(schema: JsonSchema): string | undefined {
   const ajv = new Ajv({ allErrors: true, validateFormats: false, multipleOfPrecision: 6 });

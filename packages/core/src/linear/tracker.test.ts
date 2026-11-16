@@ -281,7 +281,7 @@ describe("comment y getIssue", () => {
       priority: 2,
       labels: ["tracker", "no-clanker"],
       estimate: 3,
-      branchName: expect.stringMatching(/^fake\/ba-\d+-hija$/),
+      branchName: expect.stringMatching(/^fake\/eng-\d+-hija$/),
       parent: refOf(parent),
       milestone: { name: "Fase 1", due: "2026-12-31" },
       relations: { blocks: [], blockedBy: [], related: [] },

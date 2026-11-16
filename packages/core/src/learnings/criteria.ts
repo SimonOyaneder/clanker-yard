@@ -8,7 +8,7 @@ export const LEARNING_CRITERIA = `Un learning solo se propone si cumple las cuat
 3. Comprobado: te topaste con eso (un error, un comentario de review, CI rojo); no es una suposición.
 4. Una línea en imperativo.
 
-Bueno: "Usa \`doppler run --config dev --\` para correr tapioca y srb" (se descubrió por un error y sirve en cualquier issue).
+Bueno: "Usa \`doppler run --config dev -- \` para correr tapioca y srb" (se descubrió por un error y sirve en cualquier issue).
 Malo: "\`Dashboard::ReportExport::UploadJob\` se mantiene como está" (un dato de esta issue).`;
 
 /** Lo que el prompt de un agente que propone agrega sobre \`learnings\` del reporte. */

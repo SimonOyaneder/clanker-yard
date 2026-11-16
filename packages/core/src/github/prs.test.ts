@@ -51,13 +51,13 @@ async function connect(graphql: (request: FakeRequest) => RecordedResponse | und
 
 const graphqlRequests = () => github!.requests.filter((r) => r.path === "/graphql");
 
-async function loadAcmePack() {
-  const packDir = join(dir, "acme-pack");
+async function loadExamplePack() {
+  const packDir = join(dir, "example-pack");
   mkdirSync(packDir);
   writeFileSync(
     join(packDir, "pack.json"),
     JSON.stringify({
-      id: "acme",
+      id: "example",
       version: 1,
       activate: { githubOrgs: ["acme"] },
       actors: { ignore: "\\[bot\\]$|^merge-queue$" },
@@ -75,7 +75,7 @@ async function loadAcmePack() {
 
 describe("prs.get", () => {
   test("pide el PR con el token de la cuenta y lo normaliza con el pack de la org del repo", async () => {
-    await loadAcmePack();
+    await loadExamplePack();
     const pr = prNode({
       reviews: [review(bot("review-bot[bot]"), "APPROVED", { body: "LGTM" })],
       head: { oid: HEAD_SHA, contexts: [checkRun("test", "SUCCESS"), checkRun("merge-queue", "FAILURE")] },
@@ -97,7 +97,7 @@ describe("prs.get", () => {
   });
 
   test("un repo de otra org no recibe el pack: sin bot y con los checks requeridos", async () => {
-    await loadAcmePack();
+    await loadExamplePack();
     const pr = prNode({
       reviews: [review(bot("review-bot[bot]"), "APPROVED", { body: "LGTM" })],
       head: { oid: HEAD_SHA, contexts: [checkRun("test", "FAILURE", true), checkRun("merge-queue", "SUCCESS")] },

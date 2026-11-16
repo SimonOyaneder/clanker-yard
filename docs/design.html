@@ -160,7 +160,7 @@ pre.mermaid { background: var(--surface); text-align: center; }
         <tbody>
           <tr><td class="k">Todo desde la app</td><td>Lanzar, pausar, retomar, aprobar decisiones, configurar flujos, conectar cuentas. La terminal es opcional (CLI sobre la misma API), nunca necesaria.</td></tr>
           <tr><td class="k">MCP para usuarios</td><td>Todo lo que hace la app también se puede hacer desde Claude Code, Claude Desktop o Cursor: ver, crear, modificar y eliminar roles, flujos, loops, perfiles y decisiones (ver <a href="#mcp">MCP para usuarios</a>).</td></tr>
-          <tr><td class="k">Sin depender del PC del usuario</td><td>La app funciona en un computador limpio: no necesita <code>gh</code>, <code>doppler</code>, hooks globales ni rutas fijas, y cada repo declara su receta (setup, tests, entornos por slot). Pero sí puede <b>usar</b> lo que tengas: tus skills, comandos, CLAUDE.md y reglas se conectan como contexto opcional por rol (ver <a href="#contexto">contexto del usuario</a>).</td></tr>
+          <tr><td class="k">Sin depender del PC del usuario</td><td>La app funciona en un computador limpio: no necesita <code>gh</code>, un gestor de secretos, hooks globales ni rutas fijas, y cada repo declara su receta (setup, tests, entornos por slot). Pero sí puede <b>usar</b> lo que tengas: tus skills, comandos, CLAUDE.md y reglas se conectan como contexto opcional por rol (ver <a href="#contexto">contexto del usuario</a>).</td></tr>
           <tr><td class="k">Estado en datos, no en markdown</td><td>SQLite con tablas autoritativas y un log de eventos. Los agentes nunca escriben estado: reportan con salida estructurada y el core decide.</td></tr>
           <tr><td class="k">Tracker abstracto</td><td>Linear hoy, cualquier tracker mañana, detrás de una interfaz con un modelo normalizado (ver <a href="#tracker">tracker abstracto</a>).</td></tr>
           <tr><td class="k">GitHub y Linear por API</td><td>GitHub con un fine-grained PAT pegado en la app (fase 1) y GitHub App con device flow después; Linear con OAuth. Sin terminal. En GitHub y Linear los agentes actúan <b>como tú</b>: commits, PRs y comentarios salen a tu nombre.</td></tr>
@@ -657,7 +657,7 @@ interface Issue {
           <tr><td>review-bot[bot]</td><td class="k">Bot de review</td><td>Se pide comentando <code>/review</code>; LGTM por su review; respuestas con <code>[clanker]</code>; threads que se pueden resolver: review-bot y coverage-bot</td><td>Sin bot, solo reviews humanas</td></tr>
           <tr><td>merge-queue fuera de "CI verde"</td><td class="k">Reglas de CI</td><td>Ignorar el check <code>merge-queue</code></td><td>Checks requeridos de la branch protection</td></tr>
           <tr><td><code>[clanker-council]</code>, estilo de PR, sin Rollback, lore</td><td class="k">Convenciones para agentes</td><td>Prefijos, plantilla de PR, contexto (writing-style, create-pr), rol de review de lore en el flujo</td><td>Defaults neutros</td></tr>
-          <tr><td>Doppler, DB por slot</td><td class="k">Receta del repo</td><td>En <code>.clanker/recipe.json</code> de cada repo</td><td>—</td></tr>
+          <tr><td>Secretos, DB por slot</td><td class="k">Receta del repo</td><td>En <code>.clanker/recipe.json</code> de cada repo</td><td>—</td></tr>
         </tbody>
       </table></div>
       <h3>Cómo funciona</h3>
@@ -1616,7 +1616,7 @@ tickDev(project):
   "requires": [
     { "name": "Postgres", "check": "pg_isready -h localhost -p 54321" },
     { "name": "Redis", "check": "redis-cli -p 63791 ping" },
-    { "name": "Doppler", "check": "doppler me" }
+    { "name": "Secretos", "check": "secrets whoami" }
   ],
   "slots": { "dev": 3, "maintenance": 2 },
   "worktreeDir": null,
@@ -1626,7 +1626,7 @@ tickDev(project):
     "DATABASE_URL": "postgres://postgres:password@localhost:54321/api_dev_cy{{slot}}",
     "REDIS_URL": "redis://localhost:63791/{{slot+10}}"
   },
-  "wrap": "doppler run --config dev --preserve-env={{envKeys}} --",
+  "wrap": "secrets run --env dev --preserve-env={{envKeys}} --",
   "setup": {
     "worktree": ["bundle install --quiet"],
     "slot": ["bin/rails db:drop db:create db:schema:load", "RAILS_ENV=test bin/rails db:schema:load"],
@@ -1646,7 +1646,7 @@ tickDev(project):
     <li><b>Variables:</b> <code>{{slot}}</code>, <code>{{slot+N}}</code>, <code>{{worktree}}</code>, <code>{{branch}}</code>, <code>{{files}}</code> (los que cambió la issue) y <code>{{envKeys}}</code>. Nada más: sin expresiones ni scripts.</li>
     <li><b><code>slots</code></b> fija el tamaño de cada pool en este repo: dev usa los slots 1..3 y maintenance los 4..5.</li>
     <li><b><code>checks</code></b> son los comandos que corre la acción <code>recipe.check</code> de los flujos, en ese orden. <b><code>worktreeDir</code></b> en <code>null</code> usa el directorio de datos de la app.</li>
-    <li><b><code>wrap</code></b> prefija todo comando del slot. Reemplaza los prefijos <code>doppler run --preserve-env=…</code> que hoy arma <code>testenv</code> y que los agentes copiaban mal en zsh.</li>
+    <li><b><code>wrap</code></b> prefija todo comando del slot. Reemplaza los prefijos <code>secrets run --preserve-env=…</code> que hoy arma <code>testenv</code> y que los agentes copiaban mal en zsh.</li>
     <li><b><code>setup.guard</code></b> se corre antes de <code>setup.slot</code>: si la app no resuelve la DB esperada, no se borra nada. Es el chequeo de <code>load_schema</code> del CLI, que protege tus DBs de desarrollo.</li>
     <li><b><code>afterRebase</code></b> corre después de todo rebase o restack, antes de los tests (packwerk, regenerar la versión de <code>schema.rb</code>).</li>
     <li>Un repo sin receta funciona igual: sin slots, sin <code>wrap</code> y los comandos que el usuario confirme la primera vez.</li>
@@ -1738,8 +1738,8 @@ tickDev(project):
   <h3>Packs: esquema y pack de ejemplo</h3>
   <p>El pack de ejemplo completo, que reproduce <code>github.ts</code> y el vigilante. Es también la referencia del esquema: cada clave existe en el JSON Schema del pack.</p>
 <pre>{
-  "id": "acme", "version": 1,
-  "activate": { "githubOrgs": ["example-org"], "trackerWorkspaces": ["acme"] },
+  "id": "example", "version": 1,
+  "activate": { "githubOrgs": ["example-org"], "trackerWorkspaces": ["example"] },
   "actors": {
     "ignore": "\\[bot\\]$|^(coverage-bot|linear-code|release-bot|merge-queue|deploy-bot|github-actions|review-bot|codecov|dependabot)$",
     "silentReviewBody": "^\\s*(lgtm|looks good to me|:shipit:|👍|✅|🚀)?[\\s!.]*$"
@@ -1774,7 +1774,7 @@ tickDev(project):
     "pr": { "template": "prompts/pr.md", "omitSections": ["Rollback"] },
     "context": { "committer": ["skill:commit", "rule:git-safety"], "*": ["repo:AGENTS.md"] }
   },
-  "flows": ["flows/techlead-acme.json", "flows/council.json"],
+  "flows": ["flows/council.json"],
   "roles": ["roles/review-lore.md", "roles/triage.md"]
 }</pre>
   <ul class="tight">

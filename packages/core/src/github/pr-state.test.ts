@@ -6,9 +6,9 @@ import { bot, checkRun, comment, HEAD_SHA, OLD_SHA, prNode, review, statusContex
 
 const VIEWER = "simon";
 
-/** El pack de ejemplo de `docs/design.html#d-ops`, solo con lo que el PrState lee. */
-const acme: ResolvedPack = {
-  id: "acme",
+/** Un pack con bot de review, cola de merge y señal de riesgo (como el de ejemplo del testkit), solo con lo que el PrState lee. */
+const example: ResolvedPack = {
+  id: "example",
   ...PackSettings.parse({
     actors: {
       ignore: "\\[bot\\]$|^(coverage-bot|linear-code|release-bot|merge-queue|deploy-bot|github-actions|review-bot|codecov|dependabot)$",
@@ -49,7 +49,7 @@ const acme: ResolvedPack = {
 };
 const noPack: ResolvedPack = { id: null, ...PackSettings.parse({}) };
 
-const build = (node: PrNode, pack = acme, more: { hold?: boolean; mergeApplies?: boolean } = {}) => buildPrState(node, { pack, viewer: VIEWER, ...more });
+const build = (node: PrNode, pack = example, more: { hold?: boolean; mergeApplies?: boolean } = {}) => buildPrState(node, { pack, viewer: VIEWER, ...more });
 
 describe("el PR", () => {
   test("lo básico: clave, ramas, head y decisión de GitHub", () => {
@@ -110,8 +110,8 @@ describe("bot de review", () => {
 
   test("sin sameSha en el pack, el LGTM de otro commit sí vale", () => {
     const pack: ResolvedPack = {
-      ...acme,
-      reviewBot: { ...acme.reviewBot!, lgtm: { reviewState: "APPROVED", bodyMatch: "LGTM" } },
+      ...example,
+      reviewBot: { ...example.reviewBot!, lgtm: { reviewState: "APPROVED", bodyMatch: "LGTM" } },
     };
 
     expect(build(prNode({ reviews: [lgtm({ sha: OLD_SHA })] }), pack).bot).toMatchObject({ state: "lgtm", sha: OLD_SHA });
@@ -271,14 +271,14 @@ describe("CI con las reglas del pack", () => {
   });
 
   test("knownFlaky del pack marca, entre los que fallan, los flaky conocidos", () => {
-    const pack: ResolvedPack = { ...acme, ciRules: { ...acme.ciRules, knownFlaky: ["e2e", "visual"] } };
+    const pack: ResolvedPack = { ...example, ciRules: { ...example.ciRules, knownFlaky: ["e2e", "visual"] } };
     const contexts = [checkRun("e2e", "FAILURE"), checkRun("unit", "FAILURE"), checkRun("visual", "SUCCESS")];
 
     expect(build(prNode({ head: { oid: HEAD_SHA, contexts } }), pack).ci).toMatchObject({ state: "red", failing: ["e2e", "unit"], flaky: ["e2e"] });
   });
 
   test("okStates del pack: si SKIPPED no es ok, un check saltado deja el CI rojo", () => {
-    const pack: ResolvedPack = { ...acme, ciRules: { okStates: ["SUCCESS"] } };
+    const pack: ResolvedPack = { ...example, ciRules: { okStates: ["SUCCESS"] } };
 
     expect(build(prNode({ head: { oid: HEAD_SHA, contexts: [checkRun("a", "SUCCESS"), checkRun("b", "SKIPPED")] } }), pack).ci).toMatchObject({
       state: "red",
@@ -329,7 +329,7 @@ describe("reviewers humanos", () => {
     expect(state.reviewers).toEqual([{ login: "ana", avatarUrl: "https://avatars.example/ana", state: "approved" }]);
   });
 
-  test("sin pack, una cuenta que el pack de ejemplo ignora es una persona más", () => {
+  test("sin pack, una cuenta que el pack ignora es una persona más", () => {
     const state = build(prNode({ reviews: [review(user("coverage-bot"), "APPROVED")] }), noPack);
 
     expect(state.reviewers.map((r) => r.login)).toEqual(["coverage-bot"]);
@@ -516,7 +516,7 @@ describe("approvers", () => {
 });
 
 describe("merge", () => {
-  /** Aprobado por un humano, CI verde y sobre la principal: lo mínimo para el nivel auto de Acme. */
+  /** Aprobado por un humano, CI verde y sobre la principal: lo mínimo para el nivel auto del pack. */
   const ready = (overrides: Partial<PrNode> = {}) =>
     prNode({
       reviewDecision: "APPROVED",
@@ -524,29 +524,29 @@ describe("merge", () => {
       head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS")] },
       ...overrides,
     });
-  const fin = (body = "/merge", at = "2026-11-10T12:00:00Z") => comment(user(VIEWER), body, at);
+  const mergeComment = (body = "/merge", at = "2026-11-10T12:00:00Z") => comment(user(VIEWER), body, at);
 
   test("con la estrategia del pack: ready, offer y auto de un PR limpio", () => {
     expect(build(ready()).merge).toEqual({ via: "comment", command: "/merge", ready: true, blockers: [], queue: null, offer: true, auto: true });
   });
 
   test("un /merge de la cuenta conectada lo pone en cola, y merge-queue en FAILURE o ERROR lo da por fallado", () => {
-    const queued = build(ready({ comments: [fin("  /merge\n")], head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS"), statusContext("merge-queue", "PENDING")] } }));
+    const queued = build(ready({ comments: [mergeComment("  /merge\n")], head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS"), statusContext("merge-queue", "PENDING")] } }));
     const failed = (state: "FAILURE" | "ERROR") =>
-      build(ready({ comments: [fin()], head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS"), statusContext("merge-queue", state)] } })).merge.queue;
+      build(ready({ comments: [mergeComment()], head: { oid: HEAD_SHA, contexts: [checkRun("rspec", "SUCCESS"), statusContext("merge-queue", state)] } })).merge.queue;
 
     expect(queued.merge).toMatchObject({ queue: "queued", ready: false, blockers: [], offer: false, auto: false });
     expect(failed("FAILURE")).toBe("failed");
     expect(failed("ERROR")).toBe("failed");
     // Sin el check de la cola, o con uno que no falló, sigue en cola.
-    expect(build(ready({ comments: [fin()] })).merge.queue).toBe("queued");
-    expect(build(ready({ comments: [fin()], head: { oid: HEAD_SHA, contexts: [statusContext("merge-queue", "SUCCESS")] } })).merge.queue).toBe("queued");
+    expect(build(ready({ comments: [mergeComment()] })).merge.queue).toBe("queued");
+    expect(build(ready({ comments: [mergeComment()], head: { oid: HEAD_SHA, contexts: [statusContext("merge-queue", "SUCCESS")] } })).merge.queue).toBe("queued");
   });
 
   test("solo cuenta el comando exacto de la cuenta conectada", () => {
     for (const comments of [
-      [fin("/merge please")],
-      [fin("/Merge")],
+      [mergeComment("/merge please")],
+      [mergeComment("/Merge")],
       [comment(user("ana"), "/merge")],
       [comment(bot("review-bot[bot]"), "/merge")],
     ]) {
@@ -555,22 +555,22 @@ describe("merge", () => {
   });
 
   test("un comando con caracteres de regex se compara literal", () => {
-    const pack: ResolvedPack = { ...acme, mergeStrategy: { ...acme.mergeStrategy!, command: "merge (now)?" } };
+    const pack: ResolvedPack = { ...example, mergeStrategy: { ...example.mergeStrategy!, command: "merge (now)?" } };
 
-    expect(build(ready({ comments: [fin("merge (now)?")] }), pack).merge.queue).toBe("queued");
-    expect(build(ready({ comments: [fin("merge now")] }), pack).merge.queue).toBeNull();
+    expect(build(ready({ comments: [mergeComment("merge (now)?")] }), pack).merge.queue).toBe("queued");
+    expect(build(ready({ comments: [mergeComment("merge now")] }), pack).merge.queue).toBeNull();
   });
 
   test("hold apaga offer y auto pero no ready", () => {
-    expect(build(ready(), acme, { hold: true })).toMatchObject({ hold: true, merge: { ready: true, offer: false, auto: false } });
+    expect(build(ready(), example, { hold: true })).toMatchObject({ hold: true, merge: { ready: true, offer: false, auto: false } });
     expect(build(ready()).hold).toBe(false);
   });
 
   test("donde la estrategia no aplica, o sin pack, se mergea con el botón de GitHub y /merge no significa nada", () => {
-    const withFin = ready({ comments: [fin()] });
+    const withCommand = ready({ comments: [mergeComment()] });
 
-    expect(build(withFin, acme, { mergeApplies: false }).merge).toEqual({ via: "button", ready: true, blockers: [], queue: null, offer: true, auto: false });
-    expect(build(withFin, noPack).merge).toMatchObject({ via: "button", queue: null, auto: false });
+    expect(build(withCommand, example, { mergeApplies: false }).merge).toEqual({ via: "button", ready: true, blockers: [], queue: null, offer: true, auto: false });
+    expect(build(withCommand, noPack).merge).toMatchObject({ via: "button", queue: null, auto: false });
   });
 
   test("un PR sin aprobación o con un hilo de humano abierto no está listo", () => {

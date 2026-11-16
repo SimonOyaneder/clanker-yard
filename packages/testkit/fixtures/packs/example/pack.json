@@ -1,0 +1,51 @@
+{
+  "id": "example",
+  "version": 1,
+  "activate": { "githubOrgs": ["example-org"] },
+  "actors": {
+    "ignore": "\\[bot\\]$|^(coverage-bot|linear-code|release-bot|merge-queue|deploy-bot|github-actions|review-bot|codecov|dependabot)$",
+    "silentReviewBody": "^\\s*(lgtm|looks good to me|:shipit:|👍|✅|🚀)[\\s!.]*$"
+  },
+  "signals": [
+    {
+      "id": "risk",
+      "source": "label",
+      "match": "^risk[:/ _-]?(high|mid|medium|low)$",
+      "flags": "i",
+      "alias": { "medium": "mid" },
+      "empty": "Sin riesgo",
+      "levels": {
+        "high": { "label": "Riesgo alto", "tone": "bad", "hint": "Label risk:high que pone el bot de review. Es un cambio delicado: revísalo con calma antes de mergear" },
+        "mid": { "label": "Riesgo medio", "tone": "warn", "hint": "Label risk:mid que pone el bot de review. Merece una revisada normal" },
+        "low": { "label": "Riesgo bajo", "tone": "ok", "hint": "Label risk:low que pone el bot de review. Cambio acotado y de bajo impacto" }
+      }
+    }
+  ],
+  "reviewBot": {
+    "logins": ["review-bot", "review-bot[bot]"],
+    "request": { "type": "comment", "body": "/review" },
+    "lgtm": { "reviewState": "APPROVED", "bodyMatch": "LGTM", "sameSha": true },
+    "timeoutSec": 540,
+    "resolvableAuthors": ["review-bot", "review-bot[bot]", "coverage-bot", "coverage-bot[bot]"]
+  },
+  "ciRules": { "ignoreChecks": ["merge-queue"], "okStates": ["SUCCESS", "SKIPPED", "NEUTRAL"] },
+  "mergeStrategy": {
+    "type": "comment",
+    "command": "/merge",
+    "queueCheck": "merge-queue",
+    "appliesWhen": { "checkSeenOnDefault": "merge-queue" },
+    "ready": ["notDraft", "approved", "ciGreen", "baseIsDefault", "noConflict", "noHumanOpenThreads", "notQueued"],
+    "offer": ["notDraft", "approved", "ciGreen", "noHumanOpenThreads", "notQueued", "humanApprover", "noHumanTalk", "noCouncilOpen", "notHold"],
+    "auto": ["offer", "baseIsDefault", "noHumanResolvedThreads", "noCouncilEver"],
+    "onOffer": "gate",
+    "onAuto": "act"
+  },
+  "conventions": {
+    "commentPrefix": "[clanker] ",
+    "councilPrefix": "[clanker-council] ",
+    "commits": "conventional",
+    "noAiAttribution": true,
+    "pr": { "omitSections": ["Rollback"] },
+    "context": { "*": ["repo:AGENTS.md"] }
+  }
+}

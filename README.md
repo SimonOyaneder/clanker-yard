@@ -107,7 +107,7 @@ Lo que versionas en el repo viaja con él: el core carga `.clanker/flows/<slug>.
 - **Rol:** un agente con su prompt, contexto y herramientas (dev, reviewers, committer, triage).
 - **Perfil:** el modelo, el esfuerzo y el presupuesto con que corre cada rol.
 - **Carril:** un tope de corridas simultáneas de toda la máquina; hay uno de desarrollo y uno de mantenimiento, para que un rebase no espere a una issue larga.
-- **Pack:** lo propio de una organización (señales de PR, bot de review, reglas de CI, convenciones, flujos y roles) como JSON; el repo trae el de Acme en `packs/acme`.
+- **Pack:** lo propio de una organización (señales de PR, bot de review, reglas de CI, convenciones, flujos y roles) como JSON. La app no trae ninguno: cada organización tiene el suyo en su propio repo (hay uno de ejemplo en `packages/testkit/fixtures/packs/example`).
 - **Decisión (Bandeja):** algo que el flujo no resuelve solo; estaciona únicamente su corrida hasta que respondes.
 - **Learnings:** notas que un agente propone para los siguientes; solo las que apruebas llegan a los briefs.
 
@@ -140,7 +140,7 @@ packages/api      contrato oRPC, esquemas zod, cliente
 packages/core     Store, Flows, Agents, Workspaces, Scheduler, servidor
 packages/ui       React + shadcn, vistas
 packages/testkit  runtime fake, fixtures, repos git temporales
-packs/acme      el pack de Acme
+packs/           packs de fábrica (hoy ninguno)
 docs/             diseño y notas de investigación
 ```
 
@@ -172,6 +172,6 @@ Antes de tocar código lee [`AGENTS.md`](AGENTS.md): reglas, límites entre paqu
 - **GitHub dice que al token le falta un permiso:** el token necesita el scope `repo` y debe ser classic. En la tarjeta de GitHub, "Crear token con los permisos marcados" (menú de la tarjeta) abre el formulario ya marcado; pega el nuevo y pulsa "Probar".
 - **Linear tiene varias cuentas:** cada workspace es una conexión. En el selector de proyecto de Linear aparecen los de todas las cuentas conectadas, con el nombre del workspace al lado cuando son más de una; elige el de la cuenta correcta.
 - **Un repo no aparece en Stacks de PR:** Watch solo busca los PRs abiertos por ti en los repos registrados. Regístralo en Conexiones con "Agregar repo".
-- **Un pack no aparece:** el de Acme viene incluido en la app y se ve en Ajustes > Packs. Otro pack se instala desde ahí con la ruta de su carpeta (la que tiene `pack.json`); si está roto, el error dice qué archivo y campo fallan.
+- **Un pack no aparece:** se instala desde Ajustes > Packs con la ruta de su carpeta (la que tiene `pack.json`); si está roto, el error dice qué archivo y campo fallan.
 - **Un proyecto pide elegir su proyecto de Linear:** es un proyecto viejo que guardó el nombre en vez del id. "Elegir el proyecto de Linear" abre Ajustes del proyecto en "Proyecto del tracker".
 - **"El core está caído":** el banner de arriba ofrece "Reintentar" y "Ver logs" (también en `Archivo > Ver logs del core`).

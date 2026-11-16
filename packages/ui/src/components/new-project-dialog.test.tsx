@@ -113,7 +113,7 @@ test("con Linear, los proyectos salen con los míos primero, se filtran por text
   expect(names).toEqual(["Boundaries de engines", "SOPORTE", "Facturación mensual", "Limpieza de feature flags"])
   expect(screen.getByText("Míos")).toBeTruthy()
 
-  fireEvent.change(screen.getByPlaceholderText("Buscar proyecto"), { target: { value: "facturacion" } })
+  fireEvent.change(screen.getByPlaceholderText("Buscar proyecto"), { target: { value: "factura" } })
   const options = screen.getAllByRole("option")
   expect(options.map((o) => o.textContent)).toEqual(["Facturación mensual"])
   fireEvent.click(options[0]!)

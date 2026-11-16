@@ -76,10 +76,10 @@ const github = await startGitHubSim({
 });
 if (prsScenario) {
   // El pack de ejemplo tal cual, activado para la org del simulador y sin sus flujos, roles ni contextos (el escenario no los corre).
-  const packDir = join(home, "packs", "acme");
+  const packDir = join(home, "packs", "example");
   mkdirSync(packDir, { recursive: true });
-  const acme = JSON.parse(readFileSync(fileURLToPath(new URL("../../../packs/acme/pack.json", import.meta.url)), "utf8")) as Record<string, unknown>;
-  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
+  const example = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/packs/example/pack.json", import.meta.url)), "utf8")) as Record<string, unknown>;
+  writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...example, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
 }
 const linear = await startFakeLinear({ clientId: "demo-client" });
 const control = (): {

@@ -23,14 +23,14 @@ import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 
 // Lo que una persona le pide a un PR desde la app (`prs.merge`, `prs.requestReview`, `prs.rebase`, `prs.setHold`) con
-// el pack de ejemplo real (`packs/acme/pack.json`, salvo su alcance) sobre el GitHub simulado.
+// el pack de ejemplo (`fixtures/packs/example`, salvo su alcance) sobre el GitHub simulado.
 
 vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";
 const REPO = "octocat/secret-project";
-const ACME_PACK = new URL("../../../packs/acme/pack.json", import.meta.url);
+const EXAMPLE_PACK = new URL("../fixtures/packs/example/pack.json", import.meta.url);
 
 let dir: string;
 let store: Store;
@@ -42,18 +42,18 @@ let repoId: string;
 
 const ref = (number: number): PrRef => ({ account: ACCOUNT, repo: REPO, number });
 
-async function setup(pack: "acme" | "none") {
+async function setup(pack: "example" | "none") {
   const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
   const repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repoId = repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
   const packs = createPacks({ defs: createDefs(store) });
-  if (pack === "acme") {
+  if (pack === "example") {
     const packDir = join(dir, "pack");
     mkdirSync(packDir);
-    const acme = JSON.parse(readFileSync(ACME_PACK, "utf8")) as Record<string, unknown>;
-    writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...acme, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
+    const example = JSON.parse(readFileSync(EXAMPLE_PACK, "utf8")) as Record<string, unknown>;
+    writeFileSync(join(packDir, "pack.json"), JSON.stringify({ ...example, activate: { githubOrgs: ["octocat"] }, flows: [], roles: [], contexts: [] }));
     await packs.load(packDir);
   }
   const prs = createPrs({ connections, packs, merge: createMergeScope({ store, repos, connections }) });
@@ -97,7 +97,7 @@ const approved = () => {
 
 describe("merge", () => {
   test("un PR listo recibe el comando de merge del pack desde la cuenta del usuario y vuelve releído en cola", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = approved();
     known(pr);
 
@@ -112,7 +112,7 @@ describe("merge", () => {
     ["no está aprobado", (pr: SimPr) => pr.review("ana", "CHANGES_REQUESTED"), /no está listo para mergear: pidieron cambios/],
     ["tiene el CI en rojo", (pr: SimPr) => pr.ci("red"), /no está listo para mergear: el CI no está verde/],
   ])("un PR que %s se rechaza con lo que falta y no comenta nada", async (_name, spoil, message) => {
-    await setup("acme");
+    await setup("example");
     const pr = approved();
     known(pr);
     spoil(pr);
@@ -123,7 +123,7 @@ describe("merge", () => {
   });
 
   test("con hold se rechaza hasta que se quita", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = approved();
     known(pr);
     expect((await commands.setHold(ref(pr.number), true)).hold).toBe(true);
@@ -137,7 +137,7 @@ describe("merge", () => {
   });
 
   test("pedirlo dos veces no comenta dos veces: la segunda ve el PR en cola", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = approved();
     known(pr);
     await commands.merge(ref(pr.number));
@@ -147,7 +147,7 @@ describe("merge", () => {
   });
 
   test("donde la estrategia del pack no aplica (sin merge-queue en la branch por defecto) se manda al botón de GitHub", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = sim.openPr({ head: "one" });
     pr.ci("green");
     pr.review("ana", "APPROVED");
@@ -160,7 +160,7 @@ describe("merge", () => {
 
 describe("requestReview", () => {
   test("comenta el comando del bot del pack, tal cual", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = sim.openPr({ head: "one" });
 
     await commands.requestReview(ref(pr.number));
@@ -177,7 +177,7 @@ describe("requestReview", () => {
   });
 
   test("un PR mergeado ya no la recibe", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = sim.openPr({ head: "one" });
     pr.merge();
 
@@ -189,7 +189,7 @@ describe("rebase", () => {
   const conflicts = () => store.events.since(0, { types: ["pr.conflict"] });
 
   test("anota un pr.conflict con el sha y la base del PR para que arranque el flujo que lo atiende", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = sim.openPr({ head: "one" });
     known(pr, { owned: true });
 
@@ -199,7 +199,7 @@ describe("rebase", () => {
   });
 
   test("un PR que el sistema no abrió no se rebasea nunca", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = sim.openPr({ head: "one" });
     known(pr);
 
@@ -208,7 +208,7 @@ describe("rebase", () => {
   });
 
   test("con threads de council no se fuerza su historia", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = sim.openPr({ head: "one" });
     known(pr, { owned: true });
     pr.councilThread("revisa esto", { by: "otra" });
@@ -218,7 +218,7 @@ describe("rebase", () => {
   });
 
   test("un PR que el core no conoce se rechaza diciendo qué hacer", async () => {
-    await setup("acme");
+    await setup("example");
     const pr = sim.openPr({ head: "one" });
 
     await expect(commands.rebase(ref(pr.number), "ui")).rejects.toThrow(/registra el repo y espera a que Watch lo vea/);
