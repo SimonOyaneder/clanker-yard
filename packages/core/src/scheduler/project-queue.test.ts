@@ -5,13 +5,13 @@ import { z } from "zod";
 import { createDefs } from "../defs/defs";
 import { createProjects, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { newId } from "../store/conventions";
-import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues, type Issues } from "../tracker/issues";
 import { createLocalTracker, type LocalTracker } from "../tracker/local";
 import type { Tracker } from "../tracker/tracker";
 import { createRepos, type Repos } from "../repos/repos";
 import { createProjectQueue, QueueUnavailableError } from "./project-queue";
+import { seedPr } from "../testing/pull-requests";
 
 let store: Store;
 let local: LocalTracker;
@@ -64,12 +64,7 @@ async function sync(projectId: ProjectId) {
 }
 
 function openPr(issueId: IssueId, repoId: RepoId, number: number, headRef: string, detail?: PrState) {
-  store.tx((tx) =>
-    tx.db
-      .insert(pullRequests)
-      .values({ id: newId("pr"), repoId, number, nodeId: `n${number}`, headRef, baseRef: "main", headSha: "abc", state: "open", isDraft: true, issueId, owned: true, detail })
-      .run(),
-  );
+  seedPr(store, { repoId, number, headRef, headSha: "abc", isDraft: true, issueId, detail });
 }
 
 const prState = (state: PrState["state"], ci: PrState["ci"]["state"]): PrState => ({

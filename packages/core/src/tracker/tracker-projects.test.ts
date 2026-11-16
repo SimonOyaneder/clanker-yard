@@ -10,7 +10,7 @@ import { createLinearTracker } from "../linear/tracker";
 import { createDefs } from "../defs/defs";
 import { createProjects, type Projects } from "../projects/projects";
 import { createRouter } from "../server/router";
-import { apiDeps, withPrs } from "../server/testing";
+import { apiDeps, withPrs } from "../testing/router-deps";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { issues as issuesTable, projects as projectsTable, syncCursors } from "../store/schema";
 import { openStore, type Store } from "../store/store";

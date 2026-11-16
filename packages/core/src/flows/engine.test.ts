@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { OUTPUT_INLINE_MAX_BYTES } from "./engine";
-import { devProfile, devRole, harness as createHarness, okReport, WAIT } from "./harness";
+import { devProfile, devRole, harness as createHarness, okReport, WAIT } from "../testing/flows-harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {

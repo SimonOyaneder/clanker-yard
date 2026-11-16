@@ -35,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
+import { seedPr } from "@clanker/core/testing";
 
 // Se prueba aquí y no en el core: necesita repos git reales (tempGitRepo) y un remoto bare. GitHub es el
 // simulado (`startGitHubSim`): nunca GitHub ni tokens reales.
@@ -330,9 +331,7 @@ describe("pr.publish", () => {
   });
 
   test("un PR que Watch ya había descubierto (sin owned) se adopta: queda del sistema y con pr.opened", async () => {
-    store.db.$client
-      .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'repo_00000000000000000000000001', 1, '', ?, 'main', '', 'open', 1, 0)")
-      .run(newId("pr"), BRANCH);
+    seedPr(store, { repoId: "repo_00000000000000000000000001", number: 1, headRef: BRANCH, isDraft: true, owned: false });
 
     const ctx = durableCtx();
     await publish.run(args(), ctx);

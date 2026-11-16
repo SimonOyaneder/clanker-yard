@@ -1,16 +1,14 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { newId } from "../store/conventions";
-import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createDecisions, expireMergedReviewNotes, openDecision, type NewDecision } from "./decisions";
+import { seedPr } from "../testing/pull-requests";
 
 let store: Store;
 afterEach(() => store.close());
 
 function pull(state: "open" | "merged") {
-  const id = newId("pr");
-  store.tx((tx) => tx.db.insert(pullRequests).values({ id, repoId: newId("repo"), number: 1, nodeId: "", headRef: "", baseRef: "", headSha: "", state, isDraft: false, owned: false }).run());
-  return { type: "pr", id } as const;
+  return { type: "pr", id: seedPr(store, { repoId: newId("repo"), number: 1, state, owned: false }) } as const;
 }
 const open = (decision: NewDecision) => store.tx((tx) => openDecision(tx, decision));
 

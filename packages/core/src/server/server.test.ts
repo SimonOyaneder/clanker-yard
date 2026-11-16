@@ -23,7 +23,7 @@ import { createIssues } from "../tracker/issues";
 import { startFakeGitHubOAuth } from "../testing/github/fake-github-oauth";
 import { startFakeLinear } from "../testing/linear/fake-linear";
 import { startServer, type CoreServer } from "./server";
-import { apiDeps, withPrs } from "./testing";
+import { apiDeps, withPrs } from "../testing/router-deps";
 
 let store: Store;
 let connections: Connections;

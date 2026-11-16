@@ -1,4 +1,4 @@
-import type { Actor, PrNode, RawComment, RawContext, RawReview, RawThread, ReviewState } from "./pr-query";
+import type { Actor, PrNode, RawComment, RawContext, RawReview, RawThread, ReviewState } from "../../github/pr-query";
 
 // Nodos de PR con la forma de la GraphQL API de GitHub (`pr-query.ts`). Los campos y enums son los del
 // esquema real; los nombres de los checks, logins y labels son inventados.

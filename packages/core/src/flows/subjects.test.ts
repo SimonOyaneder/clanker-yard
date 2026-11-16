@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { newId } from "../store/conventions";
 import { runs } from "../store/schema";
 import type { Tx } from "../store/store";
-import { harness as createHarness, WAIT } from "./harness";
+import { harness as createHarness, WAIT } from "../testing/flows-harness";
 import { claimPr } from "./subjects";
 
 const cleanups: (() => Promise<void> | void)[] = [];

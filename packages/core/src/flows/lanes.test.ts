@@ -1,7 +1,7 @@
 import type { RunId, SubjectRef } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createProjects } from "../projects/projects";
-import { harness as createHarness } from "./harness";
+import { harness as createHarness } from "../testing/flows-harness";
 import type { LaneCapacity } from "./lanes";
 
 /** `vi.waitFor` con holgura: la suite entera corre en paralelo y un tick puede tardar más de 1 s. */

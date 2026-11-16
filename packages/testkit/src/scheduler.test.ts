@@ -1,13 +1,14 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event, type ProjectId } from "@clanker/api";
-import { combinedBaseBranch, createConnections, createFileSecrets, createIssues, createLocalTracker, createRepos, newId, openStore, type Core, type Store } from "@clanker/core";
+import { combinedBaseBranch, createConnections, createFileSecrets, createIssues, createLocalTracker, createRepos, openStore, type Core, type Store } from "@clanker/core";
 import { startCore } from "./start-core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { seedDb, type TestHome } from "./home";
+import { seedPr } from "@clanker/core/testing";
 
 /** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
 const WAIT = { timeout: 10_000 };
@@ -16,6 +17,9 @@ const WAIT = { timeout: 10_000 };
 // solo, sin que nadie apriete "Correr" (`runs.start`).
 
 /** `vi.waitFor` con holgura: la suite entera corre en paralelo y un tick puede tardar más de 1 s. */
+// Cada test levanta un core y repos reales: bajo la suite completa pasa de los 5 s por defecto, y `until` ya espera 10.
+vi.setConfig({ testTimeout: 20_000 });
+
 const until = (check: () => unknown) => vi.waitFor(check, { timeout: 10_000 });
 
 const juguete = fileURLToPath(new URL("../fixtures/runs/juguete", import.meta.url));
@@ -117,9 +121,7 @@ describe("el Scheduler del core", () => {
     const repoId = createRepos(store).list()[0]!.id;
     for (const [i, parent] of [one, two].entries()) {
       const issueId = createIssues(store, local).list({ projectId: project.id }).find((issue) => issue.ref.id === parent.ref.id)!.id;
-      store.db.$client
-        .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, issue_id, owned) VALUES (?, ?, ?, ?, ?, 'main', 'abc', 'open', 1, ?, 1)")
-        .run(newId("pr"), repoId, 20 + i, `n${i}`, `cla-${i + 1}`, issueId);
+      seedPr(store, { repoId, number: 20 + i, headRef: `cla-${i + 1}`, headSha: "abc", isDraft: true, issueId });
     }
 
     await client.projects.update({ id: project.id, status: "active", stackOn: "any_open", repos: [{ repoId, labels: [] }] });
@@ -251,9 +253,7 @@ describe("el repo de la issue", () => {
     // Dos PRs abiertos de los bloqueantes en cada repo: la issue sale de una base combinada en los dos.
     for (const [i, blocker] of blockers.entries()) {
       const issueId = cache.list({ projectId: project.id }).find((issue) => issue.ref.id === blocker.ref.id)!.id;
-      store.db.$client
-        .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, issue_id, owned) VALUES (?, ?, ?, ?, ?, 'main', 'abc', 'open', 1, ?, 1)")
-        .run(newId("pr"), i < 2 ? front : back, 20 + i, `n${i}`, `cla-${i + 1}`, issueId);
+      seedPr(store, { repoId: i < 2 ? front : back, number: 20 + i, headRef: `cla-${i + 1}`, headSha: "abc", isDraft: true, issueId });
     }
 
     await client.projects.update({ id: project.id, status: "active", stackOn: "any_open" });

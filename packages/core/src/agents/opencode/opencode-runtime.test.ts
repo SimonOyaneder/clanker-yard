@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { readTranscript } from "../transcripts";
 import type { AgentEvent, AgentRun, RunSpec } from "../runtime";
 import type { ModelInfo } from "./api";
-import { answer, createFakeOpencode, ev, type FakeServer } from "./fake-opencode";
+import { answer, createFakeOpencode, ev, type FakeServer } from "../../testing/opencode/fake-opencode";
 import { createOpencodeRuntime } from "./opencode-runtime";
 
 let home: string;

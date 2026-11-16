@@ -5,13 +5,13 @@ import type { MergeStrategy, PrRef, RepoId } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
-import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createRepos, type Repos } from "../repos/repos";
 import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
 import { prGraphql, type DefaultBranchCommit } from "../testing/github/fake-pr-graphql";
 import { createMergeScope } from "./merge-scope";
-import { prNode } from "./pr-fixtures";
+import { prNode } from "../testing/github/pr-fixtures";
+import { seedPr } from "../testing/pull-requests";
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const REF: PrRef = { account: "octocat", repo: "acme/api", number: 4251 };
@@ -137,9 +137,7 @@ describe("hold", () => {
     const merge = await scope();
     expect(merge.hold(REF)).toBe(false);
 
-    store.tx((tx) =>
-      tx.db.insert(pullRequests).values({ id: "pr_1", repoId, number: REF.number, nodeId: "n", headRef: "x", baseRef: "main", headSha: "a", state: "open", isDraft: false, hold: true }).run(),
-    );
+    seedPr(store, { id: "pr_1", repoId, number: REF.number, headRef: "x", headSha: "a", owned: false, hold: true });
 
     expect(merge.hold(REF)).toBe(true);
     expect(merge.hold({ ...REF, number: 1 })).toBe(false);

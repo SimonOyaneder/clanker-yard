@@ -1,7 +1,7 @@
-import { createEventQueue } from "../event-queue";
-import type { ModelInfo, ModelRef, OpencodeApi, OpencodeError, OpencodeEvent, SessionInfo, TokenUsage } from "./api";
-import { REPORT_TOOL } from "./config";
-import type { LaunchInput, LaunchServer } from "./server";
+import { createEventQueue } from "../../agents/event-queue";
+import type { ModelInfo, ModelRef, OpencodeApi, OpencodeError, OpencodeEvent, SessionInfo, TokenUsage } from "../../agents/opencode/api";
+import { REPORT_TOOL } from "../../agents/opencode/config";
+import type { LaunchInput, LaunchServer } from "../../agents/opencode/server";
 
 // Un opencode 2 falso para los tests del runtime: responde con la secuencia de eventos vista en sesiones reales de
 // opencode 2.3 (`execution.started`, por paso `step.started`, `first-token`, herramientas `input.started` → `called` →

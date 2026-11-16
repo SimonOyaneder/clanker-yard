@@ -4,7 +4,7 @@ import { createBreakers, GITHUB_SCOPE, repoScope, runtimeScope, type Breakers } 
 import { runs } from "../store/schema";
 import type { Store } from "../store/store";
 import { EnvironmentError } from "./catalog";
-import { harness as createHarness, okReport, type AgentScript } from "./harness";
+import { harness as createHarness, okReport, type AgentScript } from "../testing/flows-harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {

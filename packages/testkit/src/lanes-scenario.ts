@@ -1,5 +1,6 @@
-import { type Client, FlowBody, type NewLocalIssue, type RepoId } from "@clanker/api";
+import { type Client, FlowBody, type IssueId, type NewLocalIssue, type RepoId, type RunId } from "@clanker/api";
 import { createDefs, newId, type Store } from "@clanker/core";
+import { seedPr } from "@clanker/core/testing";
 
 // El escenario de `DEMO_SCENARIO=lanes` (ver `demo-core.ts`): el proyecto de las capturas de la vista de
 // Operación. Dev está lleno (1/1) con una corrida en review, otra corrida de dev está estacionada con su
@@ -49,14 +50,7 @@ export async function seedLanes({ client, store, repoId, now = Date.now() }: { c
   await client.projects.boostIssue({ id: project.id, issueId: later });
 
   const pr = (number: number, issueId: string, runId: string, branch: string) => {
-    const id = newId("pr");
-    sql
-      .prepare(
-        `INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, issue_id, run_id, owned)
-         VALUES (?, ?, ?, ?, ?, 'main', ?, 'open', ?, ?, ?, 1)`,
-      )
-      .run(id, repoId, number, `PR_${number}`, branch, "a".repeat(40), number === 4251 ? 1 : 0, issueId, runId);
-    return id;
+    return seedPr(store, { repoId, number, headRef: branch, headSha: "a".repeat(40), isDraft: number === 4251, issueId: issueId as IssueId, runId: runId as RunId });
   };
 
   const run = (input: { issueId: string; subject?: { type: "issue" | "pr"; id: string }; flow: { id: string; version: number }; lane: "dev" | "maintenance"; status: string; parkReason?: string; outcome?: string; borrowedFrom?: string; claimedPr?: string; startedMin: number; endedMin?: number; cost: number; steps: Step[] }) => {

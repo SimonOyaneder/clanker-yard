@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { OpencodeEvent } from "./api";
 import { parseModels, versionProblem } from "./cli";
-import { ev } from "./fake-opencode";
+import { ev } from "../../testing/opencode/fake-opencode";
 import { createTranslator, statusOfError } from "./translate";
 
 const S = "ses_main";

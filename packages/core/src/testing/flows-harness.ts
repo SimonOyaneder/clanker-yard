@@ -10,10 +10,10 @@ import { createArtifacts } from "../artifacts/artifacts";
 import { createDecisions } from "../decisions/decisions";
 import { createDefs } from "../defs/defs";
 import { openStore, type Store, type Tx } from "../store/store";
-import type { ActionCtx, ActionDef, ActionResult } from "./catalog";
-import type { LaneCapacity } from "./lanes";
-import type { EngineDeps } from "./engine";
-import { createFlows } from "./flows";
+import type { ActionCtx, ActionDef, ActionResult } from "../flows/catalog";
+import type { LaneCapacity } from "../flows/lanes";
+import type { EngineDeps } from "../flows/engine";
+import { createFlows } from "../flows/flows";
 
 // Un motor de flujos sobre una base en memoria y un runtime que responde con un guion, para los
 // tests del motor. `cleanup` lo cierra: quien lo usa lo engancha a su `afterEach`.

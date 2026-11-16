@@ -1,8 +1,8 @@
 import { type ProjectId, type RunId, type Profile } from "@clanker/api";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, test } from "vitest";
-import type { AgentScript } from "../flows/harness";
-import { devRole, harness as createHarness, okReport } from "../flows/harness";
+import type { AgentScript } from "../testing/flows-harness";
+import { devRole, harness as createHarness, okReport } from "../testing/flows-harness";
 import { newId } from "../store/conventions";
 import { runMetrics, runRoleCosts, runs } from "../store/schema";
 import { createMetrics } from "./metrics";

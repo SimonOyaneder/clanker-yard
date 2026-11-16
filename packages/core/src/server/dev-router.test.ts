@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { openStore, type Store } from "../store/store";
 import { createDevRouter, type DevTools } from "./dev-router";
-import { apiDeps } from "./testing";
+import { apiDeps } from "../testing/router-deps";
 
 /** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
 const WAIT = { timeout: 10_000 };

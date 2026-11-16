@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { harness as createHarness } from "./harness";
+import { harness as createHarness } from "../testing/flows-harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {

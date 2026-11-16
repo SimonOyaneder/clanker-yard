@@ -33,7 +33,7 @@ import { createPrs } from "../github/prs";
 import type { Connections } from "../connections/connections";
 import type { Packs } from "../packs/packs";
 import type { Repos } from "../repos/repos";
-import type { RouterDeps } from "./router";
+import type { RouterDeps } from "../server/router";
 
 const noRuntime: AgentRuntime = {
   id: "fake",

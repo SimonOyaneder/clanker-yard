@@ -1,5 +1,5 @@
 import type { FlowDef, Profile, Role } from "@clanker/api";
-import type { BuiltinTemplate } from "./install";
+import type { BuiltinTemplate } from "../builtin/install";
 
 // La plantilla de juguete (`docs/design.html#fases`, fase 0): lo mínimo que ejercita el motor de punta
 // a punta. Toma el worktree del repo, un agente de prueba lo saluda y se suelta el worktree. Su guion

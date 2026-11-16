@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createDefs, type Defs } from "../defs/defs";
 import { createRouter } from "../server/router";
-import { apiDeps, withPrs } from "../server/testing";
+import { apiDeps, withPrs } from "../testing/router-deps";
 import { newId } from "../store/conventions";
 import { issues, syncCursors } from "../store/schema";
 import { openStore, type Store } from "../store/store";

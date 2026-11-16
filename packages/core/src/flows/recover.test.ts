@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import type { ExternalEvent, WaitResult } from "./catalog";
 import { agentSessions, runs, stepRuns } from "../store/schema";
-import { harness as createHarness, okReport } from "./harness";
+import { harness as createHarness, okReport } from "../testing/flows-harness";
 
 // Un corte es cerrar la app con pasos a medias y abrir otra sobre la misma base con otro boot id:
 // el primer `harness` queda abandonado (su dispatcher detenido, lo que tenía en vuelo colgado, como

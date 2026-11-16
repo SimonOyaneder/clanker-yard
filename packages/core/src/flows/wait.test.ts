@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import type { ExternalEvent, WaitResult } from "./catalog";
-import { harness as createHarness } from "./harness";
+import { harness as createHarness } from "../testing/flows-harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {

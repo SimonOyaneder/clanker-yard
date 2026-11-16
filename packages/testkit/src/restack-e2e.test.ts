@@ -1,10 +1,10 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { RunId } from "@clanker/api";
-import { newId } from "@clanker/core";
+import type { RepoId, RunId } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { ACCOUNT, REPO, startTechleadScenario, type TechleadScenario } from "./techlead-scenario";
+import { seedPr } from "@clanker/core/testing";
 
 // Las plantillas `restack` (`pr.merged`) y `restack-rewritten` (`pr.base_rewritten`) con su tramo de
 // `/review` (`docs/design.html#d-flows`, plantillas) de punta a punta: una cadena de 3 PRs del sistema en el
@@ -50,22 +50,19 @@ async function chain(draft: { second: boolean; third: boolean }) {
   commit("cla-2", "cla-1", "two.txt", "two\n");
   commit("cla-3", "cla-2", "three.txt", "three\n");
 
-  const repoId = (store.db.$client.prepare("SELECT id FROM repos").get() as { id: string }).id;
-  const insert = store.db.$client.prepare(
-    "INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, 1)",
-  );
-  const rows = [1, 2, 3].map(() => newId("pr"));
+  const repoId = (store.db.$client.prepare("SELECT id FROM repos").get() as { id: RepoId }).id;
   const specs = [
     { head: "cla-1", base: "main", draft: true },
     { head: "cla-2", base: "cla-1", draft: draft.second },
     { head: "cla-3", base: "cla-2", draft: draft.third },
   ];
+  // Cada PR cuelga del anterior.
+  const rows: string[] = [];
   specs.forEach(({ head, base, draft: isDraft }, index) => {
     const pr = github.openPr({ head, base, title: head, draft: isDraft });
     expect(pr.number).toBe(index + 1);
-    insert.run(rows[index]!, repoId, pr.number, `PR_${pr.number}`, head, base, pr.headSha(), isDraft ? 1 : 0);
+    rows.push(seedPr(store, { repoId, number: pr.number, headRef: head, baseRef: base, headSha: pr.headSha(), isDraft, parents: rows.slice(-1) }));
   });
-  store.db.$client.prepare("INSERT INTO pr_parents (child_id, parent_id) VALUES (?, ?), (?, ?)").run(rows[1]!, rows[0]!, rows[2]!, rows[1]!);
 
   const remoteSha = (branch: string) => repo.git("--git-dir", repo.remoteDir!, "rev-parse", `refs/heads/${branch}`);
   const remoteLog = (range: string) => repo.git("--git-dir", repo.remoteDir!, "log", "--format=%s", range).split("\n").filter(Boolean);

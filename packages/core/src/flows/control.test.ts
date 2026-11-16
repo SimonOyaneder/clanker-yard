@@ -4,7 +4,7 @@ import { z } from "zod";
 import { agentSessions, stepRuns } from "../store/schema";
 import { RunCommandError } from "./engine";
 import { StepNotFoundError } from "./step-detail";
-import { harness as createHarness, okReport, type AgentScript, WAIT } from "./harness";
+import { harness as createHarness, okReport, type AgentScript, WAIT } from "../testing/flows-harness";
 
 // Lo que una persona le pide a una corrida (`control`) y a un paso (`stepCommand`).
 

@@ -2,9 +2,9 @@ import { cpSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createClient, type Client, type Event } from "@clanker/api";
+import { createClient, type Client, type Event, type RepoId } from "@clanker/api";
 import { createConnections, createFileSecrets, createProcs, createRepos, newId, openStore, type Core, type StartCoreOptions, type Store } from "@clanker/core";
-import { JUGUETE_FLOW } from "@clanker/core/testing";
+import { JUGUETE_FLOW, seedPr } from "@clanker/core/testing";
 import { startCore } from "./start-core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -363,9 +363,7 @@ describe("arranque", () => {
       store.db.$client
         .prepare("INSERT INTO workspaces (id, repo_id, path, branch, base_ref, state, fencing_token) VALUES (?, 'demo', ?, ?, 'main', 'idle', 1)")
         .run(id, join(home.path, "worktrees", branch), branch);
-      store.db.$client
-        .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'demo', ?, '', ?, 'main', '', 'merged', 0, 1)")
-        .run(`pr_${id}`, number, branch);
+      seedPr(store, { id: `pr_${id}`, repoId: "demo" as RepoId, number, headRef: branch, state: "merged" });
     };
     const states = () => store.db.$client.prepare("SELECT branch, state FROM workspaces ORDER BY branch").all();
     insert("wsp_a", "a", 1);

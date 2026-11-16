@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { agentSessions, stepRuns } from "../store/schema";
-import { harness as createHarness, okReport } from "./harness";
+import { harness as createHarness, okReport } from "../testing/flows-harness";
 
 // El apagado del core (`Engine.close({ graceMs })`): no toma pasos nuevos, interrumpe a los agentes de
 // inmediato, da una gracia a las acciones y deja cada paso cortado en pending, listo para el próximo arranque.

@@ -5,8 +5,8 @@ import { z } from "zod";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { createRouter } from "./router";
-import { apiDeps, withPrs } from "./testing";
-import { WAIT } from "../flows/harness";
+import { apiDeps, withPrs } from "../testing/router-deps";
+import { WAIT } from "../testing/flows-harness";
 
 // `runs.pause|resume|cancel|interrupt|retryStep|steerStep|forceOutcome` sobre un motor real con acciones
 // que esperan hasta que se las aborta.

@@ -8,7 +8,7 @@ import { createArtifacts } from "../artifacts/artifacts";
 import { createDefs, type Defs } from "../defs/defs";
 import { createFlows } from "../flows/flows";
 import { openStore, type Store } from "../store/store";
-import { JUGUETE_TEMPLATE } from "./juguete";
+import { JUGUETE_TEMPLATE } from "../testing/juguete";
 import { installBuiltins } from "./install";
 
 let store: Store | undefined;

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { FlowDef } from "@clanker/api";
 import { createLearnings } from "../learnings/learnings";
 import { newId } from "../store/conventions";
-import { harness as createHarness } from "./harness";
+import { harness as createHarness } from "../testing/flows-harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {

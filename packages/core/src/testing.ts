@@ -9,4 +9,5 @@ export { healthyGitHub, recorded, startFakeGitHub } from "./testing/github/fake-
 export type { FakeGitHub, FakeRequest, RecordedResponse } from "./testing/github/fake-github";
 export { defaultBranchChecksData, graphqlNotFound, prGraphql } from "./testing/github/fake-pr-graphql";
 export type { DefaultBranchCommit } from "./testing/github/fake-pr-graphql";
-export { JUGUETE_FLOW, JUGUETE_PROFILE, JUGUETE_ROLE, JUGUETE_TEMPLATE } from "./builtin/juguete";
+export { JUGUETE_FLOW, JUGUETE_PROFILE, JUGUETE_ROLE, JUGUETE_TEMPLATE } from "./testing/juguete";
+export { seedPr, type SeedPr } from "./testing/pull-requests";

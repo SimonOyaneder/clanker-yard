@@ -7,7 +7,7 @@ import { createRouterClient, ORPCError } from "@orpc/server";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createRouter } from "../server/router";
-import { apiDeps, withPrs } from "../server/testing";
+import { apiDeps, withPrs } from "../testing/router-deps";
 import { openStore, type Store } from "../store/store";
 import { syncCursors } from "../store/schema";
 import { createIssues } from "../tracker/issues";

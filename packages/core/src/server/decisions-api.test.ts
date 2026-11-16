@@ -1,12 +1,12 @@
 import { createRouterClient } from "@orpc/server";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { openDecision } from "../decisions/decisions";
-import { newId } from "../store/conventions";
-import { mergeOffers, pullRequests } from "../store/schema";
+import { mergeOffers} from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { createRouter } from "./router";
-import { apiDeps, withPrs } from "./testing";
+import { apiDeps, withPrs } from "../testing/router-deps";
+import { seedPr } from "../testing/pull-requests";
 
 let store: Store;
 let deps: ReturnType<typeof apiDeps>;
@@ -30,12 +30,8 @@ function api(origin: "ui" | "cli" | "mcp") {
 
 /** Una oferta de merge como la deja `startMergeReactions`: una `question` sin corrida y su fila en `merge_offers`. */
 function mergeOffer() {
+  const prId = seedPr(store, { repoId: "repo_00000000000000000000000001", number: 1, headRef: "one", headSha: "a".repeat(40) });
   return store.tx((tx) => {
-    const prId = newId("pr");
-    tx.db
-      .insert(pullRequests)
-      .values({ id: prId, repoId: "repo_00000000000000000000000001", number: 1, nodeId: "PR_1", headRef: "one", baseRef: "main", headSha: "a".repeat(40), state: "open", isDraft: false, owned: true })
-      .run();
     const decision = openDecision(tx, { kind: "question", title: "¿Mergeo #1?", body: "Está listo para mergear.", options: ["Comentar /merge", "Todavía no"], subject: { type: "pr", id: prId } });
     tx.db.insert(mergeOffers).values({ decisionId: decision.id, prId, headSha: "a".repeat(40) }).run();
     return decision;

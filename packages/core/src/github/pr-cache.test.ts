@@ -4,7 +4,7 @@ import { prParents, pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createRepos, type Repos } from "../repos/repos";
 import { createPrCache, type PrCache, type PrCacheDeps, type RestPull } from "./pr-cache";
-import { prNode } from "./pr-fixtures";
+import { prNode } from "../testing/github/pr-fixtures";
 import { buildPrState } from "./pr-state";
 
 const ACCOUNT = "octocat";
