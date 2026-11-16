@@ -110,10 +110,12 @@ function ctx(): ActionCtx {
 
 const newIssue = (title = "Con dos padres") => issues.createLocal({ projectId, title }, "cli");
 
-/** Un PR del sistema: `branch` sale de `base` con un commit que escribe `files`, publicado en draft. */
-async function openPr(branch: string, base: string, files: Record<string, string>, issue?: CachedIssue): Promise<{ number: number; body: string }> {
+/** Un PR del sistema: `branch` sale de `base` con un commit que escribe `files`, publicado en draft (`beforePublish` corre justo antes). */
+async function openPr(branch: string, base: string, files: Record<string, string>, issue?: CachedIssue, beforePublish?: () => void): Promise<{ number: number; body: string }> {
   const lease = await workspaces.acquire({ repo: "r1", branch, base, runId: newId("run") });
   for (const [path, content] of Object.entries(files)) writeFileSync(join(lease.path, path), content);
+  // Lo que pasa en GitHub mientras la corrida trabaja, antes de que publique.
+  beforePublish?.();
   const { workspaceId, path, baseSha, fencingToken } = lease;
   const published = await publish.run(
     publish.args.parse({
@@ -248,6 +250,85 @@ describe("pr.publish sobre una base combinada", () => {
   });
 });
 
+describe("pr.publish con un padre que se mergeó antes de publicar", () => {
+  /** El PR `number` mergeado a `main` con squash, como lo haría GitHub, antes de que el hijo publique. */
+  const mergeParent = (branch: string, number: number) => () => void github.pr(number).merge({ sha: squashOnMain(branch) });
+  const prBase = (number: number) => github.pulls().find((p) => p.number === number)?.base.ref;
+
+  test("un PR apilado sobre un padre ya mergeado se rehace sobre la branch por defecto y no cuelga de nadie", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nuno\na3\n" });
+    const mainBefore = git("rev-parse", "main");
+
+    const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\ndos\n" }, undefined, mergeParent("cla-1", 1));
+
+    expect(prBase(child.number)).toBe("main");
+    // La branch publicada trae solo su commit propio sobre el squash del padre, sin los commits del padre.
+    const squash = git("--git-dir", repo.remoteDir!, "rev-parse", "refs/heads/main");
+    expect(squash).not.toBe(mainBefore);
+    expect(remoteLog(`${squash}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${squash}`);
+    expect(sql(`SELECT * FROM pr_parents`)).toEqual([]);
+    expect(sql(`SELECT base_ref, remote_sha FROM workspaces WHERE branch = 'cla-2'`)).toEqual([{ base_ref: "main", remote_sha: remoteSha("cla-2") }]);
+    expect(sql(`SELECT * FROM decisions`)).toEqual([]);
+  });
+
+  test("con una base combinada, un padre mergeado sale de la base y el PR apunta al que queda", async () => {
+    const { issue, branch, parents } = await twoParents();
+    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+
+    const child = await openPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, issue, mergeParent("cla-1", 1));
+
+    expect(prBase(child.number)).toBe("cla-2");
+    expect(parentsOf(branch)).toEqual(["cla-2"]);
+    const { head_sha: head, status } = row(branch)!;
+    expect(status).toBe("active");
+    expect(localRef(branch)).toBe(head);
+    expect(remoteLog(`${head}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${head}`);
+    expect(sql(`SELECT parent.number AS parent FROM pr_parents JOIN pull_requests parent ON parent.id = parent_id`)).toEqual([{ parent: 2 }]);
+    expect(sql(`SELECT base_ref FROM workspaces WHERE branch = 'cla-3'`)).toEqual([{ base_ref: branch }]);
+    // El cuerpo no promete una base combinada con un solo padre.
+    expect(github.pulls().find((p) => p.number === child.number)?.body).not.toContain("Base combinada");
+  });
+
+  test("con una base combinada y todos los padres mergeados, la base se disuelve y el PR sale sobre la branch por defecto", async () => {
+    const { issue, branch, parents } = await twoParents();
+    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+
+    const child = await openPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, issue, () => {
+      mergeParent("cla-1", 1)();
+      mergeParent("cla-2", 2)();
+    });
+
+    expect(prBase(child.number)).toBe("main");
+    expect(row(branch)?.status).toBe("dissolved");
+    expect(() => localRef(branch)).toThrow();
+    const main = git("--git-dir", repo.remoteDir!, "rev-parse", "refs/heads/main");
+    expect(remoteLog(`${main}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${main}`);
+    expect(sql(`SELECT * FROM pr_parents`)).toEqual([]);
+    expect(sql(`SELECT base_ref FROM workspaces WHERE branch = 'cla-3'`)).toEqual([{ base_ref: "main" }]);
+  });
+
+  test("si sus commits no caben sobre la base nueva, nada se pierde: el PR sale sobre la branch por defecto y queda una nota", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nuno\na3\n" });
+    const merge = () => {
+      // `main` cambió la misma línea que el hijo toca sobre el padre.
+      elsewhere((g, dir) => {
+        g("checkout", "--quiet", "main");
+        writeFileSync(join(dir, "a.txt"), "a1\notro\na3\n");
+        g("commit", "--quiet", "--all", "--message", "fix: a");
+        g("push", "--quiet", "origin", "main");
+      });
+      github.pr(1).merge({ sha: git("--git-dir", repo.remoteDir!, "rev-parse", "refs/heads/main") });
+    };
+
+    const child = await openPr("cla-2", "cla-1", { "a.txt": "a1\nuno\nhijo\n" }, undefined, merge);
+
+    expect(prBase(child.number)).toBe("main");
+    // La branch se publicó tal cual: con la historia del padre y su commit encima.
+    expect(remoteLog(`main..cla-2`)).toBe("feat: cla-2\nfeat: cla-1");
+    expect(sql(`SELECT kind, title FROM decisions`)).toEqual([{ kind: "note", title: expect.stringContaining("cla-2") }]);
+  });
+});
+
 describe("stack.restack con una base combinada", () => {
   /** Los dos padres, la base combinada y el PR de `cla-3` sobre ella. */
   async function combinedPr() {
@@ -336,5 +417,38 @@ describe("stack.restack con una base combinada", () => {
     expect(row(branch)?.status).toBe("conflict");
     expect(sql(`SELECT kind, title FROM decisions`)).toEqual([{ kind: "note", title: expect.stringContaining(`#${child}`) }]);
     expect(sql(`SELECT * FROM events WHERE type = 'pr.conflict'`)).toEqual([]);
+  });
+
+  test("una fila vieja de la issue no frena el restack de un PR relanzado a mano sobre un solo padre: se retira y se restackea normal", async () => {
+    const { issue, branch, parents } = await twoParents();
+    // La corrida anterior de la issue dejó su base combinada activa; la relanzaron a mano apilada sobre `cla-1`.
+    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    const child = await openPr("cla-3", "cla-1", { "c.txt": "c1\ntres\n" }, issue);
+    const squash = squashOnMain("cla-1");
+    github.pr(1).merge({ sha: squash });
+
+    const result = await run(1);
+
+    expect(result.outcome).toBe("ok");
+    expect(result.output).toMatchObject({ children: [{ pr: { number: child.number }, branch: "cla-3", status: "restacked", commits: 1, base: "main" }] });
+    expect(remoteLog(`${squash}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${squash}`);
+    expect(prBase(child.number)).toBe("main");
+    expect(row(branch)?.status).toBe("dissolved");
+    expect(() => localRef(branch)).toThrow();
+    expect(sql(`SELECT * FROM pr_parents`)).toEqual([]);
+  });
+
+  test("la fila vieja se conserva si otro PR abierto de la issue podría seguir usándola", async () => {
+    const { issue, branch, parents } = await twoParents();
+    await workspaces.combineBase({ repo: "r1", issueId: issue.id, branch, parents });
+    await openPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, issue);
+    await openPr("cla-4", "cla-1", { "c.txt": "c1\ncuatro\n" }, issue);
+    github.pr(1).merge({ sha: squashOnMain("cla-1") });
+
+    const result = await run(1);
+
+    const { children } = result.output as { children: { branch: string; status: string; base?: string }[] };
+    expect(children.find((c) => c.branch === "cla-4")).toMatchObject({ status: "restacked", base: "main" });
+    expect(row(branch)?.status).toBe("active");
   });
 });

@@ -207,6 +207,52 @@ describe("el repo de la issue", () => {
     expect(await client.projects.queue({ id: project.id })).toEqual([]);
   });
 
+  test("una issue de dos repos con base combinada en cada uno corre en los dos y el tick sigue con el resto", async () => {
+    const files = { "a.txt": "a\n", "b.txt": "b\n" };
+    repo.cleanup();
+    other.cleanup();
+    repo = tempGitRepo({
+      commits: [{ message: "chore: base", files }],
+      branches: { "cla-1": [{ message: "feat: uno", files: { "a.txt": "uno\n" } }], "cla-2": [{ message: "feat: dos", files: { "b.txt": "dos\n" } }] },
+    });
+    other = tempGitRepo({
+      commits: [{ message: "chore: base", files }],
+      branches: { "cla-3": [{ message: "feat: tres", files: { "a.txt": "tres\n" } }], "cla-4": [{ message: "feat: cuatro", files: { "b.txt": "cuatro\n" } }] },
+    });
+    const client = await boot();
+    const { project, front, back } = await twoRepoProject(client);
+    await client.projects.update({ id: project.id, status: "paused" });
+    const local = createLocalTracker(store);
+    const blockers = [];
+    for (const title of ["uno", "dos", "tres", "cuatro"]) blockers.push(await local.createIssue(project.id, { title, status: "in_progress" }));
+    const both = await client.issues.createLocal({ projectId: project.id, title: "Cruza con dos padres en cada repo", labels: ["backend", "frontend"] });
+    const free = await client.issues.createLocal({ projectId: project.id, title: "Libre", labels: ["backend"] });
+    for (const blocker of blockers) await local.relate(blocker.ref, "blocks", both.ref);
+    const cache = createIssues(store, local);
+    await cache.sync(local, { projectId: project.id, project: { tracker: "local", id: project.id } }, "cli");
+    // Dos PRs abiertos de los bloqueantes en cada repo: la issue sale de una base combinada en los dos.
+    for (const [i, blocker] of blockers.entries()) {
+      const issueId = cache.list({ projectId: project.id }).find((issue) => issue.ref.id === blocker.ref.id)!.id;
+      store.db.$client
+        .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, issue_id, owned) VALUES (?, ?, ?, ?, ?, 'main', 'abc', 'open', 1, ?, 1)")
+        .run(newId("pr"), i < 2 ? front : back, 20 + i, `n${i}`, `cla-${i + 1}`, issueId);
+    }
+
+    await client.projects.update({ id: project.id, status: "active", stackOn: "any_open" });
+
+    const branch = combinedBaseBranch(both.ref.key);
+    await until(async () => {
+      const runs = (await client.runs.list({ projectId: project.id })).filter((r) => r.subject.id === both.id);
+      expect(runs.map((r) => [r.params.repo, r.params.base, r.status]).sort()).toEqual(
+        [[front, branch, "done"], [back, branch, "done"]].sort(),
+      );
+      expect((await client.runs.list({ projectId: project.id })).find((r) => r.subject.id === free.id)?.status).toBe("done");
+    });
+    expect(store.db.$client.prepare("SELECT repo_id, status FROM combined_bases WHERE branch = ? ORDER BY repo_id").all(branch)).toEqual(
+      [{ repo_id: front, status: "active" }, { repo_id: back, status: "active" }].sort((a, b) => a.repo_id.localeCompare(b.repo_id)),
+    );
+  });
+
   test("una issue ambigua deja una decisión con los repos y corre en el que se elige", async () => {
     const client = await boot();
     const { project, back } = await twoRepoProject(client);

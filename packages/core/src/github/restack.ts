@@ -9,7 +9,7 @@ import { git, GitError, isAncestor, tryGit } from "../git/git";
 import { combinedBases, prParents, pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
 import { emitOnce } from "../watch/marks";
-import { AttachError, RebaseError, type BaseConflict, type RepoConfig, type RestackResult, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
+import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RepoConfig, type RestackResult, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
 import type { Prs } from "./prs";
 
@@ -219,8 +219,7 @@ async function restackChain(
       throw error;
     }
     try {
-      const combined = combinedBaseOf(child);
-      const { result, base: toBase, conflict } = combined ? await restackCombined(lease, combined, merged) : await restackPlain(lease, start);
+      const { result, base: toBase, conflict } = await restackAttempt(lease, child, start, merged);
       switch (result.outcome) {
         case "restacked":
           return {
@@ -276,6 +275,28 @@ async function restackChain(
     } finally {
       workspaces.release(lease);
     }
+  }
+
+  /**
+   * La base combinada de la issue solo vale si el PR salió de ella. Una fila vieja (la issue se relanzó a mano sobre
+   * otra base y el PR cuelga de un solo padre) se retira y el PR se restackea como cualquier PR apilado.
+   */
+  async function restackAttempt(lease: WorkspaceRef, child: PrRow, start: Start, merged: string | undefined): Promise<Attempt> {
+    const combined = combinedBaseOf(child);
+    if (!combined) return restackPlain(lease, start);
+    try {
+      return await restackCombined(lease, combined, merged);
+    } catch (error) {
+      if (!(error instanceof StaleCombinedBaseError)) throw error;
+    }
+    // Otro PR abierto de la misma issue en el repo puede seguir usándola: ese la recalcula en su restack.
+    const others = store.db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.issueId, combined.issueId), eq(pullRequests.state, "open"), ne(pullRequests.id, child.id)))
+      .all();
+    if (others.length === 0) await workspaces.dissolveBase(repoId, combined.branch);
+    return restackPlain(lease, start);
   }
 
   async function restackPlain(lease: WorkspaceRef, start: Start): Promise<Attempt> {

@@ -312,7 +312,8 @@ export interface CombinedBaseParent {
  * La base sintética de una issue con dos o más padres (`docs/design.html#d-ops`, "Bases combinadas"): la
  * branch local `clanker/base/<issue>` con la punta de la branch por defecto (`default_sha`) y un merge de cada
  * padre, en orden (`parents`: el primero es la base del PR en GitHub). Guarda con qué se armó, para
- * recalcularla cuando se mergea un padre. `head_sha` es la última punta que quedó aplicada (NULL si la base
+ * recalcularla cuando se mergea un padre. Una issue de varios repos tiene una por repo (la branch sintética se llama
+ * igual en todos). `head_sha` es la última punta que quedó aplicada (NULL si la base
  * nunca se pudo armar): un restack parte de ahí, así que un `conflict` al recalcular no la pisa.
  */
 export const combinedBases = sqliteTable(
@@ -330,7 +331,7 @@ export const combinedBases = sqliteTable(
   },
   (t) => [
     primaryKey({ columns: [t.repoId, t.branch] }),
-    uniqueIndex("combined_bases_issue").on(t.issueId),
+    uniqueIndex("combined_bases_repo_issue").on(t.repoId, t.issueId),
     check("combined_bases_parents_json", sql`json_valid(${t.parents})`),
   ],
 );

@@ -1,10 +1,11 @@
-import type { PrRef } from "@clanker/api";
+import type { PrRef, RunId } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { and, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
 import { ApplyArgs, cleanMessage, commitsApplyAction } from "../commits/apply";
 import { preparePush } from "../commits/prepare-push";
 import type { Connections } from "../connections/connections";
+import { openDecision } from "../decisions/decisions";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../flows/catalog";
 import { claimPr } from "../flows/subjects";
 import type { Packs } from "../packs/packs";
@@ -12,7 +13,7 @@ import type { Recipes } from "../recipe/recipe";
 import { newId } from "../store/conventions";
 import { type CombinedBaseParent, combinedBases, prParents, pullRequests, runs, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
-import type { RepoConfig, Workspaces } from "../workspaces/workspaces";
+import { RebaseError, type RepoConfig, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
 import { pushOrThrow } from "./push";
 
@@ -84,8 +85,11 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
       return { outcome: "replan", output: { failures: "El plan no tiene commits: no hay nada que publicar." } };
     }
 
+    // Un padre pudo mergearse mientras la corrida trabajaba: nadie recalcula una base que aún no tiene PR, así que se hace aquí.
+    const settled = await ctx.once("base", () => settleBase(deps, ctx.runId, ws, row, tip));
+
     const pushed = await ctx.once("push", async () => {
-      const prepared = await preparePush(workspaces, ws, { knownSha: tip, base: workspaces.baseSha(ws), council: false, messagePattern: args.messagePattern });
+      const prepared = await preparePush(workspaces, ws, { knownSha: settled.head, base: workspaces.baseSha(ws), council: false, messagePattern: args.messagePattern });
       if (prepared.outcome === "replan") return { replan: prepared.failures };
       if (prepared.outcome === "squash-failed") throw new PermanentActionError(prepared.failures);
       await pushOrThrow(workspaces, ws, remote.account, { council: false });
@@ -96,14 +100,7 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     const [owner = "", name = ""] = remote.repo.split("/");
     const pack = packs.packFor({ githubOrg: owner });
     const title = cleanMessage(plan.pr.title).split("\n")[0]!.trim();
-    // Con base combinada, el PR apunta al primer padre: GitHub admite una sola base y el resto viaja en los merges de la branch.
-    const combined = store.db
-      .select()
-      .from(combinedBases)
-      .where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, row.baseRef), eq(combinedBases.status, "active")))
-      .get();
-    const parents = combined?.parents ?? [];
-    const baseRef = parents[0]?.branch ?? row.baseRef;
+    const { baseRef, parents } = settled;
     const body = prBody(cleanMessage(plan.pr.body), pack.conventions.pr?.omitSections ?? [], args.dependsOn, parents);
 
     const pull = await ctx.once("pr", async () => {
@@ -131,6 +128,86 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     effects: "remote",
     run: publish,
   };
+}
+
+/** Con qué base y qué padres se abre el PR, y la punta de la branch (`head`, que cambia si hubo que rehacer la base). */
+interface SettledBase {
+  head: string;
+  baseRef: string;
+  parents: CombinedBaseParent[];
+}
+
+/**
+ * La base con que sale el PR. Con una base combinada el PR apunta al primer padre (GitHub admite una sola base y el
+ * resto viaja en los merges de la branch); apilado, a la branch de su padre. Si alguno de esos padres ya se mergeó o
+ * cerró (se pregunta a GitHub, no al caché: Watch puede ir atrás), la base se recalcula como lo haría `stack.restack`
+ * con los que siguen abiertos, o es la branch por defecto si no queda ninguno. Los commits propios (`tip` es el
+ * último) se rehacen sobre la base nueva antes de pushear nada, así que nada se fuerza. Si no se pueden rehacer
+ * (conflicto, merge de otra branch), la branch queda como estaba, el PR se abre igual sobre la base correcta, y
+ * una nota deja avisado; Watch levanta el conflicto si es real. Sin padres cerrados no cambia nada.
+ */
+async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, row: typeof workspaceRows.$inferSelect, tip: string): Promise<SettledBase> {
+  const { store, workspaces } = deps;
+  const { remote, defaultBranch } = deps.repos(row.repoId);
+  if (!remote) throw new PermanentActionError(`El repo ${row.repoId} no tiene remoto configurado: no se puede publicar.`);
+  const combined = store.db
+    .select()
+    .from(combinedBases)
+    .where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, row.baseRef), eq(combinedBases.status, "active")))
+    .get();
+  const declared = combined?.parents ?? [];
+  const unchanged = { head: tip, baseRef: declared[0]?.branch ?? row.baseRef, parents: declared };
+  const watched = combined ? declared.map((parent) => parent.branch) : row.baseRef === defaultBranch ? [] : [row.baseRef];
+  if (watched.length === 0) return unchanged;
+
+  const [owner = "", name = ""] = remote.repo.split("/");
+  const client = deps.connections.githubClient(remote.account);
+  const open = new Set<string>();
+  try {
+    for (const branch of watched) {
+      const { data } = await client.request("GET /repos/{owner}/{repo}/pulls", { owner, repo: name, head: `${owner}:${branch}`, state: "all" });
+      const pulls = z.array(z.object({ state: z.enum(["open", "closed"]) })).parse(data);
+      // Sin ningún PR no hay cómo saber que se mergeó: se deja como estaba.
+      if (pulls.length === 0 || pulls.some((pull) => pull.state === "open")) open.add(branch);
+    }
+  } catch (error) {
+    if (error instanceof RequestError && error.status === 401) deps.connections.markRevoked("github", remote.account, "core");
+    throw error;
+  }
+  if (watched.every((branch) => open.has(branch))) return unchanged;
+
+  if ((await workspaces.fetch(row.repoId)) === "unauthorized") {
+    throw new Error(`GitHub rechazó el token de ${remote.account}: reconecta la cuenta para publicar ${ws.branch}.`);
+  }
+  const parents = declared.filter((parent) => open.has(parent.branch));
+  const baseRef = parents[0]?.branch ?? defaultBranch;
+  let result;
+  try {
+    result = combined
+      ? await workspaces.restackCombined(ws, { council: false, branch: row.baseRef, parents })
+      : await workspaces.restack(ws, {
+          council: false,
+          onto: await workspaces.git(ws, "rev-parse", `refs/remotes/origin/${defaultBranch}`),
+          from: workspaces.baseSha(ws),
+          base: defaultBranch,
+        });
+  } catch (error) {
+    if (!(error instanceof RebaseError)) throw error;
+    result = { outcome: "error" as const, failures: error.message };
+  }
+  if (result.outcome === "restacked" || result.outcome === "uptodate") {
+    return { head: await workspaces.git(ws, "rev-parse", "HEAD"), baseRef, parents };
+  }
+  const why = "failures" in result ? result.failures : result.outcome;
+  store.tx((tx) =>
+    openDecision(tx, {
+      kind: "note",
+      title: `${ws.branch} sale sobre ${baseRef} sin recalcular su base`,
+      body: `Su base (${watched.join(", ")}) ya se mergeó o cerró y no se pudo rehacer la branch sobre ${baseRef}: ${why}. El PR se abre sobre ${baseRef} con la historia que tenía; si choca, el flujo de rebase por conflicto lo toma.`,
+      runId,
+    }),
+  );
+  return { head: tip, baseRef, parents };
 }
 
 async function findOpenPull(client: GitHubClient, owner: string, repo: string, branch: string): Promise<Pull | undefined> {

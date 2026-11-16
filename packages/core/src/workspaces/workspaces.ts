@@ -212,8 +212,9 @@ export interface Workspaces {
    * patch-id, y el resultado se pushea con lease antes de mover la branch local: un conflicto, un lease
    * rechazado o un corte antes del push dejan la branch y el remoto como estaban. Con la branch ya sobre
    * `onto` y sin `from` en su historia no hay nada que hacer (`uptodate`). Precondiciones, o lanza
-   * `RebaseError`: sin council, `HEAD` es el `remote_sha`, árbol limpio, sin un rebase en curso y `onto` y
-   * `from` existen. Guarda `base` como `baseRef` y `onto` como `baseSha`.
+   * `RebaseError`: sin council, `HEAD` es el `remote_sha` (o la branch no se ha publicado: entonces no
+   * se pushea nada, solo se mueve la local), árbol limpio, sin un rebase en curso y `onto` y `from`
+   * existen. Guarda `base` como `baseRef` y `onto` como `baseSha`.
    */
   restack(lease: WorkspaceRef, opts: RestackOptions): Promise<RestackResult>;
   /**
@@ -239,8 +240,8 @@ export interface Workspaces {
    * combinada) sobre la base nueva, como `restack`. Con `restacked` o `uptodate` la base nueva queda registrada
    * (y disuelta si no quedan padres) y el worktree guarda `branch` (o la branch por defecto) como base. Si los
    * padres que quedan ya no se pueden juntar es `base-conflict`: nada se mueve y la base queda en `conflict`.
-   * Mismas precondiciones que `restack`; lanza `RebaseError` si la base combinada no está vigente o su última
-   * punta ya no está en la historia del PR.
+   * Mismas precondiciones que `restack`; lanza `RebaseError` si la base combinada no está vigente y
+   * `StaleCombinedBaseError` (un `RebaseError`) si el PR no salió de ella: su última punta (o nunca hubo) no está en su historia.
    */
   restackCombined(lease: WorkspaceRef, opts: RestackCombinedOptions): Promise<RestackResult | BaseConflict>;
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
@@ -273,6 +274,12 @@ export class AttachError extends Error {}
 
 /** `rebase` no se puede hacer y reintentar no lo arregla (precondiciones, council, `from` que no calza). */
 export class RebaseError extends Error {}
+
+/**
+ * `restackCombined` de un PR que no salió de la base combinada registrada (una fila vieja: la issue se relanzó a
+ * mano sobre otra base): quien llama la retira y restackea como un PR apilado común.
+ */
+export class StaleCombinedBaseError extends RebaseError {}
 
 export interface RebaseOptions {
   /** El PR tuvo threads `[clanker-council]`: no se rebasea nunca. */
@@ -1020,7 +1027,9 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const run = (...args: string[]) => gitIn(lease, ...args);
     if (await rebaseInProgress(run)) throw new RebaseError(`${row.branch} tiene un rebase en curso: termínalo o abórtalo antes de un restack.`);
     const head = await run("rev-parse", "HEAD");
-    if (row.remoteSha === null || head !== row.remoteSha) {
+    // Sin `remote_sha` la branch aún no se publicó (el PR de `pr.publish` con su base ya mergeada): no hay nada que pisar ni que pushear.
+    const published = row.remoteSha !== null;
+    if (published ? head !== row.remoteSha : await refExists(repos(row.repoId), `refs/remotes/${REMOTE}/${row.branch}`)) {
       throw new RebaseError(
         `HEAD de ${row.branch} (${head.slice(0, 9)}) no es lo último que se pusheó (${row.remoteSha?.slice(0, 9) ?? "nada"}): ` +
           "rehacerlo pisaría o perdería commits. Retoma la branch con attach.",
@@ -1052,9 +1061,17 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       case "ok":
         break;
     }
-    const pushed = await pushSha(lease, row, plan.head, moved);
-    if (pushed !== "ok") return { outcome: pushed };
-    await run("reset", "--hard", plan.head);
+    if (published) {
+      const pushed = await pushSha(lease, row, plan.head, moved);
+      if (pushed !== "ok") return { outcome: pushed };
+      await run("reset", "--hard", plan.head);
+    } else {
+      // Primero la branch y luego la fila: un corte entre los dos se reintenta como `uptodate` y la completa.
+      await run("reset", "--hard", plan.head);
+      store.tx(({ db }) =>
+        db.update(workspaces).set({ ...moved, headSha: plan.head }).where(and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, lease.fencingToken))).run(),
+      );
+    }
     return { outcome: "restacked", previousHead: head, head: plan.head, commits: plan.commits };
   }
 
@@ -1237,22 +1254,23 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const row = rowOf(lease);
     const cfg = repos(row.repoId);
     const combined = combinedRow(row.repoId, branch);
-    if (combined === undefined || combined.status === "dissolved" || combined.headSha === null) {
+    if (combined === undefined || combined.status === "dissolved") {
       throw new RebaseError(`${row.branch} no tiene una base combinada vigente (${branch}): no se sabe cuál fue la última punta de su base.`);
     }
+    if (combined.headSha === null) throw new StaleCombinedBaseError(`La base combinada ${branch} nunca se armó: ${row.branch} no salió de ella.`);
     const defaultSha = await resolveBase(cfg, cfg.defaultBranch);
     const tips = await tipsOf(cfg, parents);
     const plan = tips.length === 0 ? { status: "ok" as const, head: defaultSha } : await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity });
+    // El PR sale de esta base si su historia trae la última punta registrada o, si un corte llegó entre el push y el registro, la que ya se recalculó.
+    const head = await gitIn(lease, "rev-parse", "HEAD");
+    if (!(await isAncestor(lease.path, combined.headSha, head)) && (plan.status === "conflict" || !(await isAncestor(lease.path, plan.head, head)))) {
+      throw new StaleCombinedBaseError(`La última punta de la base combinada ${branch} (${combined.headSha.slice(0, 9)}) no está en la historia de ${row.branch}: el PR no salió de ella.`);
+    }
     if (plan.status === "conflict") {
       store.tx(({ db }) => db.update(combinedBases).set({ status: "conflict" }).where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, branch))).run());
       return { outcome: "base-conflict", parent: plan.parent.key, merged: plan.merged, files: plan.conflicts, failures: plan.failures };
     }
 
-    // Sin esto `from..HEAD` abarcaría toda la historia: pasa si la base combinada se rehízo y el PR no la tiene (un corte entre el push y el registro).
-    const head = await gitIn(lease, "rev-parse", "HEAD");
-    if (!(await isAncestor(lease.path, plan.head, head)) && !(await isAncestor(lease.path, combined.headSha, head))) {
-      throw new RebaseError(`La última punta de la base combinada ${branch} (${combined.headSha.slice(0, 9)}) no está en la historia de ${row.branch}: no se sabe cuáles son sus commits propios.`);
-    }
     const result = await restack(lease, { council, onto: plan.head, from: combined.headSha, base: tips.length === 0 ? cfg.defaultBranch : branch });
     if (result.outcome !== "restacked" && result.outcome !== "uptodate") return result;
     if (tips.length === 0) {
