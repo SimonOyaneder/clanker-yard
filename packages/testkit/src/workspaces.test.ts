@@ -59,7 +59,7 @@ function workspacesOn(store: Store, worktreeSetup?: (dir: string) => readonly st
     store,
     dataDir,
     repos: (id) => ({ path: repoById.get(id)!.dir, defaultBranch: "main", protectedBranches: ["release"] }),
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     worktreeSetup,
     now: () => clock,
   });
@@ -330,7 +330,7 @@ describe("fencing", () => {
     await workspaces.git(lease, "commit", "--allow-empty", "-m", "feat: algo");
 
     const who = await workspaces.git(lease, "log", "-1", "--format=%an <%ae> / %cn <%ce>");
-    expect(who).toBe("Clanker Yard <yard@clanker.invalid> / Clanker Yard <yard@clanker.invalid>");
+    expect(who).toBe("Ana Pérez <ana@example.com> / Ana Pérez <ana@example.com>");
   });
 });
 
@@ -620,7 +620,7 @@ describe("recover y extendLeases", () => {
       store,
       dataDir,
       repos: (repoId) => ({ path: repoById.get(repoId)!.dir, defaultBranch: "main", protectedBranches: [] }),
-      identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+      identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
       procs,
       now: () => clock,
     });

@@ -203,7 +203,7 @@ describe("start", () => {
 
   test("lanza el SDK con el entorno sin credenciales y con GH_CONFIG_DIR vacío", async () => {
     const { query, calls } = fakeQuery([init(), success()]);
-    const run = await runtimeWith(query).start(spec());
+    const run = await runtimeWith(query).start(spec({ gitIdentity: { name: "Ana Pérez", email: "ana@example.com" } }));
     await run.result;
 
     const env = calls[0]?.options.env ?? {};
@@ -212,9 +212,17 @@ describe("start", () => {
     expect(env.GH_CONFIG_DIR).toBe(join(home, "agent-env", "gh"));
     expect(await readdir(env.GH_CONFIG_DIR ?? "")).toEqual([]);
     expect(await readFile(env.GIT_CONFIG_GLOBAL ?? "", "utf8")).toBe(
-      '[user]\n\tname = "Clanker Yard"\n\temail = "clanker@localhost"\n[credential]\n\thelper =\n',
+      '[user]\n\tname = "Ana Pérez"\n\temail = "ana@example.com"\n[credential]\n\thelper =\n',
     );
     expect(calls[0]?.options.pathToClaudeCodeExecutable).toBe("/bin/claude");
+  });
+
+  test("sin identidad no configura autor: nunca inventa uno del sistema", async () => {
+    const { query, calls } = fakeQuery([init(), success()]);
+    const run = await runtimeWith(query).start(spec());
+    await run.result;
+
+    expect(await readFile(calls[0]?.options.env?.GIT_CONFIG_GLOBAL ?? "", "utf8")).toBe("[credential]\n\thelper =\n");
   });
 
   test("deja vacío GH_CONFIG_DIR aunque una corrida anterior haya escrito ahí", async () => {

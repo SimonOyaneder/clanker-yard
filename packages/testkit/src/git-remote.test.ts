@@ -79,7 +79,7 @@ async function setup(password = TOKEN, branches: Parameters<typeof tempGitRepo>[
       defaultBranch: "main",
       remote: { url: server!.url, repo: "octocat/secret-project", account: ACCOUNT },
     }),
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
     now: () => clock,
   });
@@ -235,7 +235,7 @@ describe("push", () => {
       store,
       dataDir,
       repos: () => ({ path: repo.dir, defaultBranch: "main" }),
-      identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+      identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     });
     await expect(bare.fetch("r1")).rejects.toThrow(/no tiene remoto configurado/);
   });

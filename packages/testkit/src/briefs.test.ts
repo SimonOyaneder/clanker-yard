@@ -51,7 +51,7 @@ beforeEach(async () => {
     store,
     dataDir,
     repos: () => ({ path: repo.dir, defaultBranch: "main" }),
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
   artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   briefs = createBriefs({ workspaces, artifacts });

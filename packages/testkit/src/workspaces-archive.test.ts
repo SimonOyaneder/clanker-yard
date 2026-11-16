@@ -78,7 +78,7 @@ beforeEach(async () => {
     store,
     dataDir: dir,
     repos: repos.config,
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote,
     now: () => clock,
   });

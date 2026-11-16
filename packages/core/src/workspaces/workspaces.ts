@@ -5,6 +5,7 @@ import { IssueId, type RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
 import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/catalog";
+import type { GitIdentity, GitIdentityOf } from "../git/identity";
 import { git, GitError, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { diffBetween, snapshotTree } from "../git/tree";
@@ -51,8 +52,8 @@ export interface WorkspacesOptions {
   /** Carpeta de los logs de comandos (`<logDir>/runs/<runId>/<stepId>.log`); por defecto `<dataDir>/logs`. */
   logDir?: string;
   repos: (repoId: string) => RepoConfig;
-  /** Autor y committer de todo lo que corre `git` en un worktree. */
-  identity: { name: string; email: string };
+  /** Autor y committer de todo lo que corre `git` en un worktree: la identidad de git del usuario en ese repo. */
+  identityOf: GitIdentityOf;
   /** Quien pushea y fetchea; sin él `push` y `fetch` lanzan. */
   remote?: GitRemote;
   /** Donde se registran los comandos de `exec`, para matar los que deje un crash. */
@@ -360,7 +361,7 @@ export type SyncBaseResult =
     };
 
 export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
-  const { store, dataDir, repos, identity, remote, procs, worktreeSetup, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
+  const { store, dataDir, repos, identityOf, remote, procs, worktreeSetup, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
   const logDir = opts.logDir ?? defaultLogDir(dataDir);
   const heartbeats = new Map<string, { timer: NodeJS.Timeout; workspaceId: string; runId: RunId; token: number }>();
   const repoLocks = new Map<string, Promise<unknown>>();
@@ -790,15 +791,16 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
 
   /** Corre `git` en el worktree con autor y committer en el entorno, después de validar el token. */
   async function gitIn(lease: WorkspaceRef, ...args: string[]): Promise<string> {
-    validate(lease);
+    const { repoId } = rowOf(lease);
+    const identity = await identityOf(repoId);
     return git(lease.path, args, {
       GIT_AUTHOR_NAME: identity.name,
       GIT_AUTHOR_EMAIL: identity.email,
-      ...committerEnv(),
+      ...committerEnv(identity),
     });
   }
 
-  function committerEnv(): Record<string, string> {
+  function committerEnv(identity: GitIdentity): Record<string, string> {
     return { GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email };
   }
 
@@ -1050,7 +1052,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       return { outcome: "uptodate" };
     }
 
-    const plan = await planRestack((args, env, input) => git(lease.path, args, env, input), { onto, from, committer: committerEnv() });
+    const plan = await planRestack((args, env, input) => git(lease.path, args, env, input), { onto, from, committer: committerEnv(await identityOf(row.repoId)) });
     switch (plan.status) {
       case "empty":
         return { outcome: "empty" };
@@ -1222,7 +1224,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return withRepoLock(repo, async () => {
       const defaultSha = await resolveBase(cfg, cfg.defaultBranch);
       const tips = await tipsOf(cfg, parents);
-      const plan = await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity });
+      const plan = await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity: await identityOf(repo) });
       const previous = combinedRow(repo, branch);
       const values = { repoId: repo, branch, issueId, defaultSha, parents: tips };
       const save = (row: { headSha: string | null; status: "active" | "conflict" }) =>
@@ -1260,7 +1262,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     if (combined.headSha === null) throw new StaleCombinedBaseError(`La base combinada ${branch} nunca se armó: ${row.branch} no salió de ella.`);
     const defaultSha = await resolveBase(cfg, cfg.defaultBranch);
     const tips = await tipsOf(cfg, parents);
-    const plan = tips.length === 0 ? { status: "ok" as const, head: defaultSha } : await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity });
+    const plan = tips.length === 0 ? { status: "ok" as const, head: defaultSha } : await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity: await identityOf(row.repoId) });
     // El PR sale de esta base si su historia trae la última punta registrada o, si un corte llegó entre el push y el registro, la que ya se recalculó.
     const head = await gitIn(lease, "rev-parse", "HEAD");
     if (!(await isAncestor(lease.path, combined.headSha, head)) && (plan.status === "conflict" || !(await isAncestor(lease.path, plan.head, head)))) {

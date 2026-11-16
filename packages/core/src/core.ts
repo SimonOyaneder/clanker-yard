@@ -33,6 +33,7 @@ import {
   workspaceRebaseAbortAction,
   workspaceRebaseAction,
 } from "./github/rebase-pr";
+import { createGitIdentityOf } from "./git/identity";
 import { githubRemote } from "./github/remote-config";
 import { createPacks } from "./packs/packs";
 import { createLinearTracker } from "./linear/tracker";
@@ -81,9 +82,6 @@ const SETTLE_MS = 5_000;
 
 /** Con Watch encendido, cada cuánto se sondea un wait además de sus señales: la reconciliación de 10 min del diseño. */
 const WATCH_SAFETY_PROBE_SEC = 600;
-
-/** Autor y committer de lo que el core hace con git en un worktree. */
-const GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
 
 export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion" | "onShutdown" | "allowedOrigins" | "uiKeyHash" | "dev"> {
   store: Store;
@@ -150,7 +148,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const defs = createDefs(store);
   const packs = createPacks({ defs, installedDir: opts.packsDir ?? join(dataDir, "packs"), factoryDir: opts.factoryPacksDir });
   const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
-  const agents = createAgents({ store, defs, runtime, packs, remoteOf: (repoId) => repos.get(repoId)?.remote });
+  const identityOf = createGitIdentityOf({ repos: repos.config, connections: opts.connections });
+  const agents = createAgents({ store, defs, runtime, packs, remoteOf: (repoId) => repos.get(repoId)?.remote, identityOf });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const slots = createSlots({ store });
   const askpass = createAskpass();
@@ -159,7 +158,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     store,
     dataDir,
     repos: repos.config,
-    identity: GIT_IDENTITY,
+    identityOf,
     procs,
     remote: gitRemote,
     worktreeSetup: (dir) => readRecipe(dir)?.setup?.worktree ?? [],
@@ -341,7 +340,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     packs,
     repos,
     repoConfigSync,
-    repoConfigExport: createRepoConfigExporter({ defs, repos, config: repos.config, remote: gitRemote, connections: opts.connections, dataDir, identity: GIT_IDENTITY }),
+    repoConfigExport: createRepoConfigExporter({ defs, repos, config: repos.config, remote: gitRemote, connections: opts.connections, dataDir, identityOf }),
     projectConfigs: createProjectConfigs({ projects, repos, defs }),
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
     runs,

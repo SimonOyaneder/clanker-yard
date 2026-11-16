@@ -50,7 +50,7 @@ beforeEach(() => {
     store,
     dataDir,
     repos: () => ({ path: repo.dir, defaultBranch: "main", remote: { url: "sin-uso", repo: "simon/sin-uso", account: "simon" } }),
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote,
   });
 });

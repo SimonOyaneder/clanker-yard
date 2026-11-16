@@ -124,7 +124,7 @@ beforeEach(async () => {
   const events = createPrEvents({
     store,
     repos,
-    workspaces: createWorkspaces({ store, dataDir: dir, repos: repos.config, identity: { name: "Clanker Yard", email: "yard@clanker.invalid" }, remote: gitRemote }),
+    workspaces: createWorkspaces({ store, dataDir: dir, repos: repos.config, identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }), remote: gitRemote }),
     errors,
     now: () => clock,
   });

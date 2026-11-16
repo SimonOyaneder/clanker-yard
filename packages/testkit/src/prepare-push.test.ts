@@ -21,7 +21,7 @@ beforeEach(async () => {
     store,
     dataDir,
     repos: () => ({ path: repo.dir, defaultBranch: "main" }),
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
   lease = await workspaces.acquire({ repo: "r1", branch: "cla-47", base: "main", runId: newId("run") });
 });

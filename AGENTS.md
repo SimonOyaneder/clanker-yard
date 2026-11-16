@@ -127,6 +127,8 @@ Un pack (`docs/design.html#packs`) es lo propio de una org (señales de PR, bot 
 
 ## Git remoto (push y fetch)
 
+Los commits salen con la identidad de git del usuario en ese repo (o su noreply de GitHub), nunca con una identidad del sistema (`createGitIdentityOf`, `packages/core/src/git/identity.ts`).
+
 Solo el core habla con el remoto, y el token nunca llega al entorno de git ni de los hooks del repo: `createGitRemote` (`packages/core/src/git/remote.ts`) corre push y fetch con una URL explícita, sin credential helper y con un `GIT_ASKPASS` que cambia un ticket de un uso por el token a través de un socket del core. Ese git hereda solo `INHERITED_ENV` y el fetch corre sin hooks. Se usa a través de `workspaces.push(lease)` (`--force-with-lease` contra `remote_sha`) y `workspaces.fetch(repo)`. Los tests (`packages/testkit/src/git-remote.test.ts`) usan un servidor git HTTP local con Basic auth: nunca GitHub ni tokens reales.
 
 ## Estado de un PR

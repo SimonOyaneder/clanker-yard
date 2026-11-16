@@ -93,7 +93,7 @@ beforeEach(async () => {
     store,
     dataDir,
     repos,
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
   });
   defs = createDefs(store);

@@ -52,7 +52,7 @@ beforeEach(() => {
     store,
     dataDir,
     repos: () => ({ path: repo!.dir, defaultBranch: "main" }),
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
   slots = createSlots({ store });
   recipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts, slots });

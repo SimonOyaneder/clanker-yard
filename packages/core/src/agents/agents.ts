@@ -17,6 +17,7 @@ import { git } from "../git/git";
 import type { Packs } from "../packs/packs";
 import { newId } from "../store/conventions";
 import { agentSessions, agentTurns, stepUsage, type DefPin } from "../store/schema";
+import type { GitIdentityOf } from "../git/identity";
 import type { Store, Tx } from "../store/store";
 import { LEARNING_PROMPT } from "../learnings/criteria";
 import { createContextResolver, type ContextResolver } from "./context";
@@ -123,6 +124,8 @@ export interface AgentsOptions {
   remoteOf?: (repoId: string) => string | null | undefined;
   /** Dónde se buscan `skill:` y `rule:`; por defecto el `~/.claude` del usuario. */
   userDir?: string;
+  /** La identidad de git del repo, para los commits que hace el agente; sin ella el runtime no configura autor. */
+  identityOf?: GitIdentityOf;
   /** Por defecto `PREFIX_WAIT_MS`; los tests lo acortan. */
   prefixWaitMs?: number;
 }
@@ -130,7 +133,7 @@ export interface AgentsOptions {
 /** El mismo esquema que valida el reporte, hecho JSON Schema; el outcome y el payload los pone el modo. */
 const reportEnvelope = z.toJSONSchema(Report) as JsonSchema & { properties: Record<string, unknown> };
 
-export function createAgents({ store, defs, runtime, now = Date.now, packs, remoteOf, userDir, prefixWaitMs = PREFIX_WAIT_MS }: AgentsOptions): Agents {
+export function createAgents({ store, defs, runtime, now = Date.now, packs, remoteOf, userDir, identityOf, prefixWaitMs = PREFIX_WAIT_MS }: AgentsOptions): Agents {
   defs.register("role", Role);
   defs.register("profile", Profile);
   const context: ContextResolver = createContextResolver({ defs, packs, remoteOf, userDir });
@@ -281,6 +284,10 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
   const writingPrefix = new Map<string, Promise<void>>();
 
   /** Devuelve qué llamar cuando el prefijo ya quedó escrito (o la sesión terminó sin escribirlo). */
+  async function gitIdentityFor(repoId: string | undefined) {
+    return repoId === undefined ? undefined : identityOf?.(repoId);
+  }
+
   async function claimPrefix(spec: RunSpec, signal: AbortSignal | undefined): Promise<() => void> {
     const key = createHash("sha256")
       .update(JSON.stringify([spec.model, spec.cacheTtl ?? "5m", spec.tools, spec.native, spec.systemPrompt]))
@@ -362,6 +369,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       outputSchema: outputSchemaFor(mode, proposes),
       ...settings,
       stepRunId: req.stepRunId,
+      gitIdentity: await gitIdentityFor(req.repoId),
     };
     const prefixWarmed = await claimPrefix(spec, req.signal);
     try {
@@ -409,7 +417,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     const agentRun = await runtime.resume(
       { runtime: runtime.id, sessionId: session.sessionRef, cwd: session.cwd },
       promptFor(mode, req.brief, proposes, req.notice),
-      { outputSchema: outputSchemaFor(mode, proposes), ...settings, ...resolved, stepRunId: req.stepRunId },
+      { outputSchema: outputSchemaFor(mode, proposes), ...settings, ...resolved, stepRunId: req.stepRunId, gitIdentity: await gitIdentityFor(req.repoId) },
     );
     interruptOnAbort(req.signal, agentRun);
     return converse(

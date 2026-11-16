@@ -72,6 +72,9 @@ export function tempGitRepo(opts: TempGitRepoOptions = {}): TempGitRepo {
     const dir = join(root, "work");
     mkdirSync(dir);
     runGit(dir, ["init", "--initial-branch=main"]);
+    // La identidad del repo: Workspaces la lee de aquí (`createGitIdentityOf`), no de la config global de quien corre el test.
+    runGit(dir, ["config", "user.name", "Clanker Test"]);
+    runGit(dir, ["config", "user.email", "test@clanker.invalid"]);
     for (const spec of commits) commit(dir, spec);
 
     for (const [branch, branchCommits] of Object.entries(branches)) {

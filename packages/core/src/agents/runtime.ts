@@ -58,6 +58,8 @@ export interface RunSpec {
   maxTurns?: number;
   /** El paso que lanza el run: un runtime que lanza procesos lo anota en `procs` para poder matarlos. */
   stepRunId?: string;
+  /** `user.name` y `user.email` del git que ven los commits del agente: la identidad del usuario en el repo. Sin ella el runtime no configura autor. */
+  gitIdentity?: { name: string; email: string };
 }
 
 /**
@@ -66,7 +68,7 @@ export interface RunSpec {
  */
 export type ResumeSpec = Pick<
   RunSpec,
-  "outputSchema" | "maxBudgetUsd" | "maxTurns" | "native" | "references" | "stepRunId" | "cacheTtl"
+  "outputSchema" | "maxBudgetUsd" | "maxTurns" | "native" | "references" | "stepRunId" | "cacheTtl" | "gitIdentity"
 >;
 
 /**

@@ -7,6 +7,7 @@ import type { Connections } from "../connections/connections";
 import type { Defs } from "../defs/defs";
 import { DefNotFoundError } from "../defs/write";
 import { git } from "../git/git";
+import type { GitIdentityOf } from "../git/identity";
 import type { GitRemote } from "../git/remote";
 import type { Repos } from "../workspaces/repos";
 import { RepoNotFoundError } from "../workspaces/repos";
@@ -35,18 +36,13 @@ export interface RepoConfigExporterDeps {
   connections: Pick<Connections, "githubClient" | "markRevoked">;
   /** Los worktrees desechables viven en `<dataDir>/repo-config-export`. */
   dataDir: string;
-  identity: { name: string; email: string };
+  /** Autor y committer del commit del export: la identidad de git del usuario en el repo. */
+  identityOf: GitIdentityOf;
 }
 
 const Pull = z.object({ number: z.int().positive(), html_url: z.string() });
 
-export function createRepoConfigExporter({ defs, repos, config, remote, connections, dataDir, identity }: RepoConfigExporterDeps): RepoConfigExporter {
-  const authorship = {
-    GIT_AUTHOR_NAME: identity.name,
-    GIT_AUTHOR_EMAIL: identity.email,
-    GIT_COMMITTER_NAME: identity.name,
-    GIT_COMMITTER_EMAIL: identity.email,
-  };
+export function createRepoConfigExporter({ defs, repos, config, remote, connections, dataDir, identityOf }: RepoConfigExporterDeps): RepoConfigExporter {
   // Sin hooks: `pre-commit` y compañía son del repo del usuario, no de este commit.
   const NO_HOOKS = ["-c", "core.hooksPath=/dev/null"];
 
@@ -93,6 +89,13 @@ export function createRepoConfigExporter({ defs, repos, config, remote, connecti
         await git(worktree, ["add", "--", path]);
         const verb = existed ? "actualizar" : "agregar";
         const title = `feat: ${verb} ${KIND_NAME[kind]} ${def.slug} en .clanker`;
+        const identity = await identityOf(repoId);
+        const authorship = {
+          GIT_AUTHOR_NAME: identity.name,
+          GIT_AUTHOR_EMAIL: identity.email,
+          GIT_COMMITTER_NAME: identity.name,
+          GIT_COMMITTER_EMAIL: identity.email,
+        };
         await git(worktree, [...NO_HOOKS, "commit", "--no-gpg-sign", "-m", title], authorship);
         const sha = await git(worktree, ["rev-parse", "HEAD"]);
         const branch = `clanker/export-${kind}-${def.slug}-${sha.slice(0, 7)}`;

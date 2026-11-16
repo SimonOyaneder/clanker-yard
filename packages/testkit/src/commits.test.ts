@@ -59,7 +59,7 @@ async function setup(files: Record<string, string> = {}, recipe?: unknown) {
     store,
     dataDir,
     repos: () => ({ path: repo.dir, defaultBranch: "main" }),
-    identity: { name: "Clanker Yard", email: "yard@clanker.invalid" },
+    identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   briefs = createBriefs({ workspaces, artifacts });
@@ -176,7 +176,7 @@ describe("un plan válido", () => {
     expect(verifyWorktrees()).toEqual([]);
     expect(git("worktree", "list").split("\n")).toHaveLength(2);
     // Autor y committer son la identidad de Workspaces.
-    expect(git("log", "-1", "--format=%an <%ae>")).toBe("Clanker Yard <yard@clanker.invalid>");
+    expect(git("log", "-1", "--format=%an <%ae>")).toBe("Ana Pérez <ana@example.com>");
   });
 
   test("un archivo binario, uno vacío y un cambio de modo van en commits como cualquier hunk", async () => {

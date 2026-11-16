@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -47,8 +48,6 @@ export interface ClaudeRuntimeOptions {
   credentials: () => Promise<ClaudeCredentials>;
   /** `CLANKER_HOME`: aquí quedan `transcripts/`, `agent-sessions/` y el entorno generado de los agentes. */
   home: string;
-  /** `user.name` y `user.email` del git config que ven los agentes. */
-  gitIdentity?: { name: string; email: string };
   /** El entorno del core; de él solo se heredan PATH, HOME, USER, LANG y CLAUDE_CONFIG_DIR. */
   baseEnv?: Record<string, string | undefined>;
   query?: QueryFn;
@@ -68,8 +67,6 @@ export interface ClaudeRuntimeOptions {
 
 /** Tras bajar el grupo de un agente con SIGTERM, lo que siga vivo a los 10 s cae con SIGKILL (`docs/design.html#d-flows`, "Cancelar"). */
 export const KILL_GROUP_AFTER_MS = 10_000;
-
-const DEFAULT_GIT_IDENTITY = { name: "Clanker Yard", email: "clanker@localhost" };
 
 /**
  * Lo que `resume` necesita y `ResumeSpec` no trae; se guarda al iniciar para sobrevivir a un reinicio del
@@ -91,10 +88,9 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
   const { home } = options;
   const runQuery = options.query ?? sdkQuery;
   const baseEnv = options.baseEnv ?? process.env;
-  const identity = options.gitIdentity ?? DEFAULT_GIT_IDENTITY;
   const paths = {
     ghConfigDir: join(home, "agent-env", "gh"),
-    gitConfig: join(home, "agent-env", "gitconfig"),
+    gitConfigs: join(home, "agent-env", "gitconfig"),
     transcripts: join(home, "transcripts"),
     sessions: join(home, "agent-sessions"),
   };
@@ -142,7 +138,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       await mkdir(paths.ghConfigDir, { recursive: true });
       await mkdir(paths.transcripts, { recursive: true });
       await mkdir(paths.sessions, { recursive: true });
-      await writeFile(paths.gitConfig, gitConfigFor(identity));
+      await mkdir(paths.gitConfigs, { recursive: true });
     })().catch((error: unknown) => {
       prepared = undefined;
       throw error;
@@ -155,6 +151,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
 
   async function launch(spec: RunSpec, prompt: string, resumeId: string | undefined): Promise<AgentRun> {
     const credentials = await options.credentials();
+    const gitConfig = await writeGitConfig(paths.gitConfigs, spec.gitIdentity);
     const previous = resumeId === undefined ? ZERO_TOTALS : await totalsAtEndOf(transcriptOf(resumeId));
     const abort = new AbortController();
     let stopReason: string | undefined;
@@ -208,7 +205,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         env: agentEnv({
           baseEnv,
           ghConfigDir: paths.ghConfigDir,
-          gitConfig: paths.gitConfig,
+          gitConfig,
           cacheTtl: spec.cacheTtl,
           credentials,
         }),
@@ -454,9 +451,17 @@ async function readStored(file: string, sessionId: string): Promise<StoredSessio
   }
 }
 
-function gitConfigFor({ name, email }: { name: string; email: string }): string {
+/**
+ * El `GIT_CONFIG_GLOBAL` del agente: la identidad del usuario en el repo y ningún credential helper. Un archivo por
+ * identidad (y no uno compartido) porque runs de repos distintos corren a la vez. Sin identidad no hay `[user]`.
+ */
+async function writeGitConfig(dir: string, identity: RunSpec["gitIdentity"]): Promise<string> {
   const quote = (value: string) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-  return `[user]\n\tname = ${quote(name)}\n\temail = ${quote(email)}\n[credential]\n\thelper =\n`;
+  const user = identity ? `[user]\n\tname = ${quote(identity.name)}\n\temail = ${quote(identity.email)}\n` : "";
+  const content = `${user}[credential]\n\thelper =\n`;
+  const file = join(dir, createHash("sha256").update(content).digest("hex").slice(0, 16));
+  await writeFile(file, content);
+  return file;
 }
 
 type SDKUsage = Extract<SDKMessage, { type: "assistant" }>["message"]["usage"];
