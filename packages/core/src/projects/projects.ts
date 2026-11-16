@@ -46,6 +46,13 @@ export interface Projects {
    */
   update(id: ProjectId, patch: ProjectPatch, origin: Origin): ClankerProject;
   /**
+   * Reemplaza el `trackerRef` por otro nombre del MISMO proyecto del tracker (en Linear, el UUID de un proyecto
+   * guardado con su identificador): conserva sus issues y mueve el cursor de sync a la clave nueva. No sirve para
+   * cambiar de proyecto (para eso es `update`). Emite `project.updated`; sin cambio no emite nada. Lanza
+   * `ProjectNotFoundError` o `InvalidProjectError` si otro proyecto ya usa ese `trackerRef`.
+   */
+  renameTrackerRef(id: ProjectId, trackerRef: string, origin: Origin): ClankerProject;
+  /**
    * Pausa el proyecto: el Scheduler deja de lanzar sus issues. Lo que ya corre (sus corridas, el carril de
    * mantenimiento) y los demás proyectos no se tocan. Emite `project.paused`; ya pausado no emite nada. Lanza
    * `ProjectNotFoundError` si no existe e `InvalidProjectError` si está archivado.
@@ -240,6 +247,28 @@ export function createProjects(store: Store, defs: Defs): Projects {
         if (status !== undefined) {
           tx.emit({ type: STATUS_EVENT[status], ...scope, payload: { projectId: id, fields: ["status"] } });
         }
+        return withRepos(tx.db, row);
+      });
+    },
+
+    renameTrackerRef(id, trackerRef, origin) {
+      return store.tx((tx) => {
+        const current = tx.db.select().from(projects).where(eq(projects.id, id)).get();
+        if (!current) throw new ProjectNotFoundError(id);
+        if (current.trackerRef === trackerRef) return withRepos(tx.db, current);
+        if (tx.db.select({ id: projects.id }).from(projects).where(and(eq(projects.tracker, current.tracker), eq(projects.trackerRef, trackerRef))).get()) {
+          throw new InvalidProjectError(`Ya hay un proyecto de ${current.tracker} para "${trackerRef}".`);
+        }
+        const row = tx.db.update(projects).set({ trackerRef }).where(eq(projects.id, id)).returning().get();
+        if (!row) throw new ProjectNotFoundError(id);
+        const oldKey = issuesCursorKey(current.tracker, current.trackerRef);
+        const cursor = tx.db.select().from(syncCursors).where(eq(syncCursors.key, oldKey)).get();
+        if (cursor) {
+          const moved = { ...cursor, key: issuesCursorKey(current.tracker, trackerRef) };
+          tx.db.insert(syncCursors).values(moved).onConflictDoUpdate({ target: syncCursors.key, set: moved }).run();
+          tx.db.delete(syncCursors).where(eq(syncCursors.key, oldKey)).run();
+        }
+        tx.emit({ type: "project.updated", origin, projectId: id, payload: { projectId: id, fields: ["trackerRef"] } });
         return withRepos(tx.db, row);
       });
     },

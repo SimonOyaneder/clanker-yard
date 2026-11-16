@@ -178,6 +178,11 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
         statusMapping: (ref) => projects.list().find((p) => p.tracker === "linear" && p.trackerRef === ref)?.statusMapping,
       }),
   });
+  const trackerProjects = createTrackerProjects({
+    connections: opts.connections,
+    linear: (account) => createLinearTracker({ connections: opts.connections, account, endpoint: opts.linearEndpoint }),
+    projects,
+  });
   const lanes = createLaneSettings(store);
   const breakers = createBreakers({
     store,
@@ -293,13 +298,14 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     { types: ["run.returned"] },
   );
-  const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers });
+  const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers, binding: trackerProjects.binding });
   const scheduler = createScheduler({
     store,
     projects,
     issues,
     repos,
     trackers,
+    binding: trackerProjects.binding,
     flows,
     runs,
     queue: createProjectQueue({ store, projects, issues, repos, trackers, prs }),
@@ -323,7 +329,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     errors: watchErrors,
     // Con el Scheduler apagado (los tests que lanzan a mano) un cambio del tracker no lanza nada.
     ...(opts.scheduler !== false && {
-      trackers: createTrackerChanges({ projects, trackers, issues, onChanges: () => void scheduler.tick(), errors: watchErrors }),
+      trackers: createTrackerChanges({ projects, trackers, issues, binding: trackerProjects.binding, onChanges: () => void scheduler.tick(), errors: watchErrors }),
     }),
   });
   if (opts.watch) watch.start();
@@ -340,10 +346,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
     runs,
     queue: scheduler.queue,
-    trackerProjects: createTrackerProjects({
-      connections: opts.connections,
-      linear: (account) => createLinearTracker({ connections: opts.connections, account, endpoint: opts.linearEndpoint }),
-    }),
+    trackerProjects,
     scheduler,
     lanes,
     breakers,

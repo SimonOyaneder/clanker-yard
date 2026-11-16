@@ -1,4 +1,5 @@
 import type { Issues } from "../tracker/issues";
+import { storedBinding, type ProjectBindings } from "../tracker/tracker-projects";
 import type { Trackers } from "../tracker/trackers";
 import type { Projects } from "../projects/projects";
 import type { ErrorReporter } from "./report";
@@ -11,6 +12,8 @@ export interface TrackerChangesDeps {
   /** Los adapters que este core conoce, por id de tracker. */
   trackers: Trackers;
   issues: Pick<Issues, "hasChanges">;
+  /** De dónde sale la cola de un proyecto (`TrackerProjects.binding`); sin él, su `trackerRef` guardado. */
+  binding?: ProjectBindings;
   /** Hay issues nuevas o modificadas que traer: el Scheduler hace tick (`tick()` trae lo que cambió y lanza). */
   onChanges(): void;
   errors: ErrorReporter;
@@ -22,7 +25,7 @@ export interface TrackerChanges {
 }
 
 /** Los cambios de Linear (`Tracker.changesSince`) despiertan al Scheduler (`docs/design.html#d-ops`, "Scheduler: la cola"). */
-export function createTrackerChanges({ projects, trackers, issues, onChanges, errors }: TrackerChangesDeps): TrackerChanges {
+export function createTrackerChanges({ projects, trackers, issues, binding = storedBinding, onChanges, errors }: TrackerChangesDeps): TrackerChanges {
   const lastPoll = new Map<string, number>();
   return {
     async poll(at) {
@@ -33,7 +36,7 @@ export function createTrackerChanges({ projects, trackers, issues, onChanges, er
           const tracker = trackers(project);
           if (!tracker) continue;
           lastPoll.set(project.id, at);
-          if (await issues.hasChanges(tracker, { projectId: project.id, project: { tracker: project.tracker, id: project.trackerRef } })) onChanges();
+          if (await issues.hasChanges(tracker, await binding(project))) onChanges();
           errors.clear(scope);
         } catch (error) {
           errors.report(scope, error);

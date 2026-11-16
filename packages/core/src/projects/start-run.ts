@@ -5,6 +5,7 @@ import { RunStartError, type Engine, type RunView } from "../flows/engine";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
+import { storedBinding, TrackerProjectsError, type ProjectBindings } from "../tracker/tracker-projects";
 import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../workspaces/repos";
 import { ProjectNotFoundError, type Projects } from "./projects";
@@ -23,6 +24,8 @@ export interface RunStarterDeps {
   flows: Engine;
   /** Los adapters que este core conoce, por id de tracker (`local` y `linear`). */
   trackers: Trackers;
+  /** De dónde sale la cola de un proyecto (`TrackerProjects.binding`); sin él, su `trackerRef` guardado. */
+  binding?: ProjectBindings;
 }
 
 export interface RunStarter {
@@ -42,7 +45,7 @@ export interface RunStarter {
   start(input: z.output<typeof StartRun>, origin: Origin): Promise<RunView>;
 }
 
-export function createRunStarter({ store, defs, projects, repos, issues, flows, trackers }: RunStarterDeps): RunStarter {
+export function createRunStarter({ store, defs, projects, repos, issues, flows, trackers, binding = storedBinding }: RunStarterDeps): RunStarter {
   return {
     async start(input, origin) {
       const project = projects.get(input.projectId);
@@ -113,7 +116,12 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
         throw new RunStartError(`No se pudo reclamar ${issue.ref.key}: ${(error as Error).message}`, { cause: error });
       }
       // El caché ve la issue en progreso antes de que arranque la corrida.
-      await issues.sync(tracker, { projectId: project.id, project: { tracker: project.tracker, id: project.trackerRef } }, origin);
+      try {
+        await issues.sync(tracker, await binding(project), origin);
+      } catch (error) {
+        if (error instanceof TrackerProjectsError) throw new RunStartError(`No se pudo reclamar ${issue.ref.key}: ${error.message}`, { cause: error });
+        throw error;
+      }
       store.tx((tx) =>
         tx.emit({
           type: "issue.claimed",

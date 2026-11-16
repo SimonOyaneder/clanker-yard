@@ -1,5 +1,6 @@
 // Solo para tests de la API que no corren agentes: arma los módulos que el router necesita con un
 // runtime que rechaza cualquier sesión.
+import { storedBinding } from "../tracker/tracker-projects";
 import { trackersByKind } from "../tracker/trackers";
 import { join } from "node:path";
 import { createAgents } from "../agents/agents";
@@ -85,7 +86,7 @@ export function apiDeps(
     runs,
     queue: scheduler.queue,
     // Sin Linear: los trackerRef se guardan tal cual, como los tests de proyectos los escriben.
-    trackerProjects: { list: () => Promise.reject(new Error("este core de pruebas no lista proyectos")), resolve: (_tracker, ref) => Promise.resolve(ref) },
+    trackerProjects: { list: () => Promise.reject(new Error("este core de pruebas no lista proyectos")), resolve: (_tracker, ref) => Promise.resolve(ref), normalize: (id) => Promise.resolve(projects.get(id)!), binding: storedBinding },
     scheduler,
     lanes,
     breakers: { list: () => [] },

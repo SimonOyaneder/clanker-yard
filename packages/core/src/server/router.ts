@@ -295,6 +295,13 @@ export function createRouter(deps: RouterDeps) {
         asApiErrorAsync(async () => {
           const { tracker } = projectOrNotFound(id);
           const trackerRef = patch.trackerRef === undefined ? undefined : await deps.trackerProjects.resolve(tracker, patch.trackerRef);
+          // Elegir de nuevo el mismo proyecto de Linear que guarda su identificador no cambia su cola: se normaliza antes.
+          // Si no se puede resolver el ref guardado no se sabe si es el mismo proyecto y rige la regla de `update`.
+          if (trackerRef !== undefined) {
+            await deps.trackerProjects.normalize(id, context.origin).catch((error: unknown) => {
+              if (!(error instanceof TrackerProjectsError)) throw error;
+            });
+          }
           return projects.update(id, trackerRef === undefined ? patch : { ...patch, trackerRef }, context.origin);
         }),
       ),
