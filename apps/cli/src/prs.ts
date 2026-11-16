@@ -13,66 +13,34 @@ import { projectBySlug } from "./projects";
 const POLL_MS = 2000;
 
 export const prsRepublish: Command = {
-  usage:
-    "clanker prs republish [--project <slug>] [--pr <n>]... [--drafts] [--dry-run] [--json]",
+  usage: "clanker prs republish [--project <slug>] [--pr <n>]... [--drafts] [--dry-run] [--json]",
   async run(args, ctx) {
     const { values } = parseArgs({
       args,
-      options: {
-        project: { type: "string" },
-        pr: { type: "string", multiple: true },
-        drafts: { type: "boolean" },
-        "dry-run": { type: "boolean" },
-        json: { type: "boolean" },
-      },
+      options: { project: { type: "string" }, pr: { type: "string", multiple: true }, drafts: { type: "boolean" }, "dry-run": { type: "boolean" }, json: { type: "boolean" } },
     });
     const prs = (values.pr ?? []).map((n) => {
-      if (!/^[1-9]\d*$/.test(n))
-        throw new Error(
-          `--pr pide un número de PR, no "${n}".\nUso: ${prsRepublish.usage}`,
-        );
+      if (!/^[1-9]\d*$/.test(n)) throw new Error(`--pr pide un número de PR, no "${n}".\nUso: ${prsRepublish.usage}`);
       return Number(n);
     });
     const client = await ctx.client();
-    const projectId =
-      values.project === undefined
-        ? undefined
-        : (await projectBySlug(client, values.project)).id;
-    let progress = await client.prs.republish({
-      projectId,
-      prs,
-      dryRun: values["dry-run"] ?? false,
-      draftOnly: values.drafts ?? false,
-    });
+    const projectId = values.project === undefined ? undefined : (await projectBySlug(client, values.project)).id;
+    let progress = await client.prs.republish({ projectId, prs, dryRun: values["dry-run"] ?? false, draftOnly: values.drafts ?? false });
     const printed = new Set<number>();
     const print = () => {
       for (const r of progress.results) {
-        if (
-          r.status === "pending" ||
-          r.status === "running" ||
-          printed.has(r.number)
-        )
-          continue;
+        if (r.status === "pending" || r.status === "running" || printed.has(r.number)) continue;
         printed.add(r.number);
         if (values.json) continue;
-        const target =
-          r.branch === undefined
-            ? ""
-            : ` → ${r.branch}${r.newNumber ? ` (#${r.newNumber})` : ""}, base ${r.base}${r.commits === undefined ? "" : `, ${r.commits} commits`}`;
-        ctx.write(
-          `${r.status} ${r.repo}#${r.number}${target}${r.reason ? ` (${r.reason})` : ""}`,
-        );
+        const target = r.branch === undefined ? "" : ` → ${r.branch}${r.newNumber ? ` (#${r.newNumber})` : ""}, base ${r.base}${r.commits === undefined ? "" : `, ${r.commits} commits`}`;
+        ctx.write(`${r.status} ${r.repo}#${r.number}${target}${r.reason ? ` (${r.reason})` : ""}`);
       }
     };
-    if (!values.json && progress.results.length === 0)
-      return ctx.write("No hay PRs abiertos del sistema.");
+    if (!values.json && progress.results.length === 0) return ctx.write("No hay PRs abiertos del sistema.");
     print();
     while (!progress.done) {
       await ctx.sleep(POLL_MS);
-      if (ctx.signal.aborted)
-        throw new Error(
-          "Interrumpido: las corridas ya lanzadas siguen en el core y terminan solas.",
-        );
+      if (ctx.signal.aborted) throw new Error("Interrumpido: las corridas ya lanzadas siguen en el core y terminan solas.");
       progress = await client.prs.republishProgress({ id: progress.id });
       print();
     }

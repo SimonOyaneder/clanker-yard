@@ -75,21 +75,9 @@ interface Target {
   row: PrRow | undefined;
 }
 
-const keyOf = ({ repo, number }: { repo: string; number: number }) =>
-  `${repo}#${number}`;
+const keyOf = ({ repo, number }: { repo: string; number: number }) => `${repo}#${number}`;
 
-export function createWatch({
-  store,
-  connections,
-  repos,
-  cache,
-  remote,
-  waitKeys,
-  events,
-  errors,
-  trackers,
-  now = Date.now,
-}: WatchDeps): Watch {
+export function createWatch({ store, connections, repos, cache, remote, waitKeys, events, errors, trackers, now = Date.now }: WatchDeps): Watch {
   // El calendario vive en memoria: tras un reinicio todo toca ya, y los ETags guardados hacen que sea casi gratis.
   const lastVisit = new Map<string, number>();
   const lastLsRemote = new Map<string, number>();
@@ -105,41 +93,25 @@ export function createWatch({
   // --- qué mirar ---
 
   function targets(): Target[] {
-    const waited = new Set(
-      waitKeys()
-        .flatMap((key) => prOfWaitKey(key) ?? [])
-        .map(keyOf),
-    );
+    const waited = new Set(waitKeys().flatMap((key) => prOfWaitKey(key) ?? []).map(keyOf));
     const found = new Map<string, Target>();
     const add = (repoId: RepoId, number: number, row: PrRow | undefined) => {
       const remoteOf = repos.get(repoId) && repos.config(repoId).remote;
       if (!remoteOf) return;
       const ref = { account: remoteOf.account, repo: remoteOf.repo, number };
-      found.set(keyOf(ref), {
-        ref,
-        repoId,
-        waited: waited.has(keyOf(ref)),
-        row,
-      });
+      found.set(keyOf(ref), { ref, repoId, waited: waited.has(keyOf(ref)), row });
     };
     for (const row of cache.open()) add(row.repoId, row.number, row);
     for (const key of waited) {
       if (found.has(key)) continue;
       const [repo, number] = key.split("#") as [string, string];
       const registered = repos.byRemote(repo);
-      if (registered)
-        add(
-          registered.id,
-          Number(number),
-          cache.row(registered.id, Number(number)),
-        );
+      if (registered) add(registered.id, Number(number), cache.row(registered.id, Number(number)));
     }
     return [...found.values()];
   }
 
-  const isHot = (t: Target, at: number) =>
-    t.waited ||
-    (t.row?.headChangedAt != null && at - t.row.headChangedAt < HOT_MS);
+  const isHot = (t: Target, at: number) => t.waited || (t.row?.headChangedAt != null && at - t.row.headChangedAt < HOT_MS);
 
   /**
    * Checks pendientes, un merge en cola (merge-queue cambia su status sin mover el PR) o todavía sin registrarse en
@@ -147,22 +119,12 @@ export function createWatch({
    */
   function watchesCi(t: Target, at: number): boolean {
     const detail = t.row?.detail;
-    return (
-      detail?.ci.state === "pending" ||
-      detail?.merge.queue === "queued" ||
-      (detail?.ci.state === "none" && isHot(t, at))
-    );
+    return detail?.ci.state === "pending" || detail?.merge.queue === "queued" || (detail?.ci.state === "none" && isHot(t, at));
   }
 
   function pollEveryMs(t: Target, at: number): number {
-    const temperature = isHot(t, at)
-      ? "hot"
-      : t.row?.isDraft === false
-        ? "review"
-        : "cold";
-    return watchesCi(t, at)
-      ? Math.min(CI_EVERY_MS, POLL_EVERY_MS[temperature])
-      : POLL_EVERY_MS[temperature];
+    const temperature = isHot(t, at) ? "hot" : t.row?.isDraft === false ? "review" : "cold";
+    return watchesCi(t, at) ? Math.min(CI_EVERY_MS, POLL_EVERY_MS[temperature]) : POLL_EVERY_MS[temperature];
   }
 
   const rereadPending = (key: string) => (rereadsLeft.get(key) ?? 0) > 0;
@@ -170,16 +132,13 @@ export function createWatch({
   function isDue(t: Target, at: number, throttle: Throttle): boolean {
     const key = keyOf(t.ref);
     if (headMoved.has(key)) return true;
-    const every = rereadPending(key)
-      ? UNKNOWN_REREAD_MS
-      : pollEveryMs(t, at) * (throttle.level === "normal" ? 1 : SLOW_FACTOR);
+    const every = rereadPending(key) ? UNKNOWN_REREAD_MS : pollEveryMs(t, at) * (throttle.level === "normal" ? 1 : SLOW_FACTOR);
     return at - (lastVisit.get(key) ?? Number.NEGATIVE_INFINITY) >= every;
   }
 
   // --- requests condicionales ---
 
-  const etagKey = (account: string, path: string) =>
-    `etag:github:${account}:${path}`;
+  const etagKey = (account: string, path: string) => `etag:github:${account}:${path}`;
 
   /**
    * GET con el ETag que guardamos. `undefined` si GitHub respondió 304 (no gasta cuota); si no, el body y
@@ -192,11 +151,7 @@ export function createWatch({
     params: Record<string, unknown> = {},
   ): Promise<{ data: unknown; commit: () => void } | undefined> {
     const key = etagKey(account, path);
-    const etag = store.db
-      .select({ etag: syncCursors.etag })
-      .from(syncCursors)
-      .where(eq(syncCursors.key, key))
-      .get()?.etag;
+    const etag = store.db.select({ etag: syncCursors.etag }).from(syncCursors).where(eq(syncCursors.key, key)).get()?.etag;
     try {
       const response = await connections.githubClient(account).request({
         method: "GET",
@@ -205,44 +160,26 @@ export function createWatch({
         headers: etag ? { "if-none-match": etag } : {},
       });
       const fresh = response.headers.etag;
-      return {
-        data: response.data,
-        commit: () => fresh && saveEtag(key, fresh),
-      };
+      return { data: response.data, commit: () => fresh && saveEtag(key, fresh) };
     } catch (error) {
-      if (error instanceof RequestError && error.status === 304)
-        return undefined;
+      if (error instanceof RequestError && error.status === 304) return undefined;
       throw error;
     }
   }
 
   function saveEtag(key: string, etag: string) {
     const values = { etag, checkedAt: now() };
-    store.tx((tx) =>
-      tx.db
-        .insert(syncCursors)
-        .values({ key, ...values })
-        .onConflictDoUpdate({ target: syncCursors.key, set: values })
-        .run(),
-    );
+    store.tx((tx) => tx.db.insert(syncCursors).values({ key, ...values }).onConflictDoUpdate({ target: syncCursors.key, set: values }).run());
   }
 
   function forgetEtags(account: string, paths: string[]) {
     store.tx((tx) => {
-      for (const path of paths)
-        tx.db
-          .delete(syncCursors)
-          .where(eq(syncCursors.key, etagKey(account, path)))
-          .run();
+      for (const path of paths) tx.db.delete(syncCursors).where(eq(syncCursors.key, etagKey(account, path))).run();
     });
   }
 
-  const pullPath = ({ repo, number }: PrRef) =>
-    `/repos/${repo}/pulls/${number}`;
-  const ciPaths = ({ repo }: PrRef, sha: string) => [
-    `/repos/${repo}/commits/${sha}/check-runs`,
-    `/repos/${repo}/commits/${sha}/status`,
-  ];
+  const pullPath = ({ repo, number }: PrRef) => `/repos/${repo}/pulls/${number}`;
+  const ciPaths = ({ repo }: PrRef, sha: string) => [`/repos/${repo}/commits/${sha}/check-runs`, `/repos/${repo}/commits/${sha}/status`];
 
   // --- una visita a un PR ---
 
@@ -282,10 +219,7 @@ export function createWatch({
 
     const state = await cache.refresh(ref);
     for (const commit of commits) commit();
-    if (
-      state.mergeable === "unknown" &&
-      (state.state === "open" || state.state === "draft")
-    ) {
+    if (state.mergeable === "unknown" && (state.state === "open" || state.state === "draft")) {
       const left = rereadsLeft.get(key);
       rereadsLeft.set(key, left === undefined ? UNKNOWN_REREADS : left - 1);
     } else {
@@ -302,11 +236,7 @@ export function createWatch({
   /** `git ls-remote` de cada repo con PRs vigilados: un head que se movió se mira ya, sin esperar su intervalo. */
   async function listRemotes(all: Target[], at: number): Promise<void> {
     for (const repoId of new Set(all.map((t) => t.repoId))) {
-      if (
-        at - (lastLsRemote.get(repoId) ?? Number.NEGATIVE_INFINITY) <
-        LS_REMOTE_EVERY_MS
-      )
-        continue;
+      if (at - (lastLsRemote.get(repoId) ?? Number.NEGATIVE_INFINITY) < LS_REMOTE_EVERY_MS) continue;
       lastLsRemote.set(repoId, at);
       const config = repos.config(repoId);
       if (!config.remote) continue;
@@ -316,18 +246,10 @@ export function createWatch({
         if (heads === "unauthorized") continue;
         const cursor = JSON.stringify(heads);
         const values = { cursor, checkedAt: at };
-        store.tx((tx) =>
-          tx.db
-            .insert(syncCursors)
-            .values({ key: `refs:${repo}`, ...values })
-            .onConflictDoUpdate({ target: syncCursors.key, set: values })
-            .run(),
-        );
+        store.tx((tx) => tx.db.insert(syncCursors).values({ key: `refs:${repo}`, ...values }).onConflictDoUpdate({ target: syncCursors.key, set: values }).run());
         for (const t of all) {
-          const tip =
-            t.row && t.repoId === repoId ? heads[t.row.headRef] : undefined;
-          if (tip !== undefined && tip !== t.row?.headSha)
-            headMoved.add(keyOf(t.ref));
+          const tip = t.row && t.repoId === repoId ? heads[t.row.headRef] : undefined;
+          if (tip !== undefined && tip !== t.row?.headSha) headMoved.add(keyOf(t.ref));
         }
       } catch (error) {
         errors.report(`ls-remote ${repo}`, error);
@@ -341,29 +263,17 @@ export function createWatch({
    */
   async function discover(account: string, at: number): Promise<Target[]> {
     lastSearch.set(account, at);
-    const found = await conditionalGet(account, "/search/issues", {
-      q: "is:pr author:@me is:open",
-      per_page: 100,
-    });
+    const found = await conditionalGet(account, "/search/issues", { q: "is:pr author:@me is:open", per_page: 100 });
     if (!found) return [];
     found.commit();
-    const items =
-      (found.data as { items?: { number: number; repository_url: string }[] })
-        .items ?? [];
+    const items = (found.data as { items?: { number: number; repository_url: string }[] }).items ?? [];
     return items.flatMap(({ number, repository_url }) => {
       const repo = repository_url.split("/repos/")[1];
       const registered = repo ? repos.byRemote(repo) : undefined;
       if (!repo || !registered) return [];
       const row = cache.row(registered.id, number);
       if (row && row.state !== "closed") return [];
-      return [
-        {
-          ref: { account, repo, number },
-          repoId: registered.id,
-          waited: false,
-          row,
-        },
-      ];
+      return [{ ref: { account, repo, number }, repoId: registered.id, waited: false, row }];
     });
   }
 
@@ -391,46 +301,27 @@ export function createWatch({
     const throttles = new Map<string, Throttle>();
     const throttle = (account: string) => {
       let found = throttles.get(account);
-      if (!found)
-        throttles.set(account, (found = throttleOf(store, account, at)));
+      if (!found) throttles.set(account, (found = throttleOf(store, account, at)));
       return found;
     };
     // Los que un flujo espera van primero; entre iguales, el que lleva más sin mirarse.
     const due = all
       .filter((t) => {
         const brake = throttle(t.ref.account);
-        return (
-          brake.level !== "exhausted" &&
-          (brake.level !== "waits-only" || t.waited) &&
-          isDue(t, at, brake)
-        );
+        return brake.level !== "exhausted" && (brake.level !== "waits-only" || t.waited) && isDue(t, at, brake);
       })
-      .sort(
-        (a, b) =>
-          Number(b.waited) - Number(a.waited) ||
-          (lastVisit.get(keyOf(a.ref)) ?? 0) -
-            (lastVisit.get(keyOf(b.ref)) ?? 0),
-      );
+      .sort((a, b) => Number(b.waited) - Number(a.waited) || (lastVisit.get(keyOf(a.ref)) ?? 0) - (lastVisit.get(keyOf(b.ref)) ?? 0));
     for (const t of due) {
       if (stopping) break;
       await attempt(keyOf(t.ref), () => visit(t, at));
     }
 
     // Descubrir PRs no depende de que ya haya alguno vigilado: la búsqueda corre por cada cuenta con repos registrados.
-    const accounts = repos
-      .list()
-      .flatMap(({ id }) => repos.config(id).remote?.account ?? []);
+    const accounts = repos.list().flatMap(({ id }) => repos.config(id).remote?.account ?? []);
     for (const account of new Set(accounts.filter((a) => active.has(a)))) {
       const { level } = throttle(account);
-      const every =
-        level === "normal" ? SEARCH_EVERY_MS : SEARCH_EVERY_MS * SLOW_FACTOR;
-      if (
-        stopping ||
-        level === "waits-only" ||
-        level === "exhausted" ||
-        at - (lastSearch.get(account) ?? Number.NEGATIVE_INFINITY) < every
-      )
-        continue;
+      const every = level === "normal" ? SEARCH_EVERY_MS : SEARCH_EVERY_MS * SLOW_FACTOR;
+      if (stopping || level === "waits-only" || level === "exhausted" || at - (lastSearch.get(account) ?? Number.NEGATIVE_INFINITY) < every) continue;
       await attempt(`${account} search`, async () => {
         for (const t of await discover(account, at)) {
           if (stopping) break;

@@ -68,11 +68,7 @@ let stopTriggers: () => void;
 let trackerPolls: number[];
 let clock: number;
 
-const ref = (number: number): PrRef => ({
-  account: ACCOUNT,
-  repo: REPO,
-  number,
-});
+const ref = (number: number): PrRef => ({ account: ACCOUNT, repo: REPO, number });
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "clanker-watch-"));
@@ -88,21 +84,10 @@ beforeEach(async () => {
     },
   });
   sim = await startGitHubSim({ origin, token: TOKEN });
-  connections = createConnections(store, createFileSecrets({ dir }), {
-    github: { baseUrl: sim.baseUrl },
-  });
-  await connections.connect(
-    { provider: "github", account: ACCOUNT, scopes: [], token: TOKEN },
-    "core",
-  );
+  connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
 
-  repos = createRepos(store, {
-    remote: (repo) => ({
-      url: `file://${origin.remoteDir}`,
-      repo,
-      account: ACCOUNT,
-    }),
-  });
+  repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
   defs = createDefs(store);
@@ -129,11 +114,7 @@ beforeEach(async () => {
   flows = createFlows({
     store,
     defs,
-    agents: createAgents({
-      store,
-      defs,
-      runtime: createFakeRuntime({ fixtures: [], speed: Infinity }),
-    }),
+    agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures: [], speed: Infinity }) }),
     artifacts: createArtifacts({ store, dir: join(dir, "artifacts") }),
     roles: () => undefined,
     // Solo Watch cierra los waits de estos tests: el sondeo propio del motor queda fuera de juego.
@@ -146,13 +127,7 @@ beforeEach(async () => {
   const events = createPrEvents({
     store,
     repos,
-    workspaces: createWorkspaces({
-      store,
-      dataDir: dir,
-      repoConfig: repos.config,
-      identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
-      remote: gitRemote,
-    }),
+    workspaces: createWorkspaces({ store, dataDir: dir, repoConfig: repos.config, identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }), remote: gitRemote }),
     errors,
     now: () => clock,
   });
@@ -167,14 +142,7 @@ beforeEach(async () => {
     },
     now: () => clock,
   });
-  stopTriggers = startTriggers({
-    store,
-    defs,
-    projects: { get: () => undefined },
-    repos,
-    flows,
-    errors,
-  });
+  stopTriggers = startTriggers({ store, defs, projects: { get: () => undefined }, repos, flows, errors });
   watch = createWatch({
     store,
     connections,
@@ -215,12 +183,7 @@ const requestsSince = (from: number) => sim.requests.slice(from);
 const pullReads = (requests: typeof sim.requests, number: number) =>
   requests.filter((r) => r.path === `/repos/${REPO}/pulls/${number}`).length;
 const detailReads = (requests: typeof sim.requests, number: number) =>
-  requests.filter(
-    (r) =>
-      r.path === "/graphql" &&
-      (r.body as { variables?: { number?: number } }).variables?.number ===
-        number,
-  ).length;
+  requests.filter((r) => r.path === "/graphql" && (r.body as { variables?: { number?: number } }).variables?.number === number).length;
 
 describe("descubrir y detectar", () => {
   test("la búsqueda de tus PRs los mete al caché con su detalle (solo los tuyos)", async () => {
@@ -229,11 +192,7 @@ describe("descubrir y detectar", () => {
 
     await wake();
 
-    expect(
-      cache
-        .list()
-        .map(({ ref, owned, state }) => [ref.number, owned, state?.state]),
-    ).toEqual([[1, false, "open"]]);
+    expect(cache.list().map(({ ref, owned, state }) => [ref.number, owned, state?.state])).toEqual([[1, false, "open"]]);
   });
 
   test("un PR cerrado que GitHub reabre vuelve a open y Watch lo vigila otra vez", async () => {
@@ -275,9 +234,7 @@ describe("descubrir y detectar", () => {
     const from = sim.requests.length;
 
     await wake(31 * SECOND);
-    expect(
-      detailReads(requestsSince(from), 1) + detailReads(requestsSince(from), 2),
-    ).toBe(0);
+    expect(detailReads(requestsSince(from), 1) + detailReads(requestsSince(from), 2)).toBe(0);
 
     one.setDraft(true);
     const afterQuiet = sim.requests.length;
@@ -287,9 +244,7 @@ describe("descubrir y detectar", () => {
     expect(pullReads(requests, 2)).toBe(1);
     expect(detailReads(requests, 1)).toBe(1);
     expect(detailReads(requests, 2)).toBe(0);
-    expect(cache.list().find((p) => p.ref.number === 1)?.state?.state).toBe(
-      "draft",
-    );
+    expect(cache.list().find((p) => p.ref.number === 1)?.state?.state).toBe("draft");
   });
 
   test("una review o un comentario mueven el ETag del PR: se ven sin pedir /reviews ni /comments", async () => {
@@ -303,13 +258,8 @@ describe("descubrir y detectar", () => {
 
     pr.comment("ana", "dale una vuelta");
     await wake(31 * SECOND);
-    expect(cache.list()[0]?.state?.talk.map((t) => t.kind)).toEqual([
-      "changes",
-      "comment",
-    ]);
-    expect(
-      requestsSince(from).filter((r) => /\/(reviews|comments)$/.test(r.path)),
-    ).toEqual([]);
+    expect(cache.list()[0]?.state?.talk.map((t) => t.kind)).toEqual(["changes", "comment"]);
+    expect(requestsSince(from).filter((r) => /\/(reviews|comments)$/.test(r.path))).toEqual([]);
   });
 
   test("un PR frío espera sus 5 minutos, pero un push (git ls-remote) lo adelanta", async () => {
@@ -326,17 +276,10 @@ describe("descubrir y detectar", () => {
     origin.git("push", "origin", "one");
     await wake(MINUTE);
 
-    const pushed = origin.git(
-      "--git-dir",
-      origin.remoteDir!,
-      "rev-parse",
-      "one",
-    );
+    const pushed = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
     expect(cache.list()[0]?.state?.headSha).toBe(pushed);
     expect(detailReads(requestsSince(from), 1)).toBe(1);
-    const { cursor } = store.db.$client
-      .prepare("select cursor from sync_cursors where key = ?")
-      .get(`refs:${REPO}`) as { cursor: string };
+    const { cursor } = store.db.$client.prepare("select cursor from sync_cursors where key = ?").get(`refs:${REPO}`) as { cursor: string };
     expect(JSON.parse(cursor)).toMatchObject({ one: pushed });
   });
 
@@ -380,9 +323,7 @@ describe("descubrir y detectar", () => {
 
     await wake(10 * MINUTE);
 
-    expect(
-      requestsSince(from).filter((r) => r.path.includes("/pulls/")),
-    ).toEqual([]);
+    expect(requestsSince(from).filter((r) => r.path.includes("/pulls/"))).toEqual([]);
   });
 });
 
@@ -411,11 +352,7 @@ describe("presupuesto de cuota", () => {
     const other = sim.openPr({ head: "two" });
     waited.ci("pending");
     flows.save(ciFlow());
-    flows.start(
-      "ci",
-      { type: "issue", id: "CLA-74" },
-      { pr: ref(waited.number) },
-    );
+    flows.start("ci", { type: "issue", id: "CLA-74" }, { pr: ref(waited.number) });
     await waiting();
     await wake();
     await quotaIs("core", 400);
@@ -429,22 +366,15 @@ describe("presupuesto de cuota", () => {
     expect(pullReads(requests, waited.number)).toBe(1);
     expect(pullReads(requests, other.number)).toBe(0);
     expect(requests.filter((r) => r.path.startsWith("/search/"))).toEqual([]);
-    expect(
-      cache.list().find((p) => p.ref.number === waited.number)?.state?.state,
-    ).toBe("draft");
-    expect(
-      cache.list().find((p) => p.ref.number === other.number)?.state?.state,
-    ).toBe("open");
+    expect(cache.list().find((p) => p.ref.number === waited.number)?.state?.state).toBe("draft");
+    expect(cache.list().find((p) => p.ref.number === other.number)?.state?.state).toBe("open");
   });
 
   test("sin cuota no sale ninguna request hasta el reset", async () => {
     sim.openPr({ head: "one" });
     await wake();
     sim.setQuota("core", { remaining: 0 });
-    await connections
-      .githubClient(ACCOUNT)
-      .request("GET /user")
-      .catch(() => undefined);
+    await connections.githubClient(ACCOUNT).request("GET /user").catch(() => undefined);
     const from = sim.requests.length;
 
     await wake(10 * MINUTE);
@@ -489,22 +419,14 @@ describe("notas importadas del clanker-loop", () => {
     return home;
   }
   const noteStatuses = () =>
-    (
-      store.db.$client
-        .prepare(
-          "select substr(body, 1, 7) as note, status, resolved_by as by from decisions order by id",
-        )
-        .all() as { note: string; status: string; by: string | null }[]
-    ).map((d) => [d.note, d.status, d.by]);
+    (store.db.$client.prepare("select substr(body, 1, 7) as note, status, resolved_by as by from decisions order by id").all() as { note: string; status: string; by: string | null }[]).map(
+      (d) => [d.note, d.status, d.by],
+    );
 
   test("una review_note de un PR mergeado queda expired tras el primer sync, y la de uno que sigue abierto no", async () => {
     sim.openPr({ head: "one" }).merge();
     sim.openPr({ head: "two" });
-    createLegacyImporter({
-      store,
-      defs,
-      artifacts: createArtifacts({ store, dir: join(dir, "artifacts") }),
-    }).run({ from: legacyHome(), dryRun: false });
+    createLegacyImporter({ store, defs, artifacts: createArtifacts({ store, dir: join(dir, "artifacts") }) }).run({ from: legacyHome(), dryRun: false });
     expect(noteStatuses()).toEqual([
       ["DEMO-1 ", "pending", null],
       ["DEMO-2 ", "pending", null],
@@ -519,11 +441,7 @@ describe("notas importadas del clanker-loop", () => {
       ["DEMO-2 ", "pending", null],
       ["DEMO-3 ", "expired", "watch"],
     ]);
-    expect(
-      store.events
-        .since(0, { types: ["decision.resolved"] })
-        .map((e) => e.payload.status),
-    ).toEqual(["expired", "expired"]);
+    expect(store.events.since(0, { types: ["decision.resolved"] }).map((e) => e.payload.status)).toEqual(["expired", "expired"]);
   });
 });
 
@@ -532,11 +450,7 @@ describe("avisa a los flujos", () => {
     const pr = sim.openPr({ head: "one" });
     pr.ci("pending");
     flows.save(ciFlow());
-    const runId = flows.start(
-      "ci",
-      { type: "issue", id: "CLA-74" },
-      { pr: ref(pr.number) },
-    );
+    const runId = flows.start("ci", { type: "issue", id: "CLA-74" }, { pr: ref(pr.number) });
     await waiting();
     await wake();
     expect(flows.getRun(runId).status).toBe("running");
@@ -546,9 +460,7 @@ describe("avisa a los flujos", () => {
     await finished(runId);
 
     expect(flows.getRun(runId)).toMatchObject({ status: "done" });
-    expect(flows.getRun(runId).steps.map((s) => [s.nodeId, s.outcome])).toEqual(
-      [["ci", "ok"]],
-    );
+    expect(flows.getRun(runId).steps.map((s) => [s.nodeId, s.outcome])).toEqual([["ci", "ok"]]);
   });
 
   test("los checks pendientes se miran cada 30 s aunque el PR esté en review, y al terminar se dejan de pedir", async () => {
@@ -559,9 +471,7 @@ describe("avisa a los flujos", () => {
     const from = sim.requests.length;
 
     await wake(31 * SECOND);
-    expect(
-      requestsSince(from).filter((r) => r.path.includes("/check-runs")).length,
-    ).toBe(1);
+    expect(requestsSince(from).filter((r) => r.path.includes("/check-runs")).length).toBe(1);
 
     pr.ci("green");
     await wake(31 * SECOND);
@@ -569,49 +479,25 @@ describe("avisa a los flujos", () => {
     const settled = sim.requests.length;
     await wake(121 * SECOND);
     await wake(121 * SECOND);
-    expect(
-      requestsSince(settled).filter((r) => r.path.includes("/pulls/")).length,
-    ).toBe(2);
+    expect(requestsSince(settled).filter((r) => r.path.includes("/pulls/")).length).toBe(2);
 
-    expect(
-      requestsSince(settled).filter(
-        (r) => r.path.includes("/check-runs") || r.path.includes("/status"),
-      ),
-    ).toEqual([]);
+    expect(requestsSince(settled).filter((r) => r.path.includes("/check-runs") || r.path.includes("/status"))).toEqual([]);
   });
 });
 
-const WATCH_EVENTS: EventType[] = [
-  "pr.botReview",
-  "pr.ci",
-  "pr.conflict",
-  "pr.comment",
-  "pr.merged",
-  "pr.base_rewritten",
-  "pr.human",
-  "pr.approvedWithComments",
-];
-const emitted = (...types: EventType[]) =>
-  store.events.since(0, { types: types.length > 0 ? types : WATCH_EVENTS });
-const emittedTypes = (...types: EventType[]) =>
-  emitted(...types).map((e) => e.type);
+const WATCH_EVENTS: EventType[] = ["pr.botReview", "pr.ci", "pr.conflict", "pr.comment", "pr.merged", "pr.base_rewritten", "pr.human", "pr.approvedWithComments"];
+const emitted = (...types: EventType[]) => store.events.since(0, { types: types.length > 0 ? types : WATCH_EVENTS });
+const emittedTypes = (...types: EventType[]) => emitted(...types).map((e) => e.type);
 
 /** Lo que el sistema abrió (`pr.publish` lo deja `owned`); la búsqueda de tus PRs los descubre sin serlo. */
 function own(number: number) {
-  store.db.$client
-    .prepare("update pull_requests set owned = 1 where number = ?")
-    .run(number);
+  store.db.$client.prepare("update pull_requests set owned = 1 where number = ?").run(number);
 }
 
 /** Un commit de `branch` en el remoto, hecho por otro. */
-function push(
-  branch: string,
-  message: string,
-  files: Record<string, string> = {},
-) {
+function push(branch: string, message: string, files: Record<string, string> = {}) {
   origin.git("checkout", branch);
-  for (const [path, content] of Object.entries(files))
-    writeFileSync(join(origin.dir, path), content);
+  for (const [path, content] of Object.entries(files)) writeFileSync(join(origin.dir, path), content);
   origin.git("add", "--all");
   origin.git("commit", "--allow-empty", "--message", message);
   origin.git("push", "origin", branch);
@@ -629,12 +515,7 @@ describe("eventos", () => {
 
     await wake();
     const state = cache.list()[0]?.state;
-    expect(state).toMatchObject({
-      bot: { state: "findings" },
-      ci: { state: "red" },
-      mergeable: "conflict",
-      threads: { councilOpen: [expect.any(Number)] },
-    });
+    expect(state).toMatchObject({ bot: { state: "findings" }, ci: { state: "red" }, mergeable: "conflict", threads: { councilOpen: [expect.any(Number)] } });
     expect(state?.talk).toHaveLength(1);
     // El `$first` del vigilante solo calla los comentarios; el conflicto y el council que ya había se anuncian. El bot y el CI no son eventos del vigilante.
     expect(emittedTypes()).toEqual(["pr.conflict", "pr.comment"]);
@@ -655,17 +536,8 @@ describe("eventos", () => {
     const first = pr.councilThread("uno");
     pr.comment("ana", "hola");
     await wake(31 * SECOND);
-    expect(emittedTypes()).toEqual([
-      "pr.botReview",
-      "pr.ci",
-      "pr.comment",
-      "pr.human",
-    ]);
-    expect(emitted("pr.comment")[0]?.payload).toMatchObject({
-      repo: REPO,
-      number: pr.number,
-      threadIds: [first.commentId],
-    });
+    expect(emittedTypes()).toEqual(["pr.botReview", "pr.ci", "pr.comment", "pr.human"]);
+    expect(emitted("pr.comment")[0]?.payload).toMatchObject({ repo: REPO, number: pr.number, threadIds: [first.commentId] });
 
     // Algo que no es un evento hace releer el PR: nada se repite.
     pr.setDraft(true);
@@ -678,32 +550,20 @@ describe("eventos", () => {
     await wake(31 * SECOND);
     pr.ci("green");
     await wake(31 * SECOND);
-    expect(emitted("pr.comment").map((e) => e.payload.threadIds)).toEqual([
-      [first.commentId],
-      [second.commentId],
-    ]);
-    expect(emitted("pr.ci").map((e) => e.payload.state)).toEqual([
-      "green",
-      "red",
-    ]);
+    expect(emitted("pr.comment").map((e) => e.payload.threadIds)).toEqual([[first.commentId], [second.commentId]]);
+    expect(emitted("pr.ci").map((e) => e.payload.state)).toEqual(["green", "red"]);
 
     // Un humano que habla en un draft no avisa hasta que sale de draft (la regla vive en `packages/core/src/watch/events.ts`).
     pr.setDraft(false);
     pr.comment("ana", "otra cosa");
     await wake(31 * SECOND);
-    expect(
-      emitted("pr.human").map((e) => (e.payload.talk as unknown[]).length),
-    ).toEqual([1, 1]);
+    expect(emitted("pr.human").map((e) => (e.payload.talk as unknown[]).length)).toEqual([1, 1]);
 
     pr.merge();
     await wake(31 * SECOND);
     await wake(31 * SECOND);
     expect(emitted("pr.merged")).toHaveLength(1);
-    expect(emitted("pr.merged")[0]).toMatchObject({
-      origin: "watch",
-      subject: { type: "pr" },
-      payload: { repo: REPO, number: pr.number },
-    });
+    expect(emitted("pr.merged")[0]).toMatchObject({ origin: "watch", subject: { type: "pr" }, payload: { repo: REPO, number: pr.number } });
   });
 
   test("aprobado con comentarios sale una vez por aprobación: perderla y volver a aprobar es otro hecho", async () => {
@@ -713,17 +573,7 @@ describe("eventos", () => {
     pr.comment("ana", "una duda");
     pr.review("bruno", "APPROVED");
     await wake(31 * SECOND);
-    expect(emitted("pr.approvedWithComments")).toMatchObject([
-      {
-        payload: {
-          repo: REPO,
-          number: pr.number,
-          approvers: ["bruno"],
-          authors: ["ana"],
-          comments: 1,
-        },
-      },
-    ]);
+    expect(emitted("pr.approvedWithComments")).toMatchObject([{ payload: { repo: REPO, number: pr.number, approvers: ["bruno"], authors: ["ana"], comments: 1 } }]);
 
     // Releer el PR con la misma aprobación no la anuncia de nuevo.
     pr.label("risk:low");
@@ -764,9 +614,7 @@ describe("eventos", () => {
     await wake(31 * SECOND);
     const conflicted = cache.list()[0]?.state;
     expect(conflicted?.mergeable).toBe("conflict");
-    expect(emitted("pr.conflict").map((e) => e.payload)).toEqual([
-      { repo: REPO, number: pr.number, sha: conflicted?.headSha, base: "main" },
-    ]);
+    expect(emitted("pr.conflict").map((e) => e.payload)).toEqual([{ repo: REPO, number: pr.number, sha: conflicted?.headSha, base: "main" }]);
 
     pr.setDraft(false);
     await wake(31 * SECOND);
@@ -778,10 +626,7 @@ describe("eventos", () => {
     expect(emitted("pr.conflict")).toHaveLength(1);
     await wake(21 * SECOND);
     await wake(31 * SECOND);
-    expect(emitted("pr.conflict").map((e) => e.payload.sha)).toEqual([
-      conflicted?.headSha,
-      origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one"),
-    ]);
+    expect(emitted("pr.conflict").map((e) => e.payload.sha)).toEqual([conflicted?.headSha, origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one")]);
   });
 
   test("varios pushes seguidos dan un solo evento, el del sha final", async () => {
@@ -795,56 +640,31 @@ describe("eventos", () => {
     push("one", "feat: b");
     await wake(31 * SECOND);
     pr.ci("green");
-    const final = origin.git(
-      "--git-dir",
-      origin.remoteDir!,
-      "rev-parse",
-      "one",
-    );
+    const final = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
     expect(cache.list()[0]?.state?.headSha).toBe(final);
     expect(emitted()).toEqual([]);
 
     await wake(21 * SECOND);
     await wake(31 * SECOND);
 
-    expect(emitted().map((e) => [e.type, e.payload.sha])).toEqual([
-      ["pr.ci", final],
-    ]);
+    expect(emitted().map((e) => [e.type, e.payload.sha])).toEqual([["pr.ci", final]]);
     expect(emitted("pr.ci")[0]?.payload.state).toBe("green");
   });
 
   test("una punta que no desciende de la anterior (force push) sale como base reescrita", async () => {
     sim.openPr({ head: "one" });
     await wake();
-    const before = origin.git(
-      "--git-dir",
-      origin.remoteDir!,
-      "rev-parse",
-      "one",
-    );
+    const before = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
 
     origin.git("checkout", "one");
-    origin.git(
-      "commit",
-      "--amend",
-      "--allow-empty",
-      "--message",
-      "feat: one, reescrito",
-    );
+    origin.git("commit", "--amend", "--allow-empty", "--message", "feat: one, reescrito");
     origin.git("push", "--force", "origin", "one");
-    const after = origin.git(
-      "--git-dir",
-      origin.remoteDir!,
-      "rev-parse",
-      "one",
-    );
+    const after = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
     await wake(31 * SECOND);
     await wake(21 * SECOND);
     await wake(31 * SECOND);
 
-    expect(emitted("pr.base_rewritten").map((e) => e.payload)).toEqual([
-      { repo: REPO, number: 1, from: before, to: after },
-    ]);
+    expect(emitted("pr.base_rewritten").map((e) => e.payload)).toEqual([{ repo: REPO, number: 1, from: before, to: after }]);
     expect(emittedTypes()).toEqual(["pr.base_rewritten"]);
   });
 });
@@ -867,37 +687,22 @@ describe("dispara flujos", () => {
         return { outcome: "ok" };
       },
     });
-    for (const [id, type] of [
-      ["council", "pr.comment"],
-      ["rebase", "pr.conflict"],
-      ["restack", "pr.merged"],
-    ] as const) {
+    for (const [id, type] of [["council", "pr.comment"], ["rebase", "pr.conflict"], ["restack", "pr.merged"]] as const) {
       flows.save({
         schema: 1,
         id,
         name: id,
         trigger: { type },
-        params: {
-          pr: "PrRef",
-          ...(id === "council" && { branch: "string", base: "string" }),
-        },
+        params: { pr: "PrRef", ...(id === "council" && { branch: "string", base: "string" }) },
         start: "work",
-        nodes: {
-          work: {
-            type: "action",
-            action: "work",
-            args: {},
-            on: { ok: "@done" },
-          },
-        },
+        nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
       });
     }
   });
 
   afterEach(() => release());
 
-  const runsOf = (flow: string) =>
-    flows.listRuns().filter((r) => r.flow.slug === flow);
+  const runsOf = (flow: string) => flows.listRuns().filter((r) => r.flow.slug === flow);
 
   test("un comentario de council arranca el flujo council en el carril de mantenimiento", async () => {
     const pr = sim.openPr({ head: "one" });
@@ -908,11 +713,7 @@ describe("dispara flujos", () => {
     await wake(31 * SECOND);
 
     expect(runsOf("council")).toEqual([
-      expect.objectContaining({
-        lane: "maintenance",
-        subject: { type: "pr", id: expect.any(String) },
-        params: { pr: ref(pr.number), branch: "one", base: "main" },
-      }),
+      expect.objectContaining({ lane: "maintenance", subject: { type: "pr", id: expect.any(String) }, params: { pr: ref(pr.number), branch: "one", base: "main" } }),
     ]);
     // Otro thread con la corrida viva no abre otra: `start` es idempotente por (flujo, sujeto).
     pr.councilThread("y esto otro");
@@ -954,12 +755,7 @@ describe("dispara flujos", () => {
     pr.merge();
     await wake(31 * SECOND);
 
-    expect(runsOf("restack")).toEqual([
-      expect.objectContaining({
-        lane: "maintenance",
-        params: { pr: ref(pr.number) },
-      }),
-    ]);
+    expect(runsOf("restack")).toEqual([expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number) } })]);
   });
 
   test("reescribir la branch de un PR del sistema arranca restack-rewritten con su punta vieja y la nueva", async () => {
@@ -972,10 +768,7 @@ describe("dispara flujos", () => {
       effects: "remote",
       run: (args) => {
         restacked.push(args);
-        return Promise.resolve({
-          outcome: "ok",
-          output: { changedDrafts: [] },
-        });
+        return Promise.resolve({ outcome: "ok", output: { changedDrafts: [] } });
       },
     });
     // Sin drafts cambiados no corre ninguna rama, pero el flujo que llaman tiene que existir.
@@ -984,17 +777,9 @@ describe("dispara flujos", () => {
       id: "restack-feedback",
       name: "restack-feedback",
       trigger: { type: "subflow" },
-      params: {
-        pr: "PrRef",
-        repo: "RepoRef",
-        branch: "string",
-        base: "string",
-        externalRounds: "number",
-      },
+      params: { pr: "PrRef", repo: "RepoRef", branch: "string", base: "string", externalRounds: "number" },
       start: "work",
-      nodes: {
-        work: { type: "action", action: "work", args: {}, on: { ok: "@done" } },
-      },
+      nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
     });
     flows.save(clankerLoopTemplate.flows["restack-rewritten"]!);
     const pr = sim.openPr({ head: "one" });
@@ -1003,13 +788,7 @@ describe("dispara flujos", () => {
     const from = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
 
     origin.git("checkout", "one");
-    origin.git(
-      "commit",
-      "--amend",
-      "--allow-empty",
-      "--message",
-      "feat: one, reescrito",
-    );
+    origin.git("commit", "--amend", "--allow-empty", "--message", "feat: one, reescrito");
     origin.git("push", "--force", "origin", "one");
     const to = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
     await wake(31 * SECOND);
@@ -1017,21 +796,9 @@ describe("dispara flujos", () => {
     await wake(31 * SECOND);
 
     expect(runsOf("restack-rewritten")).toEqual([
-      expect.objectContaining({
-        lane: "maintenance",
-        params: {
-          pr: ref(pr.number),
-          repo: expect.any(String),
-          externalRounds: 3,
-          from,
-          to,
-        },
-      }),
+      expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number), repo: expect.any(String), externalRounds: 3, from, to } }),
     ]);
-    await vi.waitFor(
-      () => expect(restacked).toEqual([{ pr: ref(pr.number), from, to }]),
-      WAIT,
-    );
+    await vi.waitFor(() => expect(restacked).toEqual([{ pr: ref(pr.number), from, to }]), WAIT);
   });
 
   test("un conflicto arranca el flujo de rebase, salvo que el PR tenga threads de council", async () => {
@@ -1049,13 +816,8 @@ describe("dispara flujos", () => {
     reviewed.setDraft(true);
     await wake(31 * SECOND);
 
-    expect(emitted("pr.conflict").map((e) => e.payload.number)).toEqual([
-      plain.number,
-      reviewed.number,
-    ]);
-    expect(runsOf("rebase").map((r) => r.params.pr)).toEqual([
-      ref(plain.number),
-    ]);
+    expect(emitted("pr.conflict").map((e) => e.payload.number)).toEqual([plain.number, reviewed.number]);
+    expect(runsOf("rebase").map((r) => r.params.pr)).toEqual([ref(plain.number)]);
   });
 });
 
@@ -1081,23 +843,18 @@ function ciFlow(): FlowDef {
 /** Espera a que el primer wait quede esperando. */
 function waiting(): Promise<void> {
   return new Promise((resolve) => {
-    if (store.events.since(0, { types: ["step.waiting"] }).length > 0)
-      return resolve();
-    const off = store.events.subscribe(
-      () => {
-        off();
-        resolve();
-      },
-      { types: ["step.waiting"] },
-    );
+    if (store.events.since(0, { types: ["step.waiting"] }).length > 0) return resolve();
+    const off = store.events.subscribe(() => {
+      off();
+      resolve();
+    }, { types: ["step.waiting"] });
   });
 }
 
 function finished(runId: string): Promise<void> {
   return new Promise((resolve) => {
     const filter = { types: ["run.finished" as const] };
-    if (store.events.since(0, filter).some((e) => e.runId === runId))
-      return resolve();
+    if (store.events.since(0, filter).some((e) => e.runId === runId)) return resolve();
     const off = store.events.subscribe(() => {
       off();
       resolve();

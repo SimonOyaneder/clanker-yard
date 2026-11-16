@@ -35,14 +35,8 @@ const router = os.router({
       linearClientId: "linear-client",
       githubApp: false,
     })),
-    lanes: os.system.lanes.handler(() => ({
-      dev: { active: 0, capacity: 4 },
-      maintenance: { active: 0, capacity: 2 },
-    })),
-    setLanes: os.system.setLanes.handler(() => ({
-      dev: { active: 0, capacity: 4 },
-      maintenance: { active: 0, capacity: 2 },
-    })),
+    lanes: os.system.lanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
+    setLanes: os.system.setLanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
     breakers: os.system.breakers.handler(() => []),
     shutdown: os.system.shutdown.handler(() => {}),
   },
@@ -103,12 +97,7 @@ const router = os.router({
     create: os.projects.create.handler(() => {
       throw new Error("no se usa en este test");
     }),
-    defaults: os.projects.defaults.handler(() => ({
-      defaultFlowId: null,
-      defaultProfileId: null,
-      parallel: 1,
-      maxCostUsd: null,
-    })),
+    defaults: os.projects.defaults.handler(() => ({ defaultFlowId: null, defaultProfileId: null, parallel: 1, maxCostUsd: null })),
     setDefaults: os.projects.setDefaults.handler(() => {
       throw new Error("no se usa en este test");
     }),
@@ -167,16 +156,8 @@ const router = os.router({
     rebase: os.prs.rebase.handler(() => {
       throw new Error("no se usa en este test");
     }),
-    republish: os.prs.republish.handler(() => ({
-      id: "rep_1",
-      done: true,
-      results: [],
-    })),
-    republishProgress: os.prs.republishProgress.handler(() => ({
-      id: "rep_1",
-      done: true,
-      results: [],
-    })),
+    republish: os.prs.republish.handler(() => ({ id: "rep_1", done: true, results: [] })),
+    republishProgress: os.prs.republishProgress.handler(() => ({ id: "rep_1", done: true, results: [] })),
   },
   repos: {
     list: os.repos.list.handler(() => []),
@@ -257,13 +238,11 @@ const router = os.router({
     restore: os.defs.restore.handler(() => {
       throw new Error("no se usa en este test");
     }),
-    agentOptions: os.defs.agentOptions.handler(() => ({
-      models: [],
-      efforts: [],
-    })),
+    agentOptions: os.defs.agentOptions.handler(() => ({ models: [], efforts: [] })),
     exportToRepo: os.defs.exportToRepo.handler(() => {
       throw new Error("no se usa en este test");
     }),
+
   },
   decisions: {
     list: os.decisions.list.handler(() => []),
@@ -299,10 +278,7 @@ const router = os.router({
     }),
   },
   events: {
-    list: os.events.list.handler(({ input }) => [
-      event(input.after + 1),
-      event(input.after + 2),
-    ]),
+    list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
     stream: os.events.stream.handler(async function* ({ input }) {
       yield event((input.after ?? 0) + 1);
       yield event((input.after ?? 0) + 2);
@@ -327,11 +303,7 @@ async function serve(): Promise<string> {
 afterEach(() => new Promise((resolve) => server.close(resolve)));
 
 test("el cliente manda el token y el origen en cada request", async () => {
-  const client = createClient({
-    url: await serve(),
-    token: "secreto",
-    origin: "cli",
-  });
+  const client = createClient({ url: await serve(), token: "secreto", origin: "cli" });
   await client.system.health();
   expect(seenHeaders.authorization).toBe("Bearer secreto");
   expect(seenHeaders["x-clanker-origin"]).toBe("cli");
@@ -346,13 +318,8 @@ test("llama a los procedimientos con sus tipos y defaults", async () => {
 });
 
 test("events.stream entrega los eventos como un async iterator", async () => {
-  const client = createClient({
-    url: await serve(),
-    token: "t",
-    origin: "mcp",
-  });
+  const client = createClient({ url: await serve(), token: "t", origin: "mcp" });
   const seqs: number[] = [];
-  for await (const e of await client.events.stream({ after: 4 }))
-    seqs.push(e.seq);
+  for await (const e of await client.events.stream({ after: 4 })) seqs.push(e.seq);
   expect(seqs).toEqual([5, 6]);
 });
