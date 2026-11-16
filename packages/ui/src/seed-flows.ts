@@ -65,6 +65,7 @@ export const SEED_REBASE: FlowDef = {
   schema: 1,
   id: "rebase-conflicto",
   name: "Rebase de un PR en conflicto",
+  internal: true,
   trigger: { type: "pr.conflict" },
   lane: "maintenance",
   params: {

@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event, type ProjectId } from "@clanker/api";
-import { combinedBaseBranch, createConnections, createFileSecrets, createIssues, createLocalTracker, createRepos, newId, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { combinedBaseBranch, createConnections, createFileSecrets, createIssues, createLocalTracker, createRepos, newId, openStore, type Core, type Store } from "@clanker/core";
+import { startCore } from "./start-core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";

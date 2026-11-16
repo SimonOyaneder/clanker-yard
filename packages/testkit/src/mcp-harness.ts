@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { createClient, type Client } from "@clanker/api";
-import { createConnections, createFileSecrets, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, openStore, type Core, type Store } from "@clanker/core";
+import { startCore } from "./start-core";
 import { Client as McpClient, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createDevKit } from "./dev-tools";
 import { createFakeRuntime } from "./fake-runtime";

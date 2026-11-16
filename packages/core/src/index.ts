@@ -177,7 +177,8 @@ export { createRepos, InvalidRepoError, RepoNotFoundError } from "./workspaces/r
 export type { Repos } from "./workspaces/repos";
 export { NotAGitRepoError } from "./workspaces/inspect";
 
-export { JUGUETE_FLOW, JUGUETE_PROFILE, JUGUETE_ROLE } from "./builtin/juguete";
+export { JUGUETE_FLOW, JUGUETE_PROFILE, JUGUETE_ROLE, JUGUETE_TEMPLATE } from "./builtin/juguete";
+export type { BuiltinTemplate } from "./builtin/install";
 export { createProjects, InvalidProjectError, ProjectNotFoundError } from "./projects/projects";
 export type { Projects } from "./projects/projects";
 export { createRunStarter, IssueNotCachedError } from "./projects/start-run";

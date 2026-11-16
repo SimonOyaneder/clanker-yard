@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useAppActions } from "@/lib/app-context"
-import { defName } from "@/lib/defs"
+import { defName, selectableFlows } from "@/lib/defs"
 import { tone } from "@/lib/format"
 import {
   CATEGORY_LABELS,
@@ -401,7 +401,7 @@ export function FlowSection({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NONE}>Sin flujo</SelectItem>
-              {flows.map((f) => (
+              {selectableFlows(flows, draft.defaultFlowId).map((f) => (
                 <SelectItem key={f.slug} value={f.slug}>
                   <DefOption def={f} />
                 </SelectItem>

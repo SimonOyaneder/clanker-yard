@@ -163,6 +163,10 @@ export const FlowDef = z.strictObject({
   /** La asigna `flows.save`: no se edita a mano y no forma parte del contenido guardado. */
   version: z.int().positive().optional(),
   name: z.string().min(1),
+  /** Una línea para quien elige el flujo: qué hace de punta a punta. */
+  description: z.string().min(1).optional(),
+  /** Subflujo o flujo de mantenimiento que el sistema dispara solo: no se ofrece al elegir el flujo de un proyecto. */
+  internal: z.boolean().optional(),
   trigger: z.strictObject({
     type: z.enum(FLOW_TRIGGERS),
     filter: z.record(z.string(), Value).optional(),

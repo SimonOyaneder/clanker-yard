@@ -2,22 +2,8 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type ClankerProject, type Event, type IssueId, type NewProject, type Run } from "@clanker/api";
-import {
-  createConnections,
-  createFileSecrets,
-  createIssues,
-  createLinearTracker,
-  createRepos,
-  openStore,
-  startCore,
-  startFakeLinear,
-  type AgentRuntime,
-  type Core,
-  type FakeLinear,
-  type FakeProject,
-  type FakeTeam,
-  type Store,
-} from "@clanker/core";
+import { createConnections, createFileSecrets, createIssues, createLinearTracker, createRepos, openStore, startFakeLinear, type AgentRuntime, type Core, type FakeLinear, type FakeProject, type FakeTeam, type Store } from "@clanker/core";
+import { startCore } from "./start-core";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHttpServer } from "./git-http";

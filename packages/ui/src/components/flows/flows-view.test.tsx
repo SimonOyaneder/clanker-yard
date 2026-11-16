@@ -76,7 +76,7 @@ test("los flujos internos van aparte y plegados", async () => {
   expect(toggle.getAttribute("aria-expanded")).toBe("false")
   expect(screen.queryByRole("list", { name: "Flujos internos" })).toBeNull()
   fireEvent.click(toggle)
-  expect(within(screen.getByRole("list", { name: "Flujos internos" })).getByText("interno")).toBeTruthy()
+  expect(within(screen.getByRole("list", { name: "Flujos internos" })).getAllByText("interno")).toHaveLength(2)
 })
 
 test("sin flujos explica por qué y qué revisar", async () => {

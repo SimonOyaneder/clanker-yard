@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { createClient, type Client, type ProjectSummary } from "@clanker/api";
-import { createConnections, createFileSecrets, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, openStore, type Core, type Store } from "@clanker/core";
+import { startCore } from "./start-core";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { seedDb, type TestHome } from "./home";

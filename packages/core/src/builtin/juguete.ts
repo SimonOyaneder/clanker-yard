@@ -1,4 +1,5 @@
 import type { FlowDef, Profile, Role } from "@clanker/api";
+import type { BuiltinTemplate } from "./install";
 
 // La plantilla de juguete (`docs/design.html#fases`, fase 0): lo mínimo que ejercita el motor de punta
 // a punta. Toma el worktree del repo, un agente de prueba lo saluda y se suelta el worktree. Su guion
@@ -51,3 +52,10 @@ export const JUGUETE_ROLE: Role = {
 };
 
 export const JUGUETE_PROFILE: Profile = { roles: { juguete: { model: "haiku", effort: "low" } } };
+
+/** Solo para demos y tests: el core de producción no lo instala (`StartCoreOptions.builtins`). */
+export const JUGUETE_TEMPLATE: BuiltinTemplate = {
+  roles: { juguete: JUGUETE_ROLE },
+  profiles: { juguete: JUGUETE_PROFILE },
+  flows: [JUGUETE_FLOW],
+};

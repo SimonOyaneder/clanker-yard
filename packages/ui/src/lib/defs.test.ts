@@ -1,6 +1,6 @@
 import type { DefRecord } from "@clanker/api"
 import { expect, test } from "vitest"
-import { defName, defSummary, defaultFlowSlug, defaultProfileSlug } from "./defs"
+import { defName, defSummary, defaultFlowSlug, defaultProfileSlug, selectableFlows } from "./defs"
 
 const def = (kind: DefRecord["kind"], slug: string, body: unknown): DefRecord => ({
   id: `def_${slug}`,
@@ -41,4 +41,11 @@ test("los defaults son techlead-clasico y eco, y si faltan el primero", () => {
   expect(defaultProfileSlug(profiles)).toBe("eco")
   expect(defaultProfileSlug(profiles.slice(0, 1))).toBe("medio")
   expect(defaultProfileSlug([])).toBe("")
+})
+
+test("selectableFlows oculta los internos, salvo el que el proyecto ya tiene", () => {
+  const flows = [def("flow", "techlead-clasico", { name: "Flujo principal" }), def("flow", "council", { internal: true }), def("flow", "restack", { internal: true })]
+
+  expect(selectableFlows(flows).map((f) => f.slug)).toEqual(["techlead-clasico"])
+  expect(selectableFlows(flows, "council").map((f) => f.slug)).toEqual(["techlead-clasico", "council"])
 })

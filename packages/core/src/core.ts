@@ -6,7 +6,7 @@ import { createBriefs } from "./agents/brief";
 import { createStepBriefs } from "./agents/step-brief";
 import { type AgentRuntime, selectRuntime } from "./agents/runtime";
 import { createArtifacts } from "./artifacts/artifacts";
-import { installBuiltins } from "./builtin/install";
+import { installBuiltins, type BuiltinTemplate } from "./builtin/install";
 import { commitsApplyAction } from "./commits/apply";
 import type { Connections } from "./connections/connections";
 import { createBreakers } from "./breakers/breakers";
@@ -88,6 +88,8 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   connections: Connections;
   /** Los runtimes de agentes que este core conoce; `CORE_RUNTIME` elige entre ellos. */
   runtimes: readonly AgentRuntime[];
+  /** Plantillas extra como builtin, solo para demos y tests (p. ej. `JUGUETE_TEMPLATE`): producción no pasa ninguna. */
+  builtins?: readonly BuiltinTemplate[];
   /** De aquí sale `CORE_RUNTIME`. Por defecto, `process.env`. */
   env?: Record<string, string | undefined>;
   /**
@@ -242,7 +244,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     return row?.headSha && row.headChangedAt != null ? { sha: row.headSha, at: row.headChangedAt } : undefined;
   };
   for (const wait of Object.values(prWaits(prs, { headSeen }))) flows.registerWait(wait);
-  installBuiltins({ defs, flows });
+  installBuiltins({ defs, flows, extra: opts.builtins });
   // Los flujos de un pack citan acciones y waits, así que se cargan con todo registrado. Un pack roto no tumba el arranque.
   const { errors } = await packs.loadAll(opts.packsDir ?? join(dataDir, "packs"));
   for (const error of errors) {

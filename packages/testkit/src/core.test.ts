@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
-import { createConnections, createFileSecrets, createProcs, createRepos, JUGUETE_FLOW, newId, openStore, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createProcs, createRepos, JUGUETE_FLOW, newId, openStore, type Core, type Store } from "@clanker/core";
+import { startCore } from "./start-core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -304,7 +305,7 @@ describe("projects.queue", () => {
 });
 
 describe("arranque", () => {
-  test("las plantillas juguete y techlead-clasico quedan instaladas como builtin y arrancar de nuevo no suma versiones", async () => {
+  test("las plantillas incluidas y la de juguete quedan instaladas como builtin y arrancar de nuevo no suma versiones", async () => {
     await boot();
     const versions = store.events.since(0, { types: ["def.versioned"] }).length;
     await core?.close();
@@ -322,6 +323,17 @@ describe("arranque", () => {
       { slug: "restack-rewritten" },
       { slug: "techlead-clasico" },
     ]);
+  });
+
+  test("un proyecto con `techlead-clasico` sigue resolviendo su flujo (Techlead clásico) tras reiniciar el core", async () => {
+    const client = await boot();
+    const project = await client.projects.create({ slug: "acme", name: "Acme", tracker: "local", defaultFlowId: "techlead-clasico", defaultProfileId: "juguete" });
+    await core?.close();
+    core = undefined;
+    const again = await boot();
+
+    expect(await again.projects.get({ id: project.id })).toMatchObject({ defaultFlowId: "techlead-clasico" });
+    expect((await again.defs.list({ kind: "flow" })).find((d) => d.slug === "techlead-clasico")?.body).toMatchObject({ name: "Techlead clásico" });
   });
 
   test("al devolverse un sujeto prestado, la dueña relee el head_sha de su worktree", async () => {

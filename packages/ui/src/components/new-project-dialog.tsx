@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { DefOption } from "@/components/def-option"
 import { listsProjects, TrackerProjectPicker } from "@/components/tracker-project-picker"
 import { useLiveQuery } from "@/hooks/use-live"
-import { defaultFlowSlug, defaultProfileSlug, defName } from "@/lib/defs"
+import { defaultFlowSlug, defaultProfileSlug, defName, selectableFlows } from "@/lib/defs"
 
 const TRACKERS: { id: TrackerId; label: string }[] = [
   { id: "local", label: "Local" },
@@ -54,7 +54,7 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
   // `null` es "no tocado": vale el default de lo que haya llegado.
   const [pickedFlow, setPickedFlow] = useState<string | null>(null)
   const [pickedProfile, setPickedProfile] = useState<string | null>(null)
-  const defs = useLiveQuery("new-project:defs", async () => ({ flows: await appData.defs("flow"), profiles: await appData.defs("profile") }), { live: false })
+  const defs = useLiveQuery("new-project:defs", async () => ({ flows: selectableFlows(await appData.defs("flow")), profiles: await appData.defs("profile") }), { live: false })
   const flow = pickedFlow ?? defaultFlowSlug(defs.data?.flows ?? [])
   const profile = pickedProfile ?? defaultProfileSlug(defs.data?.profiles ?? [])
   const [parallel, setParallel] = useState("1")

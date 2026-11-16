@@ -1,17 +1,8 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient, type Client, type Event } from "@clanker/api";
-import {
-  createConnections,
-  createFileSecrets,
-  createRepos,
-  openStore,
-  startCore,
-  type AgentRuntime,
-  type Connections,
-  type Core,
-  type Store,
-} from "@clanker/core";
+import { createConnections, createFileSecrets, createRepos, openStore, type AgentRuntime, type Connections, type Core, type Store } from "@clanker/core";
+import { startCore } from "./start-core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeClaude, type FakeClaude, type FakeClaudeScenario } from "./fake-claude";
 import { createFakeRuntime } from "./fake-runtime";

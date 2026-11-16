@@ -2,7 +2,8 @@ import { mkdirSync, readdirSync, readFileSync, mkdtempSync, rmSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, type Client } from "@clanker/api";
-import { createConnections, createFileSecrets, createRepos, createSlots, newId, openStore, RepoNotFoundError, startCore, type Core, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createRepos, createSlots, newId, openStore, RepoNotFoundError, type Core, type Store } from "@clanker/core";
+import { startCore } from "./start-core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";

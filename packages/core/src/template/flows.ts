@@ -6,11 +6,12 @@ import type { FlowDef, Node } from "@clanker/api";
 //
 // Desvío del diseño: `workspace.acquire` recibe `branch` (el id de la issue, como en `juguete`) en lugar de `issue`.
 
-/** "Techlead clásico": el flujo del techlead sin LLM orquestador. Llama a `pr-feedback` para el tramo externo. */
+/** "Techlead clásico": el flujo del techlead sin LLM orquestador (el slug sigue siendo `techlead-clasico`: los proyectos lo citan). Llama a `pr-feedback` para el tramo externo. */
 export const TECHLEAD_CLASICO: FlowDef = {
   schema: 1,
   id: "techlead-clasico",
   name: "Techlead clásico",
+  description: "De la issue al PR con review: implementa, revisa en rondas, corre los checks, abre el PR y atiende el feedback hasta dejarlo listo.",
   trigger: { type: "issue.queued" },
   lane: "dev",
   params: {
@@ -137,6 +138,7 @@ export const PR_FEEDBACK: FlowDef = {
   schema: 1,
   id: "pr-feedback",
   name: "Feedback del PR",
+  internal: true,
   trigger: { type: "subflow" },
   params: { ws: "Workspace", pr: "PrRef", externalRounds: { type: "number", default: 3 } },
   start: "bot-req",
@@ -271,6 +273,7 @@ export const REBASE_CONFLICTO: FlowDef = {
   schema: 1,
   id: "rebase-conflicto",
   name: "Rebase por conflicto",
+  internal: true,
   trigger: { type: "pr.conflict" },
   lane: "maintenance",
   params: {
@@ -441,6 +444,7 @@ export const RESTACK_FEEDBACK: FlowDef = {
   schema: 1,
   id: "restack-feedback",
   name: "Feedback de un PR restackeado",
+  internal: true,
   trigger: { type: "subflow" },
   params: {
     pr: "PrRef",
@@ -477,6 +481,7 @@ export const RESTACK: FlowDef = {
   schema: 1,
   id: "restack",
   name: "Restack",
+  internal: true,
   trigger: { type: "pr.merged" },
   lane: "maintenance",
   params: { pr: "PrRef", repo: "RepoRef", externalRounds: { type: "number", default: 3 } },
@@ -503,6 +508,7 @@ export const RESTACK_REWRITTEN: FlowDef = {
   schema: 1,
   id: "restack-rewritten",
   name: "Restack por base reescrita",
+  internal: true,
   trigger: { type: "pr.base_rewritten" },
   lane: "maintenance",
   params: { pr: "PrRef", repo: "RepoRef", from: "string", to: "string", externalRounds: { type: "number", default: 3 } },
@@ -531,6 +537,7 @@ export const COUNCIL: FlowDef = {
   schema: 1,
   id: "council",
   name: "Council",
+  internal: true,
   trigger: { type: "pr.comment" },
   lane: "maintenance",
   params: {

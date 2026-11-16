@@ -1,4 +1,5 @@
 import type { DefRecord } from "@clanker/api"
+import { isInternal } from "./defs-library"
 
 /** El nombre legible de un flujo (`name` de su body) y, si la def no lo trae (un perfil), su slug. */
 export function defName(def: DefRecord): string {
@@ -27,6 +28,11 @@ export function defSummary(def: DefRecord): string | undefined {
     ...(reviewModels.length > 0 ? [`reviews ${reviewModels.join("/")}`] : []),
   ]
   return parts.length > 0 ? parts.join(" · ") : undefined
+}
+
+/** Los flujos que se ofrecen como flujo de un proyecto: sin los internos, salvo `keep` (el que el proyecto ya tiene). */
+export function selectableFlows(flows: DefRecord[], keep?: string | null): DefRecord[] {
+  return flows.filter((f) => !isInternal(f) || f.slug === keep)
 }
 
 /** El flujo que se preselecciona al crear un proyecto: `techlead-clasico` si existe y si no el primero ("" si no hay ninguno). */
