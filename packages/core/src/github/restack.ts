@@ -249,8 +249,9 @@ async function restackChain(
             );
           } else {
             store.tx((tx) =>
+              // Hay que resolverlo a mano: es una alerta de la Bandeja, no una nota (las notas no llegan a la Bandeja).
               openDecision(tx, {
-                kind: "note",
+                kind: "alert",
                 title: `Base combinada en conflicto en ${remote.repo}#${child.number}`,
                 body: `No se pudo recalcular la base combinada de ${child.headRef} tras mergearse ${merged}: conflicto en ${files.join(", ")}. El PR quedó como estaba; el flujo de rebase por conflicto no sabe rehacer una base combinada, así que hay que resolverlo a mano.`,
                 runId: ctx.runId,

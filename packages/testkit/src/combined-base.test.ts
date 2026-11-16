@@ -395,7 +395,7 @@ describe("stack.restack con una base combinada", () => {
     expect(github.requests.filter((r) => r.method === "PATCH")).toEqual([]);
   });
 
-  test("si los padres que quedan chocan con la base nueva: nada se mueve y queda una nota", async () => {
+  test("si los padres que quedan chocan con la base nueva: nada se mueve y queda una alerta", async () => {
     const { branch, child } = await combinedPr();
     const head = remoteSha("cla-3");
     // Alguien deja en main un cambio de b.txt distinto del de `cla-2`, y mergea `cla-1`.
@@ -415,7 +415,7 @@ describe("stack.restack con una base combinada", () => {
     expect(remoteSha("cla-3")).toBe(head);
     expect(prBase(child)).toBe("cla-1");
     expect(row(branch)?.status).toBe("conflict");
-    expect(sql(`SELECT kind, title FROM decisions`)).toEqual([{ kind: "note", title: expect.stringContaining(`#${child}`) }]);
+    expect(sql(`SELECT kind, title FROM decisions`)).toEqual([{ kind: "alert", title: expect.stringContaining(`#${child}`) }]);
     expect(sql(`SELECT * FROM events WHERE type = 'pr.conflict'`)).toEqual([]);
   });
 
