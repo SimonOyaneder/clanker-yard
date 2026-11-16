@@ -1,4 +1,5 @@
-import { RepoId, type DetectedRepo, type RecipeStatus, type Repo } from "@clanker/api";
+import { existsSync } from "node:fs";
+import { RepoId, type DetectedRepo, type RecipeStatus, type Repo, type RepoOverview } from "@clanker/api";
 import { asc, eq } from "drizzle-orm";
 import { DefValidationError } from "../defs/defs";
 import { readRecipe, RecipeSyntaxError } from "../recipe/recipe";
@@ -27,6 +28,11 @@ export interface Repos {
    */
   register(path: string, name?: string): Promise<Repo>;
   get(id: string): Repo | undefined;
+  /**
+   * Los registrados, por nombre, con el estado de su receta (`invalid` si la carpeta ya no existe) y cómo
+   * terminó su última prueba (el último `recipe.test_finished` de cada uno).
+   */
+  overview(): RepoOverview[];
   /** Por nombre. */
   list(): Repo[];
   /** El repo registrado cuyo remoto de GitHub es `owner/name` (si hay varios checkouts, el primero por nombre). */
@@ -70,6 +76,18 @@ export function createRepos(store: Store, { remote: remoteOf }: ReposOptions = {
     list: () => store.db.select().from(repos).orderBy(asc(repos.name), asc(repos.id)).all(),
     byRemote: (remote) =>
       store.db.select().from(repos).where(eq(repos.remote, remote)).orderBy(asc(repos.name), asc(repos.id)).get(),
+    overview() {
+      const lastTest = new Map<string, { ok: boolean; at: number }>();
+      for (const event of store.events.since(0, { types: ["recipe.test_finished"] })) {
+        const repoId = event.payload.repoId;
+        if (typeof repoId === "string") lastTest.set(repoId, { ok: event.payload.ok === true, at: event.ts });
+      }
+      return self.list().map((repo) => ({
+        repo,
+        recipe: existsSync(repo.path) ? recipeStatus(repo.path) : { status: "invalid", message: `La carpeta ${repo.path} ya no existe.` },
+        lastTest: lastTest.get(repo.id) ?? null,
+      }));
+    },
     async detect(folder) {
       return (await findRepos(folder)).map((info) => ({
         ...info,

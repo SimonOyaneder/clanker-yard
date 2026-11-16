@@ -160,6 +160,7 @@ const router = os.router({
   },
   repos: {
     list: os.repos.list.handler(() => []),
+    overview: os.repos.overview.handler(() => []),
     add: os.repos.add.handler(() => {
       throw new Error("no se usa en este test");
     }),

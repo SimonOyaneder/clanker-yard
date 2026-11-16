@@ -25,7 +25,7 @@ import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefa
 import { CachedPr, PrFilter, PrRef, PrRepublish, PrState, RepublishInput } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
-import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync } from "./repos";
+import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync, RepoOverview } from "./repos";
 import { Breaker, Lanes, LanesPatch, Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue, TrackerId, TrackerProject } from "./tracker";
 
@@ -385,6 +385,11 @@ const prs = {
 const repos = {
   /** Por nombre. */
   list: base.output(z.array(Repo)),
+  /**
+   * Los repos registrados, por nombre, con el estado de su receta (`invalid` si la carpeta ya no existe) y
+   * cómo terminó su última `repos.testRecipe`: lo que muestra Conexiones.
+   */
+  overview: base.output(z.array(RepoOverview)),
   /**
    * Registra el checkout de `path`, que debe ser la raíz de un repo de git: el nombre, la branch por
    * defecto y el remoto de GitHub salen de él. `BAD_REQUEST` si no es la raíz de un repo o ya está

@@ -300,6 +300,7 @@ export function createRouter(deps: RouterDeps) {
     },
     repos: {
       list: os.repos.list.handler(() => repos.list()),
+      overview: os.repos.overview.handler(() => repos.overview()),
       add: os.repos.add.handler(({ input }) =>
         asApiErrorAsync(async () => {
           const repo = await repos.register(input.path, input.name);

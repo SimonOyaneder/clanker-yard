@@ -56,23 +56,6 @@ const LIVE_EVENTS = [
   "recipe.test_finished",
 ] as const satisfies readonly EventType[]
 
-const EVENTS_PAGE = 500
-
-/** Cómo terminó la última prueba de receta de cada repo, según los eventos `recipe.test_finished`. */
-async function lastRecipeTests(client: CoreClient): Promise<Map<string, { ok: boolean; at: number }>> {
-  const last = new Map<string, { ok: boolean; at: number }>()
-  let after = 0
-  for (;;) {
-    const page = await client.events.list({ after, limit: EVENTS_PAGE, filter: { types: ["recipe.test_finished"] } })
-    for (const event of page) {
-      const repoId = event.payload.repoId
-      if (typeof repoId === "string") last.set(repoId, { ok: event.payload.ok === true, at: event.ts })
-    }
-    if (page.length < EVENTS_PAGE) return last
-    after = page[page.length - 1]!.seq
-  }
-}
-
 /** El `AppData` real: la API del core por el cliente oRPC. */
 export function createCoreAppData(client: CoreClient): AppData {
   return {
@@ -170,19 +153,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     archiveDef: (kind, id) => client.defs.archive({ kind, id }),
     restoreDef: (kind, id) => client.defs.restore({ kind, id }),
     trackerProjects: (tracker) => client.trackers.projects({ tracker }),
-    repos: async () => {
-      const [repos, tests] = await Promise.all([client.repos.list(), lastRecipeTests(client)])
-      return Promise.all(
-        repos.map(async (repo) => {
-          // `detect` sobre la propia carpeta del repo devuelve su receta; si la carpeta ya no existe, eso es lo que dice la fila.
-          const recipe = await client.repos.detect({ folder: repo.path }).then(
-            ([found]) => found?.recipe ?? ({ status: "missing" } as const),
-            (e: unknown) => ({ status: "invalid", message: messageOf(e) }) as const,
-          )
-          return { repo, recipe, lastTest: tests.get(repo.id) ?? null }
-        }),
-      )
-    },
+    repos: () => client.repos.overview(),
     testRecipe: (repoId) => client.repos.testRecipe({ repoId }),
     addRepo: (path) => client.repos.add({ path }),
     exportDefToRepo: (input) => client.defs.exportToRepo(input),

@@ -312,3 +312,24 @@ describe("repos.testRecipe", () => {
     expect(rejected.reason).toSatisfy(badRequest(/ya hay una prueba/i));
   });
 });
+
+describe("repos.overview", () => {
+  test("cada repo con su receta y su última prueba; una carpeta que ya no existe es inválida", async () => {
+    const withRecipe = repoWith({ version: 1, requires: [{ name: "Git", check: "git --version" }] });
+    const without = repoWith(undefined);
+    const gone = repoWith(undefined);
+    const tested = await client.repos.add({ path: withRecipe.dir, name: "a-con-receta" });
+    await client.repos.add({ path: without.dir, name: "b-sin-receta" });
+    await client.repos.add({ path: gone.dir, name: "c-borrado" });
+    rmSync(gone.dir, { recursive: true, force: true });
+
+    expect((await client.repos.testRecipe({ repoId: tested.id })).ok).toBe(true);
+    const overview = await client.repos.overview();
+
+    expect(overview.map(({ repo, recipe, lastTest }) => [repo.name, recipe.status, lastTest?.ok ?? null])).toEqual([
+      ["a-con-receta", "found", true],
+      ["b-sin-receta", "missing", null],
+      ["c-borrado", "invalid", null],
+    ]);
+  });
+});
