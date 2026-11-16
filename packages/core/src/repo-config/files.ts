@@ -1,4 +1,5 @@
 import { NodeId, type DefWriteKind } from "@clanker/api";
+import { messageOf } from "../errors/format";
 
 const DIR = { flow: "flows", role: "roles", profile: "profiles" } as const satisfies Record<DefWriteKind, string>;
 const EXT = { flow: "json", role: "md", profile: "json" } as const satisfies Record<DefWriteKind, string>;
@@ -51,6 +52,6 @@ function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new RepoFileSyntaxError(`no es JSON: ${error instanceof Error ? error.message : String(error)}`);
+    throw new RepoFileSyntaxError(`no es JSON: ${messageOf(error)}`);
   }
 }

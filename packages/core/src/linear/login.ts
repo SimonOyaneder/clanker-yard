@@ -9,6 +9,7 @@ import {
   type LinearEndpoints,
   type LinearTokens,
 } from "./oauth";
+import { messageOf } from "../errors/format";
 
 export const CALLBACK_PATH = "/oauth/linear/callback";
 
@@ -85,7 +86,7 @@ export async function startLinearLogin<T>(
       reply(res, 200, "Linear quedó conectado. Puedes cerrar esta pestaña y volver a Clanker Yard.");
       succeed(result);
     } catch (error) {
-      reply(res, 400, `No se pudo conectar Linear: ${error instanceof Error ? error.message : String(error)}`);
+      reply(res, 400, `No se pudo conectar Linear: ${messageOf(error)}`);
       fail(error);
     }
   }
@@ -129,7 +130,7 @@ export async function startLinearLogin<T>(
     clearTimeout(timer);
     throw new LinearAuthError(
       `No se pudo escuchar en 127.0.0.1:${options.port} para el redirect de Linear: ${
-        error instanceof Error ? error.message : String(error)
+        messageOf(error)
       }. Cierra lo que use ese puerto o cambia el puerto del redirect.`,
     );
   }

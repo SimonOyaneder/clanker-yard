@@ -14,13 +14,17 @@ import type { Store, Tx } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import { storedBinding, type ProjectBindings } from "../tracker/tracker-projects";
 import type { Trackers } from "../tracker/trackers";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { combinedBaseBranch, type Workspaces } from "../workspaces/workspaces";
+import { messageOf } from "../errors/format";
+import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import type { LaneSettings } from "./lanes";
 import type { ProjectQueue } from "./project-queue";
 
 /** El tick periódico del diseño (`docs/design.html#d-ops`, "Scheduler: la cola"), además de los eventos que lo disparan. */
 export const SCHEDULER_TICK_MS = 5 * 60_000;
+/** El `scope` de los eventos `error` de un tick, uno por proyecto. */
+const TICK_SCOPE = "scheduler.tick";
 
 /** Lo que cambia lo que el Scheduler puede lanzar: el resto de los momentos del tick (boot y cada 5 min) los pone `start`. */
 const TRIGGERS = [
@@ -43,7 +47,7 @@ const IN_FLIGHT = ["queued", "running", "waiting", "parked", "paused"] as const;
  * Los circuit breakers por causa (`docs/design.html#d-ops`, `breakers/`): el Scheduler no lanza issues de un
  * `repo:<id>` ni del `runtime:<id>` pausados. El breaker `github` solo frena a quien publica, no el lanzamiento.
  */
-export type Breakers = Pick<AllBreakers, "open">;
+export type Breakers = Pick<AllBreakers, "openReason">;
 
 export interface SchedulerDeps {
   store: Store;
@@ -66,6 +70,8 @@ export interface SchedulerDeps {
   runtime: RuntimeId;
   /** Sin él nada está pausado. */
   breakers?: Breakers;
+  /** Dónde se anota lo que falla en un tick; por defecto uno propio sobre `store`. */
+  errors?: ErrorReporter;
   tickMs?: number;
 }
 
@@ -99,10 +105,9 @@ export class IssueNotInProjectError extends Error {}
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
   const { store, projects, issues, repos, lanes, breakers } = deps;
+  const errors = deps.errors ?? createErrorReporter(store);
   /** Lo que el último tick no pudo lanzar de cada proyecto, con su motivo. */
   const skipped = new Map<ProjectId, Map<IssueId, string>>();
-  /** El último error de cada proyecto, para no repetir el mismo evento en cada tick. */
-  const failures = new Map<ProjectId, string>();
   let running: Promise<void> | undefined;
   let again = false;
   let closed = false;
@@ -146,9 +151,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       if (project.status !== "active") continue;
       try {
         await launch(project);
-        failures.delete(project.id);
+        errors.clear(TICK_SCOPE, { projectId: project.id });
       } catch (error) {
-        report(project.id, error);
+        errors.report(TICK_SCOPE, error, { projectId: project.id });
       }
     }
   }
@@ -186,7 +191,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           inFlight.add(issue.id);
         } catch (error) {
           // Un claim perdido, un flujo que falta: esta issue queda con su motivo y sigue la siguiente.
-          marks.set(issue.id, describe(error));
+          marks.set(issue.id, messageOf(error));
         }
       }
     } finally {
@@ -246,7 +251,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   }
 
   function pausedBecause(scope: string): string | undefined {
-    const reason = breakers?.open(scope);
+    const reason = breakers?.openReason(scope);
     return reason === undefined ? undefined : `${scope} en pausa: ${reason}`;
   }
 
@@ -272,13 +277,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         tx.emit({ type: "issue.skipped", origin: "core", projectId, subject: { type: "issue", id: issueId }, payload: { issueId, reason } }),
       );
     }
-  }
-
-  function report(projectId: ProjectId, error: unknown): void {
-    const message = describe(error);
-    if (failures.get(projectId) === message) return;
-    failures.set(projectId, message);
-    store.tx((tx) => tx.emit({ type: "error", origin: "core", projectId, payload: { scope: "scheduler.tick", message } }));
   }
 
   /** El sujeto de la issue, que debe ser del proyecto. */
@@ -372,4 +370,3 @@ function conflictsWithRunning(issue: CachedIssue, cache: readonly CachedIssue[],
   );
 }
 
-const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));

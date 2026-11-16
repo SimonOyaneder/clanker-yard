@@ -31,7 +31,7 @@ export const DevWorkBrief = z.object({
       z.object({
         id: z.string(),
         path: z.string(),
-        line: z.number().int().optional(),
+        line: z.int().optional(),
         change: z.string(),
       }),
     )
@@ -64,7 +64,7 @@ export const Finding = z.object({
   id: z.string().describe("Local al reporte (f1, f2...). El core le pone el id estable."),
   severity: Severity,
   path: z.string(),
-  line: z.number().int(),
+  line: z.int(),
   claim: z.string().describe("El escenario concreto o la regla que se viola."),
   fix: z.string().describe("El cambio concreto."),
   rule: z.string().optional().describe('Id del patrón ("[2.3]") o sección de AGENTS.md.'),
@@ -125,7 +125,7 @@ export const TriageBrief = z.object({
       id: z.string(),
       kind: z.enum(["bot", "coverage", "ci"]),
       path: z.string().optional(),
-      line: z.number().int().optional(),
+      line: z.int().optional(),
       text: z.string(),
       flaky: z.boolean().optional().describe("Un check de CI que el pack ya declara flaky conocido."),
     }),

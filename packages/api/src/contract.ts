@@ -296,8 +296,6 @@ const projects = {
     })
     .input(z.object({ id: ProjectId }))
     .output(ClankerProject),
-  /** El cupo del carril dev de este proyecto (`parallel`). Rige de inmediato: el Scheduler lanza lo que quepa. */
-  setParallel: base.input(z.object({ id: ProjectId, parallel: z.int().positive() })).output(ClankerProject),
   /**
    * Con `skipped: true` (por defecto) el Scheduler no lanza esta issue mientras no se revierta: sigue en la
    * cola como `blocked` con el motivo y emite `issue.skipped`. Con `false` vuelve a la cola (`issue.queued`).

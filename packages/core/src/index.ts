@@ -93,20 +93,11 @@ export type {
 } from "./connections/connections";
 export { LinearAuthError } from "./linear/oauth";
 export type { LinearEndpoints } from "./linear/oauth";
-export { startFakeLinear } from "./linear/fake-linear";
-export type { FakeLinear, FakeLinearOptions } from "./linear/fake-linear";
-export type { FakeIssue, FakeProject, FakeTeam, FakeWorkspace } from "./linear/fake-workspace";
 export { createLinearTracker } from "./linear/tracker";
 export { GitHubPatError } from "./github/pat";
 export { GitHubAuthError } from "./github/device-flow";
 export type { GitHubOAuthEndpoints } from "./github/device-flow";
-export { startFakeGitHubOAuth } from "./github/fake-github-oauth";
-export type { FakeGitHubOAuth, FakeGitHubOAuthOptions, FakeGitHubOAuthRequest } from "./github/fake-github-oauth";
 export { PrNotFoundError } from "./github/pr-query";
-export { healthyGitHub, recorded, startFakeGitHub } from "./github/fake-github";
-export type { FakeGitHub, FakeRequest, RecordedResponse } from "./github/fake-github";
-export { defaultBranchChecksData, graphqlNotFound, prGraphql } from "./github/fake-pr-graphql";
-export type { DefaultBranchCommit } from "./github/fake-pr-graphql";
 export type { Actor, PrNode, RawComment, RawContext, RawReview, RawThread, ReviewState } from "./github/pr-query";
 export { buildPrState } from "./github/pr-state";
 export type { PrStateContext } from "./github/pr-state";
@@ -123,7 +114,7 @@ export { createWatch, WATCH_TICK_MS } from "./watch/watch";
 export type { Watch, WatchDeps } from "./watch/watch";
 export { createPrEvents, DEBOUNCE_MS } from "./watch/events";
 export type { PrEvents } from "./watch/events";
-export { createErrorReporter } from "./watch/report";
+export { createErrorReporter } from "./errors/reporter";
 export { createTrackerChanges, TRACKER_EVERY_MS } from "./watch/tracker-changes";
 export { startTriggers } from "./watch/triggers";
 export type { Prs } from "./github/prs";
@@ -173,11 +164,10 @@ export { ARCHIVE_TTL_MS } from "./workspaces/archive";
 export { CLEANUP_EVERY_MS, startCleanup } from "./workspaces/cleanup";
 export type { Cleanup } from "./workspaces/cleanup";
 export type { CleanupResult } from "./workspaces/archive";
-export { createRepos, InvalidRepoError, RepoNotFoundError } from "./workspaces/repos";
-export type { Repos } from "./workspaces/repos";
-export { NotAGitRepoError } from "./workspaces/inspect";
+export { createRepos, InvalidRepoError, RepoNotFoundError } from "./repos/repos";
+export type { Repos } from "./repos/repos";
+export { NotAGitRepoError } from "./repos/inspect";
 
-export { JUGUETE_FLOW, JUGUETE_PROFILE, JUGUETE_ROLE, JUGUETE_TEMPLATE } from "./builtin/juguete";
 export type { BuiltinTemplate } from "./builtin/install";
 export { createProjects, InvalidProjectError, ProjectNotFoundError } from "./projects/projects";
 export type { Projects } from "./projects/projects";
@@ -230,10 +220,9 @@ export { prPushFixupsAction } from "./github/push-fixups";
 export {
   prPushLeaseAction,
   prRebaseApprovalAction,
-  workspaceCommitAfterRebaseAction,
-  workspaceRebaseAbortAction,
   workspaceRebaseAction,
 } from "./github/rebase-pr";
+export { workspaceCommitAfterRebaseAction, workspaceRebaseAbortAction } from "./workspaces/rebase-actions";
 export type { RebasePrDeps } from "./github/rebase-pr";
 export { stackRestackAction, stackRestackRewrittenAction } from "./github/restack";
 export type { ChildReport, StackRestackDeps } from "./github/restack";

@@ -77,7 +77,7 @@ beforeEach(async () => {
   workspaces = createWorkspaces({
     store,
     dataDir: dir,
-    repos: repos.config,
+    repoConfig: repos.config,
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote,
     now: () => clock,

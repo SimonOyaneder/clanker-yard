@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { newId } from "../store/conventions";
 import { runs } from "../store/schema";
 import type { Tx } from "../store/store";
-import { harness as createHarness } from "./harness";
+import { harness as createHarness, WAIT } from "./harness";
 import { claimPr } from "./subjects";
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -94,7 +94,7 @@ describe("una corrida dueña por sujeto", () => {
   test("dos corridas del mismo PR no corren a la vez: la segunda espera a la primera, no a un slot", async () => {
     const h = harness();
     const first = h.start("rebase", PR);
-    await vi.waitFor(() => expect(h.work.state.started).toBe(1));
+    await vi.waitFor(() => expect(h.work.state.started).toBe(1), WAIT);
 
     const second = h.start("council", PR);
     expect(h.flows.getRun(second)).toMatchObject({ status: "queued" });
@@ -127,7 +127,7 @@ describe("una corrida dueña por sujeto", () => {
   test("las corridas queued toman el sujeto en el orden en que llegaron", async () => {
     const h = harness();
     const first = h.start("dev-long", ISSUE);
-    await vi.waitFor(() => expect(h.work.state.started).toBe(1));
+    await vi.waitFor(() => expect(h.work.state.started).toBe(1), WAIT);
     h.save({
       schema: 1,
       id: "other",
@@ -202,7 +202,7 @@ describe("préstamo del sujeto", () => {
   test("si la dueña no está estacionada o es de mantenimiento, no hay préstamo", async () => {
     const h = harness();
     const owner = h.start("rebase", PR);
-    await vi.waitFor(() => expect(h.work.state.started).toBe(1));
+    await vi.waitFor(() => expect(h.work.state.started).toBe(1), WAIT);
     const waiting = h.start("council", PR);
     expect(h.flows.getRun(waiting).status).toBe("queued");
     expect(h.row(owner).borrowedFromRunId).toBeNull();
@@ -228,12 +228,12 @@ describe("préstamo del sujeto", () => {
       },
     });
     const owner = h.start("dev-late-gate", ISSUE);
-    await vi.waitFor(() => expect(gate.state.started).toBe(1));
+    await vi.waitFor(() => expect(gate.state.started).toBe(1), WAIT);
     const waiting = h.start("rebase", PR);
     expect(h.flows.getRun(waiting).status).toBe("queued");
 
     gate.release();
-    await vi.waitFor(() => expect(h.row(waiting)).toMatchObject({ status: "running", borrowedFromRunId: owner }));
+    await vi.waitFor(() => expect(h.row(waiting)).toMatchObject({ status: "running", borrowedFromRunId: owner }), WAIT);
     h.work.release();
     await h.finished(waiting);
     expect(h.flows.getRun(owner).status).toBe("parked");
@@ -243,7 +243,7 @@ describe("préstamo del sujeto", () => {
     const h = harness();
     const owner = await parkedOwner(h);
     const borrower = h.start("rebase", PR);
-    await vi.waitFor(() => expect(h.work.state.started).toBe(1));
+    await vi.waitFor(() => expect(h.work.state.started).toBe(1), WAIT);
 
     const decision = h.pendingDecision(owner);
     h.flows.resolveGate(decision!.id, "go", "ui");
@@ -258,7 +258,7 @@ describe("préstamo del sujeto", () => {
     ]);
 
     h.work.release();
-    await vi.waitFor(() => expect(h.flows.getRun(owner)).toMatchObject({ status: "done", outcome: "done" }));
+    await vi.waitFor(() => expect(h.flows.getRun(owner)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
     expect(h.flows.getRun(borrower).status).toBe("done");
     expect(h.events(owner, "run.requeued")[0]?.payload).toEqual({ decisionId: decision!.id, reason: "gate" });
     // Primero vuelve el sujeto, después la dueña sigue.
@@ -272,9 +272,9 @@ describe("préstamo del sujeto", () => {
     const h = harness();
     const owner = await parkedOwner(h);
     const borrower = h.start("rebase", PR);
-    await vi.waitFor(() => expect(h.work.state.started).toBe(1));
+    await vi.waitFor(() => expect(h.work.state.started).toBe(1), WAIT);
 
-    h.flows.control(owner, "cancel", { by: "ui" });
+    h.flows.control(owner, "cancel", "ui");
     expect(h.row(borrower)).toMatchObject({ status: "running", borrowedFromRunId: null });
     // Ya es la dueña: una corrida nueva sobre el PR espera, no pide prestado.
     expect(h.flows.getRun(h.start("council", PR)).status).toBe("queued");
@@ -287,9 +287,9 @@ describe("préstamo del sujeto", () => {
     const h = harness();
     const owner = await parkedOwner(h);
     const borrower = h.start("rebase", PR);
-    await vi.waitFor(() => expect(h.work.state.started).toBe(1));
+    await vi.waitFor(() => expect(h.work.state.started).toBe(1), WAIT);
 
-    h.flows.control(borrower, "cancel", { by: "ui" });
+    h.flows.control(borrower, "cancel", "ui");
     expect(h.events(borrower, "run.returned")).toHaveLength(1);
     expect(h.flows.getRun(owner).status).toBe("parked");
     expect(h.pendingDecision(owner)).toBeDefined();

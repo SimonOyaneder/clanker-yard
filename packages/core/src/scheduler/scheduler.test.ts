@@ -7,7 +7,7 @@ import { createRunStarter } from "../projects/start-run";
 import { createIssues } from "../tracker/issues";
 import { createLocalTracker } from "../tracker/local";
 import type { Tracker } from "../tracker/tracker";
-import { createRepos } from "../workspaces/repos";
+import { createRepos } from "../repos/repos";
 import { pullRequests } from "../store/schema";
 import { newId } from "../store/conventions";
 import type { CombineRequest, CombineResult, Workspaces } from "../workspaces/workspaces";
@@ -80,7 +80,7 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
   const tracker: Tracker = claim ? { ...local, claim } : local;
   const trackers = trackersByKind({ local: tracker });
   const issues = createIssues(h.store, local);
-  const projects = createProjects(h.store, h.defs);
+  const projects = createProjects({ store: h.store, defs: h.defs });
   const repos = createRepos(h.store);
   const realQueue = createProjectQueue({ store: h.store, projects, issues, repos, trackers, prs: { get: () => Promise.reject(new Error("no se esperaba leer un PR")) } });
   const queue: ProjectQueue = {
@@ -271,7 +271,7 @@ describe("lanzar issues por carril", () => {
   test("un repo o runtime en pausa no se lanza y queda con su motivo; vuelve a lanzar en el tick de 5 min", async () => {
     vi.useFakeTimers();
     const paused = new Set<string>(["runtime:fake"]);
-    const h = setup({ parallel: 1, breakers: { open: (scope) => (paused.has(scope) ? "login vencido" : undefined) } });
+    const h = setup({ parallel: 1, breakers: { openReason: (scope) => (paused.has(scope) ? "login vencido" : undefined) } });
     const issue = await h.create("a");
 
     h.scheduler.start();
@@ -285,7 +285,7 @@ describe("lanzar issues por carril", () => {
   });
 
   test("el breaker github no frena el lanzamiento: solo frena a quien publica", async () => {
-    const h = setup({ parallel: 1, breakers: { open: (scope) => (scope === "github" ? "sin conexión" : undefined) } });
+    const h = setup({ parallel: 1, breakers: { openReason: (scope) => (scope === "github" ? "sin conexión" : undefined) } });
     const issue = await h.create("a");
 
     await h.scheduler.tick();
@@ -296,7 +296,7 @@ describe("lanzar issues por carril", () => {
   test("al cerrarse un breaker lanza lo que esperaba sin aguardar el tick de 5 min", async () => {
     vi.useFakeTimers();
     let paused = true;
-    const h = setup({ parallel: 1, breakers: { open: (scope) => (paused && scope === "runtime:fake" ? "sin cuota" : undefined) } });
+    const h = setup({ parallel: 1, breakers: { openReason: (scope) => (paused && scope === "runtime:fake" ? "sin cuota" : undefined) } });
     const issue = await h.create("a");
     h.scheduler.start();
     await vi.advanceTimersByTimeAsync(0);

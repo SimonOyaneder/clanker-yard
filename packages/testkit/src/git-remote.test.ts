@@ -74,7 +74,7 @@ async function setup(password = TOKEN, branches: Parameters<typeof tempGitRepo>[
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos: () => ({
+    repoConfig: () => ({
       path: repo.dir,
       defaultBranch: "main",
       remote: { url: server!.url, repo: "octocat/secret-project", account: ACCOUNT },
@@ -234,7 +234,7 @@ describe("push", () => {
     const bare = createWorkspaces({
       store,
       dataDir,
-      repos: () => ({ path: repo.dir, defaultBranch: "main" }),
+      repoConfig: () => ({ path: repo.dir, defaultBranch: "main" }),
       identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     });
     await expect(bare.fetch("r1")).rejects.toThrow(/no tiene remoto configurado/);

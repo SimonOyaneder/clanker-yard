@@ -19,16 +19,16 @@ export interface GitIdentity {
 export type GitIdentityOf = (repoId: string) => Promise<GitIdentity>;
 
 export function createGitIdentityOf({
-  repos,
+  repoConfig,
   connections,
 }: {
-  repos: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: string) => RepoConfig;
   connections: Pick<Connections, "githubClient">;
 }): GitIdentityOf {
   const cache = new Map<string, Promise<GitIdentity>>();
 
   async function resolve(repoId: string): Promise<GitIdentity> {
-    const cfg = repos(repoId);
+    const cfg = repoConfig(repoId);
     const [email, name] = await Promise.all([tryGit(cfg.path, ["config", "user.email"]), tryGit(cfg.path, ["config", "user.name"])]);
     if (email && name) return { name, email };
     if (!cfg.remote) {

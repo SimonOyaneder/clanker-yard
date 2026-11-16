@@ -73,7 +73,7 @@ const SupersedeArgs = z.object({
 
 export interface PrSupersedeDeps {
   store: Store;
-  connections: Pick<Connections, "githubClient" | "markRevoked">;
+  connections: Pick<Connections, "githubClient">;
 }
 
 /**
@@ -93,31 +93,26 @@ export function prSupersedeAction({ store, connections }: PrSupersedeDeps): Acti
     async run({ pr, oldNumber, oldHead, oldBase, draft }, ctx) {
       const [owner = "", repo = ""] = pr.repo.split("/");
       const client = connections.githubClient(pr.account);
-      try {
-        await ctx.once("comment", async () => {
-          await client.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", { owner, repo, issue_number: oldNumber, body: `Reemplazado por #${pr.number}` });
-          return true;
-        });
-        await ctx.once("close", async () => {
-          await client.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo, pull_number: oldNumber, state: "closed" });
-          return true;
-        });
-        const row = store.db
-          .select({ repoId: pullRequests.repoId })
-          .from(pullRequests)
-          .where(and(eq(pullRequests.runId, ctx.runId), eq(pullRequests.number, pr.number)))
-          .get();
-        if (!row) throw new PermanentActionError(`El core no registró el PR nuevo ${pr.repo}#${pr.number}.`);
-        const parentHead = supersededParent(store, row.repoId, oldBase);
-        await ctx.once("branches", async () => {
-          for (const branch of [oldHead, ...(parentHead ? [parentHead] : [])]) await deleteUnlessBase(client, owner, repo, branch);
-          return true;
-        });
-        followNew(store, ctx.runId, row.repoId, oldNumber, pr.number);
-      } catch (error) {
-        if (error instanceof RequestError && error.status === 401) connections.markRevoked("github", pr.account, "core");
-        throw error;
-      }
+      await ctx.once("comment", async () => {
+        await client.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", { owner, repo, issue_number: oldNumber, body: `Reemplazado por #${pr.number}` });
+        return true;
+      });
+      await ctx.once("close", async () => {
+        await client.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo, pull_number: oldNumber, state: "closed" });
+        return true;
+      });
+      const row = store.db
+        .select({ repoId: pullRequests.repoId })
+        .from(pullRequests)
+        .where(and(eq(pullRequests.runId, ctx.runId), eq(pullRequests.number, pr.number)))
+        .get();
+      if (!row) throw new PermanentActionError(`El core no registró el PR nuevo ${pr.repo}#${pr.number}.`);
+      const parentHead = supersededParent(store, row.repoId, oldBase);
+      await ctx.once("branches", async () => {
+        for (const branch of [oldHead, ...(parentHead ? [parentHead] : [])]) await deleteUnlessBase(client, owner, repo, branch);
+        return true;
+      });
+      followNew(store, ctx.runId, row.repoId, oldNumber, pr.number);
       return { outcome: draft ? "draft" : "ready" };
     },
   };

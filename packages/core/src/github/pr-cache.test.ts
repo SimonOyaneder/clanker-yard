@@ -2,7 +2,7 @@ import { PackSettings, type PrRef, type PrState } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { prParents, pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
-import { createRepos, type Repos } from "../workspaces/repos";
+import { createRepos, type Repos } from "../repos/repos";
 import { createPrCache, type PrCache, type PrCacheDeps, type RestPull } from "./pr-cache";
 import { prNode } from "./pr-fixtures";
 import { buildPrState } from "./pr-state";

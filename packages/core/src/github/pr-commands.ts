@@ -4,7 +4,7 @@ import type { Packs } from "../packs/packs";
 import { runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Connections } from "../connections/connections";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { commentOnPr } from "./comment";
 import type { PrCache } from "./pr-cache";
 import type { Prs } from "./prs";
@@ -19,23 +19,23 @@ export class PrCommandError extends Error {}
 export interface PrCommandsDeps {
   store: Store;
   repos: Pick<Repos, "byRemote">;
-  connections: Pick<Connections, "githubClient" | "markRevoked">;
+  connections: Pick<Connections, "githubClient">;
   packs: Pick<Packs, "packFor">;
   prs: Pick<Prs, "get">;
   cache: Pick<PrCache, "refresh" | "setHold" | "row">;
 }
 
 export interface PrCommands {
-  /** `PrCache.setHold`: solo para un PR que el core ya conoce. */
-  setHold(ref: PrRef, hold: boolean): Promise<PrState>;
+  /** `PrCache.setHold`: solo para un PR que el core ya conoce. Emite `pr.hold_changed` con quién lo pidió. */
+  setHold(ref: PrRef, hold: boolean, by: ClientOrigin): Promise<PrState>;
   /**
    * Comenta el comando de la estrategia de merge del pack y devuelve el PR releído. Rechaza si el repo se
    * mergea con el botón de GitHub, si el PR no está `merge.ready` (con lo que falta), si tiene `hold` o si
    * ya está en cola.
    */
-  merge(ref: PrRef): Promise<PrState>;
+  merge(ref: PrRef, by: ClientOrigin): Promise<PrState>;
   /** Comenta el comando del bot de review del pack. */
-  requestReview(ref: PrRef): Promise<void>;
+  requestReview(ref: PrRef, by: ClientOrigin): Promise<void>;
   /**
    * Anota un `pr.conflict` sobre el PR para que arranque el flujo del pack que lo atiende, como si Watch lo
    * hubiera visto en conflicto: sirve también para un PR solo atrasado. Rechaza un PR que el sistema no abrió,
@@ -55,13 +55,24 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache 
     return row;
   }
 
+  /** Lo que se comentó a pedido de una persona queda en los eventos con quién lo pidió (`pr.commented`). */
+  async function comment(ref: PrRef, body: string, by: ClientOrigin): Promise<void> {
+    await commentOnPr(connections, ref, body);
+    const row = repos.byRemote(ref.repo) && cache.row(repos.byRemote(ref.repo)!.id, ref.number);
+    store.tx((tx) =>
+      tx.emit({ type: "pr.commented", origin: by, ...(row && { subject: { type: "pr", id: row.id } }), payload: { repo: ref.repo, number: ref.number, body } }),
+    );
+  }
+
   return {
-    setHold(ref, hold) {
-      knownRow(ref);
-      return cache.setHold(ref, hold);
+    async setHold(ref, hold, by) {
+      const row = knownRow(ref);
+      const state = await cache.setHold(ref, hold);
+      store.tx((tx) => tx.emit({ type: "pr.hold_changed", origin: by, subject: { type: "pr", id: row.id }, payload: { repo: ref.repo, number: ref.number, hold } }));
+      return state;
     },
 
-    async merge(ref) {
+    async merge(ref, by) {
       const state = await prs.get(ref);
       const strategy = packOf(ref).mergeStrategy;
       if (state.merge.via !== "comment" || !strategy) {
@@ -73,16 +84,16 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache 
         throw new PrCommandError(`El merge de ${label(ref)} ya se pidió y falló en la cola: revisa por qué en GitHub antes de volver a pedirlo.`);
       }
       if (!state.merge.ready) throw new PrCommandError(`${label(ref)} no está listo para mergear: ${state.merge.blockers.join(", ") || "ya no está abierto"}.`);
-      await commentOnPr(connections, ref, strategy.command);
+      await comment(ref, strategy.command, by);
       return cache.refresh(ref);
     },
 
-    async requestReview(ref) {
+    async requestReview(ref, by) {
       const bot = packOf(ref).reviewBot;
       if (!bot) throw new PrCommandError(`El pack de la organización de ${ref.repo} no define un bot de review.`);
       const state = await prs.get(ref);
       if (state.state === "merged" || state.state === "closed") throw new PrCommandError(`${label(ref)} ya está ${state.state === "merged" ? "mergeado" : "cerrado"}.`);
-      await commentOnPr(connections, ref, bot.request.body);
+      await comment(ref, bot.request.body, by);
     },
 
     async rebase(ref, by) {

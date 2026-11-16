@@ -15,15 +15,14 @@ import {
   newId,
   openStore,
   prPublishAction,
-  startFakeGitHubOAuth,
   type ActionCtx,
   type Askpass,
   type Connections,
-  type FakeGitHubOAuth,
   type Store,
   type WorkspaceLease,
   type Workspaces,
 } from "@clanker/core";
+import { startFakeGitHubOAuth, type FakeGitHubOAuth } from "@clanker/core/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHttpServer } from "./git-http";
@@ -87,7 +86,7 @@ beforeEach(async () => {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos,
+    repoConfig: repos,
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
   });
@@ -101,7 +100,7 @@ beforeEach(async () => {
     store,
     workspaces,
     recipes: createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) }),
-    repos,
+    repoConfig: repos,
     connections,
     packs,
   });

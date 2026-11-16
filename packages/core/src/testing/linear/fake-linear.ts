@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createFakeWorkspace, type FakeWorkspace } from "./fake-workspace";
-import type { LinearEndpoints } from "./oauth";
+import type { LinearEndpoints } from "../../linear/oauth";
 
 export interface FakeLinearOptions {
   clientId: string;

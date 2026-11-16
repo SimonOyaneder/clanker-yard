@@ -4,6 +4,9 @@ import { createRepos } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { startMcpHarness, type McpHarness } from "./mcp-harness";
 
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
+
 // Las tools de escritura y las acciones del MCP contra un core real, hablado con el cliente MCP del SDK.
 // El runtime fake va con un `speed` mínimo sobre el guion con tiempos reales: el agente de `juguete` queda
 // colgado en su segundo evento, así una corrida se queda `running` hasta que el test la pausa o la cancela.
@@ -186,7 +189,7 @@ describe("las corridas y los flujos que cambian", () => {
   async function parkedRun() {
     await h.call("create", { kind: "flow", body: aprobar() });
     const { project, run } = await runIssue("aprobar");
-    await vi.waitFor(async () => expect(await statusOf(run.id)).toBe("parked"));
+    await vi.waitFor(async () => expect(await statusOf(run.id)).toBe("parked"), WAIT);
     return { project, runId: run.id };
   }
 
@@ -200,7 +203,7 @@ describe("las corridas y los flujos que cambian", () => {
     expect(await h.call("get", { kind: "run", id: runId })).toMatchObject({ flow: { slug: "aprobar", version: 1 }, flowDef: { name: "Aprobar" } });
     const [decision] = (await h.call("list", { kind: "decision", filter: { runId, status: ["pending"] } })) as { id: string }[];
     await h.call("resolve_decision", { id: decision!.id, option: "ok" });
-    await vi.waitFor(async () => expect(await h.call("get", { kind: "run", id: runId })).toMatchObject({ status: "done", flow: { version: 1 } }));
+    await vi.waitFor(async () => expect(await h.call("get", { kind: "run", id: runId })).toMatchObject({ status: "done", flow: { version: 1 } }), WAIT);
   });
 
   test("archivar un flujo no borra sus corridas ni su historial, y la corrida en curso termina", async () => {
@@ -215,7 +218,7 @@ describe("las corridas y los flujos que cambian", () => {
     expect(h.store.events.since(0, { runId }).slice(0, timeline.length)).toEqual(timeline);
     const [decision] = (await h.call("list", { kind: "decision", filter: { runId, status: ["pending"] } })) as { id: string }[];
     await h.call("resolve_decision", { id: decision!.id, option: "ok" });
-    await vi.waitFor(async () => expect(await statusOf(runId)).toBe("done"));
+    await vi.waitFor(async () => expect(await statusOf(runId)).toBe("done"), WAIT);
     expect(await h.call("list", { kind: "run", filter: { status: ["done"] } })).toHaveLength(1);
   });
 });
@@ -236,7 +239,7 @@ describe("acciones", () => {
 
   test("run_issue lanza el flujo y es idempotente; pause_run, resume_run e interrupt_run mueven la corrida; cancel_run la cierra", async () => {
     const { project, issue, run } = await runIssue();
-    await vi.waitFor(async () => expect(await statusOf(run.id)).toBe("running"));
+    await vi.waitFor(async () => expect(await statusOf(run.id)).toBe("running"), WAIT);
 
     expect(await h.call("run_issue", { projectId: project.id, issueId: issue.id })).toMatchObject({ id: run.id });
     expect(await h.call("pause_run", { id: run.id })).toMatchObject({ status: "paused" });
@@ -252,23 +255,23 @@ describe("acciones", () => {
 
   test("retry_step vuelve a correr el paso como una visita nueva", async () => {
     const { run } = await runIssue();
-    await vi.waitFor(async () => expect((await h.api.runs.get({ id: run.id })).steps.find((s) => s.nodeId === "saludar")?.status).toBe("running"));
+    await vi.waitFor(async () => expect((await h.api.runs.get({ id: run.id })).steps.find((s) => s.nodeId === "saludar")?.status).toBe("running"), WAIT);
     const step = (await h.api.runs.get({ id: run.id })).steps.find((s) => s.nodeId === "saludar")!;
 
     await h.call("retry_step", { stepId: step.id });
 
-    await vi.waitFor(async () => expect(((await h.call("get", { kind: "run", id: run.id })) as RunDetail).steps.filter((s) => s.nodeId === "saludar").map((s) => s.visit)).toEqual([1, 2]));
+    await vi.waitFor(async () => expect(((await h.call("get", { kind: "run", id: run.id })) as RunDetail).steps.filter((s) => s.nodeId === "saludar").map((s) => s.visit)).toEqual([1, 2]), WAIT);
     expect(h.store.events.since(0, { runId: run.id }).some((e) => e.origin === "mcp")).toBe(true);
   });
 
   test("resolve_decision cierra el gate una vez; una segunda es un error de la tool", async () => {
     await h.call("create", { kind: "flow", body: aprobar() });
     const { run } = await runIssue("aprobar");
-    await vi.waitFor(async () => expect(await statusOf(run.id)).toBe("parked"));
+    await vi.waitFor(async () => expect(await statusOf(run.id)).toBe("parked"), WAIT);
     const [decision] = (await h.call("list", { kind: "decision", filter: { runId: run.id } })) as { id: string }[];
 
     expect(await h.call("resolve_decision", { id: decision!.id, option: "no" })).toMatchObject({ id: decision!.id, status: "answered" });
-    await vi.waitFor(async () => expect(await h.call("get", { kind: "run", id: run.id })).toMatchObject({ status: "failed", outcome: "blocked" }));
+    await vi.waitFor(async () => expect(await h.call("get", { kind: "run", id: run.id })).toMatchObject({ status: "failed", outcome: "blocked" }), WAIT);
 
     await expect(h.call("resolve_decision", { id: decision!.id, option: "ok" })).rejects.toThrow(/BAD_REQUEST/);
   });
@@ -276,7 +279,7 @@ describe("acciones", () => {
   test("steer_step y pause_run explican por qué no se pueden aplicar", async () => {
     await h.call("create", { kind: "flow", body: aprobar() });
     const { run } = await runIssue("aprobar");
-    await vi.waitFor(async () => expect(await statusOf(run.id)).toBe("parked"));
+    await vi.waitFor(async () => expect(await statusOf(run.id)).toBe("parked"), WAIT);
     const step = (await h.api.runs.get({ id: run.id })).steps[0]!;
 
     await expect(h.call("steer_step", { stepId: step.id, message: "hola" })).rejects.toThrow(/Solo un paso de agente recibe un mensaje/);

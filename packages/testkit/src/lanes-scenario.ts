@@ -1,4 +1,4 @@
-import { type Client, type FlowDef, FlowBody, type NewLocalIssue, type RepoId } from "@clanker/api";
+import { type Client, FlowBody, type NewLocalIssue, type RepoId } from "@clanker/api";
 import { createDefs, newId, type Store } from "@clanker/core";
 
 // El escenario de `DEMO_SCENARIO=lanes` (ver `demo-core.ts`): el proyecto de las capturas de la vista de
@@ -12,32 +12,21 @@ import { createDefs, newId, type Store } from "@clanker/core";
 
 const MIN = 60_000;
 
-const REBASE: FlowDef = {
-  schema: 1,
-  id: "rebase",
-  name: "Rebase de un PR",
-  trigger: { type: "pr.conflict" },
-  lane: "maintenance",
-  start: "attach",
-  nodes: {
-    attach: { type: "action", action: "workspace.attach", args: {}, on: { ok: "rebase" } },
-    rebase: { type: "action", action: "workspace.rebase", args: {}, on: { ok: "checks" } },
-    checks: { type: "action", action: "recipe.check", args: {}, on: { ok: "push" } },
-    push: { type: "action", action: "pr.pushLease", args: {}, on: { ok: "@done" } },
-  },
-};
-
 type StepStatus = "done" | "running" | "waiting" | "failed" | "pending";
 type Step = [node: string, status: StepStatus, costMicros?: number, outcome?: string | null, error?: string];
 
 export async function seedLanes({ client, store, repoId, now = Date.now() }: { client: Client; store: Store; repoId: RepoId; now?: number }): Promise<void> {
   const sql = store.db.$client;
+  // Otro `Defs` sobre la misma base, solo para leer las versiones de los flujos de la plantilla que el core instaló.
   const defs = createDefs(store);
-  // Otro `Defs` sobre la misma base: solo para dejar el flujo de rebase, que el core todavía no trae como plantilla.
   defs.register("flow", FlowBody);
-  const rebase = defs.save({ kind: "flow", slug: "rebase", scope: "builtin", source: "demo", body: REBASE });
-  const techlead = defs.resolve("flow", "techlead-clasico");
-  if (!techlead) throw new Error("El core no instaló la plantilla techlead-clasico.");
+  const template = (slug: string) => {
+    const def = defs.resolve("flow", slug);
+    if (!def) throw new Error(`El core no instaló la plantilla ${slug}.`);
+    return def;
+  };
+  const techlead = template("techlead-clasico");
+  const rebase = template("rebase-conflicto");
 
   const project = await client.projects.create({
     slug: "boundaries",
@@ -155,7 +144,7 @@ export async function seedLanes({ client, store, repoId, now = Date.now() }: { c
     borrowedFrom: parkedRun,
     startedMin: 3,
     cost: 0,
-    steps: [["attach", "done"], ["rebase", "done"], ["checks", "running"]],
+    steps: [["ws", "done"], ["rebase", "done", 0, "clean"], ["checks", "running"]],
   });
 
   // Una terminada, con su PR abierto.

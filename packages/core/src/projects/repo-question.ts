@@ -3,7 +3,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { openDecision } from "../decisions/decisions";
 import { decisions, runs } from "../store/schema";
 import type { Store } from "../store/store";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { planIssue, repoOfRun, type IssuePlan } from "./issue-repos";
 
 type ProjectRepos = Pick<ClankerProject, "id" | "repos">;

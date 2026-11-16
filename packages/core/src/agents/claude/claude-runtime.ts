@@ -30,6 +30,7 @@ import { credentialMismatch, noteSignals, outcomeOf, type Signals } from "./outc
 import { startRecording } from "./record";
 import { skillDirs, watchDirs } from "./skills-watch";
 import { transcriptFile } from "./transcript";
+import { messageOf } from "../../errors/format";
 
 /** La herramienta con la que Claude Code entrega el reporte cuando se le pide `outputFormat`. */
 const STRUCTURED_OUTPUT_TOOL = "StructuredOutput";
@@ -229,62 +230,17 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
             (error) => skillsFailed("observar", error),
           );
     function skillsFailed(action: string, error: unknown) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = messageOf(error);
       events.push({ type: "error", kind: "other", message: `No se pudieron ${action} las skills del rol "${spec.role}": ${reason}` });
     }
 
-    const tally = emptyUsage(credentials);
+    const usage = createTurnUsage(credentials, previous, emitUsage);
     const signals: Signals = { loginFailed: false };
     const toolNames = new Map<string, string>();
     // El último reporte que el agente intentó entregar: si el tope de gasto cae justo después, el `result` no lo trae.
     let deliveredReport: unknown;
-    let turn: { id: string; model: string; usage: SDKUsage } | undefined;
     let firstToken = false;
-    const counted = new Set<string>();
-    const emitted = new Map<string, TokenCounts>();
-    let emittedWrite1h = 0;
     let final: SDKResultMessage | undefined;
-
-    // El uso de un mensaje en streaming no es final: se emite cuando llega otro id, con lo último visto.
-    // El SDK parte un mensaje en un `assistant` por bloque, todos con el mismo id y el mismo uso; si el
-    // de un subagente se intercala, el id reaparece después de emitido y no vuelve a contar.
-    const flushTurn = () => {
-      if (turn === undefined) return;
-      const { id, model, usage: sdkUsage } = turn;
-      turn = undefined;
-      if (counted.has(id)) return;
-      counted.add(id);
-      const usage = turnUsage(sdkUsage, credentials);
-      addUsage(tally, usage);
-      emitted.set(model, sumTokens([emitted.get(model) ?? NO_TOKENS, usage]));
-      const cacheWrite1hTokens = sdkUsage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-      emittedWrite1h += cacheWrite1hTokens;
-      emitUsage({ type: "usage", turn: tally.turns, usage, model, cacheWrite1hTokens });
-    };
-
-    // El uso de cada `assistant` no es final (su salida llega recién en el total) y el total también
-    // cubre subagentes y llamadas internas: lo que el `result` cuenta de más por modelo se manda como resto.
-    const flushRemainders = (result: SDKResultMessage) => {
-      const now = totalsOf(result);
-      const before = priorTo(now, previous).byModel;
-      const oneHourShare = tally.tokensCacheWrite === 0 ? 0 : emittedWrite1h / tally.tokensCacheWrite;
-      for (const [model, total] of now.byModel) {
-        const rest = subtractTokens(subtractTokens(total, before.get(model)), emitted.get(model));
-        const remainder: TokenCounts = {
-          tokensIn: Math.max(0, rest.tokensIn),
-          tokensOut: Math.max(0, rest.tokensOut),
-          tokensCacheRead: Math.max(0, rest.tokensCacheRead),
-          tokensCacheWrite: Math.max(0, rest.tokensCacheWrite),
-        };
-        if (Object.values(remainder).every((n) => n === 0)) continue;
-        emitUsage({
-          type: "usage_remainder",
-          model,
-          tokens: remainder,
-          cacheWrite1hTokens: Math.round(remainder.tokensCacheWrite * oneHourShare),
-        });
-      }
-    };
 
     const onMessage = (message: SDKMessage) => {
       noteSignals(message, signals);
@@ -298,8 +254,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
           firstToken = true;
           events.push({ type: "first_token" });
         }
-        if (turn?.id !== message.message.id) flushTurn();
-        turn = { id: message.message.id, model: message.message.model, usage: message.message.usage };
+        usage.onAssistant(message.message.id, message.message.model, message.message.usage);
         for (const block of message.message.content) {
           if (block.type === "text" && block.text !== "") {
             events.push({ type: "text", text: block.text });
@@ -341,8 +296,8 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       } catch (error) {
         crash = error;
       }
-      flushTurn();
-      if (final !== undefined) flushRemainders(final);
+      usage.flush();
+      if (final !== undefined) usage.remainders(final);
       await transcript.flush();
 
       const conclude = (): RunResult => {
@@ -352,7 +307,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         if (sessionId === undefined) throw new Error("Claude terminó sin iniciar la sesión.");
 
         if (stopReason !== undefined) {
-          return { status: "error", text: "", usage: tally, message: stopReason };
+          return { status: "error", text: "", usage: usage.tally, message: stopReason };
         }
         const outcome = outcomeOf(final, signals, credentials.mode);
         return {
@@ -363,7 +318,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
             : outcome.status === "error_max_budget_usd" && deliveredReport !== undefined
               ? { structured: deliveredReport }
               : {}),
-          usage: final === undefined ? tally : spentThisRun(final, previous, tally, credentials),
+          usage: final === undefined ? usage.tally : spentThisRun(final, previous, usage.tally, credentials),
           ...(outcome.message === undefined ? {} : { message: outcome.message }),
           ...(outcome.resetsAt === undefined ? {} : { resetsAt: outcome.resetsAt }),
         };
@@ -376,7 +331,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       }
       // Una grabación que falla no pierde el run (ya gastó): se avisa como evento.
       await recording?.finish(settled).catch((error: unknown) => {
-        const reason = error instanceof Error ? error.message : String(error);
+        const reason = messageOf(error);
         events.push({ type: "error", kind: "other", message: `No se pudo grabar el guion del rol "${spec.role}": ${reason}` });
       });
       if ("crash" in settled) throw settled.crash;
@@ -465,6 +420,78 @@ async function writeGitConfig(dir: string, identity: RunSpec["gitIdentity"]): Pr
 }
 
 type SDKUsage = Extract<SDKMessage, { type: "assistant" }>["message"]["usage"];
+
+/** Lo que lleva la cuenta del uso de un run: los turnos que ya se emitieron y el total. */
+interface TurnUsage {
+  /** Un `assistant` del stream: si es de otro mensaje, emite el turno anterior con lo último que se vio de él. */
+  onAssistant(id: string, model: string, usage: SDKUsage): void;
+  /** Emite el turno que quedó abierto (al terminar el stream). */
+  flush(): void;
+  /**
+   * El uso de cada `assistant` no es final (su salida llega recién en el total) y el total también cubre
+   * subagentes y llamadas internas: lo que el `result` cuenta de más por modelo se emite como resto.
+   */
+  remainders(result: SDKResultMessage): void;
+  /** La suma de los turnos emitidos. */
+  readonly tally: Usage;
+}
+
+/**
+ * La contabilidad de uso de un run, aparte del lanzamiento. El uso de un mensaje en streaming no es final: se
+ * emite cuando llega otro id, con lo último visto. El SDK parte un mensaje en un `assistant` por bloque, todos
+ * con el mismo id y el mismo uso; si el de un subagente se intercala, el id reaparece después de emitido y no
+ * vuelve a contar. `previous` son los totales con que terminó la sesión que se retoma.
+ */
+function createTurnUsage(
+  credentials: ClaudeCredentials,
+  previous: Totals,
+  emit: (event: Extract<AgentEvent, { type: "usage" | "usage_remainder" }>) => void,
+): TurnUsage {
+  const tally = emptyUsage(credentials);
+  let turn: { id: string; model: string; usage: SDKUsage } | undefined;
+  const counted = new Set<string>();
+  const emitted = new Map<string, TokenCounts>();
+  let emittedWrite1h = 0;
+
+  function flush(): void {
+    if (turn === undefined) return;
+    const { id, model, usage: sdkUsage } = turn;
+    turn = undefined;
+    if (counted.has(id)) return;
+    counted.add(id);
+    const usage = turnUsage(sdkUsage, credentials);
+    addUsage(tally, usage);
+    emitted.set(model, sumTokens([emitted.get(model) ?? NO_TOKENS, usage]));
+    const cacheWrite1hTokens = sdkUsage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+    emittedWrite1h += cacheWrite1hTokens;
+    emit({ type: "usage", turn: tally.turns, usage, model, cacheWrite1hTokens });
+  }
+
+  return {
+    tally,
+    flush,
+    onAssistant(id, model, usage) {
+      if (turn?.id !== id) flush();
+      turn = { id, model, usage };
+    },
+    remainders(result) {
+      const now = totalsOf(result);
+      const before = priorTo(now, previous).byModel;
+      const oneHourShare = tally.tokensCacheWrite === 0 ? 0 : emittedWrite1h / tally.tokensCacheWrite;
+      for (const [model, total] of now.byModel) {
+        const rest = subtractTokens(subtractTokens(total, before.get(model)), emitted.get(model));
+        const remainder: TokenCounts = {
+          tokensIn: Math.max(0, rest.tokensIn),
+          tokensOut: Math.max(0, rest.tokensOut),
+          tokensCacheRead: Math.max(0, rest.tokensCacheRead),
+          tokensCacheWrite: Math.max(0, rest.tokensCacheWrite),
+        };
+        if (Object.values(remainder).every((n) => n === 0)) continue;
+        emit({ type: "usage_remainder", model, tokens: remainder, cacheWrite1hTokens: Math.round(remainder.tokensCacheWrite * oneHourShare) });
+      }
+    },
+  };
+}
 
 function turnUsage(usage: SDKUsage, credentials: ClaudeCredentials): Usage {
   return {

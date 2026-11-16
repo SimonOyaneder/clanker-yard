@@ -5,7 +5,7 @@ import { newId } from "../store/conventions";
 import type { Packs } from "../packs/packs";
 import { prParents, pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import type { Prs } from "./prs";
 
 /** Lo que Watch lee de un PR de la API REST (`GET /repos/{owner}/{repo}/pulls/{n}`). */
@@ -28,7 +28,10 @@ export type PrRow = typeof pullRequests.$inferSelect;
  * `prs.list`.
  */
 export interface PrCache {
-  /** Los PRs del caché, sin ir a GitHub: los que abrió el sistema y los que descubrió Watch. */
+  /**
+   * Los PRs del caché, sin ir a GitHub: los que abrió el sistema y los que descubrió Watch. Omite los
+   * de repos sin remoto de GitHub con una cuenta conectada (`RepoConfig.remote`): sin cuenta no hay `PrRef`.
+   */
   list(filter?: PrFilter): CachedPr[];
   /**
    * `prs.get` y además deja el estado en el caché. Si cambió respecto de lo que había, llama a

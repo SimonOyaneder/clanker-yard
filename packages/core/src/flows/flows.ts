@@ -8,6 +8,7 @@ import type { ActionDef, Catalog, ConsolidatorDef, RoleInfo, WaitDef } from "./c
 import { itemsMerge, worst, worstFlow } from "./consolidators";
 import { createEngine, type Engine, type EngineDeps } from "./engine";
 import { validateFlow } from "./validate";
+import { issuesAsLines } from "../errors/format";
 
 /** `flows.save` con errores de validación: nada se guardó. */
 export class FlowValidationError extends Error {
@@ -15,7 +16,7 @@ export class FlowValidationError extends Error {
     readonly flowId: string,
     readonly errors: FlowIssue[],
   ) {
-    super(`El flujo "${flowId}" es inválido:\n` + errors.map((e) => `  ${e.path || "(raíz)"}: ${e.message}`).join("\n"));
+    super(`El flujo "${flowId}" es inválido:\n` + issuesAsLines(errors));
   }
 }
 
@@ -39,7 +40,10 @@ export interface SaveFlowOptions {
 }
 
 export interface Flows extends Engine {
-  /** Cada módulo registra lo que aporta; registrar dos veces el mismo nombre es un bug. */
+  /**
+   * Cada módulo registra lo que aporta; registrar dos veces el mismo nombre es un bug, y registrar
+   * después de `recover()` lanza (los pasos que se recuperaron ya no la encontrarían).
+   */
   registerAction<A extends ZodType>(def: ActionDef<A>): void;
   registerWait<A extends ZodType>(def: WaitDef<A>): void;
   /** `worst` e `items.merge` ya vienen registrados. */
@@ -77,7 +81,11 @@ export function createFlows({ roles, ...deps }: FlowsDeps): Flows {
   const engine = createEngine({ ...deps, actions, consolidators, waits });
   defs.register("flow", FlowBody);
 
+  // Tras `recover()` el dispatcher ya corre: un paso recuperado de una acción aún sin registrar falla para siempre.
+  let recovered = false;
+
   function register<T extends { name: string }>(kind: string, into: Map<string, T>, def: T) {
+    if (recovered) throw new Error(`No se puede registrar ${kind} ("${def.name}") después de recover(): regístralo antes, o los pasos que la usan no la encuentran.`);
     if (into.has(def.name)) throw new Error(`Ya hay ${kind} registrado con el nombre "${def.name}".`);
     into.set(def.name, def);
   }
@@ -106,6 +114,10 @@ export function createFlows({ roles, ...deps }: FlowsDeps): Flows {
 
   return {
     ...engine,
+    recover() {
+      recovered = true;
+      return engine.recover();
+    },
     registerAction: (def) => register("una acción", actions, def),
     registerWait: (def) => register("un wait", waits, def),
     registerConsolidator: (def) => register("un consolidador", consolidators, def),

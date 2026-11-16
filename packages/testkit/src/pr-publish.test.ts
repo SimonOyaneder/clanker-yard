@@ -92,7 +92,7 @@ beforeEach(async () => {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos,
+    repoConfig: repos,
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
   });
@@ -109,7 +109,7 @@ beforeEach(async () => {
     store,
     workspaces,
     recipes: createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) }),
-    repos,
+    repoConfig: repos,
     connections,
     packs,
   };

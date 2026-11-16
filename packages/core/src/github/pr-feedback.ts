@@ -1,5 +1,4 @@
 import { PrRef, type ResolvedPack } from "@clanker/api";
-import { RequestError } from "@octokit/request-error";
 import * as z from "zod";
 import { cleanMessage } from "../commits/apply";
 import type { Connections } from "../connections/connections";
@@ -28,7 +27,7 @@ const sleep = (ms: number, signal: AbortSignal) =>
   });
 
 export interface PrFeedbackDeps {
-  connections: Pick<Connections, "githubClient" | "markRevoked">;
+  connections: Pick<Connections, "githubClient">;
   packs: Packs;
   /** Cómo se espera entre escrituras; los tests la reemplazan para no esperar. */
   pause?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -36,14 +35,13 @@ export interface PrFeedbackDeps {
 
 type Target = { client: GitHubClient; owner: string; name: string; number: number; pack: ResolvedPack };
 
-/** Un 401 deja la conexión `revoked` (el cliente ya reintentó con `refresh`) y el error sigue su camino. */
+/** Un PR que no existe no se arregla reintentando (un 401 ya dejó la cuenta revocada en el cliente). */
 async function onPr<T>(deps: PrFeedbackDeps, ref: PrRef, run: (target: Target) => Promise<T>): Promise<T> {
   const [owner, name] = ref.repo.split("/") as [string, string];
   const target = { client: deps.connections.githubClient(ref.account), owner, name, number: ref.number, pack: deps.packs.packFor({ githubOrg: owner }) };
   try {
     return await run(target);
   } catch (error) {
-    if (error instanceof RequestError && error.status === 401) deps.connections.markRevoked("github", ref.account, "core");
     if (error instanceof PrNotFoundError) throw new PermanentActionError(error.message, { cause: error });
     throw error;
   }

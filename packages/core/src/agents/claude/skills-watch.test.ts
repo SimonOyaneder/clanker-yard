@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { skillDirs, watchDirs } from "./skills-watch";
 
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
+
 let root: string;
 const stops: (() => void)[] = [];
 beforeEach(async () => {
@@ -42,6 +45,6 @@ describe("watchDirs", () => {
     await writeFile(join(skills, "commit", "SKILL.md"), "# v1");
     await writeFile(join(skills, "commit", "SKILL.md"), "# v2");
 
-    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(1), WAIT);
   });
 });

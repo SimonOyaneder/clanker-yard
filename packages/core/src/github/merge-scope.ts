@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
 import { pullRequests, syncCursors } from "../store/schema";
 import type { Store } from "../store/store";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { fetchDefaultBranchChecks } from "./pr-query";
 
 // Lo que el core sabe de un PR o de su repo y la estrategia de merge necesita para evaluarse: el `hold` que

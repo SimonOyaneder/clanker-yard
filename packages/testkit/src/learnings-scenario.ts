@@ -6,7 +6,7 @@ import { createLearnings, proposeLearning, type Store } from "@clanker/core";
 // todos los roles), más lo que proponen los agentes en sus reportes, un par escritos a mano y algunos ya resueltos.
 //
 // Se siembra por `proposeLearning` (el mismo código que corre al importar o al cerrar un paso) y las aprobaciones por
-// `createLearnings(store).approve(..., "ui")`: por la API con origin `cli` el core las rechazaría, como debe.
+// `createLearnings({ store }).approve(..., "ui")`: por la API con origin `cli` el core las rechazaría, como debe.
 
 interface Seed {
   text: string;
@@ -83,7 +83,7 @@ export async function seedLearnings(opts: { client: Client; store: Store; repoId
   const boundaries = await client.projects.create({ slug: "boundaries", name: "Boundaries de engines", tracker: "local", defaultFlowId: "juguete", defaultProfileId: "juguete" });
   const soporte = await client.projects.create({ slug: "soporte", name: "SOPORTE", tracker: "local", defaultFlowId: "juguete", defaultProfileId: "juguete" });
   const projects = [demoProjectId, boundaries.id, soporte.id];
-  const learnings = createLearnings(store);
+  const learnings = createLearnings({ store });
 
   let proposed = 0;
   let approved = 0;

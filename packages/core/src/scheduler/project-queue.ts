@@ -9,7 +9,7 @@ import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
 import type { Trackers } from "../tracker/trackers";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { type QueuePrFact, tickDev } from "./queue";
 
 /** El core no puede calcular la cola de este proyecto (no tiene el adapter de su tracker o no puede leerlo): el mensaje dice qué falta. */

@@ -1,8 +1,11 @@
-import type { BreakerCause, DecisionId } from "@clanker/api";
-import { eq } from "drizzle-orm";
+import { BreakerCause, DecisionId } from "@clanker/api";
 import { closeDecision, openDecision } from "../decisions/decisions";
+import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import { meta } from "../store/schema";
+import { readMetaJson } from "../store/meta-json";
 import type { Store, Tx } from "../store/store";
+import * as z from "zod";
+import { messageOf } from "../errors/format";
 
 // Circuit breakers por causa (`docs/design.html#d-ops`, "Circuit breaker por causa"): un error de entorno
 // abre el breaker de su ámbito y solo eso se pausa. Se reintenta con una prueba barata y se cierra solo.
@@ -21,6 +24,17 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 
 const META_KEY = "breakers";
 
+/** Lo que se guarda en `meta` de cada breaker abierto, para retomarlo tras un corte. */
+const OpenBreakerSchema = z.object({
+  scope: z.string(),
+  cause: BreakerCause,
+  reason: z.string(),
+  openedAt: z.number(),
+  probes: z.int().nonnegative(),
+  nextProbeAt: z.number(),
+  decisionId: DecisionId,
+});
+
 export interface OpenBreaker {
   scope: string;
   cause: BreakerCause;
@@ -37,7 +51,7 @@ export interface OpenBreaker {
 
 export interface Breakers {
   /** Por qué está abierto el breaker de `scope`, o `undefined` si no lo está. */
-  open(scope: string): string | undefined;
+  openReason(scope: string): string | undefined;
   /**
    * Abre el breaker de `scope` (`breaker.opened` y una alerta en la bandeja). Con `resetsAt` (la cuota se
    * reinicia a esa hora) la primera prueba es ahí; si no, al minuto. Si ya estaba abierto no hace nada:
@@ -65,9 +79,11 @@ export interface BreakersOptions {
   now?: () => number;
   /** Los ms entre una prueba y la siguiente, la última repetida; por defecto 1, 5, 15 y 30 min. Un test lo acorta. */
   backoffMs?: readonly number[];
+  /** Dónde se anota una prueba que no se pudo registrar; por defecto uno propio sobre `store`. */
+  errors?: ErrorReporter;
 }
 
-export function createBreakers({ store, runtime, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS }: BreakersOptions): Breakers {
+export function createBreakers({ store, runtime, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS, errors = createErrorReporter(store) }: BreakersOptions): Breakers {
   const entries = new Map<string, OpenBreaker>();
   const timers = new Map<string, NodeJS.Timeout>();
   const probing = new Set<string>();
@@ -105,7 +121,7 @@ export function createBreakers({ store, runtime, probe, label = (scope) => scope
     try {
       failure = await probe(scope);
     } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
+      failure = messageOf(error);
     } finally {
       probing.delete(scope);
     }
@@ -119,7 +135,7 @@ export function createBreakers({ store, runtime, probe, label = (scope) => scope
       store.tx((tx) => persist(tx));
       schedule(entry);
     } catch (error) {
-      store.tx((tx) => tx.emit({ type: "error", origin: "core", payload: { scope: "breakers.probe", message: `${scope}: ${String(error)}` } }));
+      errors.report(`breakers.probe ${scope}`, error);
       schedule(entry);
     }
   }
@@ -183,13 +199,12 @@ export function createBreakers({ store, runtime, probe, label = (scope) => scope
   }
 
   return {
-    open: (scope) => entries.get(scope)?.reason,
+    openReason: (scope) => entries.get(scope)?.reason,
     trip,
     list: () => [...entries.values()].map((entry) => ({ ...entry, label: label(entry.scope) })),
 
     start() {
-      const saved = store.db.select().from(meta).where(eq(meta.key, META_KEY)).get();
-      for (const entry of saved ? (JSON.parse(saved.value) as OpenBreaker[]) : []) {
+      for (const entry of readMetaJson(store.db, META_KEY, z.array(OpenBreakerSchema)) ?? []) {
         entries.set(entry.scope, entry);
         schedule(entry);
       }

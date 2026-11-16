@@ -9,6 +9,9 @@ import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { seedDb, type TestHome } from "./home";
 
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
+
 // El Scheduler en el core armado como en producción, con el runtime fake: el producto lanza las issues
 // solo, sin que nadie apriete "Correr" (`runs.start`).
 
@@ -133,7 +136,7 @@ describe("el Scheduler del core", () => {
     });
   });
 
-  test("system.setLanes y projects.setParallel cambian los cupos y rigen de inmediato", async () => {
+  test("system.setLanes y projects.update({ parallel }) cambian los cupos y rigen de inmediato", async () => {
     const client = await boot();
     const project = await toyProject(client, 1);
 
@@ -142,7 +145,7 @@ describe("el Scheduler del core", () => {
     expect((await client.system.lanes()).maintenance.capacity).toBe(3);
     await expect(client.system.setLanes({ dev: 0 })).rejects.toThrow();
 
-    expect(await client.projects.setParallel({ id: project.id, parallel: 3 })).toMatchObject({ parallel: 3 });
+    expect(await client.projects.update({ id: project.id, parallel: 3 })).toMatchObject({ parallel: 3 });
     expect(eventsOf(["project.updated"]).at(-1)).toMatchObject({ origin: "cli", payload: { fields: ["parallel"] } });
   });
 
@@ -264,7 +267,7 @@ describe("el repo de la issue", () => {
       const pending = await client.decisions.list({ projectId: project.id, status: ["pending"] });
       expect(pending).toHaveLength(1);
       return pending;
-    });
+    }, WAIT);
     expect(question).toMatchObject({ kind: "question", subject: { type: "issue", id: issue.id }, options: ["front", "back"] });
     expect(await client.projects.queue({ id: project.id })).toMatchObject([{ issue: { id: issue.id }, state: "blocked" }]);
     expect(await client.runs.list({ projectId: project.id })).toEqual([]);
@@ -306,7 +309,7 @@ describe("el repo de la issue", () => {
       const pending = await client.decisions.list({ projectId: project.id, status: ["pending"] });
       expect(pending).toHaveLength(1);
       return pending;
-    });
+    }, WAIT);
     expect(question!.options).toEqual([`app (${front})`, `app (${back})`]);
     await client.decisions.resolve({ id: question!.id, option: `app (${back})` });
 

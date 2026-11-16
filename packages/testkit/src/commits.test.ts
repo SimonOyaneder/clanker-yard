@@ -58,7 +58,7 @@ async function setup(files: Record<string, string> = {}, recipe?: unknown) {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos: () => ({ path: repo.dir, defaultBranch: "main" }),
+    repoConfig: () => ({ path: repo.dir, defaultBranch: "main" }),
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });

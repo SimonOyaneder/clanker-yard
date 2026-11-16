@@ -4,14 +4,15 @@ import { eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
 import { expireMergedReviewNotes } from "../decisions/decisions";
 import type { GitRemote } from "../git/remote";
+import { isUnauthorized } from "../github/client";
 import { RestPull, type PrCache, type PrRow } from "../github/pr-cache";
 import { prOfWaitKey } from "../github/pr-waits";
 import { syncCursors } from "../store/schema";
 import type { Store } from "../store/store";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import type { PrEvents } from "./events";
 import { throttleOf, type Throttle } from "./quota";
-import type { ErrorReporter } from "./report";
+import type { ErrorReporter } from "../errors/reporter";
 import type { TrackerChanges } from "./tracker-changes";
 
 // Watch: detecta qué PRs cambiaron sin gastar cuota (`docs/design.html#d-ops`, "CodeHost: polling con ETags").
@@ -51,7 +52,7 @@ export interface Watch {
 
 export interface WatchDeps {
   store: Store;
-  connections: Pick<Connections, "githubClient" | "markRevoked" | "list">;
+  connections: Pick<Connections, "githubClient" | "list">;
   repos: Pick<Repos, "get" | "list" | "byRemote" | "config">;
   cache: PrCache;
   remote: Pick<GitRemote, "lsRemote">;
@@ -83,8 +84,8 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
   const lastSearch = new Map<string, number>();
   /** PRs cuyo head se movió según `git ls-remote`: se miran en el próximo despertar sin esperar su intervalo. */
   const headMoved = new Set<string>();
-  /** Cuántas relecturas por `mergeable: unknown` van; sin entrada, el PR no está en esa situación. */
-  const unknownRereads = new Map<string, number>();
+  /** Cuántas relecturas por `mergeable: unknown` le quedan a cada PR; sin entrada, no hay ninguna pendiente. */
+  const rereadsLeft = new Map<string, number>();
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
   let stopping = false;
@@ -126,7 +127,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
     return watchesCi(t, at) ? Math.min(CI_EVERY_MS, POLL_EVERY_MS[temperature]) : POLL_EVERY_MS[temperature];
   }
 
-  const rereadPending = (key: string) => (unknownRereads.get(key) ?? UNKNOWN_REREADS) < UNKNOWN_REREADS;
+  const rereadPending = (key: string) => (rereadsLeft.get(key) ?? 0) > 0;
 
   function isDue(t: Target, at: number, throttle: Throttle): boolean {
     const key = keyOf(t.ref);
@@ -201,7 +202,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
       row = cache.saveRest(t.repoId, RestPull.parse(pull.data), at);
       if (previousSha !== undefined && previousSha !== row.headSha) {
         forgetEtags(ref.account, ciPaths(ref, previousSha));
-        unknownRereads.delete(key);
+        rereadsLeft.delete(key);
       }
       commits.push(pull.commit);
       needDetail = true;
@@ -219,9 +220,10 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
     const state = await cache.refresh(ref);
     for (const commit of commits) commit();
     if (state.mergeable === "unknown" && (state.state === "open" || state.state === "draft")) {
-      unknownRereads.set(key, (unknownRereads.get(key) ?? -1) + 1);
+      const left = rereadsLeft.get(key);
+      rereadsLeft.set(key, left === undefined ? UNKNOWN_REREADS : left - 1);
     } else {
-      unknownRereads.delete(key);
+      rereadsLeft.delete(key);
     }
     if (state.state === "merged" || state.state === "closed") {
       forgetEtags(ref.account, [pullPath(ref), ...ciPaths(ref, state.headSha)]);
@@ -270,14 +272,13 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
     });
   }
 
-  /** Un trabajo que falla no tumba el despertar: el 401 deja la conexión revocada y lo demás se anota una vez. */
+  /** Un trabajo que falla no tumba el despertar: un 401 ya dejó la conexión revocada (el cliente) y lo demás se anota una vez. */
   async function attempt(account: string, scope: string, work: () => Promise<void>) {
     try {
       await work();
       errors.clear(scope);
     } catch (error) {
-      if (error instanceof RequestError && error.status === 401) connections.markRevoked("github", account, "core");
-      else errors.report(scope, error);
+      if (!isUnauthorized(error)) errors.report(scope, error);
     }
   }
 

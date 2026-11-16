@@ -5,8 +5,8 @@ import type { Engine } from "../flows/engine";
 import type { Projects } from "../projects/projects";
 import { pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
-import type { Repos } from "../workspaces/repos";
-import type { ErrorReporter } from "./report";
+import type { Repos } from "../repos/repos";
+import type { ErrorReporter } from "../errors/reporter";
 
 /** Los eventos de un PR que arrancan flujos (`trigger.type` del flujo es el mismo texto). */
 const TRIGGERS = ["pr.comment", "pr.conflict", "pr.merged", "pr.base_rewritten"] as const satisfies readonly EventType[];

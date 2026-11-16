@@ -21,6 +21,9 @@ import { z } from "zod";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
+
 // El préstamo del sujeto con Workspaces de verdad: la corrida de dev estacionada presta el PR y su
 // worktree al rebase, y al devolverlos sigue con el token nuevo. Va aquí y no en el core por los repos git reales.
 
@@ -42,7 +45,7 @@ beforeEach(() => {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos: () => ({ path: repo.dir, defaultBranch: "main" }),
+    repoConfig: () => ({ path: repo.dir, defaultBranch: "main" }),
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
   const defs = createDefs(store);
@@ -124,11 +127,11 @@ const holder = () => (store.db.$client.prepare("SELECT holder_run_id AS run, fen
 
 test("mantenimiento rebasea en el worktree de la dueña estacionada y ella sigue con el token nuevo", async () => {
   const owner = flows.start("dev", { type: "issue", id: "CLA-1" }, {}) as RunId;
-  await vi.waitFor(() => expect(flows.getRun(owner)).toMatchObject({ status: "parked", parkReason: "gate" }));
+  await vi.waitFor(() => expect(flows.getRun(owner)).toMatchObject({ status: "parked", parkReason: "gate" }), WAIT);
   expect(holder()).toEqual({ run: owner, token: 1 });
 
   const borrower = flows.start("rebase", PR, {});
-  await vi.waitFor(() => expect(flows.getRun(borrower)).toMatchObject({ status: "done", outcome: "done" }));
+  await vi.waitFor(() => expect(flows.getRun(borrower)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
 
   // Volvió a la dueña con tres tomas más: el préstamo, el `workspace.acquire` de quien lo tuvo y la devolución.
   expect(holder()).toEqual({ run: owner, token: 4 });
@@ -137,7 +140,7 @@ test("mantenimiento rebasea en el worktree de la dueña estacionada y ella sigue
   // El `$ws` de la dueña guarda el token 1: `workspace.release` valida el vigente porque el motor lo actualiza al resolver el ref.
   const [decision] = store.db.$client.prepare("SELECT id FROM decisions WHERE run_id = ? AND status = 'pending'").all(owner) as { id: string }[];
   flows.resolveGate(decision!.id as never, "go", "ui");
-  await vi.waitFor(() => expect(flows.getRun(owner)).toMatchObject({ status: "done", outcome: "done" }));
+  await vi.waitFor(() => expect(flows.getRun(owner)).toMatchObject({ status: "done", outcome: "done" }), WAIT);
   expect(holder().run).toBeNull();
   expect(workspaces.held(owner)).toBeUndefined();
 });

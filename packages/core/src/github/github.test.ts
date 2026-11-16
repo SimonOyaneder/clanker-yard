@@ -7,12 +7,12 @@ import { createRouterClient, ORPCError } from "@orpc/server";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createRouter } from "../server/router";
-import { apiDeps } from "../server/testing";
+import { apiDeps, withPrs } from "../server/testing";
 import { openStore, type Store } from "../store/store";
 import { syncCursors } from "../store/schema";
 import { createIssues } from "../tracker/issues";
 import { createGitHubClient } from "./client";
-import { healthyGitHub, recorded, startFakeGitHub, type FakeGitHub } from "./fake-github";
+import { healthyGitHub, recorded, startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
 import { GitHubPatError, githubPatForm } from "./pat";
 
 const CLASSIC_URL = "https://github.com/settings/tokens/new?description=Clanker%20Yard&scopes=repo";
@@ -207,7 +207,7 @@ describe("API", () => {
     const connections = await connectionsAgainst(
       healthyGitHub({ "GET /user": recorded("user.bad-credentials") }),
     );
-    const router = createRouter({
+    const router = createRouter(withPrs({
       store,
       connections,
       issues: createIssues(store),
@@ -217,7 +217,7 @@ describe("API", () => {
       startedAt: 0,
       dataDir: dir,
       onShutdown: () => {},
-    });
+    }));
     const client = createRouterClient(router, { context: { origin: "ui" } });
 
     await expect(client.connections.setPat({ token: TOKEN })).rejects.toSatisfy(
@@ -331,6 +331,29 @@ describe("cliente de GitHub", () => {
     expect(data.login).toBe("octocat");
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(fake.requests.map((r) => r.authorization)).toEqual(["bearer token-viejo", "bearer token-nuevo"]);
+  });
+
+  test("onUnauthorized se llama solo si el 401 sobrevive: sin refresh, o con un refresh que no sirvió", async () => {
+    const fake = await startFakeGitHub((request) => (request.authorization === "bearer bueno" ? recorded("user.ok") : recorded("user.bad-credentials")));
+    github = fake;
+    const unauthorized = vi.fn();
+    const client = (token: string, refresh?: () => Promise<void>) =>
+      createGitHubClient({ baseUrl: fake.baseUrl, tokens: refresh ? { kind: "app", token: async () => token, refresh } : { kind: "pat", token: async () => token }, onUnauthorized: unauthorized });
+
+    await expect(client("malo").request("GET /user")).rejects.toMatchObject({ status: 401 });
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+
+    await expect(client("malo", async () => {}).request("GET /user")).rejects.toMatchObject({ status: 401 });
+    expect(unauthorized).toHaveBeenCalledTimes(2);
+
+    let token = "malo";
+    const refreshed = createGitHubClient({
+      baseUrl: fake.baseUrl,
+      tokens: { kind: "app", token: async () => token, refresh: async () => void (token = "bueno") },
+      onUnauthorized: unauthorized,
+    });
+    expect((await refreshed.request("GET /user")).data.login).toBe("octocat");
+    expect(unauthorized).toHaveBeenCalledTimes(2);
   });
 
   test("las requests de un cliente salen en serie, y una que falla no frena a las demás", async () => {

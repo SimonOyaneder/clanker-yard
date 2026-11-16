@@ -203,7 +203,7 @@ describe("el runtime de los agentes", () => {
     const two = t.start("plan", subject("b-1"));
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(t.breakers.open(runtimeScope("fake"))).toBe("sin cuota");
+    expect(t.breakers.openReason(runtimeScope("fake"))).toBe("sin cuota");
     expect(t.store.events.since(0, { types: ["breaker.opened"] })[0]?.payload).toMatchObject({ scope: "runtime:fake", cause: "quota_exhausted", retryAt: resetsAt });
     expect(t.calls).toHaveLength(1);
 

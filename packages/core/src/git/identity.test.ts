@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createConnections } from "../connections/connections";
-import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "../github/fake-github";
+import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { openStore, type Store } from "../store/store";
 import type { RepoConfig } from "../workspaces/workspaces";
@@ -48,7 +48,7 @@ async function identities(path: string, remote?: RepoConfig["remote"]) {
   const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: github.baseUrl } });
   await connections.setPat("github_pat_UNIQUE-0123456789", "ui");
   const repos = vi.fn((): RepoConfig => ({ path, defaultBranch: "main", remote }));
-  return { identityOf: createGitIdentityOf({ repos, connections }), repos };
+  return { identityOf: createGitIdentityOf({ repoConfig: repos, connections }), repos };
 }
 
 const REMOTE = { url: "https://github.com/octocat/demo.git", repo: "octocat/demo", account: "octocat" };

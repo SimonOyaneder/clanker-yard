@@ -27,6 +27,9 @@ const usage: Usage = {
   costSource: "runtime",
 };
 
+/** El plazo de un `vi.waitFor` sobre una corrida: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+export const WAIT = { timeout: 10_000 };
+
 export const reportSchema = {
   type: "object",
   properties: { n: { type: "number" }, issueDoubts: { type: "array", items: { type: "string" } } },

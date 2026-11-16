@@ -47,9 +47,9 @@ describe("abrir", () => {
 
     b.trip({ scope: repoScope("a"), cause: "environment", reason: "No responde: Postgres." });
 
-    expect(b.open(repoScope("a"))).toBe("No responde: Postgres.");
-    expect(b.open(repoScope("b"))).toBeUndefined();
-    expect(b.open(GITHUB_SCOPE)).toBeUndefined();
+    expect(b.openReason(repoScope("a"))).toBe("No responde: Postgres.");
+    expect(b.openReason(repoScope("b"))).toBeUndefined();
+    expect(b.openReason(GITHUB_SCOPE)).toBeUndefined();
     expect(events("breaker.opened")[0]?.payload).toMatchObject({ scope: "repo:a", cause: "environment", retryAt: Date.now() + MIN });
     expect(alerts()).toMatchObject([{ status: "pending", title: "Pausado: repo:a", body: expect.stringContaining("No responde: Postgres.") }]);
   });
@@ -78,12 +78,12 @@ describe("backoff y cierre", () => {
     await vi.advanceTimersByTimeAsync(2 * 60 * MIN);
 
     expect(probes.map((p) => (p.at - start) / MIN)).toEqual([1, 6, 21, 51, 81, 111]);
-    expect(b.open(runtimeScope("claude-sdk"))).toBeDefined();
+    expect(b.openReason(runtimeScope("claude-sdk"))).toBeDefined();
 
     failing.clear();
     await vi.advanceTimersByTimeAsync(30 * MIN);
 
-    expect(b.open(runtimeScope("claude-sdk"))).toBeUndefined();
+    expect(b.openReason(runtimeScope("claude-sdk"))).toBeUndefined();
     expect(events("breaker.closed")).toHaveLength(1);
     expect(events("breaker.closed")[0]?.payload).toMatchObject({ scope: "runtime:claude-sdk", cause: "login_expired", probes: 6 });
     expect(alerts()).toMatchObject([{ status: "superseded" }]);
@@ -121,11 +121,11 @@ describe("backoff y cierre", () => {
 
     await vi.advanceTimersByTimeAsync(89 * MIN);
     expect(probes).toEqual([]);
-    expect(b.open(runtimeScope("claude-sdk"))).toBeDefined();
+    expect(b.openReason(runtimeScope("claude-sdk"))).toBeDefined();
 
     await vi.advanceTimersByTimeAsync(2 * MIN);
     expect(probes.map((p) => p.at)).toEqual([resetsAt]);
-    expect(b.open(runtimeScope("claude-sdk"))).toBeUndefined();
+    expect(b.openReason(runtimeScope("claude-sdk"))).toBeUndefined();
   });
 
   test("una prueba que lanza cuenta como fallida y sigue el backoff", async () => {
@@ -151,11 +151,11 @@ describe("eventos de conexión y cuota", () => {
     emit("sync.rate_limited", { provider: "github", account: "simon", resetAt });
     await vi.advanceTimersByTimeAsync(19 * MIN);
 
-    expect(b.open(GITHUB_SCOPE)).toBeDefined();
+    expect(b.openReason(GITHUB_SCOPE)).toBeDefined();
     expect(probes).toEqual([]);
 
     await vi.advanceTimersByTimeAsync(2 * MIN);
-    expect(b.open(GITHUB_SCOPE)).toBeUndefined();
+    expect(b.openReason(GITHUB_SCOPE)).toBeUndefined();
     expect(events("breaker.opened")[0]?.payload).toMatchObject({ scope: "github", cause: "rate_limited" });
   });
 
@@ -164,18 +164,18 @@ describe("eventos de conexión y cuota", () => {
     const b = breakers();
 
     emit("connection.changed", { provider: "github", account: "simon", status: "revoked" });
-    expect(b.open(GITHUB_SCOPE)).toContain("simon");
+    expect(b.openReason(GITHUB_SCOPE)).toContain("simon");
     expect(events("breaker.opened")[0]?.payload).toMatchObject({ cause: "connection_lost" });
 
     // Reconectó pero la prueba todavía falla (un token sin permisos): sigue abierto.
     emit("connection.changed", { provider: "github", account: "simon", status: "active" });
     await vi.advanceTimersByTimeAsync(0);
-    expect(b.open(GITHUB_SCOPE)).toBeDefined();
+    expect(b.openReason(GITHUB_SCOPE)).toBeDefined();
 
     failing.clear();
     emit("connection.changed", { provider: "github", account: "simon", status: "active" });
     await vi.advanceTimersByTimeAsync(0);
-    expect(b.open(GITHUB_SCOPE)).toBeUndefined();
+    expect(b.openReason(GITHUB_SCOPE)).toBeUndefined();
   });
 
   test("lo que emite la propia prueba (testClaude reescribe la conexión) no la dispara de nuevo", async () => {
@@ -190,7 +190,7 @@ describe("eventos de conexión y cuota", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(runs).toBe(1);
-    expect(b.open(runtimeScope("claude-sdk"))).toBeUndefined();
+    expect(b.openReason(runtimeScope("claude-sdk"))).toBeUndefined();
   });
 
   test("la conexión de Claude solo pausa al runtime claude-sdk, y Linear no abre ninguno", () => {
@@ -210,9 +210,9 @@ test("un corte no pierde los breakers: el core que arranca los retoma, sigue su 
 
   const second = breakers();
 
-  expect(second.open(repoScope("a"))).toBe("Postgres caído");
+  expect(second.openReason(repoScope("a"))).toBe("Postgres caído");
   expect(second.list()[0]?.decisionId).toBe(first.list()[0]?.decisionId);
   await vi.advanceTimersByTimeAsync(MIN);
-  expect(second.open(repoScope("a"))).toBeUndefined();
+  expect(second.openReason(repoScope("a"))).toBeUndefined();
   expect(alerts()).toMatchObject([{ status: "superseded" }]);
 });

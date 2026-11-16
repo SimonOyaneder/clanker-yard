@@ -51,7 +51,7 @@ export interface WorkspacesOptions {
   dataDir: string;
   /** Carpeta de los logs de comandos (`<logDir>/runs/<runId>/<stepId>.log`); por defecto `<dataDir>/logs`. */
   logDir?: string;
-  repos: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: string) => RepoConfig;
   /** Autor y committer de todo lo que corre `git` en un worktree: la identidad de git del usuario en ese repo. */
   identityOf: GitIdentityOf;
   /** Quien pushea y fetchea; sin él `push` y `fetch` lanzan. */
@@ -192,7 +192,7 @@ export interface Workspaces {
    * `SyncBaseError`: eso es `rebasePr`): el árbol completo, con cambios sin commit y archivos nuevos,
    * queda respaldado en `refs/clanker/backup/<branch>` (un commit sobre la base vieja; el último respaldo
    * pisa al anterior), el worktree pasa a la base nueva y los cambios se vuelven a aplicar con
-   * `apply --3way`. Con `conflict` las marcas quedan en los archivos. Sin `repos().remote` no hay fetch:
+   * `apply --3way`. Con `conflict` las marcas quedan en los archivos. Sin `repoConfig().remote` no hay fetch:
    * la base nueva es la que ya haya en el checkout. Reintentar tras un corte a medias retoma desde el respaldo.
    */
   syncBase(lease: WorkspaceRef): Promise<SyncBaseResult>;
@@ -361,7 +361,7 @@ export type SyncBaseResult =
     };
 
 export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
-  const { store, dataDir, repos, identityOf, remote, procs, worktreeSetup, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
+  const { store, dataDir, repoConfig, identityOf, remote, procs, worktreeSetup, leaseTtlMs = LEASE_TTL_MS, now = Date.now } = opts;
   const logDir = opts.logDir ?? defaultLogDir(dataDir);
   const heartbeats = new Map<string, { timer: NodeJS.Timeout; workspaceId: string; runId: RunId; token: number }>();
   const repoLocks = new Map<string, Promise<unknown>>();
@@ -378,7 +378,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     }
   }
 
-  const { cleanup } = createArchive({ store, repos, now, withRepoLock });
+  const { cleanup } = createArchive({ store, repoConfig, now, withRepoLock });
 
   function takeLease(db: Store["db"], id: string, runId: RunId) {
     const t = now();
@@ -470,7 +470,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   }
 
   async function acquire({ repo, branch: rawBranch, base, runId }: AcquireRequest) {
-    const cfg = repos(repo);
+    const cfg = repoConfig(repo);
     const branch = rawBranch.replace(/^refs\/heads\//, "");
     await assertBranchAllowed(cfg, branch);
     const baseRef = normalizeBase(base);
@@ -736,9 +736,9 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   }
 
   function remoteOf(repoId: string) {
-    const target = repos(repoId).remote;
+    const target = repoConfig(repoId).remote;
     if (!remote || !target) {
-      throw new Error(`El repo ${repoId} no tiene remoto configurado (repos().remote y la opción remote): no se puede pushear ni fetchear.`);
+      throw new Error(`El repo ${repoId} no tiene remoto configurado (repoConfig().remote y la opción remote): no se puede pushear ni fetchear.`);
     }
     return { remote, ...target };
   }
@@ -817,12 +817,12 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
 
   async function fetchRepo(repo: string): Promise<FetchOutcome> {
     const { remote, url, account } = remoteOf(repo);
-    return withRepoLock(repo, () => remote.fetch({ cwd: repos(repo).path, url, account }));
+    return withRepoLock(repo, () => remote.fetch({ cwd: repoConfig(repo).path, url, account }));
   }
 
   async function syncBase(lease: WorkspaceRef): Promise<SyncBaseResult> {
     const row = rowOf(lease);
-    const cfg = repos(row.repoId);
+    const cfg = repoConfig(row.repoId);
     if (cfg.remote && (await fetchRepo(row.repoId)) === "unauthorized") {
       throw new SyncBaseError(
         `GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${row.repoId}: la conexión quedó revocada, reconéctala.`,
@@ -925,7 +925,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   }
 
   async function attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean }> {
-    const cfg = repos(request.repo);
+    const cfg = repoConfig(request.repo);
     const branch = request.branch.replace(/^refs\/heads\//, "");
     if (cfg.remote && (await fetchRepo(request.repo)) === "unauthorized") {
       throw new AttachError(
@@ -970,26 +970,26 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
 
   async function rebase(lease: WorkspaceRef, { council, base, continue: resume = false }: RebaseOptions): Promise<RebaseResult> {
     const row = rowOf(lease);
-    const cfg = repos(row.repoId);
-    const run = (...args: string[]) => gitIn(lease, ...args);
+    const cfg = repoConfig(row.repoId);
+    const inWorktree = (...args: string[]) => gitIn(lease, ...args);
     if (council) {
       throw new RebaseError(`${row.branch} tiene threads [clanker-council]: un rebase reescribiría su historia y un PR con council nunca se fuerza.`);
     }
     const target = normalizeBase(base ?? row.baseRef);
-    const inProgress = await rebaseInProgress(run);
+    const inProgress = await rebaseInProgress(inWorktree);
 
     let step: RebaseStep;
     let onto: string;
     if (resume) {
       // Un rebase que el agente ya terminó por su cuenta solo falta registrarlo.
-      onto = inProgress ? await rebaseOnto(run) : await resolveBase(cfg, target);
+      onto = inProgress ? await rebaseOnto(inWorktree) : await resolveBase(cfg, target);
       if (!inProgress && !(await isAncestor(lease.path, onto, "HEAD"))) {
         throw new RebaseError(`No hay un rebase en curso en ${row.branch} y su HEAD no está sobre ${target}: no hay nada que continuar.`);
       }
-      step = inProgress ? await continueRebase(run) : { status: "done" };
+      step = inProgress ? await continueRebase(inWorktree) : { status: "done" };
     } else {
       onto = await resolveBase(cfg, target);
-      const head = await run("rev-parse", "HEAD");
+      const head = await inWorktree("rev-parse", "HEAD");
       if (inProgress) throw new RebaseError(`${row.branch} ya tiene un rebase en curso: sigue con \`continue\` o abórtalo.`);
       if (row.remoteSha === null || head !== row.remoteSha) {
         throw new RebaseError(
@@ -997,18 +997,18 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
             "rebasearlo pisaría o perdería commits. Retoma la branch con attach.",
         );
       }
-      if ((await run("status", "--porcelain")) !== "") {
+      if ((await inWorktree("status", "--porcelain")) !== "") {
         throw new RebaseError(`${row.branch} tiene cambios sin commitear: un rebase con el árbol sucio perdería trabajo.`);
       }
       const from = await rebaseFrom(row, cfg, target, lease.path);
-      step = await startRebase(run, { onto, ...(from !== undefined && { from }) });
+      step = await startRebase(inWorktree, { onto, ...(from !== undefined && { from }) });
     }
 
     if (step.status !== "done") {
       const { status, ...rest } = step;
       return { outcome: status, ...rest } as RebaseResult;
     }
-    const head = await run("rev-parse", "HEAD");
+    const head = await inWorktree("rev-parse", "HEAD");
     const saved = store.tx(({ db }) =>
       db
         .update(workspaces)
@@ -1026,18 +1026,18 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     if (council) {
       throw new RebaseError(`${row.branch} tiene threads [clanker-council]: un restack reescribiría su historia y un PR con council nunca se fuerza.`);
     }
-    const run = (...args: string[]) => gitIn(lease, ...args);
-    if (await rebaseInProgress(run)) throw new RebaseError(`${row.branch} tiene un rebase en curso: termínalo o abórtalo antes de un restack.`);
-    const head = await run("rev-parse", "HEAD");
+    const inWorktree = (...args: string[]) => gitIn(lease, ...args);
+    if (await rebaseInProgress(inWorktree)) throw new RebaseError(`${row.branch} tiene un rebase en curso: termínalo o abórtalo antes de un restack.`);
+    const head = await inWorktree("rev-parse", "HEAD");
     // Sin `remote_sha` la branch aún no se publicó (el PR de `pr.publish` con su base ya mergeada): no hay nada que pisar ni que pushear.
     const published = row.remoteSha !== null;
-    if (published ? head !== row.remoteSha : await refExists(repos(row.repoId), `refs/remotes/${REMOTE}/${row.branch}`)) {
+    if (published ? head !== row.remoteSha : await refExists(repoConfig(row.repoId), `refs/remotes/${REMOTE}/${row.branch}`)) {
       throw new RebaseError(
         `HEAD de ${row.branch} (${head.slice(0, 9)}) no es lo último que se pusheó (${row.remoteSha?.slice(0, 9) ?? "nada"}): ` +
           "rehacerlo pisaría o perdería commits. Retoma la branch con attach.",
       );
     }
-    if ((await run("status", "--porcelain")) !== "") {
+    if ((await inWorktree("status", "--porcelain")) !== "") {
       throw new RebaseError(`${row.branch} tiene cambios sin commitear: un restack con el árbol sucio perdería trabajo.`);
     }
     for (const [name, sha] of [["onto", onto], ["from", from]] as const) {
@@ -1066,10 +1066,10 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     if (published) {
       const pushed = await pushSha(lease, row, plan.head, moved);
       if (pushed !== "ok") return { outcome: pushed };
-      await run("reset", "--hard", plan.head);
+      await inWorktree("reset", "--hard", plan.head);
     } else {
       // Primero la branch y luego la fila: un corte entre los dos se reintenta como `uptodate` y la completa.
-      await run("reset", "--hard", plan.head);
+      await inWorktree("reset", "--hard", plan.head);
       store.tx(({ db }) =>
         db.update(workspaces).set({ ...moved, headSha: plan.head }).where(and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, lease.fencingToken))).run(),
       );
@@ -1200,8 +1200,8 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
    * pushearía con lease) sobre una branch a medio rebasear. `--abort` la deja como estaba antes del rebase.
    */
   async function abortLeftoverRebase(path: string): Promise<void> {
-    const run = (...args: string[]) => git(path, args);
-    if (await rebaseInProgress(run)) await run("rebase", "--abort");
+    const inWorktree = (...args: string[]) => git(path, args);
+    if (await rebaseInProgress(inWorktree)) await inWorktree("rebase", "--abort");
   }
 
   const gitAt = (cfg: RepoConfig): Git => (args, env, input) => git(cfg.path, args, env, input);
@@ -1216,7 +1216,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   }
 
   async function combineBase({ repo, issueId, branch, parents }: CombineRequest): Promise<CombineResult> {
-    const cfg = repos(repo);
+    const cfg = repoConfig(repo);
     await assertBranchAllowed(cfg, branch);
     if (cfg.remote && (await fetchRepo(repo)) === "unauthorized") {
       throw new Error(`GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${repo}: la conexión quedó revocada, reconéctala.`);
@@ -1249,12 +1249,12 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         .returning({ branch: combinedBases.branch })
         .get(),
     );
-    if (dissolved) await withRepoLock(repo, () => tryGit(repos(repo).path, ["update-ref", "-d", `refs/heads/${branch}`]));
+    if (dissolved) await withRepoLock(repo, () => tryGit(repoConfig(repo).path, ["update-ref", "-d", `refs/heads/${branch}`]));
   }
 
   async function restackCombined(lease: WorkspaceRef, { council, branch, parents }: RestackCombinedOptions): Promise<RestackResult | BaseConflict> {
     const row = rowOf(lease);
-    const cfg = repos(row.repoId);
+    const cfg = repoConfig(row.repoId);
     const combined = combinedRow(row.repoId, branch);
     if (combined === undefined || combined.status === "dissolved") {
       throw new RebaseError(`${row.branch} no tiene una base combinada vigente (${branch}): no se sabe cuál fue la última punta de su base.`);
@@ -1436,7 +1436,7 @@ export function workspaceAttachAction(workspaces: Workspaces): ActionDef<typeof 
 
 const WorkspaceReleaseArgs = z.object({
   workspaceId: z.string(),
-  fencingToken: z.number().int().positive(),
+  fencingToken: z.int().positive(),
 });
 
 /** La acción `workspace.release`: suelta el worktree que `workspace.acquire` tomó, con su `$ws.workspaceId` y `$ws.fencingToken`. */

@@ -8,12 +8,12 @@ import type { Prs } from "../github/prs";
 import type { Packs } from "../packs/packs";
 import { decisions, mergeOffers, pullRequests, runs } from "../store/schema";
 import type { Store, Tx } from "../store/store";
-import type { Repos } from "../workspaces/repos";
-import type { ErrorReporter } from "./report";
+import type { Repos } from "../repos/repos";
+import type { ErrorReporter } from "../errors/reporter";
 
 // Lo que el core hace cuando la estrategia de merge dice que un PR está listo (`docs/design.html#d-ops`,
 // "Watch: eventos y qué disparan", `pr.mergeReady`): según el pack, nada, comentar el comando de merge solo
-// (`auto`, como el `🤖 fin-merge-auto` del vigilante) o abrir una decisión (`offer`) que no estaciona ninguna
+// (`auto`: sin preguntar, solo si el pack lo pide) o abrir una decisión (`offer`) que no estaciona ninguna
 // corrida: solo ese PR espera. Sin estrategia, la decisión avisa que se mergea con el botón de GitHub.
 //
 // Todo es sobre PRs del sistema (`owned`) y nunca confía en el evento: antes de actuar lee el PR de nuevo y
@@ -26,12 +26,20 @@ export const approveOption = (command: string) => `Comentar ${command}`;
 /** La opción de una oferta sin comando: no hace nada, el merge lo da la persona en GitHub. */
 export const BUTTON_OPTION = "Lo mergeo yo en GitHub";
 
+/**
+ * Si la decisión es una oferta de merge: aprobarla comenta el comando de merge con la identidad del usuario,
+ * así que solo vale desde la app (`origin: "ui"`). La API la rechaza con otro origin en vez de cerrarla sin efecto.
+ */
+export function isMergeOffer(store: Pick<Store, "db">, decisionId: DecisionId): boolean {
+  return store.db.select({ id: mergeOffers.decisionId }).from(mergeOffers).where(eq(mergeOffers.decisionId, decisionId)).get() !== undefined;
+}
+
 export interface MergeReactionsDeps {
   store: Store;
   repos: Pick<Repos, "get" | "config">;
   packs: Pick<Packs, "packFor">;
   prs: Pick<Prs, "get">;
-  connections: Pick<Connections, "githubClient" | "markRevoked">;
+  connections: Pick<Connections, "githubClient">;
   errors: ErrorReporter;
 }
 

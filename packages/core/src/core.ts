@@ -31,10 +31,9 @@ import { createPrRepublisher } from "./github/republisher";
 import {
   prPushLeaseAction,
   prRebaseApprovalAction,
-  workspaceCommitAfterRebaseAction,
-  workspaceRebaseAbortAction,
   workspaceRebaseAction,
 } from "./github/rebase-pr";
+import { workspaceCommitAfterRebaseAction, workspaceRebaseAbortAction } from "./workspaces/rebase-actions";
 import { createGitIdentityOf } from "./git/identity";
 import { githubRemote } from "./github/remote-config";
 import { createPacks } from "./packs/packs";
@@ -60,12 +59,12 @@ import { createIssues } from "./tracker/issues";
 import { createLocalTracker } from "./tracker/local";
 import { createPrEvents } from "./watch/events";
 import { startMergeReactions } from "./watch/merge-reactions";
-import { createErrorReporter } from "./watch/report";
+import { createErrorReporter } from "./errors/reporter";
 import { createTrackerChanges } from "./watch/tracker-changes";
 import { startTriggers } from "./watch/triggers";
 import { createWatch } from "./watch/watch";
 import { startCleanup } from "./workspaces/cleanup";
-import { createRepos } from "./workspaces/repos";
+import { createRepos } from "./repos/repos";
 import {
   createWorkspaces,
   workspaceAcquireAction,
@@ -150,7 +149,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const defs = createDefs(store);
   const packs = createPacks({ defs, installedDir: opts.packsDir ?? join(dataDir, "packs"), factoryDir: opts.factoryPacksDir });
   const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
-  const identityOf = createGitIdentityOf({ repos: repos.config, connections: opts.connections });
+  const identityOf = createGitIdentityOf({ repoConfig: repos.config, connections: opts.connections });
   const agents = createAgents({ store, defs, runtime, packs, remoteOf: (repoId) => repos.get(repoId)?.remote, identityOf });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const slots = createSlots({ store });
@@ -159,7 +158,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const workspaces = createWorkspaces({
     store,
     dataDir,
-    repos: repos.config,
+    repoConfig: repos.config,
     identityOf,
     procs,
     remote: gitRemote,
@@ -167,7 +166,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   });
   const local = createLocalTracker(store);
   const issues = createIssues(store, local);
-  const projects = createProjects(store, defs);
+  const projects = createProjects({ store, defs });
   const trackers = createTrackers({
     local,
     connections: opts.connections,
@@ -185,8 +184,11 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     projects,
   });
   const lanes = createLaneSettings(store);
+  // Un solo dedupe para todo el core; lo de Watch (y los triggers y reacciones que cuelgan de sus eventos) va bajo `watch.`.
+  const reporter = createErrorReporter(store);
   const breakers = createBreakers({
     store,
+    errors: reporter,
     runtime: runtime.id,
     probe: environmentProbe({ connections: opts.connections, repos, runtime: runtime.id }),
     ...(opts.breakerBackoffMs && { backoffMs: opts.breakerBackoffMs }),
@@ -201,7 +203,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     { types: ["breaker.opened"] },
   );
-  const learnings = createLearnings(store, runtime);
+  const learnings = createLearnings({ store, runtime });
   const flows = createFlows({
     store,
     environment: { breakers, runtime: runtime.id },
@@ -222,7 +224,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
   });
   const prs = createPrs({ connections: opts.connections, packs, merge: createMergeScope({ store, repos, connections: opts.connections }) });
-  const watchErrors = createErrorReporter(store);
+  const watchErrors = reporter.within("watch");
   const prEvents = createPrEvents({ store, repos, workspaces, errors: watchErrors });
   /** Un PR cambió (Watch o `prs.refresh`): los waits que lo esperan y los eventos con su dedupe. */
   const onPrChange = (ref: PrRef, state: PrState, row: PrRow) => {
@@ -239,18 +241,18 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(workspaceCombineBaseAction(workspaces));
   flows.registerAction(recipes.checkAction);
   flows.registerAction(commitsApplyAction({ workspaces, recipes }));
-  flows.registerAction(prPublishAction({ store, workspaces, recipes, repos: repos.config, connections: opts.connections, packs }));
-  flows.registerAction(prPushFixupsAction({ store, workspaces, repos: repos.config, prs }));
+  flows.registerAction(prPublishAction({ store, workspaces, recipes, repoConfig: repos.config, connections: opts.connections, packs }));
+  flows.registerAction(prPushFixupsAction({ store, workspaces, repoConfig: repos.config, prs }));
   flows.registerAction(prReplayAction({ workspaces }));
   flows.registerAction(prSupersedeAction({ store, connections: opts.connections }));
-  const rebasePr = { store, workspaces, repos: repos.config, prs };
+  const rebasePr = { store, workspaces, repoConfig: repos.config, prs };
   flows.registerAction(workspaceRebaseAction(rebasePr));
   flows.registerAction(prPushLeaseAction(rebasePr));
   flows.registerAction(prRebaseApprovalAction(rebasePr));
-  flows.registerAction(workspaceCommitAfterRebaseAction(rebasePr));
-  flows.registerAction(workspaceRebaseAbortAction(rebasePr));
+  flows.registerAction(workspaceCommitAfterRebaseAction(workspaces));
+  flows.registerAction(workspaceRebaseAbortAction(workspaces));
   const gap: { pause?: NonNullable<StartCoreOptions["pause"]> } = opts.pause ? { pause: opts.pause } : {};
-  const restackDeps = { store, workspaces, repos: repos.config, prs, connections: opts.connections, ...gap };
+  const restackDeps = { store, workspaces, repoConfig: repos.config, prs, connections: opts.connections, ...gap };
   flows.registerAction(stackRestackAction(restackDeps));
   flows.registerAction(stackRestackRewrittenAction(restackDeps));
   const feedback = { connections: opts.connections, packs, ...gap };
@@ -263,10 +265,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   for (const wait of Object.values(prWaits(prs, { headSeen }))) flows.registerWait(wait);
   installBuiltins({ defs, flows, extra: opts.builtins });
   // Los flujos de un pack citan acciones y waits, así que se cargan con todo registrado. Un pack roto no tumba el arranque.
-  const { errors } = await packs.reload();
-  for (const error of errors) {
-    store.tx((tx) => tx.emit({ type: "error", origin: "core", payload: { scope: "packs.load", message: error.message } }));
-  }
+  for (const error of (await packs.reload()).errors) reporter.report("packs.load", error);
 
   // Antes de aceptar trabajo, en este orden: sin procesos de un core anterior que sigan escribiendo,
   // con los worktrees de las corridas vivas todavía suyos, y recién entonces los pasos se reabren.
@@ -285,7 +284,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   );
   // Un worktree cuyo PR terminó se archiva en cuanto nadie lo tiene: al soltarse el último lease (`pr.merged` y los
   // cierres sin merge llegan por `onPrChange`), y a los 7 días se borra.
-  const cleanup = startCleanup({ workspaces, errors: watchErrors });
+  const cleanup = startCleanup({ workspaces, errors: reporter });
   const stopCleaningOnRelease = store.events.subscribe(
     ({ payload }) => {
       if (payload.resource === "workspace") cleanup.request();
@@ -295,9 +294,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   // Al devolver un sujeto prestado la branch pudo moverse: la dueña relee su `head_sha` antes de seguir.
   const stopRereading = store.events.subscribe(
     ({ payload }) => {
-      workspaces.reread(payload.fromRunId as RunId).catch((error: unknown) => {
-        store.tx((tx) => tx.emit({ type: "error", origin: "core", payload: { scope: "workspaces.reread", message: String(error) } }));
-      });
+      workspaces.reread(payload.fromRunId as RunId).catch((error: unknown) => reporter.report("workspaces.reread", error));
     },
     { types: ["run.returned"] },
   );
@@ -316,9 +313,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     lanes,
     runtime: runtime.id,
     breakers,
+    errors: reporter,
   });
   const repoConfigSync = createRepoConfigSyncer({ defs, flows, repos });
-  const stopRepoConfigSync = startRepoConfigSync({ syncer: repoConfigSync, repos, errors: watchErrors });
+  const stopRepoConfigSync = startRepoConfigSync({ syncer: repoConfigSync, repos, errors: reporter });
   const stopTriggers = startTriggers({ store, defs, projects, repos, flows, errors: watchErrors });
   const mergeReactions = startMergeReactions({ store, repos, packs, prs, connections: opts.connections, errors: watchErrors });
   const watch = createWatch({
@@ -354,7 +352,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     lanes,
     breakers,
     flows,
-    onPrChange,
+    prs,
+    prCache,
     artifacts,
     decisions: createDecisions(store),
     learnings,

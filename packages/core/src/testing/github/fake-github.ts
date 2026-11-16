@@ -10,7 +10,7 @@ export interface RecordedResponse {
 }
 
 export function recorded(name: string): RecordedResponse {
-  return JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
+  return JSON.parse(readFileSync(new URL(`../../github/fixtures/${name}.json`, import.meta.url), "utf8"));
 }
 
 export interface FakeRequest {

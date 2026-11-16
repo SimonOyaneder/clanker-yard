@@ -4,10 +4,10 @@ import { join } from "node:path";
 import type { ClaudeStatus } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
-import { startFakeGitHub, type FakeGitHub } from "../github/fake-github";
+import { startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { openStore, type Store } from "../store/store";
-import { createRepos } from "../workspaces/repos";
+import { createRepos } from "../repos/repos";
 import { GITHUB_SCOPE, repoScope, runtimeScope } from "./breakers";
 import { environmentProbe } from "./probes";
 

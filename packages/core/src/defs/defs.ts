@@ -5,6 +5,7 @@ import type { ZodType } from "zod";
 import { newId } from "../store/conventions";
 import { DEF_SCOPES, defs, defVersions } from "../store/schema";
 import type { Store } from "../store/store";
+import { issuesAsLines } from "../errors/format";
 
 export type DefScope = (typeof DEF_SCOPES)[number];
 
@@ -59,7 +60,7 @@ export class DefValidationError extends Error {
   ) {
     super(
       `El body de ${kind} "${slug}" es inválido:\n` +
-        issues.map((i) => `  ${formatPath(i.path)}: ${i.message}`).join("\n"),
+        issuesAsLines(issues),
     );
   }
 }
@@ -306,6 +307,7 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function formatPath(path: PropertyKey[]): string {
-  return path.length === 0 ? "(raíz)" : path.map(String).join(".");
+/** Un objeto JSON (no `null` ni un arreglo). */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

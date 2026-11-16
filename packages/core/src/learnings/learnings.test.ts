@@ -14,7 +14,7 @@ const repo = newId("repo");
 
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
-  learnings = createLearnings(store);
+  learnings = createLearnings({ store });
 });
 afterEach(() => store.close());
 
@@ -87,7 +87,7 @@ describe("approve y reject", () => {
     const id = newId("lrn");
     expect(() => learnings.approve(id, "ui")).toThrow(LearningNotFoundError);
     expect(() => learnings.reject(id, "ui")).toThrow(LearningNotFoundError);
-    expect(() => learnings.update({ id, text: "x" })).toThrow(LearningNotFoundError);
+    expect(() => learnings.update({ id, text: "x" }, "ui")).toThrow(LearningNotFoundError);
   });
 });
 
@@ -96,16 +96,20 @@ describe("update", () => {
     const { id } = propose("a", { roles: ["dev"] });
     learnings.approve(id, "ui");
 
-    expect(learnings.update({ id, text: "b" })).toMatchObject({ text: "b", roles: ["dev"], status: "approved" });
-    expect(learnings.update({ id, roles: [], tags: ["git"] })).toMatchObject({ text: "b", roles: [], tags: ["git"] });
+    expect(learnings.update({ id, text: "b" }, "ui")).toMatchObject({ text: "b", roles: ["dev"], status: "approved" });
+    expect(learnings.update({ id, roles: [], tags: ["git"] }, "ui")).toMatchObject({ text: "b", roles: [], tags: ["git"] });
+    expect(store.events.since(0, { types: ["learning.updated"] }).map((e) => [e.origin, e.payload])).toEqual([
+      ["ui", { learningId: id, fields: ["text"] }],
+      ["ui", { learningId: id, fields: ["roles", "tags"] }],
+    ]);
   });
 
   test("no deja repetir el texto de otro learning del mismo alcance", () => {
     propose("a");
     const { id } = propose("b");
 
-    expect(() => learnings.update({ id, text: "a" })).toThrow(LearningUpdateError);
-    expect(learnings.update({ id, text: "b" }).text).toBe("b");
+    expect(() => learnings.update({ id, text: "a" }, "ui")).toThrow(LearningUpdateError);
+    expect(learnings.update({ id, text: "b" }, "ui").text).toBe("b");
   });
 });
 
@@ -204,7 +208,7 @@ describe("screen", () => {
       ],
     });
 
-    const verdicts = await createLearnings(store, runtime).screen();
+    const verdicts = await createLearnings({ store, runtime }).screen();
 
     expect(verdicts).toEqual([
       { id: bad.id, keep: false, reason: "dato de una sola issue" },
@@ -222,14 +226,14 @@ describe("screen", () => {
     const one = asAgent("uno");
     const { runtime } = runtimeAnswering({ verdicts: [] });
 
-    expect(await createLearnings(store, runtime).screen()).toEqual([{ id: one.id, keep: true, reason: expect.any(String) }]);
+    expect(await createLearnings({ store, runtime }).screen()).toEqual([{ id: one.id, keep: true, reason: expect.any(String) }]);
   });
 
   test("si el agente falla o no responde con el formato, lanza un error de dominio y no cambia nada", async () => {
     asAgent("uno");
 
-    await expect(createLearnings(store, runtimeAnswering(undefined, "error").runtime).screen()).rejects.toThrow(LearningScreenError);
-    await expect(createLearnings(store, runtimeAnswering({ nope: 1 }).runtime).screen()).rejects.toThrow(/veredictos válidos/);
+    await expect(createLearnings({ store, runtime: runtimeAnswering(undefined, "error").runtime }).screen()).rejects.toThrow(LearningScreenError);
+    await expect(createLearnings({ store, runtime: runtimeAnswering({ nope: 1 }).runtime }).screen()).rejects.toThrow(/veredictos válidos/);
     await expect(learnings.screen()).rejects.toThrow(LearningScreenError);
     expect(learnings.list()[0]!.status).toBe("proposed");
   });

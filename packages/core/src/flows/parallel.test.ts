@@ -1,6 +1,6 @@
 import type { Role } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { harness as createHarness, okReport, reportSchema, type AgentCall } from "./harness";
+import { harness as createHarness, okReport, reportSchema, type AgentCall, WAIT } from "./harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -103,8 +103,8 @@ describe("parallel con ramas fijas", () => {
     h.save(reviewsFlow());
 
     const runId = h.start("reviews-flow");
-    await vi.waitFor(() => expect(h.calls.map((c) => c.spec?.role).sort()).toEqual(["rv-bugs", "rv-tests"]));
-    await vi.waitFor(() => expect(h.flows.getRun(runId).steps.find((s) => s.nodeId === "rv-a")?.status).toBe("done"));
+    await vi.waitFor(() => expect(h.calls.map((c) => c.spec?.role).sort()).toEqual(["rv-bugs", "rv-tests"]), WAIT);
+    await vi.waitFor(() => expect(h.flows.getRun(runId).steps.find((s) => s.nodeId === "rv-a")?.status).toBe("done"), WAIT);
 
     // Las dos ramas corrieron a la vez; una ya cerró y el padre sigue esperando.
     expect(h.flows.getRun(runId).steps.map((s) => [s.nodeId, s.status])).toEqual([

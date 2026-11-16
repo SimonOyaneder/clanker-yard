@@ -6,7 +6,7 @@ import { newId } from "../store/conventions";
 import { repos } from "../store/schema";
 import type { Store } from "../store/store";
 import { findRepos, inspectRepo } from "./inspect";
-import type { RepoConfig } from "./workspaces";
+import type { RepoConfig } from "../workspaces/workspaces";
 
 /** El repo que se pidió no está registrado. */
 export class RepoNotFoundError extends Error {

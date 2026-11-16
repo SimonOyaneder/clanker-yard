@@ -21,7 +21,7 @@ import type { Artifacts } from "../artifacts/artifacts";
 import { GITHUB_SCOPE, repoScope, runtimeScope, type Breakers } from "../breakers/breakers";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import type { Defs } from "../defs/defs";
-import { MAX_PROPOSED_PER_RUN } from "../learnings/criteria";
+import { MAX_PROPOSED_PER_STEP } from "../learnings/criteria";
 import { proposeLearning } from "../learnings/learnings";
 import { recordRunMetrics } from "../metrics/record";
 import { microsToUsd, newId, usdToMicros } from "../store/conventions";
@@ -43,6 +43,8 @@ import { createSubjects, hasWaiting, loanOf, type SubjectsDeps } from "./subject
 import { StepNotFoundError } from "./step-detail";
 import { isTruthy, navigate, refPath, resolveRefs } from "./refs";
 import { calledFlows, LANE_BY_TRIGGER } from "./validate";
+import { issuesInline, messageOf } from "../errors/format";
+import { isRecord } from "../defs/defs";
 
 /** El lease de un paso: el core dueño lo renueva cada tercio mientras el paso vive. */
 const STEP_LEASE_TTL_MS = 120_000;
@@ -69,8 +71,26 @@ const ESCALATED = "El agente se pasó de su tope de gasto o de turnos; se reinte
 const STEER_NOTICE = "Una persona que supervisa esta corrida te dejó este mensaje para tu tarea:";
 const HANDOFF_NOTICE =
   "La sesión anterior de esta tarea se pasó de su tope de gasto o de turnos y se cerró. Revisa el worktree (git status y git diff --stat): puede tener cambios a medias. Termina tu tarea.";
+
+/**
+ * Por qué se reabrió un paso de agente, leído de su `error` (lo único que sobrevive a un corte): con qué aviso
+ * arranca el agente y qué sesión retoma. `unfinished` es la que la interrupción dejó sin cerrar, `steer` la del
+ * mensaje de la persona y `none` una nueva (sin `resumeFrom` del nodo).
+ */
+const REOPENED: Record<string, { notice?: string; resume: "unfinished" | "steer" | "none" }> = {
+  [RESUMED_AFTER_CUT]: { notice: CUT_NOTICE, resume: "unfinished" },
+  [RESUMED_AFTER_PAUSE]: { notice: PAUSE_NOTICE, resume: "unfinished" },
+  [STEERED]: { resume: "steer" },
+  [ESCALATED]: { notice: HANDOFF_NOTICE, resume: "none" },
+  [RETRIED]: { resume: "none" },
+};
 /** Prefijo de la opción de un `needs_human` que sigue el edge de un outcome sin ejecutar el paso: `force:ok`. */
 const FORCE = "force:";
+
+/** Si una persona puede forzar el outcome del nodo: solo action y wait, nunca un agente (decisión #44). */
+function forceable(node: Node): boolean {
+  return node.type === "action" || node.type === "wait";
+}
 /**
  * Sufijo de `retry` y `continue` en una decisión de `needs_human`: antes de seguir, la corrida toma la versión
  * vigente de su perfil en vez de la que fijó al empezar (así un tope por rol que la persona subió vale ya).
@@ -105,6 +125,8 @@ export interface StartOptions {
   repoId?: string;
   /** Slug del perfil. Obligatorio si el flujo tiene pasos agent. */
   profile?: string;
+  /** Quién la lanzó, para `run.started`; por defecto el core (un trigger, el Scheduler). */
+  by?: Origin;
 }
 
 export interface StepView {
@@ -200,7 +222,7 @@ export interface EngineDeps extends SubjectsDeps {
    * Los circuit breakers por causa (`docs/design.html#d-ops`) y el runtime de los agentes (su ámbito es
    * `runtime:<id>`). Un paso cuyo ámbito está abierto no se despacha; un error de entorno abre el de su causa.
    */
-  environment?: { breakers: Pick<Breakers, "open" | "trip">; runtime: string };
+  environment?: { breakers: Pick<Breakers, "openReason" | "trip">; runtime: string };
   /** Tope global de agentes a la vez. */
   maxAgents?: number;
   tickMs?: number;
@@ -254,7 +276,7 @@ export interface Engine {
    *   interrumpe a los agentes que sigan. Solo se pausa lo que corre: una corrida estacionada ya espera a una persona.
    * - `resume`: las pausadas vuelven a `running`; en una corrida que ya corre no hace nada.
    */
-  control(runId: RunId, cmd: "pause" | "resume" | "cancel", opts: { by: Origin; now?: boolean }): void;
+  control(runId: RunId, cmd: "pause" | "resume" | "cancel", by: Origin, opts?: { now?: boolean }): void;
   /**
    * Un comando sobre un paso de una corrida viva, y la corrida a la que pertenece. Lanza `StepNotFoundError` si el
    * paso no existe y `RunCommandError` si no se puede en su estado (los mensajes dicen qué hacer).
@@ -517,6 +539,7 @@ export function createEngine(deps: EngineDeps): Engine {
         profile,
         lane: flow.lane ?? LANE_BY_TRIGGER[flow.trigger.type] ?? "dev",
         writes: flow.effects !== "local",
+        by: opts.by,
       }).id;
     });
     wake();
@@ -547,7 +570,7 @@ export function createEngine(deps: EngineDeps): Engine {
         for (const edge of edgesOf(node)) maxRoundsOf(edge, params);
       }
     } catch (error) {
-      throw new RunStartError(describe(error), { cause: error });
+      throw new RunStartError(messageOf(error), { cause: error });
     }
     return params;
   }
@@ -590,6 +613,7 @@ export function createEngine(deps: EngineDeps): Engine {
       lane: RunRow["lane"];
       writes: boolean;
       parent?: { runId: RunId; stepRunId: StepRunId; stopBefore: string | undefined };
+      by?: Origin;
     },
   ): RunRow {
     const admission = subjects.admit(tx.db, {
@@ -629,7 +653,7 @@ export function createEngine(deps: EngineDeps): Engine {
     insertStep(tx, run, n.flow.start, { visit: 1, round: 0 });
     tx.emit({
       type: "run.started",
-      origin: "core",
+      origin: n.by ?? "core",
       ...scopeOf(run),
       payload: {
         runId: run.id,
@@ -680,7 +704,7 @@ export function createEngine(deps: EngineDeps): Engine {
     try {
       return jobOf(run, step);
     } catch (error) {
-      parkUnloadable(run, step, describe(error));
+      parkUnloadable(run, step, messageOf(error));
       return undefined;
     }
   }
@@ -745,7 +769,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const leased = lease(step);
       if (!leased) continue;
       if (isAgent) activeAgents++;
-      const job = execute({ ...planned, step: leased }).finally(() => {
+      const job = runWithLease({ ...planned, step: leased }).finally(() => {
         if (isAgent) activeAgents--;
         inFlight.delete(job);
         wake();
@@ -773,7 +797,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** El ámbito abierto que pausa a este paso, o `undefined`. */
   function pausedBy({ run, node }: Job): string | undefined {
-    return scopesOf(run, node).find((scope) => environment?.breakers.open(scope) !== undefined);
+    return scopesOf(run, node).find((scope) => environment?.breakers.openReason(scope) !== undefined);
   }
 
   /** El paso (pending, en un wait o a medias por un corte) no se pudo cargar: falla sin correr y su corrida queda parked. */
@@ -820,7 +844,8 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** El paso `step` terminó sin un edge que lo lleve a ningún lado: la corrida espera a una persona. Sin `node` (no se pudo cargar) solo se puede reintentar o cancelar. */
   function parkForHuman(tx: Tx, run: RunRow, step: StepRow, node: Node | undefined, message: string): void {
-    const forced = Object.keys(node?.on ?? {}).map((outcome) => `${FORCE}${outcome}`);
+    // Solo action y wait se fuerzan (decisión #44, igual que `forceStep`): el resultado de un agente nunca lo pone una persona.
+    const forced = node !== undefined && forceable(node) ? Object.keys(node.on ?? {}).map((outcome) => `${FORCE}${outcome}`) : [];
     park(tx, run, step, {
       reason: "needs_human",
       kind: "needs_human",
@@ -901,7 +926,7 @@ export function createEngine(deps: EngineDeps): Engine {
     );
   }
 
-  async function execute(job: Job): Promise<void> {
+  async function runWithLease(job: Job): Promise<void> {
     const controller = new AbortController();
     controllers.set(job.step.id, controller);
     if (job.node.type === "agent") agentSteps.add(job.step.id);
@@ -925,10 +950,10 @@ export function createEngine(deps: EngineDeps): Engine {
     try {
       let settled: Settled;
       try {
-        settled = await perform(job, controller);
+        settled = await dispatchNode(job, controller);
       } catch (error) {
         if (error instanceof StaleStepError) throw error;
-        settled = { kind: "failed", error: describe(error) };
+        settled = { kind: "failed", error: messageOf(error) };
       }
       const { reason } = controller.signal;
       if (settled.kind === "failed" && reason instanceof Interruption) reopenInterrupted(job, reason);
@@ -936,7 +961,7 @@ export function createEngine(deps: EngineDeps): Engine {
     } catch (error) {
       if (error instanceof StaleStepError) return;
       console.error(`No se pudo cerrar el paso ${job.step.id} (${job.step.nodeId}):`, error);
-      parkAfterFailure(job, describe(error));
+      parkAfterFailure(job, messageOf(error));
     } finally {
       clearInterval(renew);
       controllers.delete(job.step.id);
@@ -1005,7 +1030,7 @@ export function createEngine(deps: EngineDeps): Engine {
         recoverStep(run, step);
       } catch (error) {
         console.error(`No se pudo recuperar el paso ${step.id} (${step.nodeId}):`, error);
-        parkUnloadable(run, step, describe(error));
+        parkUnloadable(run, step, messageOf(error));
       }
     }
     wake();
@@ -1055,7 +1080,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   // --- ejecución de un paso --------------------------------------------------------------------
 
-  async function perform(job: Job, controller: AbortController): Promise<Settled> {
+  async function dispatchNode(job: Job, controller: AbortController): Promise<Settled> {
     const { run, step, node } = job;
     const resolve = (ref: string) => resolveRef(run, step, ref);
     if (node.when !== undefined && !isTruthy(resolveRefs(node.when, resolve))) {
@@ -1114,7 +1139,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const action = actions.get(node.action);
     if (!action) return permanent(`La acción "${node.action}" no está registrada.`);
     const args = action.args.safeParse(input);
-    if (!args.success) return permanent(`Los args de "${node.action}" no son válidos: ${formatIssues(args.error)}`);
+    if (!args.success) return permanent(`Los args de "${node.action}" no son válidos: ${issuesInline(args.error.issues)}`);
 
     const key = `${run.id}:${step.nodeId}:${step.visit}`;
     const ctx: ActionCtx = { runId: run.id, stepId: step.id, key, signal, once: (stage, fn) => once(key, stage, fn) };
@@ -1125,16 +1150,16 @@ export function createEngine(deps: EngineDeps): Engine {
       if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
       if (error instanceof EnvironmentError) {
         environment?.breakers.trip({ scope: error.scope, cause: "environment", reason: error.message });
-        return deferred(error.message, now() + ENVIRONMENT_BACKOFF_MS);
+        return deferUntil(error.message, now() + ENVIRONMENT_BACKOFF_MS);
       }
-      return error instanceof PermanentActionError ? permanent(error.message) : { kind: "failed", error: describe(error) };
+      return error instanceof PermanentActionError ? permanent(error.message) : { kind: "failed", error: messageOf(error) };
     }
     if (!action.outcomes.includes(result.outcome)) {
       return permanent(`La acción "${node.action}" devolvió el outcome "${result.outcome}", que no declara (${action.outcomes.join(", ")}).`);
     }
     const output = action.output?.safeParse(result.output);
     if (output && !output.success) {
-      return permanent(`El output de "${node.action}" no cumple su esquema: ${formatIssues(output.error)}`);
+      return permanent(`El output de "${node.action}" no cumple su esquema: ${issuesInline(output.error.issues)}`);
     }
     return { kind: "outcome", outcome: result.outcome, output: result.output };
   }
@@ -1155,10 +1180,10 @@ export function createEngine(deps: EngineDeps): Engine {
     const brief: Brief = briefFor
       ? await briefFor({ run: briefRun, nodeId: step.nodeId, visit: step.visit, mode: node.mode, role: node.role, proposesLearnings, projectId: run.projectId ?? undefined, payload, lineage: lineage(run) })
       : { run: briefRun, worktree: workspace.path, base: workspace.base, mode: node.mode, artifacts: {}, payload };
+    const reopened = step.error === null ? undefined : REOPENED[step.error];
     // Tras pasarse del tope el paso reintenta con el perfil escalado y una sesión nueva con handoff.
     const escalated = step.error === ESCALATED;
-    const cut = step.error === RESUMED_AFTER_CUT || step.error === RESUMED_AFTER_PAUSE;
-    const steer = step.error === STEERED ? steerOf(step) : undefined;
+    const steer = reopened?.resume === "steer" ? steerOf(step) : undefined;
     const placement = {
       profile: profile.slug,
       profileDef,
@@ -1166,18 +1191,12 @@ export function createEngine(deps: EngineDeps): Engine {
       projectId: run.projectId ?? undefined,
       repoId: workspace.repoId,
       signal,
-      notice: escalated
-        ? HANDOFF_NOTICE
-        : step.error === RESUMED_AFTER_CUT
-          ? CUT_NOTICE
-          : step.error === RESUMED_AFTER_PAUSE
-            ? PAUSE_NOTICE
-            : steer && `${STEER_NOTICE}\n\n${steer.message}`,
+      notice: reopened?.notice ?? (steer && `${STEER_NOTICE}\n\n${steer.message}`),
     };
     // Una sesión que la interrupción dejó `running` se retoma; sin ella (llegó antes de que el runtime
     // le diera id) empieza una nueva con el mismo brief. Con un mensaje se retoma la última del paso (o la que
     // la persona eligió al darle un paso nuevo), aunque haya terminado.
-    const resumable = steer ? (steer.session ?? lastSessionOf(step.id)) : cut ? unfinishedSession(step.id) : undefined;
+    const resumable = steer ? (steer.session ?? lastSessionOf(step.id)) : reopened?.resume === "unfinished" ? unfinishedSession(step.id) : undefined;
     const result = resumable
       ? await agents.resume({ ...placement, sessionId: resumable, mode: node.mode, brief })
       : await agents.run({
@@ -1188,7 +1207,7 @@ export function createEngine(deps: EngineDeps): Engine {
           mode: node.mode,
           brief,
           workspace: workspace.path,
-          resumeFrom: node.resumeFrom === undefined || escalated || step.error === RETRIED ? undefined : priorSession(run, node.resumeFrom),
+          resumeFrom: node.resumeFrom === undefined || reopened?.resume === "none" ? undefined : priorSession(run, node.resumeFrom),
         });
     if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
     const overspent = result.status === "error_max_turns" || result.status === "error_max_budget_usd";
@@ -1210,7 +1229,7 @@ export function createEngine(deps: EngineDeps): Engine {
           reason: result.message,
           ...(result.resetsAt === undefined ? {} : { resetsAt: result.resetsAt }),
         });
-        return deferred(result.message, result.resetsAt ?? now() + ENVIRONMENT_BACKOFF_MS);
+        return deferUntil(result.message, result.resetsAt ?? now() + ENVIRONMENT_BACKOFF_MS);
       case "error_max_turns":
       case "error_max_budget_usd":
       case "report_invalid":
@@ -1223,7 +1242,7 @@ export function createEngine(deps: EngineDeps): Engine {
    * pending y no se despacha mientras esté abierto, y sigue en cuanto se cierra: reconectar no espera a un
    * backoff); sin ellos, `notBefore`.
    */
-  function deferred(error: string, notBefore: number): Settled {
+  function deferUntil(error: string, notBefore: number): Settled {
     return { kind: "deferred", error, notBefore: environment ? now() : notBefore };
   }
 
@@ -1618,15 +1637,15 @@ export function createEngine(deps: EngineDeps): Engine {
     const { projectId } = run;
     if (projectId) {
       const texts = (closing.reported?.learnings ?? []).map((raw) => raw.trim()).filter((text) => text !== "");
-      for (const text of texts.slice(0, MAX_PROPOSED_PER_RUN)) {
+      for (const text of texts.slice(0, MAX_PROPOSED_PER_STEP)) {
         proposeLearning(tx, { projectId, text, source: "agent", sourceRunId: run.id, origin: "core" });
       }
-      if (texts.length > MAX_PROPOSED_PER_RUN) {
+      if (texts.length > MAX_PROPOSED_PER_STEP) {
         tx.emit({
           type: "error",
           origin: "core",
           ...scope,
-          payload: { scope: "learnings", message: `El paso propuso ${texts.length} learnings: se guardó el primero y se descartaron ${texts.length - MAX_PROPOSED_PER_RUN} (máximo ${MAX_PROPOSED_PER_RUN} por corrida).` },
+          payload: { scope: "learnings", message: `El paso propuso ${texts.length} learnings: se guardaron ${MAX_PROPOSED_PER_STEP} y se descartaron ${texts.length - MAX_PROPOSED_PER_STEP} (máximo ${MAX_PROPOSED_PER_STEP} por paso).` },
         });
       }
     }
@@ -1663,7 +1682,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const wait = waits.get(event);
     if (!wait) return permanent(`El wait "${event}" no está registrado.`);
     const args = wait.args.safeParse(input);
-    if (!args.success) return permanent(`Los args de "${event}" no son válidos: ${formatIssues(args.error)}`);
+    if (!args.success) return permanent(`Los args de "${event}" no son válidos: ${issuesInline(args.error.issues)}`);
 
     const found = await wait.probe(args.data);
     if (found) return fromWaitResult(wait, found);
@@ -1705,7 +1724,7 @@ export function createEngine(deps: EngineDeps): Engine {
         try {
           found = input.wait.match(event, input.args);
         } catch (error) {
-          closeWaiting(waiting, permanent(`El match de "${input.wait.name}" falló: ${describe(error)}`));
+          closeWaiting(waiting, permanent(`El match de "${input.wait.name}" falló: ${messageOf(error)}`));
           continue;
         }
         if (found) closeWaiting(waiting, fromWaitResult(input.wait, found));
@@ -1745,10 +1764,10 @@ export function createEngine(deps: EngineDeps): Engine {
     try {
       saved = readArtifact(job.step.inputHash);
     } catch (error) {
-      return { ok: false, error: describe(error) };
+      return { ok: false, error: messageOf(error) };
     }
     const args = wait.args.safeParse(saved);
-    if (!args.success) return { ok: false, error: `Los args de "${job.node.event}" no son válidos: ${formatIssues(args.error)}` };
+    if (!args.success) return { ok: false, error: `Los args de "${job.node.event}" no son válidos: ${issuesInline(args.error.issues)}` };
     return { ok: true, wait, args: args.data };
   }
 
@@ -1760,7 +1779,7 @@ export function createEngine(deps: EngineDeps): Engine {
     } catch (error) {
       if (error instanceof StaleStepError) return;
       console.error(`No se pudo cerrar el wait ${job.step.id} (${job.step.nodeId}):`, error);
-      parkAfterFailure(job, describe(error));
+      parkAfterFailure(job, messageOf(error));
     }
   }
 
@@ -1789,7 +1808,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (found) closeWaiting(job, fromWaitResult(input.wait, found));
         else noteProbeError(job, null);
       } catch (error) {
-        noteProbeError(job, describe(error));
+        noteProbeError(job, messageOf(error));
       } finally {
         probing.delete(id);
       }
@@ -2077,17 +2096,17 @@ export function createEngine(deps: EngineDeps): Engine {
     try {
       const rawArgs = typeof join === "string" ? {} : resolveRefs(join.args ?? {}, (ref) => resolveRef(job.run, parent, ref));
       const args = consolidator.args ? consolidator.args.safeParse(rawArgs) : { success: true as const, data: rawArgs };
-      if (!args.success) return { kind: "done", outcome: "error", error: `Los args de "${name}" no son válidos: ${formatIssues(args.error)}` };
+      if (!args.success) return { kind: "done", outcome: "error", error: `Los args de "${name}" no son válidos: ${issuesInline(args.error.issues)}` };
       const byBranch = Object.fromEntries(ran.map((s) => [s.key, { outcome: s.outcome ?? "", output: readArtifact(s.outputHash) }]));
       const result = consolidator.run(byBranch, args.data);
       if (result.outcome !== "error" && !consolidator.outcomes.includes(result.outcome)) {
-        throw new Error(`devolvió el outcome "${result.outcome}", que no declara (${consolidator.outcomes.join(", ")})`);
+        return { kind: "done", outcome: "error", error: `El consolidador "${name}" falló: devolvió el outcome "${result.outcome}", que no declara (${consolidator.outcomes.join(", ")})` };
       }
       const outputHash = artifacts.put(JSON.stringify(result.output), "report", { mime: "application/json" });
       artifacts.ref(outputHash, { type: "step_run", id: parent.id, role: "output" });
       return { kind: "done", outcome: result.outcome, outputHash };
     } catch (error) {
-      return { kind: "done", outcome: "error", error: `El consolidador "${name}" falló: ${describe(error)}` };
+      return { kind: "done", outcome: "error", error: `El consolidador "${name}" falló: ${messageOf(error)}` };
     }
   }
 
@@ -2177,7 +2196,7 @@ export function createEngine(deps: EngineDeps): Engine {
     try {
       childParams = paramsFor(flow, params);
     } catch (error) {
-      return permanent(describe(error));
+      return permanent(messageOf(error));
     }
 
     let profilePin: DefPin | undefined =
@@ -2248,7 +2267,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   // --- comandos de una persona ----------------------------------------------------------------
 
-  function control(runId: RunId, cmd: "pause" | "resume" | "cancel", { by, now: immediately = false }: { by: Origin; now?: boolean }): void {
+  function control(runId: RunId, cmd: "pause" | "resume" | "cancel", by: Origin, { now: immediately = false }: { now?: boolean } = {}): void {
     if (cmd === "cancel") abortInFlight(store.tx((tx) => cancelFamily(tx, runId, by)), new RunCanceled(runId));
     else if (cmd === "pause") pause(runId, by, immediately);
     else resume(runId, by);
@@ -2368,7 +2387,7 @@ export function createEngine(deps: EngineDeps): Engine {
       try {
         job = jobOf(run, step);
       } catch (error) {
-        throw new RunCommandError(`No se puede cargar el paso ${stepId}: ${describe(error)}`, { cause: error });
+        throw new RunCommandError(`No se puede cargar el paso ${stepId}: ${messageOf(error)}`, { cause: error });
       }
       if ("retry" in cmd) return retryStep(tx, job, by);
       if ("steer" in cmd) return steerStep(tx, job, cmd.steer, by);
@@ -2389,7 +2408,7 @@ export function createEngine(deps: EngineDeps): Engine {
     interrupt?: Interruption;
   }
 
-  function commanded(tx: Tx, { run, step }: Job, by: Origin, command: string, extra: object = {}, at: StepRow = step): void {
+  function emitCommanded(tx: Tx, { run, step }: Job, by: Origin, command: string, extra: object = {}, at: StepRow = step): void {
     tx.emit({ type: "step.commanded", origin: by, ...scopeOf(run, at.id), payload: { ...stepPayload(at), command, ...extra } });
   }
 
@@ -2432,7 +2451,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const answered = decision.stepRunId === step.id && decision.options.includes("retry");
       closeDecision(tx, decision.id, { status: answered ? "answered" : "superseded", ...(answered && { resolution: { option: "retry" } }), by });
     }
-    commanded(tx, job, by, "retry");
+    emitCommanded(tx, job, by, "retry");
     const reopen = () => insertStep(tx, run, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined, error: RETRIED });
     if (decision) leaveParking(tx, run, decision.id, reopen);
     else reopen();
@@ -2445,12 +2464,12 @@ export function createEngine(deps: EngineDeps): Engine {
     if (message.trim() === "") throw new RunCommandError("El mensaje para el agente está vacío.");
     if (step.status === "leased" || step.status === "running") {
       if (!controllers.has(step.id)) throw new RunCommandError(`El paso ${step.id} no está en curso en este core.`);
-      commanded(tx, job, by, "steer", { message });
+      emitCommanded(tx, job, by, "steer", { message });
       return { runId: run.id, superseded: [], interrupt: new Interruption("steer", now()) };
     }
     if (step.status === "pending") {
       tx.db.update(stepRuns).set({ error: STEERED, notBefore: null }).where(eq(stepRuns.id, step.id)).run();
-      commanded(tx, job, by, "steer", { message });
+      emitCommanded(tx, job, by, "steer", { message });
       return { runId: run.id, superseded: [] };
     }
     const decision = blockingDecision(tx, run.id);
@@ -2481,7 +2500,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   function forceStep(tx: Tx, job: Job, outcome: string, by: Origin): Commanded {
     const { run, step, node } = job;
-    if (node.type !== "action" && node.type !== "wait") {
+    if (!forceable(node)) {
       throw new RunCommandError(`Solo se fuerza el resultado de un paso action o wait (nunca el de un agente): "${step.nodeId}" es un ${node.type}.`);
     }
     if (job.parallel) {
@@ -2493,7 +2512,7 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const decision = blockingDecision(tx, run.id);
     if (step.status === "failed" && run.status === "parked" && decision?.kind === "needs_human" && decision.stepRunId === step.id) {
-      commanded(tx, job, by, "force", { outcome });
+      emitCommanded(tx, job, by, "force", { outcome });
       resolveDecision(tx, decision.id, `${FORCE}${outcome}`, by);
       return { runId: run.id, superseded: [] };
     }
@@ -2507,7 +2526,7 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     // Como `advance`, pero el paso no se ejecutó (o no terminó de esperar): lo cierra la persona.
     const taken = takeEdge(edgeFor(node, outcome) as Edge, `${step.nodeId}.${outcome}`, run.rounds, run.params);
-    commanded(tx, job, by, "force", { outcome });
+    emitCommanded(tx, job, by, "force", { outcome });
     const cost = closeStep(tx, run, step, { status: "done", outcome, note: taken.note, from: ["pending", "leased", "running", "waiting"] });
     follow(tx, tx.db.select().from(runs).where(eq(runs.id, run.id)).get() ?? run, step, taken, cost);
     return { runId: run.id, superseded: [step.id] };
@@ -2620,13 +2639,4 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return Promise.race([work, aborted]);
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function formatIssues(error: { issues: { path: PropertyKey[]; message: string }[] }): string {
-  return error.issues.map((i) => `${i.path.length === 0 ? "(raíz)" : i.path.map(String).join(".")}: ${i.message}`).join("; ");
-}

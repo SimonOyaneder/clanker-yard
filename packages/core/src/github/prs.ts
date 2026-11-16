@@ -1,5 +1,4 @@
 import type { PrRef, PrState } from "@clanker/api";
-import { RequestError } from "@octokit/request-error";
 import type { Connections } from "../connections/connections";
 import type { Packs } from "../packs/packs";
 import type { MergeScope } from "./merge-scope";
@@ -28,16 +27,11 @@ export function createPrs({ connections, packs, merge }: PrsDeps): Prs {
     async get({ account, repo, number }) {
       // PrRef ya garantiza `owner/repo`.
       const [owner, name] = repo.split("/") as [string, string];
-      try {
-        const node = await fetchPr(connections.githubClient(account), { owner, name }, number);
-        const pack = packs.packFor({ githubOrg: owner });
-        const ref = { account, repo, number };
-        const mergeApplies = pack.mergeStrategy && merge ? await merge.applies(ref, pack.mergeStrategy) : true;
-        return buildPrState(node, { pack, viewer: account, hold: merge?.hold(ref) ?? false, mergeApplies });
-      } catch (error) {
-        if (error instanceof RequestError && error.status === 401) connections.markRevoked("github", account, "core");
-        throw error;
-      }
+      const node = await fetchPr(connections.githubClient(account), { owner, name }, number);
+      const pack = packs.packFor({ githubOrg: owner });
+      const ref = { account, repo, number };
+      const mergeApplies = pack.mergeStrategy && merge ? await merge.applies(ref, pack.mergeStrategy) : true;
+      return buildPrState(node, { pack, viewer: account, hold: merge?.hold(ref) ?? false, mergeApplies });
     },
   };
 }

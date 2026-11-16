@@ -1,5 +1,4 @@
 import { PrRef } from "@clanker/api";
-import { RequestError } from "@octokit/request-error";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../connections/connections";
@@ -19,9 +18,9 @@ import type { Prs } from "./prs";
 export interface StackRestackDeps {
   store: Store;
   workspaces: Workspaces;
-  repos: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: string) => RepoConfig;
   prs: Pick<Prs, "get">;
-  connections: Pick<Connections, "githubClient" | "markRevoked">;
+  connections: Pick<Connections, "githubClient">;
   /** Espera entre las relecturas de `mergeable` (10 s); los tests la reemplazan. */
   pause?: (ms: number) => Promise<void>;
 }
@@ -103,7 +102,7 @@ export function stackRestackAction(deps: StackRestackDeps): ActionDef<typeof Res
       });
       const squash = await ctx.once("verify", async () => {
         await fetchOrThrow(deps, found, pr.repo, "restackear");
-        return verifyMerge(deps.repos(found.repoId).path, merged);
+        return verifyMerge(deps.repoConfig(found.repoId).path, merged);
       });
 
       const chain = await restackChain(deps, ctx, found, { from: merged.headSha, base: merged.baseRef }, merged.headRef);
@@ -143,7 +142,7 @@ export function stackRestackRewrittenAction(deps: StackRestackDeps): ActionDef<t
           throw new PermanentActionError(`El PR #${pr.number} de ${pr.repo} ya está ${state.state === "merged" ? "mergeado" : "cerrado"}: sus hijos no se restackean sobre su branch reescrita.`);
         }
         await fetchOrThrow(deps, found, pr.repo, "restackear");
-        const path = deps.repos(found.repoId).path;
+        const path = deps.repoConfig(found.repoId).path;
         for (const [name, sha] of [["vieja", from], ["nueva", to]] as const) {
           if ((await tryGit(path, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`])) === undefined) {
             throw new PermanentActionError(`La punta ${name} ${sha.slice(0, 9)} de ${found.row.headRef} no está en el repo local: no se puede restackear a sus hijos.`);
@@ -176,7 +175,6 @@ async function restackChain(
   const { store, workspaces, prs } = deps;
   const pause = deps.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const client = deps.connections.githubClient(remote.account);
-  const github = <T>(call: () => Promise<T>) => withGitHub(deps, remote.account, call);
   const [owner = "", name = ""] = remote.repo.split("/");
   const pull = (number: number) => ({ owner, repo: name, pull_number: number });
   const children: ChildReport[] = [];
@@ -323,7 +321,7 @@ async function restackChain(
     );
     const parents = combined.parents.filter((parent) => parent.branch !== merged && open.has(parent.branch));
     const result = await workspaces.restackCombined(lease, { council: false, branch: combined.branch, parents });
-    return { result, base: parents[0]?.branch ?? deps.repos(repoId).defaultBranch };
+    return { result, base: parents[0]?.branch ?? deps.repoConfig(repoId).defaultBranch };
   }
 
   /** La base combinada vigente de la issue del hijo, si su PR se abrió sobre una. */
@@ -344,11 +342,11 @@ async function restackChain(
   async function retarget(child: PrRow, parent: PrRow, base: string, head: string | undefined, merged: string | undefined): Promise<null> {
     const stale =
       merged !== undefined
-        ? await github(async () => {
+        ? await (async () => {
             const current = Pull.parse((await client.request("GET /repos/{owner}/{repo}/pulls/{pull_number}", pull(child.number))).data);
             if (current.base.ref !== base) await client.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { ...pull(child.number), base });
             return mentionsBase(current.body, merged, parent.number);
-          })
+          })()
         : false;
     store.tx((tx) => {
       const changes = { ...(merged !== undefined && { baseRef: base }), ...(head !== undefined && { headSha: head }) };
@@ -368,7 +366,7 @@ async function restackChain(
   }
 
   await restackChildren(parentRow, first, mergedBranch);
-  const mergeable = await ctx.once("mergeable", () => github(() => readMergeable(client, { owner, repo: name }, pause)));
+  const mergeable = await ctx.once("mergeable", () => readMergeable(client, { owner, repo: name }, pause));
   const changedDrafts = children.flatMap((child) =>
     child.status === "restacked" && child.draft ? [{ pr: child.pr, branch: child.branch, base: child.base }] : [],
   );
@@ -385,7 +383,7 @@ async function fetchOrThrow(deps: StackRestackDeps, { repoId, remote }: Found, r
 /** La fila de `pull_requests` de `pr` (el repo se reconoce por su `owner/repo` de GitHub) con su repo y remoto. */
 function rowOf(deps: StackRestackDeps, pr: PrRef) {
   for (const row of deps.store.db.select().from(pullRequests).where(eq(pullRequests.number, pr.number)).all()) {
-    const { remote } = deps.repos(row.repoId);
+    const { remote } = deps.repoConfig(row.repoId);
     if (remote?.repo === pr.repo) return { row, repoId: row.repoId, remote };
   }
   return undefined;
@@ -457,12 +455,3 @@ async function readMergeable(
   return [...result].map(([number, mergeable]) => ({ number, mergeable }));
 }
 
-/** Una llamada a GitHub; un 401 deja la conexión `revoked` y se relanza. */
-async function withGitHub<T>(deps: Pick<StackRestackDeps, "connections">, account: string, call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (error) {
-    if (error instanceof RequestError && error.status === 401) deps.connections.markRevoked("github", account, "core");
-    throw error;
-  }
-}

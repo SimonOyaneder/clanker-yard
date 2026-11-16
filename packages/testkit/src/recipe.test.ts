@@ -30,6 +30,9 @@ import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vit
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
+
 // Se prueba aquí y no en el core: necesita repos git reales (tempGitRepo) y el runtime fake.
 
 const runId = newId("run");
@@ -51,7 +54,7 @@ beforeEach(() => {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos: () => ({ path: repo!.dir, defaultBranch: "main" }),
+    repoConfig: () => ({ path: repo!.dir, defaultBranch: "main" }),
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
   slots = createSlots({ store });
@@ -212,7 +215,7 @@ describe("ws.exec", () => {
       const pid = Number(readFileSync(join(lease!.path, "child.pid"), "utf8"));
       expect(pid).toBeGreaterThan(0);
       return pid;
-    });
+    }, WAIT);
 
     controller.abort(new Error("timeout"));
 
@@ -566,7 +569,7 @@ describe("recipe.check con slots", () => {
     write(".clanker/recipe.json", JSON.stringify({ ...recipeWith(), commands: { slow: "sleep 30" }, checks: ["slow"] }));
     const controller = new AbortController();
     const running = recipes.checkAction.run({ ws: lease!, scope: "all" }, ctx(controller.signal));
-    await vi.waitFor(() => expect(slotRow(1).holder).toBe(runId));
+    await vi.waitFor(() => expect(slotRow(1).holder).toBe(runId), WAIT);
 
     controller.abort(new Error("cancelada"));
 

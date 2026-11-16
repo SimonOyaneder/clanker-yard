@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanker/api/node";
-import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core";
+import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, openDecision, openStore } from "@clanker/core";
+import { JUGUETE_FLOW, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core/testing";
 import { startCore } from "../src/start-core";
 import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedLearnings, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 

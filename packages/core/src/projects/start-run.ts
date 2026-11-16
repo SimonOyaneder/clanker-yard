@@ -7,7 +7,7 @@ import type { Issues } from "../tracker/issues";
 import type { Tracker } from "../tracker/tracker";
 import { storedBinding, TrackerProjectsError, type ProjectBindings } from "../tracker/tracker-projects";
 import type { Trackers } from "../tracker/trackers";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { ProjectNotFoundError, type Projects } from "./projects";
 import type { IssuePlan } from "./issue-repos";
 import { issueBranch } from "./branch-name";
@@ -145,6 +145,7 @@ export function createRunStarter({ store, defs, projects, repos, issues, flows, 
         projectId: project.id,
         repoId,
         profile: project.defaultProfileId ?? undefined,
+        by: origin,
       });
       return flows.getRun(runId);
     },

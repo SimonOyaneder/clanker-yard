@@ -53,7 +53,7 @@ test("dev está lleno y el rebase corre en mantenimiento con el PR de la corrida
   expect(lane("dev", "running")).toHaveLength(1);
   const [parked] = lane("dev", "parked");
   expect(parked).toMatchObject({ parkReason: "needs_human", borrowedFromRunId: null });
-  expect(lane("maintenance", "running")).toMatchObject([{ flow: { slug: "rebase" }, subject: { type: "pr" }, borrowedFromRunId: parked!.id }]);
+  expect(lane("maintenance", "running")).toMatchObject([{ flow: { slug: "rebase-conflicto" }, subject: { type: "pr" }, borrowedFromRunId: parked!.id }]);
   expect(await client.system.lanes()).toMatchObject({ dev: { active: 1 }, maintenance: { active: 1 } });
 });
 

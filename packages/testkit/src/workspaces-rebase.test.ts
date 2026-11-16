@@ -49,7 +49,7 @@ beforeEach(() => {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos: () => ({ path: repo.dir, defaultBranch: "main", remote: { url: "sin-uso", repo: "simon/sin-uso", account: "simon" } }),
+    repoConfig: () => ({ path: repo.dir, defaultBranch: "main", remote: { url: "sin-uso", repo: "simon/sin-uso", account: "simon" } }),
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote,
   });

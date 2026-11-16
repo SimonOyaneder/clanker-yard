@@ -576,3 +576,10 @@ describe("salto de reloj", () => {
     void cut(h);
   });
 });
+
+test("registrar una acción después de recover() lanza: los pasos recuperados ya no la encontrarían", () => {
+  const h = boot();
+  h.flows.recover();
+
+  expect(() => h.action("tarde", ["ok"])).toThrow(/después de recover\(\)/);
+});

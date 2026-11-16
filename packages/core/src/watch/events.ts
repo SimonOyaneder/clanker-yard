@@ -4,10 +4,10 @@ import { isAncestor, tryGit } from "../git/git";
 import type { PrRow } from "../github/pr-cache";
 import { pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import type { Workspaces } from "../workspaces/workspaces";
 import { approvalEpoch, emitOnce, lastEvaluatedHead, markHead, recordMarks, type PrEventInput } from "./marks";
-import type { ErrorReporter } from "./report";
+import type { ErrorReporter } from "../errors/reporter";
 
 // Los eventos de Watch (`docs/design.html#d-ops`, "Watch: eventos y qué disparan"): de lo que cambió en un
 // PR salen los hechos nuevos, cada uno una sola vez por su clave en `watch_marks`.
@@ -74,9 +74,9 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
       if (state.state === "open") facts.push(...approvalFacts(state, approvalEpoch(tx, row.id, isApproved(state), at)));
       for (const fact of facts) {
         const input = { ...fact, payload: (fresh: string[]) => ({ repo: ref.repo, number: ref.number, ...fact.payload(fresh) }) };
-        // Un humano que habla en un draft no avisa, ni siquiera en la primera lectura: sus marcas esperan a que salga de draft y entonces se suelta todo lo dicho (el vigilante no avanza su `seen` en un draft).
+        // Un humano que habla en un draft no avisa, ni siquiera en la primera lectura: sus marcas esperan a que salga de draft y entonces se suelta todo lo dicho.
         if (state.state === "draft" && fact.type === "pr.human") continue;
-        // La primera vez que se ve un PR se siembra lo que el vigilante calla en su primer run (`$first`: solo los comentarios); el resto se emite como él.
+        // La primera vez que se ve un PR se siembra callado lo que ya pasó (los hechos sin `emitOnFirstRead`); lo que sigue pendiente se emite.
         if (known === undefined && !fact.emitOnFirstRead) recordMarks(tx, row.id, fact.type, fact.keys, at);
         else emitOnce(tx, row, input, at);
       }
@@ -146,11 +146,11 @@ function factsOf(state: PrState): PrEventInput[] {
 }
 
 /**
- * Los hechos de la estrategia de merge, una vez por head (el `sha` de la marca, como el `offered` y el
- * `queuefail` del vigilante: un "todavía no" no se vuelve a preguntar hasta que haya un sha nuevo).
+ * Los hechos de la estrategia de merge, una vez por head (el `sha` de la marca: un "todavía no" no se vuelve
+ * a preguntar hasta que haya un sha nuevo).
  * `pr.mergeReady` lleva el nivel que se cumple (`auto` o `offer`) y `pr.mergeFailed` avisa que la cola
  * (merge-queue) falló después del comando de merge, en un PR fuera de draft. Los dos salen también en la primera
- * lectura: el `$first` del vigilante solo calla los comentarios, y un PR que ya estaba listo se ofrece.
+ * lectura: un PR que ya estaba listo se ofrece igual.
  */
 export function mergeFactsOf({ merge, headSha, state }: PrState): PrEventInput[] {
   const facts: PrEventInput[] = [];
@@ -163,13 +163,13 @@ export function mergeFactsOf({ merge, headSha, state }: PrState): PrEventInput[]
   return facts;
 }
 
-/** Aprobado como lo entiende el vigilante: la decisión de GitHub y al menos un aprobador humano. */
+/** Aprobado: la decisión de GitHub y al menos un aprobador humano (la aprobación de un bot no cuenta). */
 const isApproved = ({ reviewDecision, approvers }: PrState) => reviewDecision === "approved" && approvers.length > 0;
 
 /**
  * Un PR que se aprueba con humanos que hablaron (reviews con texto, comentarios, threads sin resolver) lo
- * anuncia una vez por aprobación (`epoch`, ver `approvalEpoch`): el `⚠️ aprobado-con-comentarios` del
- * vigilante, que también sale en la primera lectura. Solo para PRs abiertos: en draft no hay aprobación que contar.
+ * anuncia una vez por aprobación (`epoch`, ver `approvalEpoch`), también en la primera lectura: lo dicho
+ * sigue sin atender. Solo para PRs abiertos: en draft no hay aprobación que contar.
  */
 function approvalFacts(state: PrState, epoch: number): PrEventInput[] {
   if (!isApproved(state) || state.talk.length === 0) return [];

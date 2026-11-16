@@ -15,7 +15,7 @@ export class LearningNotFoundError extends Error {
 
 export { LearningScreenError };
 
-/** El cambio pedido no se puede hacer: no cambió nada. */
+/** El cambio pedido choca con otro learning: ya existe el mismo texto en el mismo alcance. */
 export class LearningUpdateError extends Error {}
 
 /** Dónde y para quién aplica un brief: el proyecto de la corrida, el repo de su worktree y el rol del paso. */
@@ -34,7 +34,8 @@ export interface Learnings {
   approve(id: LearningId, by: Origin): Learning;
   /** Un `proposed` queda `rejected` y un `approved` queda `archived`. */
   reject(id: LearningId, by: Origin): Learning;
-  update(patch: LearningPatch): Learning;
+  /** Cambia texto, roles o tags y emite `learning.updated` con los campos que llegaron y quién lo pidió. */
+  update(patch: LearningPatch, by: Origin): Learning;
   /**
    * Los textos `approved` que entran al brief de ese alcance: los del repo primero y luego los del
    * proyecto, cada grupo del más reciente al más antiguo. El brief corta en `MAX_LEARNINGS`.
@@ -52,7 +53,8 @@ export interface Learnings {
 }
 
 /** Con `runtime` el core puede filtrar los propuestos (`screen`); sin él, `screen` falla. */
-export function createLearnings(store: Store, runtime?: AgentRuntime): Learnings {
+/** Sin `runtime` no se pueden filtrar los propuestos (`screen`). */
+export function createLearnings({ store, runtime }: { store: Store; runtime?: AgentRuntime }): Learnings {
   const find = (db: Store["db"] | Tx["db"], id: LearningId) => db.select().from(learnings).where(eq(learnings.id, id)).get();
   const need = (db: Store["db"] | Tx["db"], id: LearningId) => {
     const learning = find(db, id);
@@ -97,7 +99,7 @@ export function createLearnings(store: Store, runtime?: AgentRuntime): Learnings
         if (status === "proposed") return { to: "rejected", type: "learning.rejected" };
         return status === "approved" ? { to: "archived", type: "learning.rejected" } : undefined;
       }),
-    update: (patch) =>
+    update: (patch, by) =>
       store.tx((tx) => {
         const learning = need(tx.db, patch.id);
         const { id, ...changes } = patch;
@@ -109,6 +111,7 @@ export function createLearnings(store: Store, runtime?: AgentRuntime): Learnings
           .set({ text, roles: changes.roles ?? learning.roles, tags: changes.tags ?? learning.tags })
           .where(eq(learnings.id, id))
           .run();
+        tx.emit({ type: "learning.updated", origin: by, projectId: learning.projectId ?? undefined, payload: { learningId: id, fields: Object.keys(changes).sort() } });
         return need(tx.db, id);
       }),
     screen: async ({ projectId } = {}) => {

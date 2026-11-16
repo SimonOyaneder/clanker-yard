@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { openStore, type Store } from "../store/store";
-import { createRepos } from "../workspaces/repos";
+import { createRepos } from "../repos/repos";
 import { githubRemote, githubUrl } from "./remote-config";
 
 let dir: string;

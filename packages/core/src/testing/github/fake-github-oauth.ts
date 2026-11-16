@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { GitHubOAuthEndpoints } from "./device-flow";
+import type { GitHubOAuthEndpoints } from "../../github/device-flow";
 
 export interface FakeGitHubOAuthOptions {
   clientId: string;

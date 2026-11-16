@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
-import { startFakeLinear, type FakeLinear } from "../linear/fake-linear";
+import { startFakeLinear, type FakeLinear } from "../testing/linear/fake-linear";
 import { createLinearTracker } from "../linear/tracker";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { openStore, type Store } from "../store/store";

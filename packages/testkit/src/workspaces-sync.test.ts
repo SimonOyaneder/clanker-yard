@@ -66,7 +66,7 @@ function setup(opts: TempGitRepoOptions = {}, { remote = true } = {}) {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos: () => ({
+    repoConfig: () => ({
       path: repo.dir,
       defaultBranch: "main",
       ...(remote && { remote: { url: "sin-uso", repo: "simon/sin-uso", account: "simon" } }),

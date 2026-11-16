@@ -1,45 +1,26 @@
 import { PrRef } from "@clanker/api";
-import { and, eq } from "drizzle-orm";
 import * as z from "zod";
 import { preparePush } from "../commits/prepare-push";
 import { PermanentActionError, type ActionCtx, type ActionDef } from "../flows/catalog";
-import { pullRequests, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
-import { rebaseInProgress } from "../workspaces/rebase";
 import { RebaseError, WorkspaceOutput, type RepoConfig, type Workspaces } from "../workspaces/workspaces";
 import type { Prs } from "./prs";
-import { pushOrThrow } from "./push";
+import { ownedOpenPr, pushOrThrow, type PrPurpose } from "./push";
 
 // El rebase de un PR abierto en el carril de mantenimiento (`docs/design.html#d-ops`, rebasePr):
-// `workspace.rebase` y `pr.pushLease`. `workspace.attach` retoma el worktree antes.
+// `workspace.rebase` y `pr.pushLease`. `workspace.attach` retoma el worktree antes. `workspace.rebase` vive aquí y
+// no en `workspaces/` porque lee el PR (que sea del sistema, sus threads de council); las acciones que solo tocan
+// el worktree (`workspace.rebaseAbort`, `workspace.commitAfterRebase`) están en `workspaces/rebase-actions.ts`.
 
 export interface RebasePrDeps {
   store: Store;
   workspaces: Workspaces;
-  repos: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: string) => RepoConfig;
   prs: Pick<Prs, "get">;
 }
 
-/** El PR abierto de la branch del workspace, tal como lo registró `pr.publish`; uno que el sistema no abrió no sirve. */
-function openPrOf(deps: RebasePrDeps, ws: { workspaceId: string; branch: string }) {
-  const row = deps.store.db.select().from(workspaceRows).where(eq(workspaceRows.id, ws.workspaceId)).get();
-  if (!row) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
-  const { remote } = deps.repos(row.repoId);
-  if (!remote) throw new PermanentActionError(`El repo ${row.repoId} no tiene remoto configurado: no se puede rebasear ni pushear.`);
-  const pull = deps.store.db
-    .select()
-    .from(pullRequests)
-    .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, ws.branch), eq(pullRequests.state, "open")))
-    .get();
-  if (!pull || !row.remoteSha) {
-    throw new PermanentActionError(`${ws.branch} no tiene un PR abierto pusheado: no hay un PR que rebasear.`);
-  }
-  // Watch también deja en `pull_requests` los PRs tuyos que el sistema no abrió: esos no se reescriben.
-  if (!pull.owned) {
-    throw new PermanentActionError(`El PR #${pull.number} de ${remote.repo} no lo abrió Clanker Yard: no se rebasea ni se pushea con force.`);
-  }
-  return { remote, ref: { account: remote.account, repo: remote.repo, number: pull.number } };
-}
+/** Para qué toma el rebase el PR de la branch (`ownedOpenPr`). */
+const REBASE: PrPurpose = { needsRemote: "rebasear ni pushear", missing: "no hay un PR que rebasear", notOwned: "no se rebasea ni se pushea con force" };
 
 const RebaseArgs = z.object({
   ws: WorkspaceOutput,
@@ -74,7 +55,7 @@ export function workspaceRebaseAction(deps: RebasePrDeps): ActionDef<typeof Reba
     effects: "local",
     run: ({ ws, base, continue: resume }, ctx: ActionCtx) =>
       ctx.once("rebase", async () => {
-        const { ref } = openPrOf(deps, ws);
+        const { ref } = ownedOpenPr(deps, ws, REBASE);
         const council = (await deps.prs.get(ref)).threads.councilEver;
         try {
           const { outcome, ...output } = await deps.workspaces.rebase(ws, { council, continue: resume, ...(base !== undefined && { base }) });
@@ -109,7 +90,7 @@ export function prPushLeaseAction(deps: RebasePrDeps): ActionDef<typeof PushLeas
     outcomes: ["draft", "ready"],
     effects: "remote",
     async run({ ws }, ctx) {
-      const { remote, ref } = openPrOf(deps, ws);
+      const { remote, ref } = ownedOpenPr(deps, ws, REBASE);
       const council = await ctx.once("council", async () => (await deps.prs.get(ref)).threads.councilEver);
 
       const head = await ctx.once("push", async () => {
@@ -126,59 +107,6 @@ export function prPushLeaseAction(deps: RebasePrDeps): ActionDef<typeof PushLeas
       }
       return { outcome: state === "draft" ? "draft" : "ready", output: { head, pr: ref } };
     },
-  };
-}
-
-const RebaseAbortArgs = z.object({ ws: WorkspaceOutput });
-
-/**
- * `workspace.rebaseAbort`: deja el worktree como estaba antes del rebase que el agente no pudo resolver, o
- * que una persona decidió no aplicar. Sin esto, la corrida termina con el rebase detenido y el próximo
- * `workspace.rebase` del PR lanza por "rebase en curso". Sin rebase en curso no hace nada. Output `aborted`.
- */
-export function workspaceRebaseAbortAction(deps: Pick<RebasePrDeps, "workspaces">): ActionDef<typeof RebaseAbortArgs> {
-  return {
-    name: "workspace.rebaseAbort",
-    args: RebaseAbortArgs,
-    outcomes: ["ok"],
-    effects: "local",
-    async run({ ws }) {
-      const git = (...args: string[]) => deps.workspaces.git(ws, ...args);
-      const aborted = await rebaseInProgress(git);
-      if (aborted) await git("rebase", "--abort");
-      return { outcome: "ok", output: { aborted } };
-    },
-  };
-}
-
-const CommitAfterRebaseArgs = z.object({ ws: WorkspaceOutput });
-
-/** El mensaje del commit con lo que dejó el `afterRebase` de la receta (o un arreglo del agente tras un check rojo). */
-const AFTER_REBASE_COMMIT_MESSAGE = "chore: update generated files after rebase";
-
-/**
- * `workspace.commitAfterRebase`: commitea lo que `recipe.check` con `afterRebase` dejó en el worktree
- * (la versión de `schema.rb`, `packwerk update-todo`), y lo que el agente arregló tras un check rojo, en un
- * solo commit sobre los del PR: `pr.pushLease` no pushea lo que no está commiteado. Lo hace el core y no un
- * agente porque no hay nada que decidir: son los cambios que la receta o el check pidieron. Sin cambios no
- * hace nada. Output `committed` y `head`.
- */
-export function workspaceCommitAfterRebaseAction(deps: Pick<RebasePrDeps, "workspaces">): ActionDef<typeof CommitAfterRebaseArgs> {
-  return {
-    name: "workspace.commitAfterRebase",
-    args: CommitAfterRebaseArgs,
-    outcomes: ["ok"],
-    effects: "local",
-    run: ({ ws }, ctx) =>
-      ctx.once("commit", async () => {
-        const git = (...args: string[]) => deps.workspaces.git(ws, ...args);
-        const dirty = (await git("status", "--porcelain")) !== "";
-        if (dirty) {
-          await git("add", "--all");
-          await git("commit", "--quiet", "--message", AFTER_REBASE_COMMIT_MESSAGE);
-        }
-        return { outcome: "ok", output: { committed: dirty, head: await git("rev-parse", "HEAD") } };
-      }),
   };
 }
 

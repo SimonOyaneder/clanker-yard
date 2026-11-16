@@ -116,9 +116,6 @@ const router = os.router({
     resume: os.projects.resume.handler(() => {
       throw new Error("no se usa en este test");
     }),
-    setParallel: os.projects.setParallel.handler(() => {
-      throw new Error("no se usa en este test");
-    }),
     skipIssue: os.projects.skipIssue.handler(() => {
       throw new Error("no se usa en este test");
     }),

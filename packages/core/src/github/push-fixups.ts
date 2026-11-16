@@ -1,18 +1,19 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { and, eq } from "drizzle-orm";
 import * as z from "zod";
 import { ApplyArgs, cleanMessage, CONVENTIONAL_COMMIT, patchOf } from "../commits/apply";
 import { preparePush } from "../commits/prepare-push";
 import { branchCommits, fixupMessage, FIXUP_PREFIX, oldRange, routeHunks } from "../commits/route";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../flows/catalog";
 import { diffBetween, listHunks, snapshotTree, type Hunk } from "../git/tree";
-import { pullRequests, workspaces as workspaceRows } from "../store/schema";
 import type { Store } from "../store/store";
 import type { RepoConfig, Workspaces } from "../workspaces/workspaces";
 import type { Prs } from "./prs";
-import { pushOrThrow } from "./push";
+import { ownedOpenPr, pushOrThrow, type PrPurpose } from "./push";
+
+/** Para qué toma `pr.pushFixups` el PR de la branch (`ownedOpenPr`). */
+const FIXUPS: PrPurpose = { needsRemote: "pushear", missing: "no hay a qué pushear fixups", notOwned: "no se le pushean fixups" };
 
 const PushFixupsArgs = z.object({
   ws: ApplyArgs.shape.ws,
@@ -40,7 +41,7 @@ const PushFixupsArgs = z.object({
 export interface PrPushFixupsDeps {
   store: Store;
   workspaces: Workspaces;
-  repos: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: string) => RepoConfig;
   prs: Pick<Prs, "get">;
 }
 
@@ -76,31 +77,15 @@ type Committed = { made: Made[] } | { route: { unrouted: string[]; failures?: st
  * Outcomes: `ok` (output `byItem`, id → sha pusheado, y `head`) y `route`.
  */
 export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof PushFixupsArgs> {
-  const { store, workspaces } = deps;
+  const { workspaces } = deps;
 
   async function pushFixups(args: z.infer<typeof PushFixupsArgs>, ctx: ActionCtx): Promise<ActionResult> {
     const { ws, items } = args;
-    const row = store.db.select().from(workspaceRows).where(eq(workspaceRows.id, ws.workspaceId)).get();
-    if (!row) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
-    const { remote } = deps.repos(row.repoId);
-    if (!remote) throw new PermanentActionError(`El repo ${row.repoId} no tiene remoto configurado: no se puede pushear.`);
-    const pull = store.db
-      .select()
-      .from(pullRequests)
-      .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, ws.branch), eq(pullRequests.state, "open")))
-      .get();
-    if (!pull || !row.remoteSha) {
-      throw new PermanentActionError(`${ws.branch} no tiene un PR abierto pusheado: no hay a qué pushear fixups.`);
-    }
-    // Watch también deja en `pull_requests` los PRs tuyos que el sistema no abrió: a esos no se les pushea.
-    if (!pull.owned) {
-      throw new PermanentActionError(`El PR #${pull.number} de ${remote.repo} no lo abrió Clanker Yard: no se le pushean fixups.`);
-    }
+    const { remote, ref, remoteSha: knownSha } = ownedOpenPr(deps, ws, FIXUPS);
     const base = workspaces.baseSha(ws);
-    const knownSha = row.remoteSha;
 
     const council = await ctx.once("council", async () => {
-      const state = await deps.prs.get({ account: remote.account, repo: remote.repo, number: pull.number });
+      const state = await deps.prs.get(ref);
       return state.threads.councilEver;
     });
 

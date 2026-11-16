@@ -11,11 +11,12 @@ import { claimPr } from "../flows/subjects";
 import type { Packs } from "../packs/packs";
 import type { Recipes } from "../recipe/recipe";
 import { newId } from "../store/conventions";
-import { type CombinedBaseParent, combinedBases, issues, prParents, pullRequests, runs, workspaces as workspaceRows } from "../store/schema";
+import { type CombinedBaseParent, combinedBases, issues, prParents, pullRequests, runs, workspaces as workspacesTable } from "../store/schema";
 import type { Store } from "../store/store";
 import { RebaseError, type RepoConfig, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 import type { GitHubClient } from "./client";
 import { pushOrThrow } from "./push";
+import { messageOf } from "../errors/format";
 
 const PublishArgs = ApplyArgs.extend({
   /** El reporte del committer: de él lee los commits (como `commits.apply`) y el título y cuerpo del PR. */
@@ -43,8 +44,8 @@ export interface PrPublishDeps {
   store: Store;
   workspaces: Workspaces;
   recipes: Recipes;
-  repos: (repoId: string) => RepoConfig;
-  connections: Pick<Connections, "githubClient" | "markRevoked">;
+  repoConfig: (repoId: string) => RepoConfig;
+  connections: Pick<Connections, "githubClient">;
   packs: Packs;
 }
 
@@ -76,9 +77,9 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
 
   async function publish(args: z.infer<typeof PublishArgs>, ctx: ActionCtx): Promise<ActionResult> {
     const { ws, plan } = args;
-    const row = store.db.select().from(workspaceRows).where(eq(workspaceRows.id, ws.workspaceId)).get();
+    const row = store.db.select().from(workspacesTable).where(eq(workspacesTable.id, ws.workspaceId)).get();
     if (!row) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
-    const { remote } = deps.repos(row.repoId);
+    const { remote } = deps.repoConfig(row.repoId);
     if (!remote) throw new PermanentActionError(`El repo ${row.repoId} no tiene remoto configurado: no se puede publicar.`);
 
     const applied = await apply.run(args, ctx);
@@ -113,16 +114,11 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     const pull = await ctx.once("pr", async () => {
       workspaces.validate(ws);
       const client = deps.connections.githubClient(remote.account);
-      try {
-        const existing = await findOpenPull(client, owner, name, ws.branch);
-        const pull = existing ?? (await openPull(client, owner, name, { title, body, head: ws.branch, base: baseRef, draft: args.draft }));
-        recordPull(store, ctx, { repoId: row.repoId, repo: remote.repo, pull, headRef: ws.branch, baseRef, parentBranches: parents.map((p) => p.branch) });
-        if (!existing) await assignOrNote(store, client, ctx.runId, { owner, repo: name, number: pull.number, assignee: remote.account });
-        return pull;
-      } catch (error) {
-        if (error instanceof RequestError && error.status === 401) deps.connections.markRevoked("github", remote.account, "core");
-        throw error;
-      }
+      const existing = await findOpenPull(client, owner, name, ws.branch);
+      const pull = existing ?? (await openPull(client, owner, name, { title, body, head: ws.branch, base: baseRef, draft: args.draft }));
+      recordPull(store, ctx, { repoId: row.repoId, repo: remote.repo, pull, headRef: ws.branch, baseRef, parentBranches: parents.map((p) => p.branch) });
+      if (!existing) await assignOrNote(store, client, ctx.runId, { owner, repo: name, number: pull.number, assignee: remote.account });
+      return pull;
     });
 
     const pr: PrRef = { account: remote.account, repo: remote.repo, number: pull.number };
@@ -154,9 +150,9 @@ interface SettledBase {
  * (conflicto, merge de otra branch), la branch queda como estaba, el PR se abre igual sobre la base correcta, y
  * una nota deja avisado; Watch levanta el conflicto si es real. Sin padres cerrados no cambia nada.
  */
-async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, row: typeof workspaceRows.$inferSelect, tip: string): Promise<SettledBase> {
+async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, row: typeof workspacesTable.$inferSelect, tip: string): Promise<SettledBase> {
   const { store, workspaces } = deps;
-  const { remote, defaultBranch } = deps.repos(row.repoId);
+  const { remote, defaultBranch } = deps.repoConfig(row.repoId);
   if (!remote) throw new PermanentActionError(`El repo ${row.repoId} no tiene remoto configurado: no se puede publicar.`);
   const combined = store.db
     .select()
@@ -171,16 +167,11 @@ async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, r
   const [owner = "", name = ""] = remote.repo.split("/");
   const client = deps.connections.githubClient(remote.account);
   const open = new Set<string>();
-  try {
-    for (const branch of watched) {
-      const { data } = await client.request("GET /repos/{owner}/{repo}/pulls", { owner, repo: name, head: `${owner}:${branch}`, state: "all" });
-      const pulls = z.array(z.object({ state: z.enum(["open", "closed"]) })).parse(data);
-      // Sin ningún PR no hay cómo saber que se mergeó: se deja como estaba.
-      if (pulls.length === 0 || pulls.some((pull) => pull.state === "open")) open.add(branch);
-    }
-  } catch (error) {
-    if (error instanceof RequestError && error.status === 401) deps.connections.markRevoked("github", remote.account, "core");
-    throw error;
+  for (const branch of watched) {
+    const { data } = await client.request("GET /repos/{owner}/{repo}/pulls", { owner, repo: name, head: `${owner}:${branch}`, state: "all" });
+    const pulls = z.array(z.object({ state: z.enum(["open", "closed"]) })).parse(data);
+    // Sin ningún PR no hay cómo saber que se mergeó: se deja como estaba.
+    if (pulls.length === 0 || pulls.some((pull) => pull.state === "open")) open.add(branch);
   }
   if (watched.every((branch) => open.has(branch))) return unchanged;
 
@@ -246,7 +237,7 @@ async function assignOrNote(store: Store, client: GitHubClient, runId: RunId, pr
     });
   } catch (error) {
     if (error instanceof RequestError && error.status === 401) throw error;
-    const why = error instanceof Error ? error.message : String(error);
+    const why = messageOf(error);
     store.tx((tx) =>
       openDecision(tx, {
         kind: "note",

@@ -27,7 +27,7 @@ export interface CleanupResult {
 
 export interface ArchiveDeps {
   store: Store;
-  repos: (repoId: string) => RepoConfig;
+  repoConfig: (repoId: string) => RepoConfig;
   now: () => number;
   /** El mutex del repo: `worktree remove` toca refs compartidas. */
   withRepoLock: <T>(repoId: string, fn: () => Promise<T>) => Promise<T>;
@@ -38,7 +38,7 @@ export interface ArchiveDeps {
  * una corrida tiene (también estacionada) nunca se archiva ni se borra; cuando lo suelte, la próxima
  * pasada lo archiva.
  */
-export function createArchive({ store, repos, now, withRepoLock }: ArchiveDeps) {
+export function createArchive({ store, repoConfig, now, withRepoLock }: ArchiveDeps) {
   const pullsOf = (db: Store["db"], { repoId, branch }: Row) =>
     db.select({ state: pullRequests.state, headSha: pullRequests.headSha }).from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.headRef, branch))).all();
 
@@ -74,10 +74,10 @@ export function createArchive({ store, repos, now, withRepoLock }: ArchiveDeps) 
     const tip = await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/heads/${row.branch}`]);
     let head = tip;
     if (present) {
-      const run = (...args: string[]) => git(row.path, args);
-      if (await rebaseInProgress(run)) return "tiene un rebase en curso";
-      if ((await run("status", "--porcelain")) !== "") return "tiene cambios sin commitear";
-      head = await run("rev-parse", "HEAD");
+      const inWorktree = (...args: string[]) => git(row.path, args);
+      if (await rebaseInProgress(inWorktree)) return "tiene un rebase en curso";
+      if ((await inWorktree("status", "--porcelain")) !== "") return "tiene cambios sin commitear";
+      head = await inWorktree("rev-parse", "HEAD");
       if (tip !== undefined && tip !== head) return "su HEAD no es la punta de la branch";
     }
     if (head === undefined) return undefined;
@@ -95,7 +95,7 @@ export function createArchive({ store, repos, now, withRepoLock }: ArchiveDeps) 
    * la fila vuelve.
    */
   async function remove(row: Row): Promise<"removed" | "kept"> {
-    const cfg = repos(row.repoId);
+    const cfg = repoConfig(row.repoId);
     return withRepoLock(row.repoId, async () => {
       const present = existsSync(row.path);
       if ((await unpushedWork(row, cfg, present)) !== undefined) return "kept";

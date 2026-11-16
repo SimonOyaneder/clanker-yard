@@ -37,20 +37,20 @@ describe("Report.learnings", () => {
     await h.finished(runId);
 
     expect(h.flows.getRun(runId)).toMatchObject({ status: "done", outcome: "done" });
-    expect(createLearnings(store).list({ projectId }).map(({ text, status, source, sourceRunId, repoId, roles }) => ({ text, status, source, sourceRunId, repoId, roles }))).toEqual([
+    expect(createLearnings({ store }).list({ projectId }).map(({ text, status, source, sourceRunId, repoId, roles }) => ({ text, status, source, sourceRunId, repoId, roles }))).toEqual([
       { text: "Los specs usan `let_it_be`", status: "proposed", source: "agent", sourceRunId: runId, repoId: null, roles: [] },
     ]);
     expect(store.events.since(0, { runId, types: ["learning.proposed"] })).toHaveLength(1);
   });
 
-  test("máximo 1 por corrida: guarda el primero y avisa del resto sin fallar", async () => {
+  test("máximo 1 por paso: guarda el primero y avisa del resto sin fallar", async () => {
     const projectId = newId("prj");
     const { h, runId, store } = run(["Primero", "Segundo", "Tercero"], projectId);
 
     await h.finished(runId);
 
     expect(h.flows.getRun(runId)).toMatchObject({ status: "done" });
-    expect(createLearnings(store).list({ projectId }).map((l) => l.text)).toEqual(["Primero"]);
+    expect(createLearnings({ store }).list({ projectId }).map((l) => l.text)).toEqual(["Primero"]);
     expect(store.events.since(0, { runId, types: ["error"] }).map((e) => e.payload)).toEqual([
       { scope: "learnings", message: expect.stringContaining("se descartaron 2") },
     ]);
@@ -60,7 +60,7 @@ describe("Report.learnings", () => {
     const projectId = newId("prj");
     const first = run(["Usa `let_it_be`."], projectId);
     await first.h.finished(first.runId);
-    const learnings = createLearnings(first.store);
+    const learnings = createLearnings({ store: first.store });
     learnings.reject(learnings.list({ projectId })[0]!.id, "ui");
 
     const again = learnings.propose({ projectId, text: "usa let_it_be", roles: [], tags: [] }, "ui");
@@ -75,7 +75,7 @@ describe("Report.learnings", () => {
 
     await h.finished(runId);
 
-    expect(createLearnings(store).list({ projectId })).toEqual([]);
+    expect(createLearnings({ store }).list({ projectId })).toEqual([]);
     const spec = h.calls[0]!.spec!;
     expect(spec.prompt).not.toContain("Learnings (`learnings` del reporte)");
     expect(spec.outputSchema.properties).not.toHaveProperty("learnings");
@@ -98,10 +98,10 @@ describe("Report.learnings", () => {
     const projectId = newId("prj");
     const first = run(["   ", "Usa el helper"], projectId);
     await first.h.finished(first.runId);
-    expect(createLearnings(first.store).list({ projectId })).toHaveLength(1);
+    expect(createLearnings({ store: first.store }).list({ projectId })).toHaveLength(1);
 
     const second = run(["Algo que nadie va a aprobar"]);
     await second.h.finished(second.runId);
-    expect(createLearnings(second.store).list()).toEqual([]);
+    expect(createLearnings({ store: second.store }).list()).toEqual([]);
   });
 });

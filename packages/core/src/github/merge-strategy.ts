@@ -23,7 +23,7 @@ export type MergeFacts = Pick<PrState, "state" | "baseRef" | "baseIsDefault" | "
 };
 
 /**
- * `undefined` si se cumple; si no, qué se lo impide con las palabras de `mergeStatus` de Clanker Control. El
+ * `undefined` si se cumple; si no, qué se lo impide, con el texto corto que ve el usuario en la píldora. El
  * texto vacío es "no se cumple, pero no hay nada que decirle al usuario" (`queue` ya lo dice).
  */
 type Unmet = (facts: MergeFacts) => string | undefined;
@@ -32,7 +32,7 @@ const CONDITIONS: Record<Exclude<MergeCondition, "ready" | "offer">, Unmet> = {
   notDraft: (f) => (f.state === "draft" ? "es draft" : undefined),
   approved: (f) =>
     f.reviewDecision === "approved" ? undefined : f.reviewDecision === "changes_requested" ? "pidieron cambios" : "falta aprobación",
-  // Un PR sin checks que cuenten (`none`) es listo, como `every` sobre vacío en Control y en el vigilante.
+  // Un PR sin checks que cuenten (`none`) es listo: un repo sin CI no tiene nada que esperar.
   ciGreen: (f) => (f.ci.state === "green" || f.ci.state === "none" ? undefined : "el CI no está verde"),
   baseIsDefault: (f) => (f.baseIsDefault ? undefined : `va sobre ${f.baseRef}, no sobre ${f.defaultBranch}`),
   noConflict: (f) => (f.mergeable === "conflict" ? "tiene conflictos" : undefined),

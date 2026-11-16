@@ -1,13 +1,14 @@
-import { DecisionKind, DecisionStatus, Lane, LearningSource, LearningStatus, ParkReason, RunStatus, StepStatus } from "@clanker/api";
+import { AgentSessionStatus, DecisionKind, DecisionStatus, Lane, LearningSource, LearningStatus, ParkReason, RunStatus, StepStatus } from "@clanker/api";
 import { expect, test } from "vitest";
-import { DECISION_KINDS, DECISION_STATUSES, LANES, LEARNING_SOURCES, LEARNING_STATUSES, PARK_REASONS, RUN_STATUSES, STEP_STATUSES } from "./schema";
+import { AGENT_SESSION_STATUSES, DECISION_KINDS, DECISION_STATUSES, LANES, LEARNING_SOURCES, LEARNING_STATUSES, PARK_REASONS, RUN_STATUSES, STEP_STATUSES } from "./schema";
 
 // El schema no importa valores de la API (drizzle-kit lo carga solo): este test los mantiene iguales.
-test("los estados de runs y step_runs son los mismos que expone la API", () => {
+test("los estados de runs, step_runs y agent_sessions son los mismos que expone la API", () => {
   expect(RunStatus.options).toEqual(RUN_STATUSES);
   expect(ParkReason.options).toEqual(PARK_REASONS);
   expect(Lane.options).toEqual(LANES);
   expect(StepStatus.options).toEqual(STEP_STATUSES);
+  expect(AgentSessionStatus.options).toEqual(AGENT_SESSION_STATUSES);
 });
 
 test("los kinds y estados de decisions son los mismos que expone la API", () => {

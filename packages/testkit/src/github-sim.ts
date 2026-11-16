@@ -1,20 +1,22 @@
 import { createHash } from "node:crypto";
 import {
+  type Actor,
+  type PrNode,
+  type RawComment,
+  type RawContext,
+  type RawReview,
+  type ReviewState,
+} from "@clanker/core";
+import {
   healthyGitHub,
   defaultBranchChecksData,
   prGraphql,
   recorded,
   startFakeGitHub,
-  type Actor,
   type FakeGitHub,
   type FakeRequest,
-  type PrNode,
-  type RawComment,
-  type RawContext,
-  type RawReview,
   type RecordedResponse,
-  type ReviewState,
-} from "@clanker/core";
+} from "@clanker/core/testing";
 import { parse, valueFromASTUntyped, type FieldNode, type OperationDefinitionNode } from "graphql";
 import type { TempGitRepo } from "./git";
 

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import * as z from "zod";
 import type { BranchResult, ConsolidatorDef } from "./catalog";
+import { isRecord } from "../defs/defs";
 
 // Los consolidadores que trae el motor: el join de un parallel es código con tests, no un LLM
 // (`docs/design.html#d-flows`, "Parallel y join"). Los registra `createFlows`.
@@ -53,7 +54,7 @@ const ItemsMergeArgs = z.strictObject({
   rank: z.string().min(1).describe("Campo de cada ítem con su rango."),
   changesIf: z.array(z.string()).describe("Rangos que, si queda algún ítem con uno de ellos, dan `changes`."),
   order: z.array(z.string()).min(1).optional().describe("Rangos de mayor a menor. Por defecto red, yellow, white."),
-  window: z.number().int().nonnegative().optional().describe("Líneas de distancia para tratar dos ítems como el mismo. Por defecto 3."),
+  window: z.int().nonnegative().optional().describe("Líneas de distancia para tratar dos ítems como el mismo. Por defecto 3."),
   idKeys: z.array(z.string()).min(1).optional().describe("Campos del ítem que forman su id estable. Por defecto branch, path, claim."),
   onlyIfTrivial: z.array(z.string()).optional().describe("Rangos cuyos ítems pasan solo con `trivial`. Por defecto white."),
 });
@@ -142,6 +143,4 @@ function stableId(item: Item, keys: string[]): string {
     .slice(0, 12);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
+

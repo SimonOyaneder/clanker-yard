@@ -66,7 +66,7 @@ beforeEach(async () => {
   workspaces = createWorkspaces({
     store,
     dataDir,
-    repos,
+    repoConfig: repos,
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
   });
@@ -81,8 +81,8 @@ beforeEach(async () => {
   await packs.load(packDir);
   const recipes = createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) });
   const prs = createPrs({ connections, packs });
-  publish = prPublishAction({ store, workspaces, recipes, repos, connections, packs });
-  const restackDeps = { store, workspaces, repos, prs, connections, pause: () => Promise.resolve() };
+  publish = prPublishAction({ store, workspaces, recipes, repoConfig: repos, connections, packs });
+  const restackDeps = { store, workspaces, repoConfig: repos, prs, connections, pause: () => Promise.resolve() };
   restack = stackRestackAction(restackDeps);
   restackRewritten = stackRestackRewrittenAction(restackDeps);
 });

@@ -1,4 +1,4 @@
-import type { ErrorReporter } from "../watch/report";
+import type { ErrorReporter } from "../errors/reporter";
 import type { Workspaces } from "./workspaces";
 
 /** Cada cuánto corre sola: lo que no avisa nadie (el vencimiento de los 7 días) y lo que se haya escapado. */

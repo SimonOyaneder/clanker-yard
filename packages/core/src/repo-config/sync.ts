@@ -2,10 +2,11 @@ import type { DefWriteKind, FlowDef, RepoConfigSync } from "@clanker/api";
 import { git, GitError, tryGit } from "../git/git";
 import { canonicalJson, DefValidationError, type Defs } from "../defs/defs";
 import type { Flows } from "../flows/flows";
-import type { ErrorReporter } from "../watch/report";
-import type { Repos } from "../workspaces/repos";
-import { RepoNotFoundError } from "../workspaces/repos";
+import type { ErrorReporter } from "../errors/reporter";
+import type { Repos } from "../repos/repos";
+import { RepoNotFoundError } from "../repos/repos";
 import { parseRepoConfigPath, parseRepoFile, REPO_CONFIG_DIRS, RepoFileSyntaxError } from "./files";
+import { issuesInline } from "../errors/format";
 
 export interface RepoConfigSyncer {
   /**
@@ -20,7 +21,8 @@ export interface RepoConfigSyncer {
 }
 
 export function createRepoConfigSyncer({ defs, flows, repos }: { defs: Defs; flows: Pick<Flows, "validate" | "save">; repos: Repos }): RepoConfigSyncer {
-  async function readTree(repoId: string): Promise<{ commit: string; files: Map<string, string> } | undefined> {
+  /** Los archivos de `.clanker/` de la punta por defecto; uno que git no pudo leer queda con su `GitError`, sin borrar su def. */
+  async function readTree(repoId: string): Promise<{ commit: string; files: Map<string, string | GitError> } | undefined> {
     const repo = repos.get(repoId);
     if (!repo) throw new RepoNotFoundError(repoId);
     let commit: string | undefined;
@@ -31,9 +33,15 @@ export function createRepoConfigSyncer({ defs, flows, repos }: { defs: Defs; flo
     // Sin la branch por defecto (un repo recién creado) no hay nada que leer, y tampoco que archivar.
     if (!commit) return undefined;
     const listed = await git(repo.path, ["ls-tree", "-r", "--name-only", "-z", commit, "--", ...REPO_CONFIG_DIRS]);
-    const files = new Map<string, string>();
+    const files = new Map<string, string | GitError>();
     for (const path of listed.split("\0").filter(Boolean)) {
-      if (parseRepoConfigPath(path)) files.set(path, await git(repo.path, ["show", `${commit}:${path}`]).catch(() => ""));
+      if (!parseRepoConfigPath(path)) continue;
+      try {
+        files.set(path, await git(repo.path, ["show", `${commit}:${path}`]));
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        files.set(path, error);
+      }
     }
     return { commit, files };
   }
@@ -73,12 +81,17 @@ export function createRepoConfigSyncer({ defs, flows, repos }: { defs: Defs; flo
       for (const path of paths) {
         const { kind, slug } = parseRepoConfigPath(path)!;
         const fail = (message: string) => result.errors.push({ file: path, message });
+        const content = tree.files.get(path)!;
+        if (content instanceof GitError) {
+          fail(`git no pudo leer el archivo: ${content.message}`);
+          continue;
+        }
         let parsed: unknown;
         try {
-          parsed = defs.validate(kind, slug, parseRepoFile(kind, tree.files.get(path)!));
+          parsed = defs.validate(kind, slug, parseRepoFile(kind, content));
         } catch (error) {
           if (error instanceof RepoFileSyntaxError) fail(error.message);
-          else if (error instanceof DefValidationError) fail(error.issues.map((i) => `${i.path.map(String).join(".") || "(raíz)"}: ${i.message}`).join("; "));
+          else if (error instanceof DefValidationError) fail(issuesInline(error.issues));
           else throw error;
           continue;
         }
@@ -86,7 +99,7 @@ export function createRepoConfigSyncer({ defs, flows, repos }: { defs: Defs; flo
           const { errors } = flows.validate(parsed, { repoId });
           if ((parsed as { id: string }).id !== slug) errors.push({ path: "id", message: `el id del flujo es "${(parsed as { id: string }).id}" y debe ser el nombre del archivo ("${slug}")` });
           if (errors.length > 0) {
-            fail(errors.map((e) => `${e.path || "(raíz)"}: ${e.message}`).join("; "));
+            fail(issuesInline(errors));
             continue;
           }
         }

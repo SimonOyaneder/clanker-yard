@@ -12,7 +12,7 @@ import {
 import { createFileSecrets } from "../secrets/encrypted-file";
 import type { Secrets } from "../secrets/secrets";
 import { openStore, type Store } from "../store/store";
-import { startFakeLinear, type FakeLinear } from "./fake-linear";
+import { startFakeLinear, type FakeLinear } from "../testing/linear/fake-linear";
 import { LINEAR_REFRESH_TTL_MS, LinearAuthError } from "./oauth";
 
 const NOW = 1_700_000_000_000;

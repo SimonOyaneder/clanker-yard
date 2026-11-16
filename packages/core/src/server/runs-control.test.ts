@@ -5,7 +5,8 @@ import { z } from "zod";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { createRouter } from "./router";
-import { apiDeps } from "./testing";
+import { apiDeps, withPrs } from "./testing";
+import { WAIT } from "../flows/harness";
 
 // `runs.pause|resume|cancel|interrupt|retryStep|steerStep|forceOutcome` sobre un motor real con acciones
 // que esperan hasta que se las aborta.
@@ -40,13 +41,13 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  for (const { id } of deps.flows.listRuns({ status: ["running", "paused"] })) deps.flows.control(id, "cancel", { by: "core" });
+  for (const { id } of deps.flows.listRuns({ status: ["running", "paused"] })) deps.flows.control(id, "cancel", "core");
   await deps.flows.close();
   store.close();
 });
 
 function api(origin: "ui" | "cli" | "mcp" = "ui") {
-  const router = createRouter({
+  const router = createRouter(withPrs({
     store,
     connections: {} as never,
     issues: createIssues(store),
@@ -56,7 +57,7 @@ function api(origin: "ui" | "cli" | "mcp" = "ui") {
     startedAt: 0,
     dataDir: "/tmp/clanker",
     onShutdown: () => {},
-  });
+  }));
   return createRouterClient(router, { context: { origin } });
 }
 
@@ -64,7 +65,7 @@ const code = (expected: string, message?: RegExp) => (e: unknown) => e instanceo
 
 async function slowRun(): Promise<{ id: RunId; stepId: StepRunId }> {
   const id = deps.flows.start("slow", { type: "issue", id: "ENG-1" });
-  await vi.waitFor(() => expect(started).toHaveLength(1));
+  await vi.waitFor(() => expect(started).toHaveLength(1), WAIT);
   return { id, stepId: started[0] as StepRunId };
 }
 
@@ -115,5 +116,5 @@ test("retryStep abre una visita nueva del nodo; steerStep sobre una acción es B
     ["slow", 2, "running"],
   ]);
   expect(retried.id).toBe(id);
-  await vi.waitFor(() => expect(started).toHaveLength(2));
+  await vi.waitFor(() => expect(started).toHaveLength(2), WAIT);
 });

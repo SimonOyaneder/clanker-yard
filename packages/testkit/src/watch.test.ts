@@ -38,6 +38,9 @@ import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
+/** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
+const WAIT = { timeout: 10_000 };
+
 // Watch contra el GitHub simulado: qué mira, cuándo, y lo que gasta de cuota. El reloj es el de `clock`
 // (Watch no usa timers en estos tests: cada `wake` es un `watch.tick()`), y el motor de flujos corre real.
 
@@ -124,7 +127,7 @@ beforeEach(async () => {
   const events = createPrEvents({
     store,
     repos,
-    workspaces: createWorkspaces({ store, dataDir: dir, repos: repos.config, identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }), remote: gitRemote }),
+    workspaces: createWorkspaces({ store, dataDir: dir, repoConfig: repos.config, identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }), remote: gitRemote }),
     errors,
     now: () => clock,
   });
@@ -466,7 +469,7 @@ describe("avisa a los flujos", () => {
   });
 });
 
-const WATCH_EVENTS: EventType[] = ["pr.botReview", "pr.ci", "pr.conflict", "pr.comment", "pr.merged", "pr.base_rewritten", "pr.human"];
+const WATCH_EVENTS: EventType[] = ["pr.botReview", "pr.ci", "pr.conflict", "pr.comment", "pr.merged", "pr.base_rewritten", "pr.human", "pr.approvedWithComments"];
 const emitted = (...types: EventType[]) => store.events.since(0, { types: types.length > 0 ? types : WATCH_EVENTS });
 const emittedTypes = (...types: EventType[]) => emitted(...types).map((e) => e.type);
 
@@ -534,7 +537,7 @@ describe("eventos", () => {
     expect(emitted("pr.comment").map((e) => e.payload.threadIds)).toEqual([[first.commentId], [second.commentId]]);
     expect(emitted("pr.ci").map((e) => e.payload.state)).toEqual(["green", "red"]);
 
-    // Un humano que habla en un draft no avisa hasta que sale de draft (ver `watch-parity.test.ts`).
+    // Un humano que habla en un draft no avisa hasta que sale de draft (la regla vive en `packages/core/src/watch/events.ts`).
     pr.setDraft(false);
     pr.comment("ana", "otra cosa");
     await wake(31 * SECOND);
@@ -545,6 +548,43 @@ describe("eventos", () => {
     await wake(31 * SECOND);
     expect(emitted("pr.merged")).toHaveLength(1);
     expect(emitted("pr.merged")[0]).toMatchObject({ origin: "watch", subject: { type: "pr" }, payload: { repo: REPO, number: pr.number } });
+  });
+
+  test("aprobado con comentarios sale una vez por aprobación: perderla y volver a aprobar es otro hecho", async () => {
+    const pr = sim.openPr({ head: "one" });
+    await wake();
+
+    pr.comment("ana", "una duda");
+    pr.review("bruno", "APPROVED");
+    await wake(31 * SECOND);
+    expect(emitted("pr.approvedWithComments")).toMatchObject([{ payload: { repo: REPO, number: pr.number, approvers: ["bruno"], authors: ["ana"], comments: 1 } }]);
+
+    // Releer el PR con la misma aprobación no la anuncia de nuevo.
+    pr.label("risk:low");
+    await wake(31 * SECOND);
+    expect(emitted("pr.approvedWithComments")).toHaveLength(1);
+
+    // Pedir cambios le quita la aprobación; aprobar otra vez es otra aprobación.
+    pr.review("bruno", "CHANGES_REQUESTED", { body: "mejor no" });
+    await wake(31 * SECOND);
+    expect(emitted("pr.approvedWithComments")).toHaveLength(1);
+    pr.review("bruno", "APPROVED");
+    await wake(31 * SECOND);
+    expect(emitted("pr.approvedWithComments")).toHaveLength(2);
+  });
+
+  test("aprobado sin comentarios, o en draft, no se anuncia", async () => {
+    const quiet = sim.openPr({ head: "one" });
+    const draft = sim.openPr({ head: "two", draft: true });
+    await wake();
+
+    quiet.review("bruno", "APPROVED");
+    draft.comment("ana", "una duda");
+    draft.review("bruno", "APPROVED");
+    await wake(31 * SECOND);
+    await wake(31 * SECOND);
+
+    expect(emitted("pr.approvedWithComments")).toEqual([]);
   });
 
   test("un conflicto sale por sha de la punta", async () => {
@@ -742,7 +782,7 @@ describe("dispara flujos", () => {
     expect(runsOf("restack-rewritten")).toEqual([
       expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number), repo: expect.any(String), externalRounds: 3, from, to } }),
     ]);
-    await vi.waitFor(() => expect(restacked).toEqual([{ pr: ref(pr.number), from, to }]));
+    await vi.waitFor(() => expect(restacked).toEqual([{ pr: ref(pr.number), from, to }]), WAIT);
   });
 
   test("un conflicto arranca el flujo de rebase, salvo que el PR tenga threads de council", async () => {

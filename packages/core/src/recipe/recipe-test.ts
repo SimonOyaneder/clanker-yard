@@ -7,7 +7,7 @@ import type { SlotLease, Slots } from "../slots/slots";
 import { newId } from "../store/conventions";
 import type { Store } from "../store/store";
 import { excerpt, execStreaming } from "../workspaces/exec";
-import { RepoNotFoundError, type Repos } from "../workspaces/repos";
+import { RepoNotFoundError, type Repos } from "../repos/repos";
 import { readRecipe, RECIPE_PATH } from "./recipe";
 
 /** Una prueba que dura más se mata: un `setup` colgado no puede dejar la llamada abierta para siempre. */

@@ -187,7 +187,7 @@ const POLL_MS = 50;
  * Devuelve la conexión a un core sano de este `apiMajor` (y, con `uiKey`, que la reconozca), lanzándolo si
  * hace falta. Si el que corre tiene otro `apiMajor` (pasa al actualizar la app) le pide `system.shutdown({ drain: true })` y
  * lanza el nuevo. Varias llamadas concurrentes terminan con un solo core: los sobrantes salen solos
- * al ver `core.lock` (ver `packages/core/src/process/lock.ts`).
+ * al ver `core.lock` (ver `packages/core/src/daemon/lock.ts`).
  */
 export async function ensureCore(opts: EnsureCoreOptions): Promise<CoreConnection> {
   const { dataDir, origin } = opts;

@@ -24,6 +24,7 @@ import { claudeSchemaError } from "./claude/report-schema";
 import { createContextResolver, type ContextResolver } from "./context";
 import { estimateCostMicros, minUsefulBudgetMicros, PREFIX_TOKENS, type TurnTokens } from "./pricing";
 import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, Usage } from "./runtime";
+import { issuesInline, messageOf } from "../errors/format";
 
 /** Una diferencia mayor a este porcentaje entre la suma de los turnos y el total del runtime queda como evento `error`. */
 export const USAGE_MISMATCH_PERCENT = 2;
@@ -207,7 +208,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
       const parsed = compileJsonSchema(mode.payload).safeParse(brief.payload);
       if (!parsed.success) {
         throw new Error(
-          `El payload del brief no cumple el esquema del modo "${modeName}" del rol "${roleSlug}":\n${formatIssues(parsed.error)}`,
+          `El payload del brief no cumple el esquema del modo "${modeName}" del rol "${roleSlug}":\n${issuesInline(parsed.error.issues)}`,
         );
       }
     }
@@ -267,7 +268,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
     try {
       stat = (await git(req.workspace, ["diff", "--stat", base])).trim() || "(sin cambios contra la base)";
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = messageOf(error);
       store.tx((tx) =>
         tx.emit({
           type: "error",
@@ -512,7 +513,7 @@ export function createAgents({ store, defs, runtime, now = Date.now, packs, remo
         status: "error",
         text: "",
         usage: emptyUsage(),
-        message: `El runtime falló: ${reason instanceof Error ? reason.message : String(reason)}`,
+        message: `El runtime falló: ${messageOf(reason)}`,
       };
     }
     lastActivity.delete(sessionId);
@@ -986,11 +987,7 @@ function validateReport(mode: RoleMode, structured: unknown): Checked {
   const parsed = schema.safeParse(structured);
   return parsed.success
     ? { ok: true, report: parsed.data }
-    : { ok: false, problem: formatIssues(parsed.error) };
+    : { ok: false, problem: issuesInline(parsed.error.issues) };
 }
 
-function formatIssues(error: z.ZodError): string {
-  return error.issues
-    .map((i) => `${i.path.length === 0 ? "(raíz)" : i.path.map(String).join(".")}: ${i.message}`)
-    .join("; ");
-}
+

@@ -1,5 +1,4 @@
-import type { IssueId, PrRef, PrRepublish, RepublishInput, RunId } from "@clanker/api";
-import { RequestError } from "@octokit/request-error";
+import type { IssueId, Origin, PrRef, PrRepublish, RepublishInput, RunId } from "@clanker/api";
 import { and, eq, inArray, or } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../connections/connections";
@@ -10,8 +9,9 @@ import type { Projects } from "../projects/projects";
 import { prParents, pullRequests, runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import type { Prs } from "./prs";
+import { messageOf } from "../errors/format";
 
 export interface PrRepublisherDeps {
   store: Store;
@@ -19,7 +19,7 @@ export interface PrRepublisherDeps {
   issues: Pick<Issues, "get">;
   projects: Pick<Projects, "get">;
   flows: Pick<Engine, "start" | "getRun">;
-  connections: Pick<Connections, "githubClient" | "markRevoked">;
+  connections: Pick<Connections, "githubClient">;
   prs: Pick<Prs, "get">;
   /** `workspaces.fetch`: trae las branches del remoto, que `pr.replay` y los nombres nuevos necesitan al día. */
   fetchRepo(repoId: string): Promise<FetchOutcome>;
@@ -40,7 +40,7 @@ export interface PrRepublisher {
    * fallido) salta a sus hijos; los errores son por PR y no frenan a los demás. Con `dryRun` solo se leen GitHub y el
    * caché: no se lanza ninguna corrida, no cuesta nada y `commits` es lo que tiene hoy el PR viejo.
    */
-  republish(input: RepublishInput): Promise<PrRepublish[]>;
+  republish(input: RepublishInput, by: Origin): Promise<PrRepublish[]>;
 }
 
 /** Estados en que una corrida sigue usando su issue y su branch (`runs_active_flow_subject`). */
@@ -65,7 +65,7 @@ export function createPrRepublisher(deps: PrRepublisherDeps): PrRepublisher {
   const pollMs = deps.pollMs ?? 1000;
 
   return {
-    async republish({ projectId, prs: numbers = [], dryRun = false, draftOnly = false }) {
+    async republish({ projectId, prs: numbers = [], dryRun = false, draftOnly = false }, by) {
       const rows = store.db
         .select()
         .from(pullRequests)
@@ -164,15 +164,14 @@ export function createPrRepublisher(deps: PrRepublisherDeps): PrRepublisher {
               body: [(pull.body ?? "").trim(), `Reemplaza a #${row.number}`].filter(Boolean).join("\n\n"),
               draft: pull.draft,
             },
-            { projectId: issue.projectId, repoId: row.repoId, profile: project?.defaultProfileId ?? undefined },
+            { projectId: issue.projectId, repoId: row.repoId, profile: project?.defaultProfileId ?? undefined, by },
           );
           const result = await finish(runId);
           if (result.status === "failed") done.set(row.id, { skipped: `falló: ${result.reason}` });
           const commits = result.newNumber === undefined ? undefined : (await readPull(deps, account, owner, name, result.newNumber).catch(() => undefined))?.commits;
           results.push({ ...base, branch, base: newBase, ...result, ...(commits !== undefined && { commits }) });
         } catch (error) {
-          if (error instanceof RequestError && error.status === 401) deps.connections.markRevoked("github", account, "core");
-          const reason = error instanceof Error ? error.message : String(error);
+          const reason = messageOf(error);
           done.set(row.id, { skipped: `falló: ${reason}` });
           results.push({ ...base, status: "failed", reason });
         }

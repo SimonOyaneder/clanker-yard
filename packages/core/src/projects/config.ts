@@ -1,8 +1,9 @@
 import { ProjectConfig, type ClankerProject, type ClientOrigin, type DefIssue, type ProjectId, type ProjectImportResult, type ProjectPatch } from "@clanker/api";
 import type { Defs } from "../defs/defs";
 import { diffBodies } from "../defs/write";
-import type { Repos } from "../workspaces/repos";
+import type { Repos } from "../repos/repos";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "./projects";
+import { issuesAsLines } from "../errors/format";
 
 export interface ProjectConfigs {
   /** La configuración del proyecto para llevarla a otra máquina: sus repos por nombre y remoto, no por id. Lanza `ProjectNotFoundError`. */
@@ -14,7 +15,7 @@ export interface ProjectConfigs {
    * y se omiten sin frenar el resto. Si ningún repo de la configuración se encuentra, la lista de repos del
    * proyecto no se toca. Con errores y sin `dryRun` lanza `InvalidProjectError`. Lanza `ProjectNotFoundError`.
    */
-  import(id: ProjectId, raw: unknown, opts: { dryRun: boolean; origin: ClientOrigin }): ProjectImportResult;
+  import(id: ProjectId, raw: unknown, by: ClientOrigin, opts: { dryRun: boolean }): ProjectImportResult;
 }
 
 export function createProjectConfigs({ projects, repos, defs }: { projects: Projects; repos: Repos; defs: Defs }): ProjectConfigs {
@@ -63,7 +64,7 @@ export function createProjectConfigs({ projects, repos, defs }: { projects: Proj
       };
     },
 
-    import(id, raw, { dryRun, origin }) {
+    import(id, raw, origin, { dryRun }) {
       const project = get(id);
       const parsed = ProjectConfig.safeParse(raw);
       if (!parsed.success) {
@@ -122,7 +123,7 @@ export function createProjectConfigs({ projects, repos, defs }: { projects: Proj
 /** Con `dryRun` los errores son un resultado; sin él, un `InvalidProjectError` (nada se escribió). */
 function reject(errors: DefIssue[], dryRun: boolean): ProjectImportResult {
   if (!dryRun) {
-    throw new InvalidProjectError(`No se importó la configuración:\n${errors.map((e) => `  ${e.path || "(raíz)"}: ${e.message}`).join("\n")}`);
+    throw new InvalidProjectError(`No se importó la configuración:\n${issuesAsLines(errors)}`);
   }
   return { applied: false, errors, unmapped: [], changes: [] };
 }

@@ -30,6 +30,7 @@ import type { Secrets } from "../secrets/secrets";
 import { connections } from "../store/schema";
 import type { Store } from "../store/store";
 import { OAuthSession } from "./oauth-session";
+import { messageOf } from "../errors/format";
 
 export interface ConnectInput {
   provider: ConnectionProvider;
@@ -529,7 +530,7 @@ export function createConnections(
   }
 
   function reportDeviceFlowFailure(error: unknown, origin: Origin) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     const reason: LoginFailure = error instanceof GitHubAuthError && error.reason !== "rejected" ? error.reason : "failed";
     store.tx((tx) => tx.emit({ type: "connection.login_failed", origin, payload: { provider: "github", reason, message } }));
   }
@@ -664,6 +665,8 @@ export function createConnections(
               ? { kind: "app", token, refresh: async () => void (await refresh("github", account, true)) }
               : { kind: "pat", token },
           quota: { store, account },
+          // Un 401 que sobrevive al refresh deja la cuenta revocada (abre el breaker de GitHub): ninguna llamada lo repite.
+          onUnauthorized: () => self.markRevoked("github", account, "core"),
         });
         githubClients.set(account, client);
       }

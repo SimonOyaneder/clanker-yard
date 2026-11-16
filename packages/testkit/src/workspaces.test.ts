@@ -58,7 +58,7 @@ function workspacesOn(store: Store, worktreeSetup?: (dir: string) => readonly st
   return createWorkspaces({
     store,
     dataDir,
-    repos: (id) => ({ path: repoById.get(id)!.dir, defaultBranch: "main", protectedBranches: ["release"] }),
+    repoConfig: (id) => ({ path: repoById.get(id)!.dir, defaultBranch: "main", protectedBranches: ["release"] }),
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     worktreeSetup,
     now: () => clock,
@@ -619,7 +619,7 @@ describe("recover y extendLeases", () => {
     const withProcs = createWorkspaces({
       store,
       dataDir,
-      repos: (repoId) => ({ path: repoById.get(repoId)!.dir, defaultBranch: "main", protectedBranches: [] }),
+      repoConfig: (repoId) => ({ path: repoById.get(repoId)!.dir, defaultBranch: "main", protectedBranches: [] }),
       identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
       procs,
       now: () => clock,

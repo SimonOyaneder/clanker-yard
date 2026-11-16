@@ -11,15 +11,13 @@ export const GITHUB_APP_SLUG_ENV = "CLANKER_GITHUB_APP_SLUG";
 /** Variable de entorno que pisa `linear.clientId` del archivo. */
 export const LINEAR_CLIENT_ID_ENV = "CLANKER_LINEAR_CLIENT_ID";
 
-const ClientId = z.object({ clientId: z.string().trim().min(1) }).strict();
-const GitHubApp = z.object({ clientId: z.string().trim().min(1), slug: z.string().trim().min(1).optional() }).strict();
+const ClientId = z.strictObject({ clientId: z.string().trim().min(1) });
+const GitHubApp = z.strictObject({ clientId: z.string().trim().min(1), slug: z.string().trim().min(1).optional() });
 
-const ConfigFile = z
-  .object({
-    githubApp: GitHubApp.optional(),
-    linear: ClientId.optional(),
-  })
-  .strict();
+const ConfigFile = z.strictObject({
+  githubApp: GitHubApp.optional(),
+  linear: ClientId.optional(),
+});
 
 /** La configuración del core que el usuario escribe a mano (`docs/github-app.md`). */
 export interface CoreConfig {

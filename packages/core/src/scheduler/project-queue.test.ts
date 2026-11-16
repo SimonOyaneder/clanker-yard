@@ -10,7 +10,7 @@ import { openStore, type Store } from "../store/store";
 import { createIssues, type Issues } from "../tracker/issues";
 import { createLocalTracker, type LocalTracker } from "../tracker/local";
 import type { Tracker } from "../tracker/tracker";
-import { createRepos, type Repos } from "../workspaces/repos";
+import { createRepos, type Repos } from "../repos/repos";
 import { createProjectQueue, QueueUnavailableError } from "./project-queue";
 
 let store: Store;
@@ -28,7 +28,7 @@ beforeEach(() => {
   const defs = createDefs(store);
   defs.register("flow", z.unknown());
   defs.register("profile", z.unknown());
-  projects = createProjects(store, defs);
+  projects = createProjects({ store, defs });
   repos = createRepos(store, { remote: (repo) => ({ url: `https://example.com/${repo}.git`, repo, account: "octocat" }) });
   reads = [];
   readPr = () => Promise.reject(new Error("no se esperaba leer un PR"));

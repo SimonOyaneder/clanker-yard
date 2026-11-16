@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { NodeId, Pack, PackSettings, Role, type DefKind, type PackInfo, type PackOrigin, type PackScope, type ResolvedPack } from "@clanker/api";
 import * as z from "zod";
 import { DefValidationError, type DefIssue, type Defs } from "../defs/defs";
+import { issuesAsLines, messageOf } from "../errors/format";
 
 /** `PackSettings` sin ser estricto: lo que queda de un `Pack` al quitarle id, alcance y archivos. */
 const SettingsOfPack = z.object(PackSettings.shape);
@@ -17,7 +18,7 @@ export class PackLoadError extends Error {
   ) {
     super(
       `El pack en ${dir} es inválido, ${file}:\n` +
-        issues.map((i) => `  ${i.path.length === 0 ? "(raíz)" : i.path.map(String).join(".")}: ${i.message}`).join("\n"),
+        issuesAsLines(issues),
     );
   }
 }
@@ -88,14 +89,14 @@ export function createPacks({ defs, factoryDir, installedDir }: { defs: Defs; fa
       text = await readFile(join(dir, file), "utf8");
     } catch (error) {
       throw new PackLoadError(dir, file, [
-        { path: [], message: `no se pudo leer: ${error instanceof Error ? error.message : String(error)}` },
+        { path: [], message: `no se pudo leer: ${messageOf(error)}` },
       ]);
     }
     try {
       return JSON.parse(text);
     } catch (error) {
       throw new PackLoadError(dir, file, [
-        { path: [], message: `no es JSON: ${error instanceof Error ? error.message : String(error)}` },
+        { path: [], message: `no es JSON: ${messageOf(error)}` },
       ]);
     }
   }

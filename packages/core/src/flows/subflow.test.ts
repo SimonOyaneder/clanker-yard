@@ -1,7 +1,7 @@
 import type { RunId } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { RunNotFoundError } from "./engine";
-import { harness as createHarness } from "./harness";
+import { harness as createHarness, WAIT } from "./harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -313,7 +313,7 @@ describe("cancelar", () => {
     const runId = h.start("parent");
     await running;
     const [kid] = h.childrenOf(runId);
-    h.flows.control(runId, "cancel", { by: "ui" });
+    h.flows.control(runId, "cancel", "ui");
 
     expect(h.flows.getRun(runId)).toMatchObject({ status: "canceled", outcome: null });
     expect(h.flows.getRun(kid?.id as RunId)).toMatchObject({ status: "canceled", outcome: null });
@@ -325,7 +325,7 @@ describe("cancelar", () => {
       expect(finished.map((e) => e.payload)).toEqual([expect.objectContaining({ outcome: "canceled" })]);
     }
     // Ni el cierre tardío de la acción ni el dispatcher reviven nada.
-    await vi.waitFor(() => expect(h.flows.getRun(runId).steps).toHaveLength(1));
+    await vi.waitFor(() => expect(h.flows.getRun(runId).steps).toHaveLength(1), WAIT);
     expect(h.flows.getRun(kid?.id as RunId).steps).toHaveLength(1);
   });
 
@@ -348,10 +348,10 @@ describe("cancelar", () => {
     h.save(parent({}, { start: "sub", nodes: { sub: { type: "flow", flow: "child", params: {}, on: ends } } }));
     const runId = h.start("parent");
     await running;
-    h.flows.control(runId, "cancel", { by: "ui" });
+    h.flows.control(runId, "cancel", "ui");
 
     const [kid] = h.childrenOf(runId);
-    await vi.waitFor(() => expect(h.store.events.since(0, { runId: kid?.id, types: ["agent.ended"] })).toHaveLength(1));
+    await vi.waitFor(() => expect(h.store.events.since(0, { runId: kid?.id, types: ["agent.ended"] })).toHaveLength(1), WAIT);
     expect(h.flows.getRun(kid?.id as RunId)).toMatchObject({ status: "canceled" });
     expect(h.flows.getRun(kid?.id as RunId).steps.map((s) => [s.status, s.attempt])).toEqual([["canceled", 1]]);
     expect(h.calls).toHaveLength(1);
@@ -371,8 +371,8 @@ describe("cancelar", () => {
     const runId = h.start("parent");
     await running;
     const [kid] = h.childrenOf(runId);
-    h.flows.control(kid?.id as RunId, "cancel", { by: "ui" });
-    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("failed"));
+    h.flows.control(kid?.id as RunId, "cancel", "ui");
+    await vi.waitFor(() => expect(h.flows.getRun(runId).status).toBe("failed"), WAIT);
 
     expect(h.flows.getRun(runId).steps[0]).toMatchObject({ nodeId: "sub", outcome: "failed", error: expect.stringContaining("se canceló") });
   });
@@ -385,9 +385,9 @@ describe("cancelar", () => {
     const runId = h.start("parent");
     await h.finished(runId);
 
-    h.flows.control(runId, "cancel", { by: "ui" });
+    h.flows.control(runId, "cancel", "ui");
 
     expect(h.flows.getRun(runId).status).toBe("done");
-    expect(() => h.flows.control("run_nope" as RunId, "cancel", { by: "ui" })).toThrow(RunNotFoundError);
+    expect(() => h.flows.control("run_nope" as RunId, "cancel", "ui")).toThrow(RunNotFoundError);
   });
 });

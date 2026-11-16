@@ -5,14 +5,14 @@ import { NewProject } from "@clanker/api";
 import { createRouterClient, ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
-import { startFakeLinear, type FakeLinear } from "../linear/fake-linear";
+import { startFakeLinear, type FakeLinear } from "../testing/linear/fake-linear";
 import { createLinearTracker } from "../linear/tracker";
 import { createDefs } from "../defs/defs";
 import { createProjects, type Projects } from "../projects/projects";
 import { createRouter } from "../server/router";
-import { apiDeps } from "../server/testing";
+import { apiDeps, withPrs } from "../server/testing";
 import { createFileSecrets } from "../secrets/encrypted-file";
-import { issues as issuesTable, projects as projects_, syncCursors } from "../store/schema";
+import { issues as issuesTable, projects as projectsTable, syncCursors } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "./issues";
 import { createTrackerProjects, type TrackerProjects } from "./tracker-projects";
@@ -43,7 +43,7 @@ beforeEach(() => {
   linear = undefined;
   dir = mkdtempSync(join(tmpdir(), "clanker-tracker-projects-"));
   store = openStore({ path: join(dir, "clanker.db") });
-  clankerProjects = createProjects(store, createDefs(store));
+  clankerProjects = createProjects({ store, defs: createDefs(store) });
   projects = createTrackerProjects({
     connections: { list: () => connections.list() },
     linear: (account) => createLinearTracker({ connections, account, endpoint: linear!.endpoints.graphql }),
@@ -89,7 +89,7 @@ test("un tracker sin adapter para listar dice que se escriba el id", async () =>
 
 test("trackers.projects traduce esos errores a BAD_REQUEST", async () => {
   connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), {});
-  const router = createRouter({
+  const router = createRouter(withPrs({
     store,
     connections,
     issues: createIssues(store),
@@ -100,7 +100,7 @@ test("trackers.projects traduce esos errores a BAD_REQUEST", async () => {
     startedAt: 0,
     dataDir: "/tmp/clanker",
     onShutdown: () => {},
-  });
+  }));
   const client = createRouterClient(router, { context: { origin: "ui" } });
 
   const error = await client.trackers.projects({ tracker: "linear" }).catch((e: unknown) => e);
@@ -134,7 +134,7 @@ test("projects.create y projects.update guardan el UUID aunque se pida con el id
   linear = fake;
   const project = fake.workspace.addProject("Facturación", { identifier: "P-ENG-1525" });
   const other = fake.workspace.addProject("Otro");
-  const router = createRouter({
+  const router = createRouter(withPrs({
     store,
     connections,
     issues: createIssues(store),
@@ -145,7 +145,7 @@ test("projects.create y projects.update guardan el UUID aunque se pida con el id
     startedAt: 0,
     dataDir: "/tmp/clanker",
     onShutdown: () => {},
-  });
+  }));
   const client = createRouterClient(router, { context: { origin: "ui" } });
 
   const created = await client.projects.create({ slug: "facturacion", name: "Facturación", tracker: "linear", trackerRef: "P-ENG-1525" });
@@ -168,7 +168,7 @@ async function legacyProject(fake: FakeLinear, identifier: string) {
   const issues = createIssues(store);
   await issues.sync(tracker, { projectId: created.id, project: { tracker: "linear", id: linearProject.id } });
   store.db.update(syncCursors).set({ key: `issues:linear:${identifier}` }).run();
-  store.tx((tx) => tx.db.update(projects_).set({ trackerRef: identifier }).run());
+  store.tx((tx) => tx.db.update(projectsTable).set({ trackerRef: identifier }).run());
   return { linearProject, id: created.id, issues };
 }
 
@@ -209,7 +209,7 @@ test("projects.update permite elegir de nuevo el mismo proyecto de Linear aunque
   linear = fake;
   const { linearProject, id } = await legacyProject(fake, "P-ENG-1525");
   const other = fake.workspace.addProject("Otro");
-  const router = createRouter({
+  const router = createRouter(withPrs({
     store,
     connections,
     issues: createIssues(store),
@@ -220,7 +220,7 @@ test("projects.update permite elegir de nuevo el mismo proyecto de Linear aunque
     startedAt: 0,
     dataDir: "/tmp/clanker",
     onShutdown: () => {},
-  });
+  }));
   const client = createRouterClient(router, { context: { origin: "ui" } });
 
   const rejected = await client.projects.update({ id, trackerRef: other.id }).catch((e: unknown) => e);

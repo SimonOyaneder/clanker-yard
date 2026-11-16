@@ -7,9 +7,9 @@ import { createConnections, type Connections } from "../connections/connections"
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
-import { createRepos, type Repos } from "../workspaces/repos";
-import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "./fake-github";
-import { prGraphql, type DefaultBranchCommit } from "./fake-pr-graphql";
+import { createRepos, type Repos } from "../repos/repos";
+import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
+import { prGraphql, type DefaultBranchCommit } from "../testing/github/fake-pr-graphql";
 import { createMergeScope } from "./merge-scope";
 import { prNode } from "./pr-fixtures";
 

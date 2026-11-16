@@ -1,5 +1,5 @@
 import type { FakeRequest, RecordedResponse } from "./fake-github";
-import type { PrNode } from "./pr-query";
+import type { PrNode } from "../../github/pr-query";
 
 // El GraphQL de PRs del GitHub falso: responde a las queries de `pr-query.ts` con un `PrNode`, con las
 // formas del esquema real. Lo usan los tests del core con un nodo suelto y el simulador del testkit
