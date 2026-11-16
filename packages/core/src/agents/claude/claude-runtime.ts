@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   query as sdkQuery,
@@ -91,7 +91,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
   const baseEnv = options.baseEnv ?? process.env;
   const paths = {
     ghConfigDir: join(home, "agent-env", "gh"),
-    gitConfigs: join(home, "agent-env", "gitconfig"),
+    gitConfigs: join(home, "agent-env", "gitconfigs"),
     transcripts: join(home, "transcripts"),
     sessions: join(home, "agent-sessions"),
   };
@@ -139,6 +139,10 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       await mkdir(paths.ghConfigDir, { recursive: true });
       await mkdir(paths.transcripts, { recursive: true });
       await mkdir(paths.sessions, { recursive: true });
+      // Las instalaciones anteriores a la identidad por usuario dejaron aquí un gitconfig global con
+      // clanker@localhost: nunca debe usarse.
+      const legacyGitConfig = join(home, "agent-env", "gitconfig");
+      if ((await stat(legacyGitConfig).catch(() => undefined))?.isFile()) await rm(legacyGitConfig);
       await mkdir(paths.gitConfigs, { recursive: true });
     })().catch((error: unknown) => {
       prepared = undefined;
