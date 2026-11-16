@@ -6,7 +6,6 @@ describe("contrato", () => {
   test("exporta los routers system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, defs, metrics e imports con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual([
       "artifacts",
-      "branches",
       "connections",
       "decisions",
       "defs",
@@ -39,7 +38,6 @@ describe("contrato", () => {
     expect(Object.keys(contract.defs).sort()).toEqual(["agentOptions", "archive", "create", "exportToRepo", "get", "list", "restore", "update"]);
     expect(Object.keys(contract.metrics).sort()).toEqual(["byDay", "byIssue", "byModel", "byRole", "byStep"]);
     expect(Object.keys(contract.imports)).toEqual(["legacy"]);
-    expect(Object.keys(contract.branches)).toEqual(["renameLegacy"]);
     for (const procedure of [
       ...Object.values(contract.system),
       ...Object.values(contract.events),
@@ -56,7 +54,6 @@ describe("contrato", () => {
       ...Object.values(contract.defs),
       ...Object.values(contract.metrics),
       ...Object.values(contract.imports),
-      ...Object.values(contract.branches),
     ]) {
       expect(isContractProcedure(procedure)).toBe(true);
     }

@@ -187,8 +187,6 @@ export { createRepoConfigExporter, RepoExportError } from "./repo-config/export"
 export type { RepoConfigExporter } from "./repo-config/export";
 export { createRepoConfigSyncer, startRepoConfigSync } from "./repo-config/sync";
 export type { RepoConfigSyncer } from "./repo-config/sync";
-export { createLegacyBranchRenamer } from "./projects/rename-legacy-branches";
-export type { LegacyBranchRenamer } from "./projects/rename-legacy-branches";
 export { createRunStarter, IssueNotCachedError } from "./projects/start-run";
 export type { RunStarter, RunStarterDeps } from "./projects/start-run";
 export type {

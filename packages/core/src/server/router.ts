@@ -36,7 +36,6 @@ import { RecipeSyntaxError } from "../recipe/recipe";
 import { RecipeTestError, type RecipeTester } from "../recipe/recipe-test";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
-import { createLegacyBranchRenamer } from "../projects/rename-legacy-branches";
 import type { Issues } from "../tracker/issues";
 import { TrackerProjectsError, type TrackerProjects } from "../tracker/tracker-projects";
 import { defaultLogDir } from "../workspaces/exec";
@@ -108,7 +107,6 @@ export function createRouter(deps: RouterDeps) {
   const prs = createPrs({ connections: deps.connections, packs: deps.packs, merge: createMergeScope({ store, repos, connections: deps.connections }) });
   const prCache = createPrCache({ store, repos, packs: deps.packs, prs, onChange: deps.onPrChange });
   const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache });
-  const legacyBranches = createLegacyBranchRenamer({ store, repos, issues: deps.issues, connections: deps.connections });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
     if (!project) throw new ORPCError("NOT_FOUND", { message: `No existe el proyecto ${id}.` });
@@ -387,9 +385,6 @@ export function createRouter(deps: RouterDeps) {
       byModel: os.metrics.byModel.handler(({ input }) => metrics.byModel(input)),
       byStep: os.metrics.byStep.handler(({ input }) => metrics.byStep(input)),
       byIssue: os.metrics.byIssue.handler(({ input }) => metrics.byIssue(input)),
-    },
-    branches: {
-      renameLegacy: os.branches.renameLegacy.handler(({ input }) => asApiErrorAsync(() => legacyBranches.renameLegacy(input))),
     },
     imports: {
       legacy: os.imports.legacy.handler(({ input }) => asApiError(() => deps.legacyImport.run(input))),

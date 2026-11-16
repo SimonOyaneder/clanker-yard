@@ -336,33 +336,3 @@ describe("clanker import legacy", () => {
     await expect(exec(["import", "legacy"], {})).rejects.toThrow(/Falta --from\. Uso: clanker import legacy/);
   });
 });
-
-describe("clanker branches rename-legacy", () => {
-  const results = [
-    { repo: "r1", number: 4299, from: "iss_A", to: "eng-1-uno", status: "planned" },
-    { repo: "r1", number: 4300, from: "iss_B", status: "skipped", reason: "la corrida run_1 sigue viva" },
-  ];
-  const clientFor = () => {
-    const calls: unknown[] = [];
-    return {
-      calls,
-      projects: { list: () => Promise.resolve([{ id: "prj_1", slug: "api" }]) },
-      branches: { renameLegacy: (input: unknown) => (calls.push(input), Promise.resolve(results)) },
-    };
-  };
-
-  test("--dry-run y --project se los pasa al core y lista viejo → nuevo por PR", async () => {
-    const client = clientFor();
-
-    const out = await exec(["branches", "rename-legacy", "--project", "api", "--dry-run"], client);
-
-    expect(client.calls).toEqual([{ projectId: "prj_1", dryRun: true }]);
-    expect(out).toBe(["planned r1#4299 iss_A → eng-1-uno", "skipped r1#4300 iss_B (la corrida run_1 sigue viva)"].join("\n"));
-  });
-
-  test("sin --dry-run aplica", async () => {
-    const client = clientFor();
-    await exec(["branches", "rename-legacy"], client);
-    expect(client.calls).toEqual([{ projectId: undefined, dryRun: false }]);
-  });
-});

@@ -457,3 +457,4 @@ El MCP (`docs/design.html#mcp`) sale del contrato: `generateMcp` (`packages/core
 ## Git
 
 Conventional Commits (`feat(core): ...`), atómicos. Un PR por issue de Linear (`CLA-N`).
+- Nunca renombrar la branch head de un PR abierto: GitHub cierra el PR. Para cambiar el nombre hay que abrir otro PR.

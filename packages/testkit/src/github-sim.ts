@@ -679,25 +679,6 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       },
     ],
     [
-      "POST",
-      /^\/branches\/(.+)\/rename$/,
-      (match, { body }) => {
-        const from = decodeURIComponent(match[1]!);
-        const to = (body as { new_name?: string } | undefined)?.new_name;
-        if (branchSha(from) === undefined) return notFound();
-        if (!to) return invalid({ resource: "Branch", field: "new_name", code: "missing_field" });
-        if (branchSha(to) !== undefined) return invalid({ resource: "Branch", field: "new_name", code: "already_exists" });
-        // Como GitHub: el PR sigue abierto sobre la branch nueva y los PRs que apuntaban a la vieja ahora apuntan a la nueva.
-        git("branch", "-m", from, to);
-        for (const pr of prs) {
-          if (pr.head === from) pr.head = to;
-          if (pr.base === from) pr.base = to;
-          pr.updatedAt = tick();
-        }
-        return json(201, { name: to, commit: { sha: branchSha(to) }, protected: false });
-      },
-    ],
-    [
       "GET",
       /^\/issues\/(\d+)\/comments$/,
       (_, __, pr) => {
