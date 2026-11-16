@@ -22,6 +22,7 @@ const TEMPLATES: BuiltinTemplate[] = [
       clankerLoopTemplate.flows["restack"]!,
       clankerLoopTemplate.flows["restack-rewritten"]!,
       clankerLoopTemplate.flows.council!,
+      clankerLoopTemplate.flows["republish-pr"]!,
     ],
   },
 ];

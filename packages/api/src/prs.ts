@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { RunId } from "./domain";
+import { ProjectId, RunId } from "./domain";
 import { SignalTone } from "./pack";
 
 // El estado normalizado de un PR (`docs/design.html#d-ops`, interface PrState). Es genérico: lo que
@@ -209,3 +209,34 @@ export const PrFilter = z.object({
   state: z.enum(["open", "closed", "merged"]).optional(),
 });
 export type PrFilter = z.infer<typeof PrFilter>;
+
+/** `prs.republish`: qué PRs rehacer y si solo planearlo. */
+export const RepublishInput = z.object({
+  /** Solo los PRs de las issues de este proyecto; sin él, los de todos. */
+  projectId: ProjectId.optional(),
+  /** Solo los PRs con estos números (de cualquier repo); vacío: todos los abiertos del sistema. */
+  prs: z.array(z.int().positive()).default([]),
+  /** Solo los PRs en draft: uno que ya salió de draft no se toca (un draft apilado sobre él sale sobre su branch actual). */
+  draftOnly: z.boolean().default(false),
+  /** Lista `viejo → branch nueva` sin tocar GitHub, el repo ni el core, y sin correr al committer (no gasta). */
+  dryRun: z.boolean().default(false),
+});
+export type RepublishInput = z.input<typeof RepublishInput>;
+
+/**
+ * Qué pasó (o pasaría, con `dryRun`: `planned`) con un PR. `branch` y `base` son los del PR nuevo. `commits`:
+ * con `dryRun`, los commits que tiene hoy el PR viejo (el committer puede cortarlos distinto); si no, los del PR nuevo.
+ * `newNumber` es el PR nuevo, que existe aunque `reason` diga que algo posterior (el feedback) quedó pendiente.
+ * `skipped` y `failed` llevan su razón.
+ */
+export const PrRepublish = z.object({
+  repo: z.string().min(1),
+  number: z.int().positive(),
+  status: z.enum(["planned", "republished", "skipped", "failed"]),
+  branch: z.string().optional(),
+  base: z.string().optional(),
+  commits: z.int().nonnegative().optional(),
+  newNumber: z.int().positive().optional(),
+  reason: z.string().optional(),
+});
+export type PrRepublish = z.infer<typeof PrRepublish>;

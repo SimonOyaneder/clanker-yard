@@ -22,7 +22,7 @@ import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
 import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
-import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
+import { CachedPr, PrFilter, PrRef, PrRepublish, PrState, RepublishInput } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync } from "./repos";
@@ -373,6 +373,15 @@ const prs = {
    * si el PR no lo abrió el sistema, ya se cerró o tiene threads de council (nunca se fuerza su historia).
    */
   rebase: base.input(PrRef),
+  /**
+   * Rehace los PRs abiertos del sistema con la branch (`eng-1234-slug`), el autor y los commits de las reglas de hoy, en
+   * orden de stack (los padres antes que los hijos): el mismo cambio, abierto como PR nuevo ("Reemplaza a #n") y el
+   * viejo cerrado. No cambia la implementación: el árbol del PR nuevo es el del viejo o ese PR se aborta. Salta (y
+   * lo dice) un PR con una corrida viva, con threads de council o comentarios humanos sin resolver, con base
+   * combinada o que ya reemplaza a otro. Un PR que falla no frena a los demás, solo a sus hijos. Con `draftOnly` solo los que están en draft. Con `dryRun` no toca nada ni corre al
+   * committer. Espera a que termine cada corrida, así que puede tardar.
+   */
+  republish: base.input(RepublishInput).output(z.array(PrRepublish)),
 };
 
 const repos = {

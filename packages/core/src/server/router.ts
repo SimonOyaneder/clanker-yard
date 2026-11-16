@@ -7,6 +7,7 @@ import { createMergeScope } from "../github/merge-scope";
 import { createPrCache, type PrCacheDeps } from "../github/pr-cache";
 import { createPrCommands, PrCommandError } from "../github/pr-commands";
 import { createPrs } from "../github/prs";
+import type { PrRepublisher } from "../github/republisher";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
 import { CLAUDE_OPTIONS } from "../agents/claude/models";
@@ -85,6 +86,8 @@ export interface RouterDeps {
   defs: Defs;
   /** `imports.legacy`. */
   legacyImport: LegacyImporter;
+  /** `prs.republish`. */
+  republisher: PrRepublisher;
   coreVersion: string;
   bootId: string;
   /** ms epoch */
@@ -346,6 +349,7 @@ export function createRouter(deps: RouterDeps) {
       rebase: os.prs.rebase.handler(({ input, context }) =>
         asApiErrorAsync(() => readPr(input, (ref) => prCommands.rebase(ref, context.origin))),
       ),
+      republish: os.prs.republish.handler(({ input }) => asApiErrorAsync(() => deps.republisher.republish(input))),
     },
     repos: {
       list: os.repos.list.handler(() => repos.list()),

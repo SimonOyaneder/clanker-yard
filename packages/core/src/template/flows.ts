@@ -642,6 +642,83 @@ export const COUNCIL: FlowDef = {
   },
 };
 
+/**
+ * "Republicar PR" (`prs.republish`): el cambio de un PR abierto del sistema vuelve a salir con la branch, el autor y los
+ * commits de las reglas de hoy. `ws` toma un worktree nuevo sobre la base (`base`: la branch por defecto o la del
+ * PR padre ya republicado), `replay` le deja el cambio del PR viejo (`head` es su sha) sin commits, el committer lo
+ * corta en modo `plan` y `pr.publish` lo pushea y abre el PR nuevo con el título y cuerpo del viejo (`title` y `body`
+ * ya traen "Reemplaza a #n"), exigiendo el árbol de `replay`. Recién entonces `supersede` cierra el viejo, así que un
+ * fallo antes deja todo como estaba. Un PR que estaba en draft sigue a `pr-feedback` (`/review`), como el PR de
+ * cualquier corrida del flujo normal. Lo lanza `prs.republish`; nada lo dispara solo.
+ */
+export const REPUBLISH_PR: FlowDef = {
+  schema: 1,
+  id: "republish-pr",
+  name: "Republicar PR",
+  internal: true,
+  trigger: { type: "manual" },
+  lane: "maintenance",
+  params: {
+    repo: "RepoRef",
+    base: "string",
+    branch: "string",
+    head: "string",
+    oldNumber: "number",
+    oldHead: "string",
+    oldBase: "string",
+    title: "string",
+    body: "string",
+    draft: { type: "boolean", default: true },
+    externalRounds: { type: "number", default: 3 },
+  },
+  limits: { maxCostUsd: null, maxSteps: 50 },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.acquire",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "replay" },
+    },
+    replay: {
+      type: "action",
+      action: "pr.replay",
+      args: { ws: "$ws", head: "$run.params.head", base: "$run.params.oldBase" },
+      on: { ok: "commit" },
+    },
+    commit: {
+      type: "agent",
+      role: "committer",
+      mode: "plan",
+      brief: { ws: "$ws", cuts: [], issue: "$run.subject" },
+      on: { ok: "publish" },
+    },
+    publish: {
+      type: "action",
+      action: "pr.publish",
+      args: {
+        ws: "$ws",
+        plan: { commits: "$commit.commits", pr: { title: "$run.params.title", body: "$run.params.body" } },
+        draft: "$run.params.draft",
+        expectTree: "$replay.tree",
+      },
+      on: { ok: "supersede", replan: { to: "commit", maxRounds: 2, exhausted: "@failed" } },
+    },
+    supersede: {
+      type: "action",
+      action: "pr.supersede",
+      args: { pr: "$publish.pr", oldNumber: "$run.params.oldNumber", oldHead: "$run.params.oldHead", oldBase: "$run.params.oldBase", draft: "$run.params.draft" },
+      on: { draft: "feedback", ready: "@done" },
+    },
+    feedback: {
+      type: "flow",
+      flow: "pr-feedback",
+      params: { ws: "$ws", pr: "$publish.pr", externalRounds: "$run.params.externalRounds" },
+      on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+    },
+  },
+};
+
 export const flows: Record<string, FlowDef> = {
   "techlead-clasico": TECHLEAD_CLASICO,
   "pr-feedback": PR_FEEDBACK,
@@ -650,4 +727,5 @@ export const flows: Record<string, FlowDef> = {
   restack: RESTACK,
   "restack-rewritten": RESTACK_REWRITTEN,
   council: COUNCIL,
+  "republish-pr": REPUBLISH_PR,
 };

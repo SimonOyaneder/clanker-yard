@@ -35,6 +35,7 @@ export interface StartServerOptions extends Pick<
   | "learnings"
   | "defs"
   | "legacyImport"
+  | "republisher"
   | "coreVersion"
   | "dataDir"
   | "onShutdown"

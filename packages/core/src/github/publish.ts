@@ -24,6 +24,8 @@ const PublishArgs = ApplyArgs.extend({
   draft: z.boolean().default(true),
   /** PRs de los que este depende, como `repo#n` (un PR apilado): el cuerpo abre con "Depende de ...". */
   dependsOn: z.array(z.string().regex(/^[^\s#]+#\d+$/, "debe ser repo#n")).default([]),
+  /** El árbol que los commits deben dejar (`pr.replay` lo calcula al rehacer un PR): otro y no se publica nada. */
+  expectTree: z.string().optional(),
 });
 
 /** Lo que la acción lee de un PR de la API REST. */
@@ -81,7 +83,10 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
 
     const applied = await apply.run(args, ctx);
     if (applied.outcome !== "ok") return { outcome: "replan", output: applied.output };
-    const { commits } = z.object({ commits: z.array(z.object({ sha: z.string() })) }).parse(applied.output);
+    const { commits, tree } = z.object({ commits: z.array(z.object({ sha: z.string() })), tree: z.string() }).parse(applied.output);
+    if (args.expectTree !== undefined && tree !== args.expectTree) {
+      throw new PermanentActionError(`Los commits dejan el árbol ${tree.slice(0, 9)} y no el esperado ${args.expectTree.slice(0, 9)}: no se publica.`);
+    }
     const tip = commits.at(-1)?.sha;
     if (tip === undefined) {
       return { outcome: "replan", output: { failures: "El plan no tiene commits: no hay nada que publicar." } };

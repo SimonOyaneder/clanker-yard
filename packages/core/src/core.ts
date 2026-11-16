@@ -26,6 +26,8 @@ import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/publish";
 import { stackRestackAction, stackRestackRewrittenAction } from "./github/restack";
 import { prPushFixupsAction } from "./github/push-fixups";
+import { prReplayAction, prSupersedeAction } from "./github/republish";
+import { createPrRepublisher } from "./github/republisher";
 import {
   prPushLeaseAction,
   prRebaseApprovalAction,
@@ -239,6 +241,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(commitsApplyAction({ workspaces, recipes }));
   flows.registerAction(prPublishAction({ store, workspaces, recipes, repos: repos.config, connections: opts.connections, packs }));
   flows.registerAction(prPushFixupsAction({ store, workspaces, repos: repos.config, prs }));
+  flows.registerAction(prReplayAction({ workspaces }));
+  flows.registerAction(prSupersedeAction({ store, connections: opts.connections }));
   const rebasePr = { store, workspaces, repos: repos.config, prs };
   flows.registerAction(workspaceRebaseAction(rebasePr));
   flows.registerAction(prPushLeaseAction(rebasePr));
@@ -356,6 +360,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     learnings,
     defs,
     legacyImport: createLegacyImporter({ store, defs, artifacts }),
+    republisher: createPrRepublisher({ store, repos, issues, projects, flows, connections: opts.connections, prs, fetchRepo: workspaces.fetch }),
     bootId,
     coreVersion: opts.coreVersion,
     dataDir,

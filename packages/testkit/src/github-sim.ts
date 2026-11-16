@@ -79,6 +79,8 @@ export interface SimPull {
   head: { label: string; ref: string; sha: string };
   base: { label: string; ref: string; sha: string | undefined };
   assignees: { login: string }[];
+  /** Los commits del head sobre su base. */
+  commits: number;
 }
 
 export interface GitHubSimOptions {
@@ -435,6 +437,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     head: { label: `${owner}:${pr.head}`, ref: pr.head, sha: headSha(pr) },
     base: { label: `${owner}:${pr.base}`, ref: pr.base, sha: branchSha(pr.base) },
     assignees: pr.assignees.map(({ login }) => ({ login })),
+    commits: pr.state === "open" && branchSha(pr.base) !== undefined ? commitsAhead(pr.base, headSha(pr)) : 0,
   });
   const commentJson = (c: SimComment, pr: PrData) => ({
     id: c.id,
@@ -604,6 +607,11 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     };
   }
 
+  function closePr(pr: PrData): void {
+    pr.state = "closed";
+    pr.closedAt = tick();
+  }
+
   // --- REST ---
 
   /** `pr` busca el PR del primer grupo de la ruta (`/pulls/:n`). */
@@ -676,6 +684,21 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
         }
         found.updatedAt = tick();
         return json(200, pullJson(found));
+      },
+    ],
+    [
+      "DELETE",
+      /^\/git\/refs\/(.+)$/,
+      (match) => {
+        const ref = decodeURIComponent(match[1]!);
+        const branch = ref.replace(/^heads\//, "");
+        if (!ref.startsWith("heads/") || branchSha(branch) === undefined) return json(422, { message: "Reference does not exist", documentation_url: DOCS, status: "422" });
+        git("update-ref", "-d", `refs/heads/${branch}`);
+        // Como GitHub: sin su branch un PR abierto, de head o de base, se cierra.
+        for (const pr of prs) {
+          if (pr.state === "open" && (pr.head === branch || pr.base === branch)) closePr(pr);
+        }
+        return json(204, undefined);
       },
     ],
     [

@@ -1,4 +1,4 @@
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { CachedIssue } from "@clanker/api";
 import { tryGit } from "../git/git";
 import { runs } from "../store/schema";
@@ -47,21 +47,38 @@ export async function issueBranch(store: Store, issue: CachedIssue, repoPath: st
     .find((b): b is string => typeof b === "string" && b !== "");
   if (previous !== undefined) return previous;
 
-  const taken = new Set<string>();
-  for (const { params } of store.db
-    .select({ params: runs.params })
-    .from(runs)
-    .where(and(eq(runs.subjectType, "issue"), ne(runs.subjectId, issue.id)))
-    .all()) {
-    if (typeof params.branch === "string") taken.add(params.branch);
+  return uniqueBranch(suggestedBranch(issue), await takenBranches(store, repoPath, (run) => run.subjectId !== issue.id));
+}
+
+/**
+ * Una branch nueva para la issue aunque ya haya corrido: `suggestedBranch` con `-2`, `-3`... mientras la tenga cualquier
+ * corrida (también las de esta issue), una branch del repo, o `reserved` (los nombres que otra llamada ya repartió).
+ * Rehacer un PR la necesita: `issueBranch` devolvería la branch que ya tiene.
+ */
+export async function freshIssueBranch(store: Store, issue: CachedIssue, repoPath: string | undefined, reserved: ReadonlySet<string> = new Set()): Promise<string> {
+  return uniqueBranch(suggestedBranch(issue), await takenBranches(store, repoPath, () => true, reserved));
+}
+
+function uniqueBranch(base: string, taken: ReadonlySet<string>): string {
+  let name = base;
+  for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
+  return name;
+}
+
+/** Los nombres de branch en uso: los `params.branch` de las corridas que pasan `ofRun`, y las branches del repo (locales o de `origin` según el último fetch). */
+async function takenBranches(
+  store: Store,
+  repoPath: string | undefined,
+  ofRun: (run: { subjectId: string }) => boolean,
+  reserved: ReadonlySet<string> = new Set(),
+): Promise<Set<string>> {
+  const taken = new Set(reserved);
+  for (const run of store.db.select({ subjectId: runs.subjectId, params: runs.params }).from(runs).where(eq(runs.subjectType, "issue")).all()) {
+    if (ofRun(run) && typeof run.params.branch === "string") taken.add(run.params.branch);
   }
   if (repoPath !== undefined) {
     const refs = await tryGit(repoPath, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin"]);
     for (const ref of refs?.split("\n") ?? []) taken.add(ref.replace(/^refs\/(heads|remotes\/origin)\//, ""));
   }
-
-  const base = suggestedBranch(issue);
-  let name = base;
-  for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
-  return name;
+  return taken;
 }

@@ -37,7 +37,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -96,5 +96,6 @@ export function apiDeps(
     learnings: createLearnings(store),
     defs,
     legacyImport: createLegacyImporter({ store, defs, artifacts }),
+    republisher: { republish: () => Promise.reject(new Error("este core de pruebas no republica PRs")) },
   };
 }

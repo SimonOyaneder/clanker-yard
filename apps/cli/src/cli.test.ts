@@ -336,3 +336,43 @@ describe("clanker import legacy", () => {
     await expect(exec(["import", "legacy"], {})).rejects.toThrow(/Falta --from\. Uso: clanker import legacy/);
   });
 });
+
+describe("clanker prs republish", () => {
+  const results = [
+    { repo: "r1", number: 4299, status: "planned", branch: "eng-1-uno", base: "main", commits: 3 },
+    { repo: "r1", number: 4300, status: "republished", branch: "eng-2-dos", base: "eng-1-uno", newNumber: 4350, commits: 2 },
+    { repo: "r1", number: 4301, status: "skipped", reason: "la corrida run_1 sigue viva" },
+  ];
+  const clientFor = () => {
+    const calls: unknown[] = [];
+    return {
+      calls,
+      projects: { list: () => Promise.resolve([{ id: "prj_1", slug: "api" }]) },
+      prs: { republish: (input: unknown) => (calls.push(input), Promise.resolve(results)) },
+    };
+  };
+
+  test("--project, --pr (repetible) y --dry-run se los pasa al core y lista viejo → nuevo por PR", async () => {
+    const client = clientFor();
+
+    const out = await exec(["prs", "republish", "--project", "api", "--pr", "4299", "--pr", "4300", "--drafts", "--dry-run"], client);
+
+    expect(client.calls).toEqual([{ projectId: "prj_1", prs: [4299, 4300], dryRun: true, draftOnly: true }]);
+    expect(out).toBe(
+      [
+        "planned r1#4299 → eng-1-uno, base main, 3 commits",
+        "republished r1#4300 → eng-2-dos (#4350), base eng-1-uno, 2 commits",
+        "skipped r1#4301 (la corrida run_1 sigue viva)",
+      ].join("\n"),
+    );
+  });
+
+  test("sin opciones rehace todo y un --pr que no es número falla con el uso, sin tocar el core", async () => {
+    const client = clientFor();
+    await exec(["prs", "republish"], client);
+    expect(client.calls).toEqual([{ projectId: undefined, prs: [], dryRun: false, draftOnly: false }]);
+
+    await expect(exec(["prs", "republish", "--pr", "abc"], client)).rejects.toThrow(/--pr pide un número de PR, no "abc"\.\nUso: clanker prs republish/);
+    expect(client.calls).toHaveLength(1);
+  });
+});

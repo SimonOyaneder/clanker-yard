@@ -159,6 +159,7 @@ const router = os.router({
     rebase: os.prs.rebase.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    republish: os.prs.republish.handler(() => []),
   },
   repos: {
     list: os.repos.list.handler(() => []),

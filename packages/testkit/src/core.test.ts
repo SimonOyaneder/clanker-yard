@@ -320,6 +320,7 @@ describe("arranque", () => {
       { slug: "juguete" },
       { slug: "pr-feedback" },
       { slug: "rebase-conflicto" },
+      { slug: "republish-pr" },
       { slug: "restack" },
       { slug: "restack-feedback" },
       { slug: "restack-rewritten" },

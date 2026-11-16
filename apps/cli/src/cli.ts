@@ -4,6 +4,7 @@ import { importLegacy } from "./import";
 import { mcp } from "./mcp";
 import { metricsCompareCommand } from "./metrics-compare";
 import { projectsList } from "./projects";
+import { prsRepublish } from "./prs";
 import { runsGet, runsStart } from "./runs";
 import { status } from "./status";
 
@@ -34,6 +35,7 @@ const commands: Record<string, Command> = {
   "events tail": events,
   "metrics compare": metricsCompareCommand,
   "import legacy": importLegacy,
+  "prs republish": prsRepublish,
   mcp,
 };
 
