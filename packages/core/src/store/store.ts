@@ -48,12 +48,16 @@ export interface Store {
 export interface OpenStoreOptions {
   /** Ruta de `clanker.db`, o `:memory:` en tests. */
   path: string;
-  /** Carpeta de drizzle-kit con una carpeta por migración. Por defecto, la que empaqueta el core. */
+  /**
+   * Carpeta de drizzle-kit con una carpeta por migración. Por defecto `packages/core/migrations`, buscada desde este
+   * archivo: vale corriendo desde el código (tests, testkit, demo). El bundle (`dist/main.js`) queda en otra carpeta y
+   * pasa la suya (`main.ts`), que es la que el `.app` copia junto a él.
+   */
   migrationsFolder?: string;
   now?: () => number;
 }
 
-const bundledMigrations = fileURLToPath(new URL("../../migrations", import.meta.url));
+const sourceMigrations = fileURLToPath(new URL("../../migrations", import.meta.url));
 
 export function openStore(opts: OpenStoreOptions): Store {
   const now = opts.now ?? Date.now;
@@ -68,7 +72,7 @@ export function openStore(opts: OpenStoreOptions): Store {
     const db = drizzle({ client: sqlite });
     migrateStore(sqlite, db, {
       path: opts.path,
-      migrationsFolder: opts.migrationsFolder ?? bundledMigrations,
+      migrationsFolder: opts.migrationsFolder ?? sourceMigrations,
     });
     return createStore(sqlite, db, now);
   } catch (error) {

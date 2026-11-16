@@ -14,9 +14,20 @@ export interface Cleanup {
 /**
  * Quien llama a `workspaces.cleanup` (`docs/design.html#d-ops`, estados del worktree): una pasada al arrancar,
  * cada `CLEANUP_EVERY_MS` y cada vez que `request` avisa que un PR terminó o que se soltó un worktree. Nunca
- * lanza: lo que falla se anota una vez con `errors` hasta que una pasada salga bien.
+ * lanza: lo que falla se anota una vez con `errors` hasta que una pasada salga bien. Con `initialPass: false` la
+ * primera la pide quien la creó (el core, después de recuperar los worktrees del arranque anterior).
  */
-export function startCleanup({ workspaces, errors, everyMs = CLEANUP_EVERY_MS }: { workspaces: Pick<Workspaces, "cleanup">; errors: ErrorReporter; everyMs?: number }): Cleanup {
+export function startCleanup({
+  workspaces,
+  errors,
+  everyMs = CLEANUP_EVERY_MS,
+  initialPass = true,
+}: {
+  workspaces: Pick<Workspaces, "cleanup">;
+  errors: ErrorReporter;
+  everyMs?: number;
+  initialPass?: boolean;
+}): Cleanup {
   const scope = "workspaces.cleanup";
   let running: Promise<void> | undefined;
   let again = false;
@@ -45,7 +56,7 @@ export function startCleanup({ workspaces, errors, everyMs = CLEANUP_EVERY_MS }:
 
   const timer = setInterval(request, everyMs);
   timer.unref();
-  request();
+  if (initialPass) request();
 
   return {
     request,

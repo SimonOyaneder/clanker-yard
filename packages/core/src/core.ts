@@ -94,6 +94,11 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   runtimes: readonly AgentRuntime[];
   /** Plantillas extra como builtin, solo para demos y tests (p. ej. `JUGUETE_TEMPLATE`): producción no pasa ninguna. */
   builtins?: readonly BuiltinTemplate[];
+  /**
+   * Solo tests y demo: `recipe.check` no corre los checks y consume `run.<check>` del guion del runtime fake (sus
+   * `requires` sí corren: son el entorno real del repo). Producción no lo pasa.
+   */
+  recipeResults?: ScriptedRecipe;
   /** De aquí sale `CORE_RUNTIME`. Por defecto, `process.env`. */
   env?: Record<string, string | undefined>;
   /**
@@ -226,6 +231,23 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     errors: reporter,
   });
+  // Antes que nada pueda terminar una corrida o soltar un worktree (también `flows.recover()`, más abajo): una corrida
+  // que termina no se lleva el worktree, porque el flujo puede no haberlo soltado (`@done` no lo hace).
+  const stopReleasing = store.events.subscribe(
+    ({ runId }) => {
+      if (runId) workspaces.releaseHeldBy(runId);
+    },
+    { types: ["run.finished"] },
+  );
+  // Un worktree cuyo PR terminó se archiva en cuanto nadie lo tiene: al soltarse el último lease (`pr.merged` y los
+  // cierres sin merge llegan por `onPrChange`), y a los 7 días se borra.
+  const cleanup = startCleanup({ workspaces, errors: reporter, initialPass: false });
+  const stopCleaningOnRelease = store.events.subscribe(
+    ({ payload }) => {
+      if (payload.resource === "workspace") cleanup.request();
+    },
+    { types: ["lease.released"] },
+  );
   const prs = createPrs({ connections: opts.connections, packs, merge: createMergeScope({ store, repos, connections: opts.connections }) });
   const watchErrors = reporter.within("watch");
   const prEvents = createPrEvents({ store, repos, workspaces, errors: watchErrors });
@@ -236,7 +258,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     if (state.state === "merged" || state.state === "closed") cleanup.request();
   };
   const prCache = createPrCache({ store, repos, packs, prs, onChange: onPrChange });
-  const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtimes.default) ? runtimes.default : undefined });
+  const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: opts.recipeResults });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceAttachAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
@@ -279,22 +301,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   if (orphans + leases + steps > 0) {
     store.tx((tx) => tx.emit({ type: "core.recovered", origin: "core", payload: { steps, leases, orphans } }));
   }
-  // Una corrida que termina no se lleva el worktree: el flujo puede no haberlo soltado (`@done` no lo hace).
-  const stopReleasing = store.events.subscribe(
-    ({ runId }) => {
-      if (runId) workspaces.releaseHeldBy(runId);
-    },
-    { types: ["run.finished"] },
-  );
-  // Un worktree cuyo PR terminó se archiva en cuanto nadie lo tiene: al soltarse el último lease (`pr.merged` y los
-  // cierres sin merge llegan por `onPrChange`), y a los 7 días se borra.
-  const cleanup = startCleanup({ workspaces, errors: reporter });
-  const stopCleaningOnRelease = store.events.subscribe(
-    ({ payload }) => {
-      if (payload.resource === "workspace") cleanup.request();
-    },
-    { types: ["lease.released"] },
-  );
+  // La primera pasada de limpieza, ya con los worktrees de las corridas vivas recuperados.
+  cleanup.request();
   // Al devolver un sujeto prestado la branch pudo moverse: la dueña relee su `head_sha` antes de seguir.
   const stopRereading = store.events.subscribe(
     ({ payload }) => {
@@ -379,13 +387,12 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   return {
     server,
     async close({ drain } = { drain: false }) {
+      // Primero lo que abre corridas (Watch y sus triggers, el Scheduler): un cierre no abre corridas nuevas.
       await watch.stop();
-      // Como el Scheduler: un cierre no abre corridas nuevas.
       stopTriggers();
       await stopRepoConfigSync.stop();
       mergeReactions.stop();
       const graceMs = drain ? DRAIN_MS : 0;
-      // Antes de apagar el motor: un cierre no abre corridas nuevas.
       await scheduler.close();
       breakers.close();
       stopMarkingLogin();
@@ -414,7 +421,6 @@ function roleInfoOf(defs: Defs) {
   };
 }
 
-/** El runtime `fake` entrega los resultados de la receta desde su guion; los demás no tienen `nextRecipeResult`. */
 /**
  * Los runtimes que usan los agentes del perfil por defecto de un proyecto (su breaker pausa sus lanzamientos). Sin
  * perfil, o uno que no se lee, el runtime por defecto.
@@ -426,6 +432,3 @@ function profileRuntimes(defs: Defs, runtimes: RuntimeRegistry, profileSlug: str
   return [...new Set(Object.values(profile.data.roles).map((entry) => runtimes.idFor(entry.runtime)))];
 }
 
-function isScripted(runtime: AgentRuntime): runtime is AgentRuntime & ScriptedRecipe {
-  return "nextRecipeResult" in runtime && typeof runtime.nextRecipeResult === "function";
-}

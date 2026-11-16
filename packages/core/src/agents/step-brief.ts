@@ -19,8 +19,8 @@ export interface StepBriefsDeps {
   issues: Pick<Issues, "get">;
   learnings: Pick<Learnings, "forBrief" | "pendingFor">;
   /** Los adapters por id de tracker: de ahí sale el detalle de la issue del sujeto. */
-  /** Para el proyecto de una corrida. */
   trackers: Trackers;
+  /** Para el proyecto de una corrida. */
   projects: Pick<Projects, "get">;
 }
 

@@ -301,11 +301,10 @@ export function createAgents({ store, defs, runtimes, now = Date.now, packs, rem
    */
   const writingPrefix = new Map<string, Promise<void>>();
 
-  /** Devuelve qué llamar cuando el prefijo ya quedó escrito (o la sesión terminó sin escribirlo). */
-  async function gitIdentityFor(repoId: RepoId | undefined) {
-    return repoId === undefined ? undefined : identityOf?.(repoId);
-  }
+  /** La identidad de git del usuario en el repo del worktree, para los commits del agente. */
+  const gitIdentityFor = (repoId: RepoId | undefined) => (repoId === undefined ? undefined : identityOf?.(repoId));
 
+  /** Devuelve qué llamar cuando el prefijo ya quedó escrito (o la sesión terminó sin escribirlo). */
   async function claimPrefix(runtimeId: RuntimeId, spec: RunSpec, signal: AbortSignal | undefined): Promise<() => void> {
     const key = createHash("sha256")
       .update(JSON.stringify([runtimeId, spec.model, spec.cacheTtl ?? "5m", spec.tools, spec.native, spec.systemPrompt]))

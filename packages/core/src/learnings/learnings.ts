@@ -61,7 +61,6 @@ export interface Learnings {
 }
 
 /** Con `runtime` el core puede filtrar los propuestos (`screen`); sin él, `screen` falla. */
-/** Sin `runtime` no se pueden filtrar los propuestos (`screen`). */
 export function createLearnings({ store, runtime }: { store: Store; runtime?: AgentRuntime }): Learnings {
   const find = (db: Store["db"] | Tx["db"], id: LearningId) => db.select().from(learnings).where(eq(learnings.id, id)).get();
   const need = (db: Store["db"] | Tx["db"], id: LearningId) => {
