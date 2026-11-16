@@ -348,7 +348,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     runs,
     queue: scheduler.queue,
     trackerProjects,
-    scheduler,
+    // Con el Scheduler apagado (los tests que lanzan a mano, el core de demo) `system.setLanes` no lanza nada.
+    scheduler: opts.scheduler === false ? { ...scheduler, tick: () => Promise.resolve() } : scheduler,
     lanes,
     breakers,
     flows,

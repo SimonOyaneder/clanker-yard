@@ -39,9 +39,10 @@ afterEach(async () => {
   home.cleanup();
 });
 
-async function boot(): Promise<Client> {
+async function boot({ scheduler = true }: { scheduler?: boolean } = {}): Promise<Client> {
   core = await startCore({
     store,
+    scheduler,
     dataDir: home.path,
     connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
     runtimes: [createFakeRuntime({ fixtures: juguete, speed: Infinity })],
@@ -66,6 +67,19 @@ async function toyProject(client: Client, parallel = 2) {
 }
 
 const eventsOf = (types: Event["type"][]) => store.events.since(0, { types });
+
+test("con el Scheduler apagado, system.setLanes no lanza la cola", async () => {
+  const client = await boot({ scheduler: false });
+  const project = await toyProject(client);
+  await client.issues.createLocal({ projectId: project.id, title: "Una" });
+
+  await client.system.setLanes({ dev: 5 });
+  // Cerrar el core espera el tick en curso, si alguno se pidió: lo que haya lanzado ya está en los eventos.
+  await core?.close();
+  core = undefined;
+
+  expect(eventsOf(["run.started"])).toEqual([]);
+});
 
 describe("el Scheduler del core", () => {
   test("lanza solo las issues de la cola y las corre hasta el final", async () => {
