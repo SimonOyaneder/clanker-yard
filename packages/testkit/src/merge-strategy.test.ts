@@ -27,6 +27,7 @@ import {
   type PrCache,
   type Store,
   type Watch,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -92,7 +93,7 @@ beforeEach(async () => {
   flows = createFlows({
     store,
     defs,
-    agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures: [], speed: Infinity }) }),
+    agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([createFakeRuntime({ fixtures: [], speed: Infinity })], {}) }),
     artifacts: createArtifacts({ store, dir: join(dir, "artifacts") }),
     roles: () => undefined,
     probeEverySec: 3600,

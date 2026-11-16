@@ -1,3 +1,4 @@
+import { createRuntimeRegistry } from "../agents/runtime";
 import { Role } from "@clanker/api";
 import { afterEach, expect, test } from "vitest";
 import { z } from "zod";
@@ -52,7 +53,7 @@ function setup() {
   const flows = createFlows({
     store,
     defs,
-    agents: createAgents({ store, defs, runtime: unusedRuntime }),
+    agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([unusedRuntime], {}) }),
     artifacts: createArtifacts({ store, dir: "sin-uso" }),
     roles: (id) => {
       const def = defs.resolve("role", id);

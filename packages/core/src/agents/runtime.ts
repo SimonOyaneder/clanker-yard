@@ -1,6 +1,7 @@
-import type { Effort, JsonSchema, ToolPolicy } from "@clanker/api";
+import { DEFAULT_AGENT_RUNTIME, type AgentRuntimeId, type Effort, type JsonSchema, type RuntimeOptions, type ToolPolicy } from "@clanker/api";
 
-export type RuntimeId = "claude-sdk" | "acp" | "fake";
+/** Los que un perfil puede pedir (`AgentRuntimeId`), más `fake` (tests y demo) y `acp` (reservado). */
+export type RuntimeId = AgentRuntimeId | "acp" | "fake";
 
 /**
  * Lo que el core guarda para retomar una sesión. Con `cwd` porque la caché y el historial de
@@ -173,21 +174,65 @@ export interface AgentRuntime {
   capabilities: RuntimeCapabilities;
   start(spec: RunSpec): Promise<AgentRun>;
   resume(ref: SessionRef, message: string, spec: ResumeSpec): Promise<AgentRun>;
+  /**
+   * La prueba barata de su breaker (`runtime:<id>`): `undefined` si puede volver a lanzar agentes, o por qué no.
+   * Sin ella, el breaker se cierra en la primera prueba (`claude-sdk` lo prueba el core con su conexión).
+   */
+  probe?(): Promise<string | undefined>;
+  /** Lo que ofrece a un perfil (`defs.agentOptions`): modelos, esfuerzos y si está disponible. Sin él, el runtime no se ofrece. */
+  describe?(): Promise<RuntimeOptions>;
 }
 
-export const DEFAULT_RUNTIME: RuntimeId = "claude-sdk";
+/** Las entradas de perfil sin `runtime` corren con este. */
+export const DEFAULT_RUNTIME: RuntimeId = DEFAULT_AGENT_RUNTIME;
 
-/** Elige el runtime por `CORE_RUNTIME` (default `claude-sdk`) entre los que el core tiene registrados. */
-export function selectRuntime(
+/** El perfil pide un runtime que este core no tiene registrado. */
+export class RuntimeUnavailableError extends Error {}
+
+/**
+ * Los runtimes que el core tiene registrados y cuál corre cada agente (`docs/design.html#d-agents`).
+ *
+ * Cada entrada del perfil elige el suyo (`ProfileRole.runtime`, `claude-sdk` si no lo dice). `CORE_RUNTIME` los
+ * fuerza a todos a uno: es lo que hacen los tests y el core de demo con `fake`, que reproduce guiones de cualquier rol.
+ */
+export interface RuntimeRegistry {
+  /** El que corre una entrada sin `runtime`; con `CORE_RUNTIME`, el forzado. */
+  default: AgentRuntime;
+  /** El de `CORE_RUNTIME`, si se fijó: corre todo. */
+  forced: AgentRuntime | undefined;
+  all: readonly AgentRuntime[];
+  /** El id que corre una entrada de perfil que pide `requested` (sin él, el default). No lanza: el breaker usa el id aunque falte. */
+  idFor(requested: string | undefined): RuntimeId;
+  /** El runtime de una entrada de perfil. Lanza `RuntimeUnavailableError` si este core no lo tiene. */
+  get(requested: string | undefined): AgentRuntime;
+}
+
+/** Arma el registro; `CORE_RUNTIME` debe ser uno de los registrados. */
+export function createRuntimeRegistry(
   runtimes: readonly AgentRuntime[],
   env: Record<string, string | undefined> = process.env,
-): AgentRuntime {
-  const wanted = env.CORE_RUNTIME ?? DEFAULT_RUNTIME;
-  const found = runtimes.find((r) => r.id === wanted);
-  if (!found) {
-    throw new Error(
-      `CORE_RUNTIME="${wanted}" no corresponde a ningún runtime registrado (${runtimes.map((r) => r.id).join(", ") || "ninguno"}).`,
-    );
+): RuntimeRegistry {
+  const names = () => runtimes.map((r) => r.id).join(", ") || "ninguno";
+  const wanted = env.CORE_RUNTIME;
+  const forced = wanted === undefined || wanted === "" ? undefined : runtimes.find((r) => r.id === wanted);
+  if (wanted !== undefined && wanted !== "" && !forced) {
+    throw new Error(`CORE_RUNTIME="${wanted}" no corresponde a ningún runtime registrado (${names()}).`);
   }
-  return found;
+  const fallback = forced ?? runtimes.find((r) => r.id === DEFAULT_RUNTIME) ?? runtimes[0];
+  if (!fallback) throw new Error("El core necesita al menos un runtime de agentes.");
+  const idFor = (requested: string | undefined): RuntimeId => (forced?.id ?? (requested as RuntimeId | undefined) ?? fallback.id);
+  return {
+    default: fallback,
+    forced,
+    all: runtimes,
+    idFor,
+    get(requested) {
+      const id = idFor(requested);
+      const found = runtimes.find((r) => r.id === id);
+      if (!found) {
+        throw new RuntimeUnavailableError(`El perfil pide el runtime "${id}" y este core no lo tiene (tiene: ${names()}).`);
+      }
+      return found;
+    },
+  };
 }

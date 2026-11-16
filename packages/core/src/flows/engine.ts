@@ -1,4 +1,6 @@
-import { FlowDef,
+import {
+  FlowDef,
+  Profile,
   Role,
   type ArtifactHash,
   type Brief,
@@ -214,10 +216,11 @@ export interface EngineDeps extends SubjectsDeps {
    */
   briefFor?: (request: StepBriefRequest) => Promise<Brief>;
   /**
-   * Los circuit breakers por causa (`docs/design.html#d-ops`) y el runtime de los agentes (su ámbito es
+   * Los circuit breakers por causa (`docs/design.html#d-ops`) y el runtime de cada agente (su ámbito es
    * `runtime:<id>`). Un paso cuyo ámbito está abierto no se despacha; un error de entorno abre el de su causa.
+   * `runtimeOf` dice qué runtime corre una entrada de perfil que pide `requested` (`ProfileRole.runtime`).
    */
-  environment?: { breakers: Pick<Breakers, "openReason" | "trip">; runtime: string };
+  environment?: { breakers: Pick<Breakers, "openReason" | "trip">; runtimeOf(requested: string | undefined): string };
   /** Tope global de agentes a la vez. */
   maxAgents?: number;
   tickMs?: number;
@@ -766,12 +769,23 @@ export function createEngine(deps: EngineDeps): Engine {
     if (!environment) return [];
     const scopes: string[] = [];
     const repoId = workspaceFor(run)?.repoId;
-    if (node.type === "agent") scopes.push(runtimeScope(environment.runtime));
+    if (node.type === "agent") scopes.push(runtimeScope(runtimeOfNode(run, node)));
     if (repoId !== undefined && (node.type === "agent" || (node.type === "action" && actions.get(node.action)?.needsRepoEnv))) {
       scopes.push(repoScope(repoId));
     }
     if (node.type === "action" && actions.get(node.action)?.effects === "remote") scopes.push(GITHUB_SCOPE);
     return scopes;
+  }
+
+  /**
+   * El runtime que correrá un nodo agente: el de su entrada del perfil fijado por la corrida (`profileRole` o el rol).
+   * Un paso escalado usa la entrada de escalada; si su runtime es otro, su breaker lo abre el resultado del paso.
+   */
+  function runtimeOfNode(run: RunRow, node: Extract<Node, { type: "agent" }>): string {
+    const body = run.profileDefId !== null && run.profileVersion !== null ? defs.get("profile", run.profileDefId, run.profileVersion)?.body : undefined;
+    const profile = Profile.safeParse(body);
+    const entry = profile.success ? profile.data.roles[node.profileRole ?? node.role] : undefined;
+    return environment?.runtimeOf(entry?.runtime) ?? "";
   }
 
   /** El ámbito abierto que pausa a este paso, o `undefined`. */
@@ -1181,7 +1195,7 @@ export function createEngine(deps: EngineDeps): Engine {
       : await agents.run({
           ...placement,
           role: node.role,
-          profileRole: escalated ? node.escalate?.profileRole : undefined,
+          profileRole: escalated ? node.escalate?.profileRole : node.profileRole,
           roleDef,
           mode: node.mode,
           brief,
@@ -1191,10 +1205,11 @@ export function createEngine(deps: EngineDeps): Engine {
     if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
     const overspent = result.status === "error_max_turns" || result.status === "error_max_budget_usd";
     if (overspent && node.escalate && !escalated) return { kind: "escalate" };
-    return fromAgentResult(result);
+    return fromAgentResult(result, () => runtimeOfNode(run, node));
   }
 
-  function fromAgentResult(result: AgentResult): Settled {
+  /** `runtimeOf`: el runtime del nodo, por si el resultado no dice cuál falló. */
+  function fromAgentResult(result: AgentResult, runtimeOf: () => string): Settled {
     switch (result.status) {
       case "success":
         return { kind: "outcome", outcome: result.report.outcome, output: result.report.payload, reported: { notes: result.report.decisions ?? [], learnings: result.report.learnings ?? [] } };
@@ -1203,7 +1218,7 @@ export function createEngine(deps: EngineDeps): Engine {
       case "login_expired":
       case "quota_exhausted":
         environment?.breakers.trip({
-          scope: runtimeScope(environment.runtime),
+          scope: runtimeScope(result.runtime ?? runtimeOf()),
           cause: result.status,
           reason: result.message,
           ...(result.resetsAt === undefined ? {} : { resetsAt: result.resetsAt }),

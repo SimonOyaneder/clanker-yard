@@ -15,6 +15,7 @@ import {
   type Flows,
   type Store,
   type Workspaces,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { z } from "zod";
@@ -52,7 +53,7 @@ beforeEach(() => {
   flows = createFlows({
     store,
     defs,
-    agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures: demoFixtures }) }),
+    agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([createFakeRuntime({ fixtures: demoFixtures })], {}) }),
     artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }),
     roles: () => undefined,
     workspaceOf: workspaces.held,

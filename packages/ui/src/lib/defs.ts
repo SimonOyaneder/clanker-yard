@@ -25,7 +25,7 @@ export function defSummary(def: DefRecord): string | undefined {
   const reviewModels = [...new Set(roles.filter(([role]) => role.startsWith("review-")).map(([, spec]) => spec.model))]
   const parts = [
     ...(dev ? [`dev ${dev.model}${typeof dev.effort === "string" ? ` ${dev.effort}` : ""}`] : []),
-    ...(reviewModels.length > 0 ? [`reviews ${reviewModels.join("/")}`] : []),
+    ...(reviewModels.length > 0 ? [`reviews ${reviewModels.join(", ")}`] : []),
   ]
   return parts.length > 0 ? parts.join(" · ") : undefined
 }

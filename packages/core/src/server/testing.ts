@@ -1,3 +1,4 @@
+import { createRuntimeRegistry } from "../agents/runtime";
 // Solo para tests de la API que no corren agentes: arma los módulos que el router necesita con un
 // runtime que rechaza cualquier sesión.
 import { storedBinding } from "../tracker/tracker-projects";
@@ -5,6 +6,7 @@ import { trackersByKind } from "../tracker/trackers";
 import { join } from "node:path";
 import { createAgents } from "../agents/agents";
 import type { AgentRuntime } from "../agents/runtime";
+import { describeRuntimes } from "../agents/runtime-options";
 import { createArtifacts } from "../artifacts/artifacts";
 import { createDecisions } from "../decisions/decisions";
 import { createLearnings } from "../learnings/learnings";
@@ -43,13 +45,13 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher" | "agentOptions"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
     store,
     defs,
-    agents: createAgents({ store, defs, runtime: noRuntime }),
+    agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([noRuntime], {}) }),
     artifacts,
     roles: () => undefined,
   });
@@ -78,7 +80,7 @@ export function apiDeps(
     // Sin repos git: este core de pruebas no arma bases combinadas.
     workspaces: { combineBase: () => Promise.reject(new Error("este core de pruebas no tiene workspaces")), dissolveBase: () => Promise.resolve() },
     lanes,
-    runtime: noRuntime.id,
+    runtimesOf: () => [noRuntime.id],
   });
   return {
     projects,
@@ -106,6 +108,7 @@ export function apiDeps(
       republish: () => Promise.reject(new Error("este core de pruebas no republica PRs")),
       progress: () => Promise.reject(new Error("este core de pruebas no republica PRs")),
     },
+    agentOptions: () => describeRuntimes(createRuntimeRegistry([noRuntime], {})),
   };
 }
 

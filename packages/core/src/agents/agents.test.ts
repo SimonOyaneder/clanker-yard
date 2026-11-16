@@ -18,7 +18,8 @@ import {
   type Agents,
 } from "./agents";
 import {
-  selectRuntime,
+  createRuntimeRegistry,
+  RuntimeUnavailableError,
   type AgentEvent,
   type AgentRun,
   type AgentRuntime,
@@ -120,7 +121,7 @@ interface Step {
 }
 
 /** Un runtime que responde lo guionado, en orden, y anota lo que le pidieron. */
-function stubRuntime(steps: Step[]) {
+function stubRuntime(steps: Step[], id: AgentRuntime["id"] = "fake") {
   const calls = {
     starts: [] as RunSpec[],
     resumes: [] as { ref: SessionRef; message: string; spec: ResumeSpec }[],
@@ -131,14 +132,14 @@ function stubRuntime(steps: Step[]) {
     if (!step) throw new Error("el stub se quedó sin pasos guionados");
     const events = step.events ?? (async function* () {});
     return {
-      ref: { runtime: "fake", sessionId: step.sessionId ?? `stub-${++n}`, cwd },
+      ref: { runtime: id, sessionId: step.sessionId ?? `${id === "fake" ? "stub" : id}-${++n}`, cwd },
       events: events(),
       interrupt: async () => step.onInterrupt?.(),
       result: Promise.resolve({ status: "success", text: "", usage, ...step.result }),
     };
   };
   const runtime: AgentRuntime = {
-    id: "fake",
+    id,
     capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
     async start(spec) {
       calls.starts.push(spec);
@@ -157,7 +158,7 @@ function setup(steps: Step[], now?: () => number, prefixWaitMs?: number) {
   open.push(store);
   const defs = createDefs(store);
   const stub = stubRuntime(steps);
-  const agents: Agents = createAgents({ store, defs, runtime: stub.runtime, now, prefixWaitMs });
+  const agents: Agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([stub.runtime], {}), now, prefixWaitMs });
   defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });
   defs.save({ kind: "profile", slug: "default", scope: "user", body: profile, source: "ui" });
   return { store, defs, agents, ...stub };
@@ -976,15 +977,113 @@ describe("contexto del rol", () => {
   });
 });
 
-describe("selectRuntime", () => {
-  const { runtime } = stubRuntime([]);
+describe("varios runtimes", () => {
+  const followupReport = { outcome: "done", summary: "listo", payload: { done: true } };
 
-  test("elige por CORE_RUNTIME", () => {
-    expect(selectRuntime([runtime], { CORE_RUNTIME: "fake" })).toBe(runtime);
+  /** Un core con `claude-sdk` y `opencode`; `analyst-oc` es la entrada del perfil que pide opencode. */
+  function setupBoth(claudeSteps: Step[], opencodeSteps: Step[]) {
+    const store = openStore({ path: ":memory:" });
+    open.push(store);
+    const defs = createDefs(store);
+    const claude = stubRuntime(claudeSteps, "claude-sdk");
+    const opencode = stubRuntime(opencodeSteps, "opencode");
+    const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([claude.runtime, opencode.runtime], {}) });
+    defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });
+    defs.save({
+      kind: "profile",
+      slug: "default",
+      scope: "user",
+      body: { roles: { analyst: { model: "sonnet" }, "analyst-oc": { runtime: "opencode", model: "openai/gpt-6.1-terra", effort: "high" } } },
+      source: "ui",
+    });
+    return { store, agents, claude: claude.calls, opencode: opencode.calls };
+  }
+
+  test("cada entrada del perfil corre con su runtime y la sesión queda con él", async () => {
+    const { store, agents, claude, opencode } = setupBoth([{ result: { structured: validReport } }], [{ result: { structured: validReport } }]);
+
+    const byDefault = await agents.run(request());
+    const byOpencode = await agents.run({ ...request(), profileRole: "analyst-oc" });
+
+    expect([byDefault.status, byOpencode.status]).toEqual(["success", "success"]);
+    expect(claude.starts.map((s) => s.model)).toEqual(["sonnet"]);
+    expect(opencode.starts.map((s) => [s.model, s.effort])).toEqual([["openai/gpt-6.1-terra", "high"]]);
+    expect(store.db.select().from(agentSessions).all().map((row) => [row.runtime, row.model])).toEqual([
+      ["claude-sdk", "sonnet"],
+      ["opencode", "openai/gpt-6.1-terra"],
+    ]);
   });
 
-  test("sin CORE_RUNTIME usa claude-sdk y, si no está registrado, dice cuáles hay", () => {
-    expect(() => selectRuntime([runtime], {})).toThrow(/CORE_RUNTIME="claude-sdk".*fake/);
+  test("retomar una sesión va al runtime que la abrió", async () => {
+    const { agents, claude, opencode } = setupBoth([], [{ result: { structured: validReport } }, { result: { structured: followupReport } }]);
+    const first = await agents.run({ ...request(), profileRole: "analyst-oc" });
+
+    const resumed = await agents.resume({ profile: "default", sessionId: first.sessionId, mode: "followup", brief: brief("followup") });
+
+    expect(resumed.status).toBe("success");
+    expect(opencode.resumes.map((r) => r.ref)).toEqual([{ runtime: "opencode", sessionId: "opencode-1", cwd: "/work/tree" }]);
+    expect(claude.resumes).toEqual([]);
+  });
+
+  test("resumeFrom una sesión de otro runtime abre una nueva con handoff", async () => {
+    const { agents, claude, opencode } = setupBoth([{ result: { structured: validReport } }], [{ result: { structured: followupReport } }]);
+    const first = await agents.run(request());
+
+    const next = await agents.run({ ...request("followup"), profileRole: "analyst-oc", resumeFrom: first.sessionId });
+
+    expect(next.status).toBe("success");
+    expect(claude.resumes).toEqual([]);
+    expect(opencode.starts[0]?.prompt).toContain('corrió con el runtime "claude-sdk" y esta entrada del perfil usa "opencode"');
+  });
+
+  test("un fallo de entorno dice qué runtime falló", async () => {
+    const { agents } = setupBoth([], [{ result: { status: "login_expired", message: "opencode: el login de openai venció." } }]);
+
+    const result = await agents.run({ ...request(), profileRole: "analyst-oc" });
+
+    expect(result).toMatchObject({ status: "login_expired", runtime: "opencode" });
+  });
+
+  test("una entrada que pide un runtime que el core no tiene falla antes de lanzar", async () => {
+    const store = openStore({ path: ":memory:" });
+    open.push(store);
+    const defs = createDefs(store);
+    const claude = stubRuntime([], "claude-sdk");
+    const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([claude.runtime], {}) });
+    defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });
+    defs.save({ kind: "profile", slug: "default", scope: "user", body: { roles: { analyst: { runtime: "opencode", model: "openai/gpt-6.1-terra" } } }, source: "ui" });
+
+    await expect(agents.run(request())).rejects.toThrow(RuntimeUnavailableError);
+    expect(claude.calls.starts).toEqual([]);
+  });
+});
+
+describe("createRuntimeRegistry", () => {
+  const { runtime } = stubRuntime([]);
+  const claude = { ...stubRuntime([]).runtime, id: "claude-sdk" as const };
+  const opencode = { ...stubRuntime([]).runtime, id: "opencode" as const };
+
+  test("cada entrada elige su runtime y sin runtime corre con claude-sdk", () => {
+    const registry = createRuntimeRegistry([claude, opencode], {});
+    expect(registry.get(undefined)).toBe(claude);
+    expect(registry.get("opencode")).toBe(opencode);
+    expect(registry.forced).toBeUndefined();
+  });
+
+  test("CORE_RUNTIME fuerza todos los agentes a uno", () => {
+    const registry = createRuntimeRegistry([claude, runtime], { CORE_RUNTIME: "fake" });
+    expect(registry.get("claude-sdk")).toBe(runtime);
+    expect(registry.idFor("opencode")).toBe("fake");
+  });
+
+  test("un CORE_RUNTIME que no está registrado dice cuáles hay", () => {
+    expect(() => createRuntimeRegistry([runtime], { CORE_RUNTIME: "claude-sdk" })).toThrow(/CORE_RUNTIME="claude-sdk".*fake/);
+  });
+
+  test("un runtime que el core no tiene falla al pedirlo, no al armar el registro", () => {
+    const registry = createRuntimeRegistry([claude], {});
+    expect(registry.idFor("opencode")).toBe("opencode");
+    expect(() => registry.get("opencode")).toThrow(RuntimeUnavailableError);
   });
 });
 

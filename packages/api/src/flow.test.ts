@@ -39,6 +39,12 @@ describe("Node y Edge", () => {
     expect(Node.safeParse({ type: "loop" }).success).toBe(false);
   });
 
+  test("un agente puede pedir otra entrada del perfil, con el mismo formato que la de escalada", () => {
+    const agent = { type: "agent", role: "review-bugs", mode: "review", brief: {} };
+    expect(Node.safeParse({ ...agent, profileRole: "review-bugs-opencode" }).success).toBe(true);
+    expect(Node.safeParse({ ...agent, profileRole: "review bugs" }).success).toBe(false);
+  });
+
   test("un edge es un nodo, un fin o un objeto con to", () => {
     expect(Edge.safeParse("next").success).toBe(true);
     expect(Edge.safeParse("@done").success).toBe(true);

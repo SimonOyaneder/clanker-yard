@@ -37,6 +37,7 @@ export interface StartServerOptions extends Pick<
   | "defs"
   | "legacyImport"
   | "republisher"
+  | "agentOptions"
   | "coreVersion"
   | "dataDir"
   | "onShutdown"

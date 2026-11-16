@@ -449,7 +449,15 @@ describe("arranque", () => {
 
   test("CORE_RUNTIME que no está registrado hace fallar el arranque diciendo cuáles hay", async () => {
     await expect(boot({ CORE_RUNTIME: "claude-sdk" })).rejects.toThrow(/CORE_RUNTIME="claude-sdk".*\(fake\)/);
-    await expect(boot({})).rejects.toThrow(/CORE_RUNTIME="claude-sdk"/);
+  });
+
+  test("sin CORE_RUNTIME cada perfil elige; sin claude-sdk registrado, lo que no lo dice corre con el que hay", async () => {
+    const client = await boot({});
+    const { runtimes } = await client.defs.agentOptions();
+    expect(runtimes.map((r) => [r.id, r.available])).toEqual([
+      ["claude-sdk", false],
+      ["opencode", false],
+    ]);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   openStore,
   type Flows,
   type Store,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
@@ -74,7 +75,7 @@ function setup(): { flows: Flows; store: Store; startedRoles: string[]; prompts:
   const defs = createDefs(store);
   const runtime = createFakeRuntime({ fixtures, speed: Infinity });
   // `createAgents` registra el validador de roles y perfiles: va antes de guardarlos.
-  const agents = createAgents({ store, defs, runtime });
+  const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([runtime], {}) });
   for (const [slug, body] of Object.entries(clankerLoopTemplate.roles)) {
     defs.save({ kind: "role", slug, scope: "user", body, source: "ui" });
   }

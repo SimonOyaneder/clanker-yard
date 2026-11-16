@@ -25,14 +25,14 @@ function setup(script?: AgentScript, options: { maxAgents?: number } = {}) {
       store = s;
       breakers = createBreakers({
         store: s,
-        runtime: "fake",
+        runtimes: ["fake"],
         probe: (scope) => {
           probes.push(scope);
           return Promise.resolve(down.has(scope) ? "sigue caído" : undefined);
         },
       });
       breakers.start();
-      return { breakers, runtime: "fake" };
+      return { breakers, runtimeOf: (requested) => requested ?? "fake" };
     },
     workspaceOf: (runId) => {
       const subject = store.db.select({ id: runs.subjectId }).from(runs).where(eq(runs.id, runId)).get()?.id ?? "";
@@ -187,6 +187,24 @@ describe("GitHub en rojo", () => {
 
 describe("el runtime de los agentes", () => {
   const plan = flow("plan", { plan: { type: "agent", role: "dev", mode: "plan", brief: {}, on: { ok: "@done", changes: "@failed" } } }, "plan");
+
+  test("un nodo espera al breaker del runtime de su entrada del perfil, no al de los demás", async () => {
+    vi.useFakeTimers();
+    const t = setup();
+    const entries = (t.defs.resolve("profile", "default")!.body as { roles: Record<string, unknown> }).roles;
+    t.defs.save({ kind: "profile", slug: "default", scope: "user", body: { roles: { ...entries, "dev-oc": { runtime: "opencode", model: "openai/gpt-6.1-terra" } } }, source: "ui" });
+    t.save(flow("plan-oc", { plan: { type: "agent", role: "dev", profileRole: "dev-oc", mode: "plan", brief: {}, on: { ok: "@done", changes: "@failed" } } }, "plan"));
+    t.save(plan);
+    t.breakers.trip({ scope: runtimeScope("opencode"), cause: "environment", reason: "opencode no está instalado." });
+
+    const viaOpencode = t.start("plan-oc", subject("a-1"));
+    const viaDefault = t.start("plan", subject("b-1"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(t.flows.getRun(viaDefault)).toMatchObject({ status: "done" });
+    expect(t.calls.map((c) => c.subject)).toEqual(["b-1"]);
+    expect(t.flows.getRun(viaOpencode).steps[0]).toMatchObject({ status: "pending", attempt: 0 });
+  });
 
   test("sin cuota abre runtime:<id> hasta el reset y pausa a todos los agentes, también los que no lo encontraron", async () => {
     vi.useFakeTimers();

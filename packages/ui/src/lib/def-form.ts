@@ -7,7 +7,7 @@ import type { ContextSource, Profile, ProfileRole, Role, ToolPolicy } from "@cla
 export function profileSummary(profile: Profile): string {
   const { dev, ...others } = profile.roles
   const reviews = [...new Set(Object.entries(others).filter(([role]) => role.startsWith("review-")).map(([, spec]) => spec.model))]
-  return [dev ? `dev ${dev.model}${dev.effort ? ` ${dev.effort}` : ""}` : null, reviews.length > 0 ? `reviews ${reviews.join("/")}` : null].filter(Boolean).join(" · ")
+  return [dev ? `dev ${dev.model}${dev.effort ? ` ${dev.effort}` : ""}` : null, reviews.length > 0 ? `reviews ${reviews.join(", ")}` : null].filter(Boolean).join(" · ")
 }
 
 /** El perfil con ese rol reemplazado; un `effort` en `undefined` se quita (queda el esfuerzo por defecto del modelo). */

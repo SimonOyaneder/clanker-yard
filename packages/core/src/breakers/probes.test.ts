@@ -32,12 +32,12 @@ describe("github", () => {
     github = await startFakeGitHub(() => ({ status, headers: {}, body: status === 200 ? { login: "simon" } : { message: "Bad credentials" } }));
     const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: github.baseUrl } });
     await connections.connect({ provider: "github", account: "simon", scopes: [], token: "tok" }, "ui");
-    return { connections, probe: environmentProbe({ connections, repos: createRepos(store), runtime: "fake" }) };
+    return { connections, probe: environmentProbe({ connections, repos: createRepos(store), runtimes: [{ id: "fake" }] }) };
   }
 
   test("sin ninguna cuenta conectada sigue pausado", async () => {
     const connections = createConnections(store, createFileSecrets({ dir }));
-    const probe = environmentProbe({ connections, repos: createRepos(store), runtime: "fake" });
+    const probe = environmentProbe({ connections, repos: createRepos(store), runtimes: [{ id: "fake" }] });
 
     expect(await probe(GITHUB_SCOPE)).toBe("No hay una cuenta de GitHub conectada.");
   });
@@ -70,17 +70,25 @@ describe("runtime", () => {
 
   test("claude-sdk pasa solo con Claude listo y si no dice por qué", async () => {
     const repos = createRepos(store);
-    const ready = environmentProbe({ connections: claude({}), repos, runtime: "claude-sdk" });
-    const out = environmentProbe({ connections: claude({ state: "quota_exhausted", message: "Se agotó la cuota de Claude." }), repos, runtime: "claude-sdk" });
+    const ready = environmentProbe({ connections: claude({}), repos, runtimes: [{ id: "claude-sdk" }] });
+    const out = environmentProbe({ connections: claude({ state: "quota_exhausted", message: "Se agotó la cuota de Claude." }), repos, runtimes: [{ id: "claude-sdk" }] });
 
     expect(await ready(runtimeScope("claude-sdk"))).toBeUndefined();
     expect(await out(runtimeScope("claude-sdk"))).toBe("Se agotó la cuota de Claude.");
   });
 
-  test("otro runtime no tiene causas de entorno que probar", async () => {
-    const probe = environmentProbe({ connections: claude({ state: "login_expired" }), repos: createRepos(store), runtime: "fake" });
+  test("otro runtime se prueba con su probe, y sin él no tiene causas de entorno que probar", async () => {
+    const opencode = { id: "opencode" as const, probe: () => Promise.resolve("opencode no está instalado.") };
+    const probe = environmentProbe({ connections: claude({ state: "login_expired" }), repos: createRepos(store), runtimes: [{ id: "fake" }, opencode] });
 
     expect(await probe(runtimeScope("fake"))).toBeUndefined();
+    expect(await probe(runtimeScope("opencode"))).toBe("opencode no está instalado.");
+  });
+
+  test("claude-sdk solo se prueba con la conexión si el core lo tiene registrado", async () => {
+    const probe = environmentProbe({ connections: claude({ state: "login_expired" }), repos: createRepos(store), runtimes: [{ id: "fake" }] });
+
+    expect(await probe(runtimeScope("claude-sdk"))).toBeUndefined();
   });
 });
 
@@ -92,7 +100,7 @@ describe("repo", () => {
     return createRepos(store).add({ name: "api", path });
   }
   const probeFor = () =>
-    environmentProbe({ connections: createConnections(store, createFileSecrets({ dir })), repos: createRepos(store), runtime: "fake" });
+    environmentProbe({ connections: createConnections(store, createFileSecrets({ dir })), repos: createRepos(store), runtimes: [{ id: "fake" }] });
 
   test("pasa si todos los requires responden y falla nombrando los que no", async () => {
     const id = repoWith({ version: 1, requires: [{ name: "Postgres", check: "true" }, { name: "Redis", check: "exit 1" }, { name: "Doppler", check: "exit 3" }] });

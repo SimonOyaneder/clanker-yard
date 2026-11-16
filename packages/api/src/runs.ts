@@ -155,8 +155,9 @@ export type AgentSessionStatus = z.infer<typeof AgentSessionStatus>;
 /** Una sesión de agente de un paso: un intento, o la sesión que un reintento retomó. */
 export const StepSession = z.object({
   id: AgentSessionId,
+  /** Con qué corrió: `claude-sdk`, `opencode` (o `fake` en tests y demo). */
   runtime: z.string(),
-  /** El id de la sesión en su runtime: el que `claude --resume` entiende. */
+  /** El id de la sesión en su runtime: el que entiende `claude --resume` u `opencode --session`. */
   sessionRef: z.string(),
   /** Slug del rol que corrió. */
   role: z.string(),

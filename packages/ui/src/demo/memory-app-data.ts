@@ -724,15 +724,40 @@ export function createMemoryAppData(now = Date.now()): AppData {
       })
     },
     agentOptions: async () => ({
-      models: [
-        { id: "haiku", label: "Haiku", about: "El más rápido y barato; para tareas simples y revisiones livianas." },
-        { id: "sonnet", label: "Sonnet", about: "Equilibrado: buena calidad a costo medio." },
-        { id: "opus", label: "Opus", about: "Más potente y más caro; para el trabajo difícil." },
-      ],
-      efforts: [
-        { id: "low", about: "Responde casi sin pensar: rápido y barato." },
-        { id: "medium", about: "Piensa lo justo." },
-        { id: "high", about: "Piensa a fondo: el punto de partida habitual." },
+      runtimes: [
+        {
+          id: "claude-sdk",
+          label: "Claude Code",
+          about: "Claude Code con tu suscripción o API key (Conexiones > Claude).",
+          available: true,
+          models: [
+            { id: "haiku", label: "Haiku", about: "El más rápido y barato; para tareas simples y revisiones livianas." },
+            { id: "sonnet", label: "Sonnet", about: "Equilibrado: buena calidad a costo medio." },
+            { id: "opus", label: "Opus", about: "Más potente y más caro; para el trabajo difícil." },
+          ],
+          efforts: [
+            { id: "low", about: "Responde casi sin pensar: rápido y barato." },
+            { id: "medium", about: "Piensa lo justo." },
+            { id: "high", about: "Piensa a fondo: el punto de partida habitual." },
+          ],
+        },
+        {
+          id: "opencode",
+          label: "opencode",
+          about: "opencode con los proveedores que tengas conectados (opencode auth login).",
+          available: true,
+          models: [
+            { id: "openai/gpt-6-luna", label: "openai/gpt-6-luna", about: "Recomendado: el más liviano de los nuevos de OpenAI, para tareas simples y revisiones." },
+            { id: "openai/gpt-6.1-terra", label: "openai/gpt-6.1-terra", about: "Recomendado: equilibrado, el punto de partida." },
+            { id: "openai/gpt-6.1-sol", label: "openai/gpt-6.1-sol", about: "Recomendado: el más potente de los nuevos de OpenAI, para el trabajo difícil." },
+            { id: "opencode/big-pickle", label: "opencode/big-pickle", about: "De opencode, conectado en opencode." },
+          ],
+          defaultModel: "openai/gpt-6.1-terra",
+          efforts: [
+            { id: "low", about: "Va como variante del modelo (--variant)." },
+            { id: "high", about: "Va como variante del modelo (--variant)." },
+          ],
+        },
       ],
     }),
     updateDef: async ({ kind, id: defId, body, dryRun }) => {

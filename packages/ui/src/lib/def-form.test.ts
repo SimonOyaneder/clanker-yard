@@ -13,7 +13,7 @@ const profile = Profile.parse({
 })
 
 test("el resumen dice el dev y los modelos distintos de los reviews", () => {
-  expect(profileSummary(profile)).toBe("dev opus high · reviews haiku/sonnet")
+  expect(profileSummary(profile)).toBe("dev opus high · reviews haiku, sonnet")
   expect(profileSummary(Profile.parse({ roles: { committer: { model: "sonnet" } } }))).toBe("")
 })
 

@@ -70,6 +70,11 @@ const AgentNode = z.strictObject({
   role: NodeId,
   mode: z.string().min(1),
   brief: z.record(z.string(), Value),
+  /**
+   * La entrada del perfil que pone runtime, modelo, effort y topes de este nodo; sin ella, la del rol. Así un nodo
+   * corre con otro runtime o modelo sin cambiar el rol (p. ej. `review-bugs-opencode`). `escalate.profileRole` la pisa.
+   */
+  profileRole: NodeId.optional(),
   /** De qué sesión partir; si se retoma o no lo decide Agents. */
   resumeFrom: NodeId.optional(),
   escalate: z

@@ -1,8 +1,11 @@
 import { open } from "node:fs/promises";
 import { join } from "node:path";
-import { TRANSCRIPT_TEXT_MAX_CHARS, type TranscriptEntry, type TranscriptPage } from "@clanker/api";
+import { TRANSCRIPT_TEXT_MAX_CHARS, TranscriptEntry, type TranscriptPage } from "@clanker/api";
 
-/** Dónde queda el transcript de una sesión: un mensaje del SDK por línea, tal como llegó. */
+/**
+ * Dónde queda el transcript de una sesión: un mensaje del SDK de Claude por línea, tal como llegó, o una entrada ya
+ * normalizada (`{ type: "clanker", subtype: "entry", entry }`) de otro runtime.
+ */
 export function transcriptFile(home: string, sessionRef: string): string {
   return join(home, "transcripts", `${sessionRef}.jsonl`);
 }
@@ -116,8 +119,12 @@ export function entriesOf(line: string): TranscriptEntry[] {
           text: typeof record.result === "string" ? record.result : null,
         },
       ];
-    case "clanker":
-      return record.subtype === "pre_compact" ? [{ kind: "compaction", trigger: String(record.trigger) }] : [];
+    case "clanker": {
+      if (record.subtype === "pre_compact") return [{ kind: "compaction", trigger: String(record.trigger) }];
+      // Un runtime que no es Claude (opencode) escribe sus entradas ya normalizadas.
+      const entry = record.subtype === "entry" ? TranscriptEntry.safeParse(record.entry) : undefined;
+      return entry?.success ? [entry.data] : [];
+    }
     default:
       return [];
   }

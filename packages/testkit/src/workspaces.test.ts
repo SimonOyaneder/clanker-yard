@@ -23,6 +23,7 @@ import {
   type Store,
   type WorkspaceLease,
   type Workspaces,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -401,7 +402,7 @@ describe("workspace.acquire", () => {
     const flows = createFlows({
       store,
       defs,
-      agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures: demoFixtures }) }),
+      agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([createFakeRuntime({ fixtures: demoFixtures })], {}) }),
       artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }),
       roles: () => undefined,
     });

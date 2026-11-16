@@ -1,6 +1,5 @@
 import type { CachedIssue, ClankerProject, IssueId, Origin, ProjectId, QueueEntry, RepoId } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import type { RuntimeId } from "../agents/runtime";
 import type { Breakers as AllBreakers } from "../breakers/breakers";
 import { openDecision } from "../decisions/decisions";
 import type { Engine } from "../flows/engine";
@@ -66,8 +65,11 @@ export interface SchedulerDeps {
   /** Arma (y disuelve) la base combinada de una issue con varios padres antes de lanzar su corrida. */
   workspaces: Pick<Workspaces, "combineBase" | "dissolveBase">;
   lanes: LaneSettings;
-  /** El runtime con que corren los agentes de este core: su breaker pausa todos los lanzamientos. */
-  runtime: RuntimeId;
+  /**
+   * Los runtimes que usan los agentes del perfil de un proyecto (`ProfileRole.runtime`): el breaker de cualquiera de
+   * ellos pausa los lanzamientos del proyecto. Una entrada que pide otro runtime solo frena a su propio paso.
+   */
+  runtimesOf(project: ClankerProject): readonly string[];
   /** Sin él nada está pausado. */
   breakers?: Breakers;
   /** Dónde se anota lo que falla en un tick; por defecto uno propio sobre `store`. */
@@ -204,8 +206,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const related = conflictsWithRunning(issue, cache, inFlight);
     if (related !== undefined) return `relacionada con ${related.ref.key}, que está en vuelo: no corren a la vez`;
     const repoId = repoOfIssue(project, issue);
-    const paused = (repoId === undefined ? undefined : pausedBecause(`repo:${repoId}`)) ?? pausedBecause(`runtime:${deps.runtime}`);
-    return paused;
+    const scopes = [...(repoId === undefined ? [] : [`repo:${repoId}`]), ...deps.runtimesOf(project).map((id) => `runtime:${id}`)];
+    for (const scope of scopes) {
+      const paused = pausedBecause(scope);
+      if (paused !== undefined) return paused;
+    }
+    return undefined;
   }
 
   /** El repo donde correrá la issue, si ya se sabe (ver `issuePlan`). */

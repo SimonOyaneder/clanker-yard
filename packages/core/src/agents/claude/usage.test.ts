@@ -1,3 +1,4 @@
+import { createRuntimeRegistry } from "../runtime";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -121,7 +122,7 @@ function setup(query: QueryFn) {
     query,
     baseEnv: { PATH: "/usr/bin", HOME: "/Users/x", USER: "x" },
   });
-  const agents: Agents = createAgents({ store, defs, runtime });
+  const agents: Agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([runtime], {}) });
   defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });
   defs.save({ kind: "profile", slug: "default", scope: "user", body: profile, source: "ui" });
   return { store, agents };

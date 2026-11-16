@@ -16,6 +16,9 @@ export const REPO_SCOPE_PREFIX = "repo:";
 export const repoScope = (repoId: RepoId): string => `${REPO_SCOPE_PREFIX}${repoId}`;
 export const runtimeScope = (runtime: string): string => `runtime:${runtime}`;
 
+/** El runtime que depende de la conexión `claude`. */
+export const CLAUDE_RUNTIME = "claude-sdk";
+
 export type { BreakerCause };
 
 /** Los minutos entre una prueba y la siguiente: 1, 5, 15 y 30, y después cada 30. */
@@ -69,8 +72,8 @@ export interface Breakers {
 
 export interface BreakersOptions {
   store: Store;
-  /** El runtime con que corren los agentes: la conexión de Claude solo abre su breaker si es `claude-sdk`. */
-  runtime: string;
+  /** Los runtimes que el core tiene registrados: la conexión de Claude abre el breaker de `claude-sdk` si está entre ellos. */
+  runtimes: readonly string[];
   /**
    * La prueba barata de un ámbito: `undefined` si la causa se fue, o por qué sigue. Si lanza cuenta como
    * fallida. Una prueba que reconecta o prueba cosas puede emitir eventos: mientras corre se ignoran los de su ámbito.
@@ -85,7 +88,7 @@ export interface BreakersOptions {
   errors?: ErrorReporter;
 }
 
-export function createBreakers({ store, runtime, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS, errors = createErrorReporter(store) }: BreakersOptions): Breakers {
+export function createBreakers({ store, runtimes, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS, errors = createErrorReporter(store) }: BreakersOptions): Breakers {
   const entries = new Map<string, OpenBreaker>();
   const timers = new Map<string, NodeJS.Timeout>();
   const probing = new Set<string>();
@@ -94,7 +97,7 @@ export function createBreakers({ store, runtime, probe, label = (scope) => scope
 
   /** La conexión de la que depende cada ámbito global. */
   const scopeOfProvider = (provider: unknown): string | undefined =>
-    provider === "github" ? GITHUB_SCOPE : provider === "claude" && runtime === "claude-sdk" ? runtimeScope(runtime) : undefined;
+    provider === "github" ? GITHUB_SCOPE : provider === "claude" && runtimes.includes(CLAUDE_RUNTIME) ? runtimeScope(CLAUDE_RUNTIME) : undefined;
 
   /** Guarda lo que sobrevive a un corte, en la misma transacción que el cambio. */
   function persist(tx: Tx): void {

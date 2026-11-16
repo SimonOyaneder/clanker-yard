@@ -35,10 +35,11 @@ export type { BriefRequest, Briefs, PreparedBrief, PreviousReport } from "./agen
 export { listHunks } from "./git/tree";
 export type { Hunk } from "./git/tree";
 export { createClaudeRuntime } from "./agents/claude/claude-runtime";
+export { createOpencodeRuntime } from "./agents/opencode/opencode-runtime";
 export type { ClaudeRuntimeOptions, QueryFn } from "./agents/claude/claude-runtime";
 export { apiKeyCredentials, subscriptionCredentials } from "./agents/claude/credentials";
 export type { ClaudeCredentials, SubscriptionOptions } from "./agents/claude/credentials";
-export { DEFAULT_RUNTIME, selectRuntime } from "./agents/runtime";
+export { createRuntimeRegistry, DEFAULT_RUNTIME, RuntimeUnavailableError, type RuntimeRegistry } from "./agents/runtime";
 export type {
   AgentEvent,
   AgentRun,

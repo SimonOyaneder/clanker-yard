@@ -25,6 +25,7 @@ import {
   type Store,
   type WorkspaceLease,
   type Workspaces,
+  createRuntimeRegistry,
 } from "@clanker/core";
 import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -316,7 +317,7 @@ describe("recipe.check", () => {
     const flows = createFlows({
       store,
       defs,
-      agents: createAgents({ store, defs, runtime: createFakeRuntime({ fixtures, speed: Infinity }) }),
+      agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([createFakeRuntime({ fixtures, speed: Infinity })], {}) }),
       artifacts,
       roles: () => undefined,
     });
@@ -478,7 +479,7 @@ describe("recipe.check con el runtime fake", () => {
     const flows = createFlows({
       store,
       defs,
-      agents: createAgents({ store, defs, runtime }),
+      agents: createAgents({ store, defs, runtimes: createRuntimeRegistry([runtime], {}) }),
       artifacts,
       roles: () => ({ modes: { implement: { outcomes: ["ok"] } } }),
       workspaceOf: () => ({ path: lease!.path, base: "main" }),

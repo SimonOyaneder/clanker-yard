@@ -157,6 +157,16 @@ export function NodePanel({ id, node, flow, roles, flows, actions, events, marks
               )
             }}
           </Field>
+          <TextField
+            label="Entrada del perfil"
+            help="Con qué runtime y modelo corre este paso: el nombre de una entrada del perfil del proyecto (por ejemplo review-bugs-opencode). Vacío: la del rol."
+            value={node.profileRole ?? ""}
+            onChange={(value) => {
+              const next = { ...node, profileRole: value.trim() }
+              if (next.profileRole === "") delete (next as Partial<typeof next>).profileRole
+              onChange(next)
+            }}
+          />
           <JsonField label="Brief" help="Lo que se le entrega al agente, como JSON. Un valor que empieza con $ (como $plan.files) toma el resultado de un paso anterior." value={node.brief} onChange={(brief) => set({ brief })} />
         </>
       ) : null}
