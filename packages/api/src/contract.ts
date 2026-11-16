@@ -71,6 +71,8 @@ const system = {
       platform: z.enum(["darwin", "linux", "win32"]),
       /** El client_id de la OAuth app de Linear que usa este core: el incluido, o el de `config.json` o el entorno. */
       linearClientId: z.string(),
+      /** Hay client_id de la GitHub App (`config.json` o el entorno): sin él, GitHub solo se conecta pegando un token. */
+      githubApp: z.boolean(),
     }),
   ),
   /** Con `drain` el core no toma pasos nuevos y espera las acciones en curso antes de salir. */

@@ -33,6 +33,7 @@ const router = os.router({
       dataDir: "/tmp/clanker",
       platform: "linux" as const,
       linearClientId: "linear-client",
+      githubApp: false,
     })),
     lanes: os.system.lanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
     setLanes: os.system.setLanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),

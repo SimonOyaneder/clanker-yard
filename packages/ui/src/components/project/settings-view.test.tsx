@@ -71,7 +71,8 @@ test("cambiar reviewRounds y guardar manda solo flowParams, con un toast que lo 
 })
 
 test("el proyecto del tracker se cambia con el mismo selector y se guarda como trackerRef", async () => {
-  const { project, update } = await setup()
+  // Un proyecto viejo guardaba un nombre en vez del id: el selector lo dice y pide elegir uno.
+  const { project, update } = await setup({ trackerRef: "boundaries" })
   const section = screen.getByRole("region", { name: "Proyecto del tracker" })
   expect(await within(section).findByText(/El proyecto guardado \(boundaries\) no está en la lista/)).toBeTruthy()
 
@@ -175,7 +176,7 @@ test("quitar un repo y hacer otro el de por defecto reordena la lista que se gua
 })
 
 test("con tracker local el mapeo de estados explica que no hay nada que mapear", async () => {
-  await setup({}, 1)
+  await setup({ tracker: "local" }, 1)
 
   expect(within(screen.getByRole("region", { name: "Mapeo de estados" })).getByText(/El tracker local ya usa las categorías/)).toBeTruthy()
 })

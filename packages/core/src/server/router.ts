@@ -158,6 +158,7 @@ export function createRouter(deps: RouterDeps) {
         dataDir: deps.dataDir,
         platform,
         linearClientId: deps.connections.linearClientId,
+        githubApp: deps.connections.githubAppConfigured,
       })),
       lanes: os.system.lanes.handler(() => deps.lanes.usage()),
       breakers: os.system.breakers.handler(() => deps.breakers.list()),

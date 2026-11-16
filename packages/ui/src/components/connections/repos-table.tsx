@@ -17,7 +17,11 @@ import { looksLikeGitHubRepo } from "@/lib/repo-path"
 
 const RECIPE = {
   found: { label: "encontrada", tone: tone.green, hint: "El repo tiene .clanker/recipe.json y es válida." },
-  missing: { label: "falta", tone: tone.neutral, hint: "El repo no tiene .clanker/recipe.json: las corridas no saben prepararlo ni qué checks correr." },
+  missing: {
+    label: "falta",
+    tone: tone.neutral,
+    hint: "El repo no tiene .clanker/recipe.json. Las corridas igual trabajan, pero sin instalar dependencias ni correr tests y lint: créala (ver Receta del repo en el README) y vuelve a abrir Conexiones.",
+  },
 } as const
 
 interface Props {
@@ -82,7 +86,7 @@ export function ReposTable({ rows, onTest, onAdded }: Props) {
       {rows.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-8 text-center">
           <FolderGit2 className="size-5 text-muted-foreground" />
-          <p className="max-w-sm text-[13px] text-muted-foreground">Todavía no hay repos registrados. Las corridas trabajan sobre un repo: agrega el checkout y el core lee su receta.</p>
+          <p className="max-w-sm text-[13px] text-muted-foreground">Todavía no hay repos registrados. Las corridas trabajan sobre un repo: agrega la carpeta donde lo tienes clonado. Si trae una receta (.clanker/recipe.json, cómo instalarlo y qué checks correr), el core la lee.</p>
           <Button size="sm" onClick={add}>
             <Plus /> Agregar repo
           </Button>

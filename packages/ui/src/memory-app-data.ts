@@ -1,6 +1,6 @@
 import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
-import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
+import { SEED_REBASE, SEED_TECHLEAD } from "@/seed-flows"
 import { buildOpenPrs } from "@/seed-prs"
 import { aggregate, seedClosedRuns } from "@/seed-metrics"
 import { seedStep, transcriptPage, type StepSeed } from "@/seed-steps"
@@ -14,7 +14,7 @@ const id = <P extends string>(prefix: P, n: number) => `${prefix}_${String(n).pa
 // Los proyectos de Linear de ejemplo: los de la persona primero, como los ordena el core.
 const TRACKER_PROJECTS = [
   { ref: { tracker: "linear" as const, id: "5d1c0a52-7a58-4f43-9a0e-0c7f5b2f1a01" }, name: "Boundaries de engines", mine: true },
-  { ref: { tracker: "linear" as const, id: "0a9e3c1b-2f6d-4b88-8d57-7e0d4c9a3b02" }, name: "Clanker Yard MVP", mine: true },
+  { ref: { tracker: "linear" as const, id: "0a9e3c1b-2f6d-4b88-8d57-7e0d4c9a3b02" }, name: "SOPORTE", mine: true },
   { ref: { tracker: "linear" as const, id: "c43b8e70-91d2-4e0c-a6f5-3b1e8d2f6c03" }, name: "Facturación mensual", mine: false },
   { ref: { tracker: "linear" as const, id: "9e72d4a8-6b15-4c39-b0a2-5f8c1d7e4a04" }, name: "Limpieza de feature flags", mine: false },
 ]
@@ -29,7 +29,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       slug: "boundaries-de-engines",
       name: "Boundaries de engines",
       tracker: "linear",
-      trackerRef: "boundaries",
+      trackerRef: TRACKER_PROJECTS[0]!.ref.id,
       trackerAccount: "clanker-yard",
       defaultFlowId: "techlead-clasico",
       defaultProfileId: "medio",
@@ -47,11 +47,11 @@ export function createMemoryAppData(now = Date.now()): AppData {
       id: id("prj", 2),
       slug: "soporte",
       name: "SOPORTE",
-      tracker: "local",
-      trackerRef: id("prj", 2),
-      trackerAccount: null,
-      defaultFlowId: "juguete",
-      defaultProfileId: "juguete",
+      tracker: "linear",
+      trackerRef: TRACKER_PROJECTS[1]!.ref.id,
+      trackerAccount: "clanker-yard",
+      defaultFlowId: "techlead-clasico",
+      defaultProfileId: "eco",
       repos: [],
       queueFilter: {},
       conventions: {},
@@ -106,8 +106,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
   const ran = (from: number, to?: number): Pick<Step, "startedAt" | "endedAt"> => ({ startedAt: min(from), endedAt: to === undefined ? null : min(to) })
 
   const run = (n: number, issueN: number, status: Run["status"], startedMinAgo: number, steps: Step[], extra: Partial<RunDetail> = {}): RunDetail => {
-    const toy = projects[0]!.id !== issues[issueN - 1]!.projectId
-    const flowDef = toy ? SEED_TOY : SEED_TECHLEAD
+    const flowDef = SEED_TECHLEAD
     return {
       id: id("run", n),
       projectId: issues[issueN - 1]!.projectId,
@@ -119,14 +118,14 @@ export function createMemoryAppData(now = Date.now()): AppData {
       status,
       parkReason: null,
       outcome: status === "done" ? "done" : null,
-      params: toy ? {} : { base: "main", reviewRounds: 3, checkRounds: 3 },
+      params: { base: "main", reviewRounds: 3, checkRounds: 3 },
       rounds: {},
       costMicros: steps.reduce((sum, s) => sum + s.costMicros, 0),
       startedAt: min(startedMinAgo),
       endedAt: status === "done" || status === "failed" ? min(startedMinAgo - 12) : null,
       steps,
       flowDef,
-      workspace: toy ? null : { repo: "api", branch: `ba-${issueN}`, base: "main" },
+      workspace: { repo: "api", branch: `ba-${issueN}`, base: "main" },
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       ...extra,
     }
@@ -310,7 +309,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
   }
 
   const connections: Connection[] = [
-    { provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 60 * day, expiresSoon: false, auth: "pat" },
+    { provider: "github", account: "octocat", scopes: ["repo"], status: "active", expiresAt: now + 60 * day, expiresSoon: false, auth: "pat" },
     { provider: "linear", account: "clanker-yard", scopes: ["read", "write"], status: "expired", expiresAt: now - 2 * day },
   ]
   const connect = (c: Connection) => {
@@ -339,19 +338,17 @@ export function createMemoryAppData(now = Date.now()): AppData {
     modes: { [mode]: { instructions: `Haz el trabajo del modo ${mode}.`, report: { type: "object" }, outcomes: ["ok"], session: "new" } },
   })
   const defsStore: DefRecord[] = [
-    ...[SEED_TECHLEAD, SEED_TOY, SEED_REBASE].map((flow) => def("flow", flow.id, flow, flow === SEED_TECHLEAD ? { currentVersion: 3, version: 3 } : {})),
+    ...[SEED_TECHLEAD, SEED_REBASE].map((flow) => def("flow", flow.id, flow, flow === SEED_TECHLEAD ? { currentVersion: 3, version: 3 } : {})),
     def("role", "dev", roleBody("Eres quien implementa la issue.", "implement")),
     def("role", "review-bugs", roleBody("Buscas bugs de producción en el cambio.", "review")),
     def("role", "review-tests", roleBody("Revisas los tests del cambio.", "review")),
     def("role", "review-patterns", roleBody("Revisas patrones y simplicidad.", "review")),
     def("role", "review-lore", roleBody("Revisas el cambio contra el lore del equipo.", "review")),
     def("role", "committer", roleBody("Armas los commits y el PR.", "plan")),
-    def("role", "juguete", roleBody("Saludas.", "saludar")),
     def("profile", "eco", { roles: { dev: { model: "sonnet", effort: "high" }, "review-bugs": { model: "sonnet" }, "review-tests": { model: "haiku" } } }),
     def("profile", "medio", { roles: { dev: { model: "sonnet", effort: "medium" }, "review-bugs": { model: "sonnet" }, "review-tests": { model: "haiku", effort: "high" }, committer: { model: "sonnet" } } }),
     def("context", "lore", { description: "Lecciones de reviews anteriores", refs: ["rule:lore"] }),
     def("context", "commits", { description: "Cómo se hacen los commits", refs: ["skill:commit"] }),
-    def("profile", "juguete", { roles: { juguete: { model: "haiku" } } }),
   ]
   // Los bodies de las versiones guardadas desde `updateDef`, por def.
   const bodies = new Map<string, Map<number, { body: unknown; source: string; createdAt: number }>>()
@@ -504,7 +501,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       if (found.origin === "factory") throw new Error(`El pack "${packId}" viene con la app: no se puede quitar.`)
       packsStore = packsStore.filter((p) => p.id !== packId)
     },
-    coreInfo: async () => ({ dataDir: "/Users/ana/Library/Application Support/Clanker Yard", linearClientId: "60358f9aaddae2ba3a9c09e1419c2579" }),
+    coreInfo: async () => ({ dataDir: "/Users/ana/Library/Application Support/Clanker Yard", linearClientId: "60358f9aaddae2ba3a9c09e1419c2579", githubApp: false }),
     breakers: async () => breakers.map((b) => ({ ...b })),
     openPrs: async () => prs.map((p) => ({ ...p })),
     refreshPrs: async () => {},

@@ -49,20 +49,54 @@ xattr -dr com.apple.quarantine "/Applications/Clanker Yard.app"
 
 ## Primeros pasos
 
-1. Abre Conexiones (en la barra lateral, sección Configurar).
-2. GitHub: con la tarjeta de GitHub sin conectar aparece el campo "Personal access token (classic)". Pulsa "Crear el token con el scope ya marcado": abre en GitHub el formulario de un token classic con el scope `repo`. Créalo, pégalo en el campo y pulsa "Probar". Un token fine-grained no sirve porque no puede leer los checks. Ignora "Conectar con la GitHub App" salvo que hayas registrado la App (`docs/github-app.md`).
-3. Linear: en la tarjeta de Linear pulsa "Conectar con Linear" y autoriza en el navegador. Para otro workspace, "Conectar otro workspace": cada workspace es una cuenta.
-4. Claude: en la tarjeta de Claude pulsa "Probar". Hace una llamada mínima, detecta tu versión y plan y muestra cuánto llevas usado.
-5. Repos: en "Repos y recetas" pulsa "Agregar repo" y elige en el Finder la carpeta donde tienes clonado el repo (el checkout local, no la URL de GitHub). El core lee la receta del repo y "Probar receta" la corre en un worktree desechable.
-6. Proyecto: pulsa el botón de nuevo proyecto de la barra lateral (`⌘N`, o `Archivo > Nuevo proyecto…`). Elige un nombre, el tracker Linear, el "Proyecto del tracker" de la lista, el "Flujo por defecto" (Techlead clásico) y el "Perfil por defecto" (qué modelo usa cada rol).
-7. Correr: en la pestaña Operación del proyecto, la lista "En cola" muestra las issues con su motivo; "Correr" lanza el flujo sobre una. Con el proyecto activo, el Scheduler toma la cola solo; "Pausar" y "Reanudar" lo detienen y lo retoman.
-8. Seguir el trabajo:
+Al abrir la app sin proyectos ves una bienvenida con los cinco pasos de la configuración; el pie de la barra lateral muestra "Configuración n/5" hasta completarlos, y cada paso lleva a donde se hace.
+
+1. GitHub (en Conexiones): pulsa "Crear token en GitHub", que abre el formulario de un token classic con el scope `repo` ya marcado. Créalo, pégalo en el campo "Personal access token (classic)" y pulsa "Probar". Un token fine-grained no sirve porque no puede leer los checks. La opción "Conectar con la GitHub App" solo aparece si registraste la App y pusiste su `client_id` (`docs/github-app.md`).
+2. Linear: pulsa "Conectar con Linear" y autoriza en el navegador. Para otro workspace, "Conectar otro workspace": cada workspace es una cuenta.
+3. Claude: pulsa "Probar". Hace una llamada mínima, detecta tu versión y plan y muestra cuánto llevas usado.
+4. Repo: en "Repos y recetas" pulsa "Agregar repo" y elige en el Finder la carpeta donde tienes clonado el repo (el checkout local, no la URL de GitHub). Si el repo tiene receta (ver abajo), "Probar receta" la corre en un worktree desechable.
+5. Proyecto: pulsa el botón de nuevo proyecto de la barra lateral (`⌘N`, o `Archivo > Nuevo proyecto…`). Elige un nombre, el proyecto de Linear de la lista, el "Flujo por defecto" (Techlead clásico) y el "Perfil por defecto" (qué modelo usa cada agente). El tracker "Local (para probar)" no lee de ningún lado: sus issues se crean por la API.
+
+Después:
+
+1. Correr: en la pestaña Operación del proyecto, la lista "En cola" muestra las issues con su motivo; "Correr" lanza el flujo sobre una. Con el proyecto activo, la app toma la cola sola; "Pausar" y "Reanudar" lo detienen y lo retoman.
+2. Seguir el trabajo:
    - Bandeja (`⇧⌘I`): las decisiones que esperan por ti.
+   - Learnings (`⇧⌘A`): lo que los agentes proponen recordar; solo lo que apruebas llega a los siguientes.
    - Stacks de PR (`⇧⌘P`): tus PRs abiertos en los repos registrados, agrupados por stack.
-   - Flujos: la biblioteca de flujos, roles y perfiles, que puedes editar.
-   - Ajustes del proyecto (pestaña Ajustes, `⇧⌘3`): repos, filtros de la cola, mapeo de estados, convenciones y parámetros del flujo.
+   - Flujos: la biblioteca de flujos, roles y perfiles (ver abajo).
+   - Ajustes del proyecto (pestaña Ajustes, `⇧⌘3`): repos, proyecto de Linear, filtros de la cola, mapeo de estados, convenciones, parámetros del flujo y exportar o importar su configuración.
+   - Ajustes de la app (barra lateral, Configurar > Ajustes): cuántas corridas caben a la vez en cada carril de la máquina, los packs activos, con qué flujo, perfil y paralelismo parte un proyecto nuevo, y la carpeta de datos.
+
+Un proyecto creado antes de que la app listara los proyectos de Linear puede tener guardado un nombre en vez del id: Operación lo avisa con "Elegir el proyecto de Linear", que lleva a elegirlo de nuevo.
 
 `⌘K` abre la paleta de comandos y `⌘/` la lista de atajos.
+
+## Receta del repo
+
+Para que los agentes instalen dependencias y corran tests y lint, el repo necesita `.clanker/recipe.json`. Sin receta las corridas trabajan igual, pero sin checks. Un ejemplo (el de este repo):
+
+```json
+{
+  "version": 1,
+  "requires": [{ "name": "npm", "check": "npm --version" }],
+  "setup": { "worktree": ["npm ci --silent"] },
+  "commands": {
+    "typecheck": "npm run -s typecheck",
+    "lint": "npm run -s lint",
+    "test:related": "npx vitest related --run --passWithNoTests {{files}}"
+  },
+  "checks": ["typecheck", "lint", "test:related"]
+}
+```
+
+`requires` se prueba antes de correr, `setup.worktree` prepara cada worktree nuevo y `checks` corre en orden y se corta en el primer rojo. Un comando con `{{files}}` recibe los archivos que cambió la issue y se salta si no cambió nada. En Conexiones, "Probar receta" la corre en un worktree desechable y muestra el log en vivo.
+
+## Flujos, roles y perfiles
+
+En Flujos están los flujos, roles y perfiles que usa la app. Uno incluido no se edita directo: "Duplicar para editar" crea uno tuyo con el mismo slug, que manda desde ese momento. Un flujo tuyo se edita con "Editar": en un canvas (agregas pasos desde la paleta, los conectas arrastrando de un paso a otro y el panel edita el paso elegido) o como JSON con validación en vivo, y cada vez que guardas queda una versión nueva; las corridas en curso siguen con la versión con que empezaron. Los roles y perfiles se editan con un formulario.
+
+Lo que versionas en el repo viaja con él: el core carga `.clanker/flows/<slug>.json`, `.clanker/roles/<slug>.md` y `.clanker/profiles/<slug>.json` de la branch por defecto al registrar el repo y cada 5 minutos. "Exportar al repo" (en el detalle de uno tuyo) abre un PR en draft con ese archivo, sin tocar tu checkout. La configuración de un proyecto se exporta e importa como JSON desde Ajustes del proyecto > Exportar e importar.
 
 ## Conceptos
 
@@ -138,5 +172,6 @@ Antes de tocar código lee [`AGENTS.md`](AGENTS.md): reglas, límites entre paqu
 - **GitHub dice que al token le falta un permiso:** el token necesita el scope `repo` y debe ser classic. En la tarjeta de GitHub, "Crear token con los permisos marcados" (menú de la tarjeta) abre el formulario ya marcado; pega el nuevo y pulsa "Probar".
 - **Linear tiene varias cuentas:** cada workspace es una conexión. En el selector de proyecto de Linear aparecen los de todas las cuentas conectadas, con el nombre del workspace al lado cuando son más de una; elige el de la cuenta correcta.
 - **Un repo no aparece en Stacks de PR:** Watch solo busca los PRs abiertos por ti en los repos registrados. Regístralo en Conexiones con "Agregar repo".
-- **El pack no cargó:** la app no instala packs sola; el core lee los de `~/Library/Application Support/Clanker Yard/packs/<id>` al arrancar. Para el de Acme: `cp -R packs/acme ~/Library/Application\ Support/Clanker\ Yard/packs/` y reinicia con `Archivo > Salir y detener agentes`. Si un pack está roto, el core sigue y deja un evento de error `packs.load` con el archivo.
+- **Un pack no aparece:** el de Acme viene incluido en la app y se ve en Ajustes > Packs. Otro pack se instala desde ahí con la ruta de su carpeta (la que tiene `pack.json`); si está roto, el error dice qué archivo y campo fallan.
+- **Un proyecto pide elegir su proyecto de Linear:** es un proyecto viejo que guardó el nombre en vez del id. "Elegir el proyecto de Linear" abre Ajustes del proyecto en "Proyecto del tracker".
 - **"El core está caído":** el banner de arriba ofrece "Reintentar" y "Ver logs" (también en `Archivo > Ver logs del core`).

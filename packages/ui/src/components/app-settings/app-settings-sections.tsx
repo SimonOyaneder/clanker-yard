@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useHost } from "@/host"
 import { type DefaultsDraft, orgsWithoutPack } from "@/lib/app-settings"
 import { copy } from "@/lib/clipboard"
-import { defName, selectableFlows } from "@/lib/defs"
+import { defaultFlowSlug, defaultProfileSlug, defName, selectableFlows } from "@/lib/defs"
 import { tone } from "@/lib/format"
 import type { Problems } from "@/lib/project-settings"
 import { messageOf } from "@/lib/undoable"
@@ -230,6 +230,11 @@ const describedBy = (id: string, error: string | undefined) => [`${id}-hint`, er
 export function DefaultsSection({ draft, update, problems, flows, profiles }: DefaultsProps) {
   const choosable = selectableFlows(flows, draft.defaultFlowId)
   const flowOf = flows.find((f) => f.slug === draft.defaultFlowId)
+  // Sin default, Nuevo proyecto preselecciona el flujo y el perfil de siempre: el vacío se llama por lo que hace.
+  const autoFlow = flows.find((f) => f.slug === defaultFlowSlug(choosable))
+  const noFlow = autoFlow ? `Automático (${defName(autoFlow)})` : "Sin flujo"
+  const autoProfile = defaultProfileSlug(profiles)
+  const noProfile = autoProfile ? `Automático (${autoProfile})` : "Sin perfil"
   return (
     <Section
       id="defaults"
@@ -240,10 +245,10 @@ export function DefaultsSection({ draft, update, problems, flows, profiles }: De
         <Field id="new-default-flow" label="Flujo" hint="Los pasos que sigue cada issue: por ejemplo, planear, programar y abrir el PR.">
           <Select value={draft.defaultFlowId ?? NONE} onValueChange={(v) => update({ defaultFlowId: v === NONE ? null : v })}>
             <SelectTrigger id="new-default-flow" size="sm" className="w-full">
-              <SelectValue>{flowOf ? defName(flowOf) : (draft.defaultFlowId ?? "Sin flujo")}</SelectValue>
+              <SelectValue>{flowOf ? defName(flowOf) : (draft.defaultFlowId ?? noFlow)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Sin flujo</SelectItem>
+              <SelectItem value={NONE}>{noFlow}</SelectItem>
               {choosable.map((f) => (
                 <SelectItem key={f.slug} value={f.slug}>
                   <DefOption def={f} />
@@ -255,10 +260,10 @@ export function DefaultsSection({ draft, update, problems, flows, profiles }: De
         <Field id="new-default-profile" label="Perfil" hint="Qué modelo usan los agentes y cuánto razonan.">
           <Select value={draft.defaultProfileId ?? NONE} onValueChange={(v) => update({ defaultProfileId: v === NONE ? null : v })}>
             <SelectTrigger id="new-default-profile" size="sm" className="w-full">
-              <SelectValue>{draft.defaultProfileId ?? "Sin perfil"}</SelectValue>
+              <SelectValue>{draft.defaultProfileId ?? noProfile}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>Sin perfil</SelectItem>
+              <SelectItem value={NONE}>{noProfile}</SelectItem>
               {profiles.map((p) => (
                 <SelectItem key={p.slug} value={p.slug}>
                   <DefOption def={p} />

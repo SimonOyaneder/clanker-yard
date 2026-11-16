@@ -1,6 +1,7 @@
 import type { ClankerProject, Run } from "@clanker/api"
 import { BookCheck, ChevronRight, Copy, GitPullRequest, Inbox, Keyboard, Plug, Plus, RefreshCw, Search, Settings, Workflow } from "lucide-react"
 import { PlanUsage } from "@/components/connections/plan-usage"
+import { SetupProgress } from "@/components/setup-checklist"
 import type { ClaudePlan } from "@/hooks/use-claude-plan"
 import type { CoreState } from "@/host"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -23,6 +24,7 @@ import { copy } from "@/lib/clipboard"
 import { footerStatus, type FooterTone } from "@/lib/core-status"
 import { readPref, writePref } from "@/lib/prefs"
 import { barProjects } from "@/lib/projects"
+import type { SetupStep, SetupStepId } from "@/lib/setup"
 import { cn } from "@/lib/utils"
 import { Hint } from "./common"
 
@@ -49,6 +51,8 @@ interface Props {
   connectionsAlert: boolean
   onSelectConnections: () => void
   plan: ClaudePlan
+  /** La configuración inicial; `null` mientras no llegan las conexiones, los repos y los proyectos. */
+  setup: { steps: SetupStep[]; onStep: (id: SetupStepId) => void } | null
   prsBadge: { count: number; tone: "red" | "green" | "muted" } | null
   onSelectPrs: () => void
   connected: boolean
@@ -104,7 +108,7 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, learningsActive, learningsBadge, onSelectLearnings, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, flowsActive, onSelectFlows, settingsActive, onSelectSettings, plan, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
+export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, learningsActive, learningsBadge, onSelectLearnings, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, flowsActive, onSelectFlows, settingsActive, onSelectSettings, plan, setup, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
   const actions = useAppActions()
   const status = footerStatus(core, { error, connected })
   const inBar = barProjects(projects)
@@ -266,6 +270,7 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
       </SidebarContent>
 
       <SidebarFooter className="gap-2.5 border-t border-sidebar-border px-3 pt-3 pb-2">
+        {setup ? <SetupProgress steps={setup.steps} onStep={setup.onStep} /> : null}
         <PlanUsage plan={plan} />
         <div className="flex items-center justify-between gap-2">
           <Hint label="Actualizar ahora" keys="⌘R" side="top">

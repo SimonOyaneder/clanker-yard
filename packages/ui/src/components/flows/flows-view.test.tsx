@@ -35,7 +35,7 @@ test("la vista lista los flujos con su origen, versión y proyectos, y abre el g
   const row = await waitFor(() => rowOf("techlead-clasico"))
   expect(within(row).getByText("incluido")).toBeTruthy()
   expect(within(row).getByText("v3")).toBeTruthy()
-  expect(within(row).getByText("Boundaries de engines")).toBeTruthy()
+  expect(within(row).getByText(/Boundaries de engines, SOPORTE/)).toBeTruthy()
   fireEvent.click(within(row).getByRole("button"))
   expect(await screen.findByRole("group", { name: "Grafo del flujo techlead-clasico" })).toBeTruthy()
   expect(await screen.findByText("versión 2")).toBeTruthy()
@@ -68,15 +68,12 @@ test("uno incluido no se archiva y dice qué hacer", async () => {
 })
 
 test("los flujos internos van aparte y plegados", async () => {
-  const base = createMemoryAppData()
-  const flows = await base.defs("flow")
-  const internal: DefRecord = { ...flows.find((f) => f.slug === "juguete")!, body: { ...(flows.find((f) => f.slug === "juguete")!.body as object), internal: true } }
-  await openFlows({ defs: async (kind, opts) => (kind === "flow" ? [...flows.filter((f) => f.slug !== "juguete"), internal] : base.defs(kind, opts)) })
+  await openFlows()
   const toggle = await screen.findByRole("button", { name: /Internos/ })
   expect(toggle.getAttribute("aria-expanded")).toBe("false")
   expect(screen.queryByRole("list", { name: "Flujos internos" })).toBeNull()
   fireEvent.click(toggle)
-  expect(within(screen.getByRole("list", { name: "Flujos internos" })).getAllByText("interno")).toHaveLength(2)
+  expect(within(screen.getByRole("list", { name: "Flujos internos" })).getAllByText("interno")).toHaveLength(1)
 })
 
 test("sin flujos explica por qué y qué revisar", async () => {

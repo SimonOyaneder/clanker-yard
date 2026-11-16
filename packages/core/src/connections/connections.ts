@@ -113,6 +113,8 @@ export interface ConnectionsOptions {
 export interface Connections {
   /** El client_id de la OAuth app de Linear con que este core inicia y refresca el login. */
   readonly linearClientId: string;
+  /** Hay client_id de la GitHub App: sin él, `startDeviceFlow` falla y GitHub solo se conecta con un PAT. */
+  readonly githubAppConfigured: boolean;
   /**
    * Guarda el token en `Secrets` y la cuenta en la base. Si la cuenta ya estaba conectada, reemplaza
    * token, scopes y vencimiento y la deja `active`. Emite `connection.changed`. GitHub queda con
@@ -534,6 +536,7 @@ export function createConnections(
 
   const self: Connections = {
     linearClientId,
+    githubAppConfigured: Boolean(githubApp?.clientId),
     async connect({ provider, account, scopes, token, expiresAt }, origin) {
       if (account === "" || token === "") {
         throw new Error(`Conectar ${provider} necesita una cuenta y un token no vacíos.`);

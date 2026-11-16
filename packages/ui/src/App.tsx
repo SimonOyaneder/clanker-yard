@@ -1,5 +1,5 @@
 import type { CachedIssue, ClankerProject, Decision, DecisionId, RunDetail, RunId, Repo, RunStatus } from "@clanker/api"
-import { ChevronRight, Plus, Search } from "lucide-react"
+import { ChevronRight, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast, Toaster } from "sonner"
 import { type AppData, AppDataProvider, useAppData } from "@/app-data"
@@ -20,6 +20,7 @@ import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
 import { RunView, type RunTab } from "@/components/project/run-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { PrsView } from "@/components/prs/prs-view"
+import { SetupChecklist } from "@/components/setup-checklist"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
 import { StatusBanner } from "@/components/status-banner"
 import { Button } from "@/components/ui/button"
@@ -48,6 +49,7 @@ import { withPending } from "@/lib/learnings"
 import { readPref, writePref } from "@/lib/prefs"
 import { messageOf, undoable } from "@/lib/undoable"
 import { barProjects } from "@/lib/projects"
+import { type SetupStep, type SetupStepId, setupSteps } from "@/lib/setup"
 import { cn } from "@/lib/utils"
 import { Hint } from "./components/common"
 
@@ -186,6 +188,14 @@ function Shell() {
     if (module === "prs") reloadPrs()
   }, [module, reloadPrs])
   const openPrs = useMemo(() => openPrsOf(prsQuery.data ?? []), [prsQuery.data])
+  // La configuración inicial, cuando ya llegó todo lo que la decide (antes, ni el pie ni la bienvenida la muestran a medias).
+  const setup = useMemo(
+    () =>
+      connectionsQuery.data && reposQuery.data && projectsQuery.data
+        ? setupSteps({ connections: connectionsQuery.data, repos: reposQuery.data.length, projects: projectsQuery.data.length })
+        : null,
+    [connectionsQuery.data, reposQuery.data, projectsQuery.data],
+  )
   const unreadPrs = (prsQuery.data?.length ?? 0) - openPrs.length
   const prsNeedingAction = openPrs.filter((p) => reviewStatus(p) === "changes").length
   const prsReady = openPrs.filter((p) => p.state.merge.ready && !p.state.hold).length
@@ -375,6 +385,16 @@ function Shell() {
 
   // ⇧⌘1, ⇧⌘2 y ⇧⌘3: Operación, Resumen y Ajustes del proyecto (también desde una corrida: vuelve al proyecto).
   const goTab = useCallback((to: ProjectTab) => go({ module: "projects", runId: null, tab: to }), [go])
+  // Cada paso de la configuración lleva a donde se hace: Linear y Claude además arrancan el login o la prueba.
+  const runSetupStep = useCallback(
+    (id: SetupStepId) => {
+      if (id === "project") setNewProjectOpen(true)
+      else if (id === "linear") connectLinear()
+      else if (id === "claude") void probeClaude()
+      else goConnections()
+    },
+    [connectLinear, probeClaude, goConnections],
+  )
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey || !e.shiftKey || e.altKey || e.ctrlKey) return
@@ -448,6 +468,10 @@ function Shell() {
       },
       editFlow: () => {
         setSettingsFocus("flow")
+        go({ module: "projects", runId: null, tab: "settings" })
+      },
+      editTrackerProject: () => {
+        setSettingsFocus("tracker")
         go({ module: "projects", runId: null, tab: "settings" })
       },
       openExternal: host.openExternal,
@@ -592,6 +616,7 @@ function Shell() {
           settingsActive={module === "settings"}
           onSelectSettings={goSettings}
           plan={claudePlan}
+          setup={setup ? { steps: setup, onStep: runSetupStep } : null}
           prsBadge={prsQuery.data ? (prsNeedingAction ? { count: prsNeedingAction, tone: "red" } : prsReady ? { count: prsReady, tone: "green" } : { count: openPrs.length, tone: "muted" }) : null}
           onSelectPrs={() => go({ module: "prs" })}
           connected={live.connected}
@@ -719,7 +744,7 @@ function Shell() {
                     <Loading />
                   )
                 ) : !project ? (
-                  <NoProjects onCreate={() => setNewProjectOpen(true)} />
+                  <Welcome steps={setup} onStep={runSetupStep} />
                 ) : runId ? (
                   !detail ? (
                     projectData.error ? (
@@ -861,14 +886,18 @@ function Problem({ message, onRetry, extra }: { message: string; onRetry: () => 
   )
 }
 
-function NoProjects({ onCreate }: { onCreate: () => void }) {
+// Sin proyectos: qué es la app y los pasos para lanzar la primera corrida, los mismos del pie de la barra lateral.
+function Welcome({ steps, onStep }: { steps: readonly SetupStep[] | null; onStep: (id: SetupStepId) => void }) {
   return (
-    <div className="mx-auto mt-24 flex max-w-sm flex-col items-center gap-3 text-center">
-      <h2 className="text-base font-semibold">Sin proyectos</h2>
-      <p className="text-muted-foreground">Un proyecto junta una cola de issues de un tracker con el flujo que las trabaja. Crea el primero para lanzar corridas.</p>
-      <Button onClick={onCreate}>
-        <Plus /> Crear proyecto
-      </Button>
+    <div className="mx-auto mt-16 flex max-w-md flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <h2 className="text-base font-semibold">Bienvenido a Clanker Yard</h2>
+        <p className="text-muted-foreground">
+          Toma issues de Linear y las lleva hasta un PR en GitHub con un equipo de agentes de Claude: uno planifica, otro implementa y varios revisan. Lo que necesita tu
+          criterio te espera en la Bandeja; el resto sigue solo.
+        </p>
+      </div>
+      {steps ? <SetupChecklist steps={steps} onStep={onStep} /> : <Skeleton className="h-60 w-full" />}
     </div>
   )
 }

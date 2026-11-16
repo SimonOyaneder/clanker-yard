@@ -112,8 +112,8 @@ export interface AppData {
   installPack(path: string): Promise<PackInfo>
   /** Quita un pack instalado; uno que viene con la app no se puede quitar. */
   removePack(id: string): Promise<void>
-  /** Dónde guarda el core sus datos y con qué client_id de Linear se conecta. */
-  coreInfo(): Promise<{ dataDir: string; linearClientId: string }>
+  /** Dónde guarda el core sus datos, con qué client_id de Linear se conecta y si tiene configurada la GitHub App. */
+  coreInfo(): Promise<{ dataDir: string; linearClientId: string; githubApp: boolean }>
   /** Los circuit breakers abiertos: qué está en pausa y cuándo se vuelve a probar. */
   breakers(): Promise<Breaker[]>
   /** Los PRs abiertos que Watch conoce (los que abrió el sistema y los de tu búsqueda), con su estado ya leído y las señales de su pack. */

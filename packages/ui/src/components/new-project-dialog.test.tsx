@@ -5,6 +5,7 @@ import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider, type AppData } from "@/app-data"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { createMemoryAppData } from "@/memory-app-data"
+import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 
@@ -19,6 +20,14 @@ beforeAll(() => {
   Element.prototype.hasPointerCapture = () => false
 })
 afterEach(cleanup)
+
+// La app trae un solo flujo para elegir: para elegir otro, el de juguete se suma como si fuera tuyo.
+const withToy = (data: AppData): Pick<AppData, "defs"> => ({
+  defs: async (kind, opts) => {
+    const defs = await data.defs(kind, opts)
+    return kind === "flow" ? [...defs, { ...defs[0]!, slug: "juguete", scope: "user", body: SEED_TOY }] : defs
+  },
+})
 
 function setup(override: Partial<AppData> = {}) {
   const data = createMemoryAppData(NOW)
@@ -42,9 +51,10 @@ const chooseTracker = async (label: string) => {
 
 test("flujo y perfil llegan preseleccionados: techlead-clasico y eco", async () => {
   const { createProject } = setup()
-  await waitFor(() => expect(screen.getByRole("combobox", { name: "Flujo por defecto" }).textContent).toBe("Techlead clásico"))
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Flujo por defecto" }).textContent).toBe(SEED_TECHLEAD.name))
   expect(screen.getByRole("combobox", { name: "Perfil por defecto" }).textContent).toBe("eco")
 
+  await chooseTracker("Local (para probar)")
   fillName("Uno")
   create()
 
@@ -53,15 +63,16 @@ test("flujo y perfil llegan preseleccionados: techlead-clasico y eco", async () 
 })
 
 test("elegir otro flujo muestra su nombre y su slug en mono, y es el que se manda", async () => {
-  const { createProject } = setup()
+  const { createProject } = setup(withToy(createMemoryAppData(NOW)))
   const trigger = await screen.findByRole("combobox", { name: "Flujo por defecto" })
-  await waitFor(() => expect(trigger.textContent).toBe("Techlead clásico"))
+  await waitFor(() => expect(trigger.textContent).toBe(SEED_TECHLEAD.name))
 
   fireEvent.keyDown(trigger, { key: "Enter" })
   const option = await screen.findByRole("option", { name: /Juguete/ })
-  expect(screen.getByRole("option", { name: /Techlead clásico/ }).textContent).toContain("techlead-clasico")
+  expect(screen.getByRole("option", { name: new RegExp(SEED_TECHLEAD.name) }).textContent).toContain("techlead-clasico")
   expect(within(option).getByText("juguete").className).toContain("font-mono")
   fireEvent.click(option)
+  await chooseTracker("Local (para probar)")
   fillName("Dos")
   create()
 
@@ -82,6 +93,7 @@ test("sin flujos ni perfiles lo dice y el proyecto se crea sin defaults", async 
   expect(await screen.findByText("No hay flujos: el proyecto se crea sin uno por defecto.")).toBeTruthy()
   expect(screen.getByText("No hay perfiles: el proyecto se crea sin uno por defecto.")).toBeTruthy()
 
+  await chooseTracker("Local (para probar)")
   fillName("Tres")
   create()
 
@@ -98,7 +110,7 @@ test("con Linear, los proyectos salen con los míos primero, se filtran por text
 
   fireEvent.click(await screen.findByRole("combobox", { name: "Proyecto del tracker" }))
   const names = screen.getAllByRole("option").map((o) => o.textContent)
-  expect(names).toEqual(["Boundaries de engines", "Clanker Yard MVP", "Facturación mensual", "Limpieza de feature flags"])
+  expect(names).toEqual(["Boundaries de engines", "SOPORTE", "Facturación mensual", "Limpieza de feature flags"])
   expect(screen.getByText("Míos")).toBeTruthy()
 
   fireEvent.change(screen.getByPlaceholderText("Buscar proyecto"), { target: { value: "facturacion" } })
@@ -114,9 +126,9 @@ test("con Linear, los proyectos salen con los míos primero, se filtran por text
 })
 
 test("con Linear sin conectar muestra el error del core y un botón a Conexiones", async () => {
-  const { data, onOpenConnections } = setup()
+  const data = createMemoryAppData(NOW)
   await data.disconnect("linear", "clanker-yard")
-  await chooseTracker("Linear")
+  const { onOpenConnections } = setup({ trackerProjects: data.trackerProjects })
 
   expect((await screen.findByRole("alert")).textContent).toContain("Linear no está conectado")
   fireEvent.click(screen.getByRole("button", { name: "Ir a Conexiones" }))
@@ -131,16 +143,13 @@ test("sin proyectos en la cuenta lo dice", async () => {
   expect(await screen.findByText(/no tiene proyectos todavía/)).toBeTruthy()
 })
 
-test("un tracker sin listado (Jira) deja el campo de texto con el id", async () => {
-  const { createProject } = setup()
-  await chooseTracker("Jira")
+test("parte en Linear y solo ofrece los trackers que el core sabe leer", async () => {
+  setup()
+  const tracker = screen.getByRole("combobox", { name: "Tracker" })
+  expect(tracker.textContent).toBe("Linear")
 
-  fireEvent.change(screen.getByLabelText("Proyecto del tracker"), { target: { value: "PROJ-1" } })
-  fillName("Cinco")
-  create()
-
-  await waitFor(() => expect(createProject).toHaveBeenCalled())
-  expect(sent(createProject)).toMatchObject({ tracker: "jira", trackerRef: "PROJ-1" })
+  fireEvent.keyDown(tracker, { key: "Enter" })
+  expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Linear", "Local (para probar)"])
 })
 
 test("con dos workspaces, el proyecto que se elige guarda la cuenta de su workspace", async () => {
@@ -162,11 +171,12 @@ test("con dos workspaces, el proyecto que se elige guarda la cuenta de su worksp
 test("los defaults de proyectos nuevos de Ajustes mandan sobre los de siempre", async () => {
   const data = createMemoryAppData(NOW)
   await data.setProjectDefaults({ defaultFlowId: "juguete", defaultProfileId: "medio", parallel: 3 })
-  const { createProject } = setup({ projectDefaults: data.projectDefaults })
+  const { createProject } = setup({ projectDefaults: data.projectDefaults, ...withToy(data) })
   await waitFor(() => expect(screen.getByRole("combobox", { name: "Flujo por defecto" }).textContent).toBe("Juguete"))
   expect(screen.getByRole("combobox", { name: "Perfil por defecto" }).textContent).toBe("medio")
   expect((screen.getByLabelText("Corridas en paralelo") as HTMLInputElement).value).toBe("3")
 
+  await chooseTracker("Local (para probar)")
   fillName("Tres")
   create()
 

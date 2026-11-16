@@ -63,7 +63,7 @@ test("interno solo si el flujo lo declara", () => {
 test("duplicar un incluido da uno tuyo con el mismo slug", () => {
   const builtin = def("flow", "techlead-clasico", SEED_TECHLEAD)
   const copy = duplicateOf(builtin, [builtin])
-  expect(copy).toMatchObject({ slug: "techlead-clasico", overrides: true, body: { id: "techlead-clasico", name: "Techlead clásico" } })
+  expect(copy).toMatchObject({ slug: "techlead-clasico", overrides: true, body: { id: "techlead-clasico", name: SEED_TECHLEAD.name } })
 })
 
 test("duplicar uno tuyo da una copia con slug libre, que el flujo lleva en su id", () => {

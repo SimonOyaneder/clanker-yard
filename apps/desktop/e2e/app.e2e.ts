@@ -20,6 +20,9 @@ test("crea un proyecto desde el diálogo", async ({ window: page }) => {
   const dialog = page.getByRole("dialog", { name: "Nuevo proyecto" });
   await dialog.getByLabel("Nombre").fill("Proyecto E2E");
   await expect(dialog.getByLabel("Slug")).toHaveValue("proyecto-e2e");
+  // Parte en Linear, que todavía no está conectado: el proyecto de prueba usa el tracker local.
+  await dialog.getByRole("combobox", { name: "Tracker" }).click();
+  await page.getByRole("option", { name: "Local (para probar)" }).click();
   await dialog.getByRole("button", { name: "Crear proyecto" }).click();
 
   await expect(dialog).toBeHidden();

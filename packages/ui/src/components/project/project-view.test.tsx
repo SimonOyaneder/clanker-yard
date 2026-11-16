@@ -39,6 +39,8 @@ async function setup({ entries = () => [], queueError, runs = () => [], decision
     refresh: () => {},
     editQueueFilters: vi.fn(),
     editFlow: vi.fn(),
+    editTrackerProject: vi.fn(),
+    goConnections: vi.fn(),
     openRun: vi.fn(),
     openExternal: vi.fn(),
   }
@@ -113,10 +115,26 @@ test("una cola vacía dice qué filtro la dejó vacía y ofrece editarlos", asyn
 })
 
 test("una cola que el core no pudo calcular dice por qué y deja ver el resto de la operación", async () => {
-  await setup({ queueError: "No hay una cuenta de Linear conectada: conéctala en Conexiones (connections.linearAuth)." })
+  const { actions } = await setup({ queueError: "No hay una cuenta de Linear conectada: conéctala en Conexiones (connections.linearAuth)." })
 
   expect(screen.getByText(/No se pudo calcular la cola\. No hay una cuenta de Linear conectada/)).toBeTruthy()
   expect(stat("Carril dev")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Ir a Conexiones" }))
+  expect(actions.goConnections).toHaveBeenCalledOnce()
+})
+
+test("un proyecto que guardó el nombre de su proyecto de Linear en vez del id lo explica y lleva a elegirlo", async () => {
+  const { actions } = await setup({ project: { trackerRef: "boundaries" }, queueError: "El proyecto del tracker no es un UUID" })
+
+  expect(screen.getByRole("alert").textContent).toContain("«boundaries», que no es un proyecto de Linear")
+  expect(screen.getByText("No hay cola hasta que elijas el proyecto de Linear.")).toBeTruthy()
+  for (const button of screen.getAllByRole("button", { name: "Elegir el proyecto de Linear" })) fireEvent.click(button)
+  expect(actions.editTrackerProject).toHaveBeenCalledTimes(2)
+})
+
+test("un proyecto con el id de su proyecto de Linear no pide elegirlo", async () => {
+  await setup()
+  expect(screen.queryByRole("button", { name: "Elegir el proyecto de Linear" })).toBeNull()
 })
 
 // Un rebase en mantenimiento mientras dev está lleno, una corrida estacionada que le prestó su PR y un breaker abierto.

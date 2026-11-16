@@ -21,12 +21,14 @@ interface QueueProps {
   title: string
   /** Lo que dice la sección cuando no hay nada, con qué hacer; con él ofrece editar los filtros de la cola. */
   empty?: string
+  /** El botón del vacío cuando lo que falta no son los filtros (la cola no se pudo calcular). */
+  emptyAction?: { label: string; onClick: () => void }
   entries: readonly QueueEntry[]
   project: ClankerProject
 }
 
 // Issues de la cola, cada una con su motivo a la vista. La cola ya viene ordenada por el core.
-export function QueueList({ title, empty, entries, project }: QueueProps) {
+export function QueueList({ title, empty, emptyAction, entries, project }: QueueProps) {
   const actions = useAppActions()
   if (!entries.length && !empty) return null
   return (
@@ -41,8 +43,8 @@ export function QueueList({ title, empty, entries, project }: QueueProps) {
       ) : (
         <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed px-3 py-4">
           <p className="text-muted-foreground">{empty}</p>
-          <Button size="sm" variant="outline" onClick={actions.editQueueFilters}>
-            Editar filtros
+          <Button size="sm" variant="outline" onClick={emptyAction?.onClick ?? actions.editQueueFilters}>
+            {emptyAction?.label ?? "Editar filtros"}
           </Button>
         </div>
       )}
@@ -72,7 +74,7 @@ function QueueRow({ entry, project }: { entry: QueueEntry; project: ClankerProje
               {skipped ? "saltada" : state.label}
             </Pill>
             {skipped ? (
-              <Hint label="Vuelve a la cola: el Scheduler la considera de nuevo">
+              <Hint label="Vuelve a la cola: el proyecto la puede tomar de nuevo">
                 <Button size="xs" variant="outline" onClick={() => void actions.skipIssue(project, issue, false)}>
                   <Undo2 /> Volver
                 </Button>
@@ -145,7 +147,7 @@ export function ParkedList({ runs, decisions, subjectOf, borrowers, project }: P
   if (!runs.length) return null
   return (
     <section className="flex flex-col gap-2">
-      <SectionTitle count={runs.length} aside="No ocupan cupo ni slot: nada más espera por ellas">
+      <SectionTitle count={runs.length} aside="Esperan una decisión tuya en la Bandeja y no ocupan cupo del carril">
         Estacionadas
       </SectionTitle>
       <ul className="overflow-hidden rounded-lg border bg-card">

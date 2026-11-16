@@ -17,18 +17,22 @@ import { codeCountdown, expiryLabel, statusLook } from "@/lib/connections"
 import { tone } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-// GitHub entra por la GitHub App (device flow: el core da un código y la cuenta aparece sola al aprobarlo en
-// github.com) o con un PAT classic con `repo`: se pega y [Probar] lo valida contra GitHub (usuario, scope y una lectura por permiso).
+// GitHub entra con un PAT classic con `repo`: se pega y [Probar] lo valida contra GitHub (usuario, scope y una lectura por
+// permiso). Si el core tiene el client_id de la GitHub App, también por la App (device flow: el core da un código y la cuenta
+// aparece sola al aprobarlo en github.com); sin él, la App ni se ofrece, porque fallaría.
 export function GitHubCard({ connection, onChanged }: { connection: Connection | undefined; onChanged: () => void }) {
   const appData = useAppData()
   const host = useHost()
   const login = useGitHubDeviceFlow(connection, onChanged)
   const form = useLiveQuery("github-pat-form", () => appData.githubPatForm(), { live: false })
+  const info = useLiveQuery("core-info", () => appData.coreInfo(), { live: false })
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
 
   const active = connection?.status === "active"
   const viaApp = connection?.auth === "app"
+  // Una cuenta que ya entró por la App se puede reconectar igual: si el client_id desapareció, el error lo dice.
+  const appAvailable = info.data?.githubApp === true || viaApp
   // Sin instalar, la App conecta pero ningún repo es visible. Se pide una vez por conexión (no por evento: es una llamada a GitHub);
   // quien vuelve de instalarla la repite al volver a la ventana o con el botón.
   const installations = useLiveQuery(
@@ -79,7 +83,7 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
                 hint={
                   viaApp
                     ? "Los agentes publican con la GitHub App: el token dura 8 horas y el core lo renueva solo. Para volver a un token personal, pega uno desde el menú."
-                    : "Los agentes publican con un PAT classic que pegaste. Para cambiar a la GitHub App, pulsa Cambiar a la GitHub App: reemplaza este token."
+                    : "Los agentes publican con un PAT classic que pegaste. Para rotarlo, pulsa Reconectar y pega uno nuevo."
                 }
               >
                 {viaApp ? "GitHub App" : "Token personal"}
@@ -102,10 +106,16 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
                 {connection?.expiresSoon ? "Rotar token" : "Reconectar"}
               </Button>
             ) : null}
-            <Button size="sm" variant={active ? "outline" : "default"} disabled={login.pending !== null} onClick={() => void login.start()}>
-              {login.pending ? <Loader2 className="animate-spin" /> : null}
-              {viaApp ? "Reconectar" : active ? "Cambiar a la GitHub App" : "Conectar con la GitHub App"}
-            </Button>
+            {appAvailable ? (
+              <Button size="sm" variant={active ? "outline" : "default"} disabled={login.pending !== null} onClick={() => void login.start()}>
+                {login.pending ? <Loader2 className="animate-spin" /> : null}
+                {viaApp ? "Reconectar" : active ? "Cambiar a la GitHub App" : "Conectar con la GitHub App"}
+              </Button>
+            ) : !connection ? (
+              <Button size="sm" onClick={createToken} disabled={!form.data}>
+                <ExternalLink /> Crear token en GitHub
+              </Button>
+            ) : null}
           </>
         }
         menu={[
@@ -177,7 +187,12 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
             </ul>
           </div>
         ) : (
-          <p className="text-muted-foreground">Los agentes publican en GitHub con tu cuenta. Conecta la GitHub App (escribes un código en github.com) o crea un token classic con el scope repo ya marcado, pégalo y pruébalo.</p>
+          <p className="text-muted-foreground">
+            Los agentes publican en GitHub (push, PRs y comentarios) con tu cuenta.{" "}
+            {appAvailable
+              ? "Conecta la GitHub App (escribes un código en github.com) o crea un token classic con el scope repo ya marcado, pégalo y pruébalo."
+              : "Crea un token classic con el scope repo (el botón abre el formulario de GitHub ya marcado), pégalo abajo y pulsa Probar. Un token fine-grained no sirve: no puede leer los checks."}
+          </p>
         )}
         {login.failure ? (
           <div role="alert" className="flex items-center gap-2 text-xs text-destructive">
@@ -196,9 +211,12 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
             action="Probar"
             onSubmit={probe}
             help={
-              <button type="button" onClick={createToken} disabled={!form.data} className={cn("flex w-fit items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50")}>
-                <ExternalLink className="size-3" /> Crear el token con el scope ya marcado
-              </button>
+              // Sin cuenta ni App, el botón principal de la tarjeta ya abre el formulario.
+              connection || appAvailable ? (
+                <button type="button" onClick={createToken} disabled={!form.data} className={cn("flex w-fit items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50")}>
+                  <ExternalLink className="size-3" /> Crear el token con el scope ya marcado
+                </button>
+              ) : undefined
             }
           />
         ) : null}

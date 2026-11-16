@@ -22,6 +22,8 @@ export interface AppActions {
   editQueueFilters: () => void
   /** Abre Ajustes del proyecto en Flujo y parámetros, donde se elige el flujo y el perfil por defecto. */
   editFlow: () => void
+  /** Abre Ajustes del proyecto en Proyecto del tracker, donde se elige de qué proyecto de Linear sale la cola. */
+  editTrackerProject: () => void
   openExternal: (url: string) => void
   refresh: () => void
   goConnections: () => void

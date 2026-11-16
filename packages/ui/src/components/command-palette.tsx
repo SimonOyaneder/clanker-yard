@@ -1,5 +1,5 @@
 import type { CachedIssue, ClankerProject, Decision, DecisionId, QueueEntry, Run, RunId } from "@clanker/api"
-import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, X } from "lucide-react"
+import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, X } from "lucide-react"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs"
 import { repoNameOf } from "@/lib/prs"
@@ -240,6 +240,11 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <CommandItem value="editar filtros de la cola del proyecto" onSelect={run(actions.editQueueFilters)}>
               <Filter /> Filtros de la cola de {current.name}
             </CommandItem>
+            {current.tracker === "linear" ? (
+              <CommandItem value="elegir proyecto de linear del tracker" onSelect={run(actions.editTrackerProject)}>
+                <ListTodo /> Proyecto de Linear de {current.name}
+              </CommandItem>
+            ) : null}
           </CommandGroup>
         ) : null}
 

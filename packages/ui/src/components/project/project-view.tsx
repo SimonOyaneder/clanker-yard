@@ -1,5 +1,5 @@
 import type { Breaker, CachedIssue, CachedPr, ClankerProject, Decision, Lanes, QueueEntry, Run } from "@clanker/api"
-import { Copy, Ellipsis, Pause, Play } from "lucide-react"
+import { Copy, Ellipsis, ListTodo, Pause, Play } from "lucide-react"
 import { type ReactNode, useRef } from "react"
 import { BreakerStrip } from "@/components/project/breaker-strip"
 import { Ago, Hint, Pill, SectionTitle, StatBar } from "@/components/common"
@@ -18,6 +18,10 @@ import { copy } from "@/lib/clipboard"
 import { costUsd, elapsed, tone } from "@/lib/format"
 import { subjectLabeler, type SubjectLabel } from "@/lib/subject"
 import { borrowers as borrowersOf, breakersOf, laneUsage, parkedRuns, projectPrs, spentToday } from "@/lib/project-ops"
+import { needsTrackerProject } from "@/lib/projects"
+import { defName } from "@/lib/defs"
+import { useAppData } from "@/app-data"
+import { useLiveQuery } from "@/hooks/use-live"
 
 const PROJECT_STATUS = {
   active: { label: "activo", tone: tone.green, hint: "Toma issues de su cola y lanza corridas." },
@@ -58,6 +62,10 @@ export const issuesById = (issues: CachedIssue[]) => new Map<string, CachedIssue
 export function ProjectFrame({ project, tab, onTab, children }: { project: ClankerProject; tab: ProjectTab; onTab: (tab: ProjectTab) => void; children: ReactNode }) {
   const status = PROJECT_STATUS[project.status]
   const { editFlow } = useAppActions()
+  const appData = useAppData()
+  // El nombre del flujo, como en Flujos y en Nuevo proyecto; mientras llega (o si ya no existe), su slug.
+  const flows = useLiveQuery("project-frame:flows", () => appData.defs("flow"), { live: false })
+  const flow = flows.data?.find((f) => f.slug === project.defaultFlowId)
   // Sin flujo o sin perfil, el texto lleva a Ajustes a elegirlo.
   const choose = (missing: string) => (
     <button type="button" className="underline underline-offset-2" onClick={editFlow}>
@@ -75,14 +83,14 @@ export function ProjectFrame({ project, tab, onTab, children }: { project: Clank
           <ProjectActions project={project} />
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Pill className={tone.neutral} hint="Flujo con que corre una issue si no se pide otro.">
-            flujo: {project.defaultFlowId ?? choose("sin flujo")}
+          <Pill className={tone.neutral} hint={`Flujo con que corre una issue si no se pide otro${project.defaultFlowId ? ` (${project.defaultFlowId})` : ""}.`}>
+            flujo: {flow ? defName(flow) : (project.defaultFlowId ?? choose("sin flujo"))}
           </Pill>
           <Pill className={tone.neutral} hint="Perfil con que corren los pasos de agente.">
             perfil: {project.defaultProfileId ?? choose("sin perfil")}
           </Pill>
-          <Pill className={tone.neutral} hint="De dónde salen las issues del proyecto.">
-            {project.tracker === "local" ? "tracker local" : `${project.tracker} · ${project.trackerRef}`}
+          <Pill className={tone.neutral} hint={project.tracker === "local" ? "Las issues salen del tracker local, para probar la app." : `Las issues salen del proyecto de Linear ${project.trackerRef}${project.trackerAccount ? ` del workspace ${project.trackerAccount}` : ""}.`}>
+            {project.tracker === "local" ? "tracker local" : `Linear${project.trackerAccount ? ` · ${project.trackerAccount}` : ""}`}
           </Pill>
         </div>
       </header>
@@ -120,6 +128,9 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
   const queued = queue.filter((e) => e.state !== "blocked")
   const blocked = queue.filter((e) => e.state === "blocked")
   const spent = spentToday(runs, now)
+  const actions = useAppActions()
+  const unpicked = needsTrackerProject(project)
+  const pickTracker = { label: "Elegir el proyecto de Linear", onClick: actions.editTrackerProject }
 
   return (
     <>
@@ -143,21 +154,47 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
         ]}
       />
 
+      {unpicked ? <PickTrackerProject project={project} onPick={actions.editTrackerProject} /> : null}
       <BreakerStrip breakers={stopped} now={now} />
 
       {roots.length === 0 && queue.length === 0 ? (
-        <EmptyProject />
+        <EmptyProject project={project} />
       ) : (
         <LaneBoard project={project} runs={roots} usage={usage} subjectOf={subjectOf} now={now} />
       )}
 
       <ParkedList runs={parked} decisions={decisions} subjectOf={subjectOf} borrowers={borrowersOf(roots)} project={project} />
-      {roots.length || queue.length || queueError ? (
-        <QueueList title="En cola" entries={queued} project={project} empty={queueError ? `No se pudo calcular la cola. ${queueError}` : emptyQueue(project)} />
+      {roots.length || queue.length || queueError || unpicked ? (
+        <QueueList
+          title="En cola"
+          entries={queued}
+          project={project}
+          empty={unpicked ? "No hay cola hasta que elijas el proyecto de Linear." : queueError ? `No se pudo calcular la cola. ${queueError}` : emptyQueue(project)}
+          emptyAction={unpicked ? pickTracker : queueError ? { label: "Ir a Conexiones", onClick: actions.goConnections } : undefined}
+        />
       ) : null}
       <QueueList title="Bloqueadas" entries={blocked} project={project} />
       <RunGroup title="Terminadas" runs={finished} subjectOf={subjectOf} now={now} project={project} />
     </>
+  )
+}
+
+// Un proyecto viejo que guardó el nombre de su proyecto de Linear en vez del id: sin elegirlo de nuevo no hay cola.
+function PickTrackerProject({ project, onPick }: { project: ClankerProject; onPick: () => void }) {
+  return (
+    <div role="alert" className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+      <ListTodo className="mt-0.5 size-4 flex-none text-amber-700 dark:text-amber-300" />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="font-medium">Elige de qué proyecto de Linear salen las issues</span>
+        <span className="text-muted-foreground">
+          Este proyecto guardó «{project.trackerRef}», que no es un proyecto de Linear (los proyectos creados antes de elegirlo de una lista guardaban el nombre). Hasta
+          que lo elijas de nuevo no se leen issues ni se lanzan corridas nuevas; las que ya corren siguen.
+        </span>
+      </div>
+      <Button size="sm" onClick={onPick}>
+        Elegir el proyecto de Linear
+      </Button>
+    </div>
   )
 }
 
@@ -166,7 +203,7 @@ function emptyQueue(project: ClankerProject): string {
   const status = project.queueFilter.status?.join(" o ") ?? "todo"
   const labels = project.queueFilter.labels?.length ? ` con el label ${project.queueFilter.labels.join(" o ")}` : ""
   const excluded = project.queueFilter.excludeLabels ?? ["no-clanker"]
-  return `0 issues en ${status}${labels} sin el label ${excluded.join(" ni ")}. Crea o mueve una issue a ${status} en ${project.tracker === "local" ? "el tracker local" : project.tracker}, o ajusta los filtros de la cola del proyecto.`
+  return `0 issues en ${status}${labels} sin el label ${excluded.join(" ni ")}. Crea o mueve una issue a ${status} en ${project.tracker === "local" ? "el tracker local" : "Linear"}, o ajusta los filtros de la cola del proyecto.`
 }
 
 // El botón principal del proyecto (Pausar o Reanudar) y, en "…", el resto de lo que se hace con él.
@@ -179,7 +216,7 @@ function ProjectActions({ project }: { project: ClankerProject }) {
   const pausing = project.status === "active"
   return (
     <div className="ml-auto flex items-center gap-1.5">
-      <Hint label={pausing ? "El Scheduler deja de lanzar issues de este proyecto. Lo que ya corre, y los demás proyectos, siguen" : "El Scheduler vuelve a lanzar las issues de la cola"} keys="⇧⌘Y">
+      <Hint label={pausing ? "Deja de lanzar issues de este proyecto. Lo que ya corre, y los demás proyectos, siguen" : "Vuelve a lanzar las issues de la cola"} keys="⇧⌘Y">
         <Button size="sm" variant={pausing ? "outline" : "default"} onClick={() => (pausing ? commands.pauseProject(project) : commands.resumeProject(project))}>
           {pausing ? <Pause /> : <Play />}
           {pausing ? "Pausar" : "Reanudar"}
@@ -225,18 +262,26 @@ function ProjectActions({ project }: { project: ClankerProject }) {
   )
 }
 
-function EmptyProject() {
+function EmptyProject({ project }: { project: ClankerProject }) {
   const actions = useAppActions()
   return (
     <div className="mx-auto flex max-w-md flex-col items-center gap-2 py-10 text-center">
       <h2 className="text-base font-semibold">Todavía no hay corridas</h2>
       <p className="text-muted-foreground">
-        Una corrida lanza el flujo del proyecto sobre una issue. Con tracker local crea una issue (<code className="font-mono">issues.createLocal</code>) y córrela desde acá; con
-        otro tracker, las issues llegan al sincronizar.
+        {project.tracker === "local"
+          ? "Una corrida lanza el flujo del proyecto sobre una issue. Las issues del tracker local se crean por la API; cuando haya, aparecen en la cola y se corren desde acá."
+          : `Una corrida lanza el flujo del proyecto sobre una issue. ${emptyQueue(project)}`}
       </p>
-      <Button variant="outline" size="sm" onClick={actions.refresh}>
-        Actualizar
-      </Button>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" onClick={actions.refresh}>
+          Actualizar
+        </Button>
+        {project.tracker === "local" ? null : (
+          <Button variant="outline" size="sm" onClick={actions.editQueueFilters}>
+            Editar filtros
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

@@ -5,13 +5,14 @@ import { expect, test } from "vitest"
 // La UI es genérica: lo que depende de una organización (señales, bot de review, comando de merge) llega del pack
 // por el core. Una marca en el código de la UI es una convención que se coló.
 const BRAND = new RegExp(["fin", "toc"].join(""), "i")
-const SELF = import.meta.filename
+// Los flujos de ejemplo copian lo que el core real trae (el nombre del flujo incluido viene del pack): son datos, no código de la UI.
+const SKIP = new Set([import.meta.filename, join(import.meta.dirname, "seed-flows.ts")])
 
 function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name)
     if (entry.isDirectory()) return sources(path)
-    return /\.(tsx?|css|html)$/.test(entry.name) && path !== SELF ? [path] : []
+    return /\.(tsx?|css|html)$/.test(entry.name) && !SKIP.has(path) ? [path] : []
   })
 }
 

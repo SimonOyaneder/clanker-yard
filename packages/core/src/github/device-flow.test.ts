@@ -248,7 +248,9 @@ describe("startDeviceFlow", () => {
   });
 
   test("sin client_id falla antes de llamar a GitHub, diciendo dónde ponerlo", async () => {
+    expect(connections.githubAppConfigured).toBe(true);
     connections = connectionsWith(undefined);
+    expect(connections.githubAppConfigured).toBe(false);
 
     const failure = await connections.startDeviceFlow("ui").catch((e: unknown) => e);
 

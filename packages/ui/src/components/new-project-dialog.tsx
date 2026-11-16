@@ -8,15 +8,14 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DefOption } from "@/components/def-option"
-import { listsProjects, TrackerProjectPicker } from "@/components/tracker-project-picker"
+import { TrackerProjectPicker } from "@/components/tracker-project-picker"
 import { useLiveQuery } from "@/hooks/use-live"
 import { defaultFlowSlug, defaultProfileSlug, defName, selectableFlows } from "@/lib/defs"
 
+// Los trackers con adapter en el core. GitHub Issues y Jira existen en la API pero no tienen adapter: no se ofrecen.
 const TRACKERS: { id: TrackerId; label: string }[] = [
-  { id: "local", label: "Local" },
   { id: "linear", label: "Linear" },
-  { id: "github-issues", label: "GitHub Issues" },
-  { id: "jira", label: "Jira" },
+  { id: "local", label: "Local (para probar)" },
 ]
 
 export function slugOf(name: string): string {
@@ -49,7 +48,7 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
   const appData = useAppData()
   const [name, setName] = useState("")
   const [slug, setSlug] = useState<string | null>(null)
-  const [tracker, setTracker] = useState<TrackerId>("local")
+  const [tracker, setTracker] = useState<TrackerId>("linear")
   const [trackerRef, setTrackerRef] = useState("")
   // La cuenta del proyecto elegido; solo la fija el selector (un id escrito a mano no la trae).
   const [trackerAccount, setTrackerAccount] = useState<string | null>(null)
@@ -72,7 +71,6 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
 
   const shownSlug = slug ?? slugOf(name)
   const local = tracker === "local"
-  const picker = listsProjects(tracker)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -99,7 +97,7 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
     <form onSubmit={submit} className="flex flex-col gap-4">
       <DialogHeader>
         <DialogTitle>Nuevo proyecto</DialogTitle>
-        <DialogDescription>Un proyecto junta una cola de issues de un tracker con el flujo que las trabaja.</DialogDescription>
+        <DialogDescription>Un proyecto toma las issues de un proyecto de Linear y lanza el flujo sobre cada una: una corrida por issue.</DialogDescription>
       </DialogHeader>
 
       <div className="flex flex-col gap-1.5">
@@ -139,22 +137,17 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
           <Input id="project-parallel" type="number" min={1} value={parallel} onChange={(e) => setParallel(e.target.value)} required />
         </div>
       </div>
-      {local ? null : (
+      {local ? (
+        <p className="-mt-2 text-xs text-muted-foreground">Sin tracker externo: sirve para probar la app. Sus issues se crean por la API, no desde la app.</p>
+      ) : (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="project-ref">Proyecto del tracker</Label>
-          {picker ? (
-            <TrackerProjectPicker id="project-ref" tracker={tracker} value={trackerRef} onChange={(ref, account) => { setTrackerRef(ref); setTrackerAccount(account) }} onOpenConnections={onOpenConnections} />
-          ) : (
-            <>
-              <Input id="project-ref" value={trackerRef} onChange={(e) => { setTrackerRef(e.target.value); setTrackerAccount(null) }} required />
-              <p className="text-xs text-muted-foreground">El id del proyecto dentro de {TRACKERS.find((t) => t.id === tracker)?.label} del que sale la cola.</p>
-            </>
-          )}
+          <TrackerProjectPicker id="project-ref" tracker={tracker} value={trackerRef} onChange={(ref, account) => { setTrackerRef(ref); setTrackerAccount(account) }} onOpenConnections={onOpenConnections} />
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <DefSelect id="project-flow" label="Flujo por defecto" noun="flujos" query={defs} defs={defs.data?.flows} value={flow} onChange={setPickedFlow} />
-        <DefSelect id="project-profile" label="Perfil por defecto" noun="perfiles" query={defs} defs={defs.data?.profiles} value={profile} onChange={setPickedProfile} />
+        <DefSelect id="project-flow" label="Flujo por defecto" help="Los pasos que sigue cada issue." noun="flujos" query={defs} defs={defs.data?.flows} value={flow} onChange={setPickedFlow} />
+        <DefSelect id="project-profile" label="Perfil por defecto" help="Qué modelo usa cada agente." noun="perfiles" query={defs} defs={defs.data?.profiles} value={profile} onChange={setPickedProfile} />
       </div>
 
       {error ? (
@@ -178,6 +171,7 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
 function DefSelect({
   id,
   label,
+  help,
   noun,
   query,
   defs,
@@ -186,6 +180,7 @@ function DefSelect({
 }: {
   id: string
   label: string
+  help: string
   noun: string
   query: { error?: string | null; reload: () => void }
   defs: DefRecord[] | undefined
@@ -221,6 +216,7 @@ function DefSelect({
           </SelectContent>
         </Select>
       )}
+      <p className="text-xs text-muted-foreground">{help}</p>
     </div>
   )
 }

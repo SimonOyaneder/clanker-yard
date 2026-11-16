@@ -1,11 +1,13 @@
 import type { FlowDef } from "@clanker/api"
 
-// Flujos de ejemplo para `createMemoryAppData`: un flujo con rondas y un parallel, y el de juguete.
+// Flujos de ejemplo para `createMemoryAppData`: el que la app trae para elegir (con rondas y un parallel) y el de rebase,
+// que es interno. El de juguete solo lo usan los tests.
 
 export const SEED_TECHLEAD: FlowDef = {
   schema: 1,
   id: "techlead-clasico",
   name: "Techlead clásico",
+  description: "De la issue al PR con review: implementa, revisa en rondas, corre los checks, abre el PR y atiende el feedback hasta dejarlo listo.",
   trigger: { type: "issue.queued" },
   lane: "dev",
   params: {

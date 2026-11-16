@@ -85,8 +85,8 @@ export function createCoreAppData(client: CoreClient): AppData {
     installPack: (path) => client.packs.install({ path }),
     removePack: (id) => client.packs.remove({ id }),
     coreInfo: async () => {
-      const { dataDir, linearClientId } = await client.system.info()
-      return { dataDir, linearClientId }
+      const { dataDir, linearClientId, githubApp } = await client.system.info()
+      return { dataDir, linearClientId, githubApp }
     },
     breakers: () => client.system.breakers(),
     openPrs: () => client.prs.list({ state: "open" }),

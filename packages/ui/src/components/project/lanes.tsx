@@ -18,7 +18,7 @@ const LANE = {
   dev: {
     title: "Carril dev",
     hint: "Desarrolla issues nuevas. Su cupo es el paralelismo del proyecto, con el tope global de la máquina.",
-    empty: "Cupo libre. El Scheduler lanza aquí la próxima issue de la cola.",
+    empty: "Cupo libre. El proyecto lanza aquí la próxima issue de la cola.",
   },
   maintenance: {
     title: "Carril mantenimiento",
