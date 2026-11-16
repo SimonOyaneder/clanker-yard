@@ -13,6 +13,7 @@ import { createOpencodeCli, parseModels, versionProblem, type OpencodeCli } from
 import { configFor, inheritedEnv, OPENCODE_AGENT, parseModel, SERVE_ARGS, serverEnv } from "./config";
 import { REPORT_PLUGIN_SOURCE } from "./report-plugin";
 import { launchOpencodeServer, type LaunchServer } from "./server";
+import { catalogPrices, type PriceOf } from "./prices";
 import { createTranslator, statusOfError } from "./translate";
 
 /** Cuántas veces dejar que opencode reintente un error que no es de cuota ni de login (un 5xx, un proveedor saturado). */
@@ -45,6 +46,8 @@ export interface OpencodeRuntimeOptions {
   home: string;
   /** El entorno del core; de él solo se heredan PATH, HOME, USER, LANG, TMPDIR y las `XDG_*`. */
   baseEnv?: Record<string, string | undefined>;
+  /** El precio de lista de un modelo; por defecto, el catálogo que opencode baja de models.dev. */
+  priceOf?: PriceOf;
   /** El binario; por defecto `opencode` del PATH (el de la shell de login, que la app de escritorio ya copia). */
   executable?: string;
   /** Con `procs`, cada `opencode serve` y lo que lance el agente quedan registrados con el paso (`kind: "agent"`). */
@@ -110,6 +113,8 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
   const apiFor = options.api ?? createOpencodeApi;
   const cli = options.cli ?? createOpencodeCli(executable, inheritedEnv(baseEnv));
   const now = options.now ?? Date.now;
+  // El precio de lista de cada modelo, para estimar lo que cuesta un proveedor que reporta 0 (una suscripción).
+  const priceOf: PriceOf = options.priceOf ?? catalogPrices(baseEnv);
   const pollMs = options.pollMs ?? STATUS_POLL_MS;
   const paths = {
     ghConfigDir: join(home, "agent-env", "opencode", "gh"),
@@ -173,7 +178,7 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
 
     const transcript = createTranscriptWriter(transcriptFile(home, sessionID));
     transcript.append({ kind: "prompt", ...clip(prompt) });
-    const translator = createTranslator(sessionID);
+    const translator = createTranslator(sessionID, priceOf);
     const tally = emptyUsage();
     const stopListening = new AbortController();
 
@@ -207,6 +212,8 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
         tally.tokensCacheRead += e.usage.tokensCacheRead;
         tally.tokensCacheWrite += e.usage.tokensCacheWrite;
         tally.costMicros += e.usage.costMicros;
+        // Con un paso estimado, el total también lo es.
+        if (e.usage.costSource === "estimate") tally.costSource = "estimate";
       }
       for (const entry of t.transcript) transcript.append(entry);
       if (t.report !== undefined) report = t.report;
