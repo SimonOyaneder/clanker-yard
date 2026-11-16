@@ -1,10 +1,11 @@
 import type { MergeStrategy, PrRef } from "@clanker/api";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
-import { pullRequests, syncCursors } from "../store/schema";
+import { syncCursors } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Repos } from "../repos/repos";
 import { fetchDefaultBranchChecks } from "./pr-query";
+import { prHold } from "./pr-rows";
 
 // Lo que el core sabe de un PR o de su repo y la estrategia de merge necesita para evaluarse: el `hold` que
 // marcó el usuario y si la estrategia del pack aplica al repo (`docs/design.html#d-ops`, "Packs", y la
@@ -39,12 +40,7 @@ export function createMergeScope({ store, repos, connections, now = Date.now }: 
     hold(ref) {
       const repo = repos.byRemote(ref.repo);
       if (!repo) return false;
-      const row = store.db
-        .select({ hold: pullRequests.hold })
-        .from(pullRequests)
-        .where(and(eq(pullRequests.repoId, repo.id), eq(pullRequests.number, ref.number)))
-        .get();
-      return row?.hold ?? false;
+      return prHold(store.db, repo.id, ref.number);
     },
 
     async applies(ref, { appliesWhen }) {

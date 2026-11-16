@@ -1,13 +1,12 @@
 import type { PrRef, PrState } from "@clanker/api";
-import { and, eq, isNotNull } from "drizzle-orm";
 import { isAncestor, tryGit } from "../git/git";
 import type { PrRow } from "../github/pr-cache";
-import { pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Repos } from "../repos/repos";
 import type { Workspaces } from "../workspaces/workspaces";
 import { approvalEpoch, emitOnce, lastEvaluatedHead, markHead, recordMarks, type PrEventInput } from "./marks";
 import type { ErrorReporter } from "../errors/reporter";
+import { openPrsWithDetail } from "../github/pr-rows";
 
 // Los eventos de Watch (`docs/design.html#d-ops`, "Watch: eventos y qué disparan"): de lo que cambió en un
 // PR salen los hechos nuevos, cada uno una sola vez por su clave en `watch_marks`.
@@ -91,11 +90,7 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
 
     async flush(at = now()) {
       await queue;
-      const rows = store.db
-        .select()
-        .from(pullRequests)
-        .where(and(eq(pullRequests.state, "open"), isNotNull(pullRequests.detail)))
-        .all();
+      const rows = openPrsWithDetail(store.db);
       for (const row of rows) {
         const { detail } = row;
         const remote = repos.get(row.repoId) && repos.config(row.repoId).remote;

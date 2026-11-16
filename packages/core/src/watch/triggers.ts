@@ -1,12 +1,11 @@
 import { FlowDef, type Event, type EventType, type PrRef } from "@clanker/api";
-import { eq } from "drizzle-orm";
 import type { Defs } from "../defs/defs";
 import type { Engine } from "../flows/engine";
 import type { Projects } from "../projects/projects";
-import { pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Repos } from "../repos/repos";
 import type { ErrorReporter } from "../errors/reporter";
+import { prById } from "../github/pr-rows";
 
 /** Los eventos de un PR que arrancan flujos (`trigger.type` del flujo es el mismo texto). */
 const TRIGGERS = ["pr.comment", "pr.conflict", "pr.merged", "pr.base_rewritten"] as const satisfies readonly EventType[];
@@ -37,7 +36,7 @@ export interface TriggersDeps {
 export function startTriggers({ store, defs, projects, repos, flows, errors }: TriggersDeps): () => void {
   function dispatch(event: Event): void {
     if (event.subject?.type !== "pr") return;
-    const row = store.db.select().from(pullRequests).where(eq(pullRequests.id, event.subject.id)).get();
+    const row = prById(store.db, event.subject.id);
     const remote = row && repos.get(row.repoId) && repos.config(row.repoId).remote;
     if (!row?.owned || !remote) return;
     // Con threads de council un rebase reescribiría su historia, y eso nunca se fuerza (`workspaces.rebase`).

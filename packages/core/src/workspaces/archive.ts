@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { and, eq, isNotNull, isNull, lte } from "drizzle-orm";
 import { git, isAncestor, tryGit } from "../git/git";
-import { pullRequests, workspaces } from "../store/schema";
+import { workspaces } from "../store/schema";
 import type { Store } from "../store/store";
 import { rebaseInProgress } from "./rebase";
 import type { RepoConfig } from "./workspaces";
+import { prsOfBranch } from "../github/pr-rows";
 
 /** Cuánto vive un worktree archivado antes de borrarse (`docs/design.html#d-ops`, estados del worktree). */
 export const ARCHIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -39,8 +40,7 @@ export interface ArchiveDeps {
  * pasada lo archiva.
  */
 export function createArchive({ store, repoConfig, now, withRepoLock }: ArchiveDeps) {
-  const pullsOf = (db: Store["db"], { repoId, branch }: Row) =>
-    db.select({ state: pullRequests.state, headSha: pullRequests.headSha }).from(pullRequests).where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.headRef, branch))).all();
+  const pullsOf = (db: Store["db"], { repoId, branch }: Row) => prsOfBranch(db, repoId, branch);
 
   /** Un PR abierto manda: si hay uno, el worktree sigue vivo aunque otro PR de la misma branch se haya cerrado. */
   const hasOpenPull = (pulls: { state: string }[]) => pulls.some((p) => p.state === "open");

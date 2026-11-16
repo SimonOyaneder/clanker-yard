@@ -1,9 +1,10 @@
 import type { PrRef } from "@clanker/api";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { PermanentActionError } from "../../flows/catalog";
-import { pullRequests, workspaces as workspacesTable } from "../../store/schema";
+import { workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
 import type { RepoConfig, Workspaces, WorkspaceRef } from "../../workspaces/workspaces";
+import { openPrOfBranch } from "../pr-rows";
 
 /** Qué iba a hacer la acción con el PR, para los mensajes de `ownedOpenPr`. */
 export interface PrPurpose {
@@ -30,11 +31,7 @@ export function ownedOpenPr(
   if (!row) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
   const { remote } = deps.repoConfig(row.repoId);
   if (!remote) throw new PermanentActionError(`El repo ${row.repoId} no tiene remoto configurado: no se puede ${purpose.needsRemote}.`);
-  const pull = deps.store.db
-    .select()
-    .from(pullRequests)
-    .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, ws.branch), eq(pullRequests.state, "open")))
-    .get();
+  const pull = openPrOfBranch(deps.store.db, row.repoId, ws.branch);
   if (!pull || !row.remoteSha) throw new PermanentActionError(`${ws.branch} no tiene un PR abierto pusheado: ${purpose.missing}.`);
   if (!pull.owned) throw new PermanentActionError(`El PR #${pull.number} de ${remote.repo} no lo abrió Clanker Yard: ${purpose.notOwned}.`);
   return { remote, ref: { account: remote.account, repo: remote.repo, number: pull.number }, remoteSha: row.remoteSha };
