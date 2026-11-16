@@ -17,9 +17,6 @@ const WAIT = { timeout: 10_000 };
 // solo, sin que nadie apriete "Correr" (`runs.start`).
 
 /** `vi.waitFor` con holgura: la suite entera corre en paralelo y un tick puede tardar más de 1 s. */
-// Cada test levanta un core y repos reales: bajo la suite completa pasa de los 5 s por defecto, y `until` ya espera 10.
-vi.setConfig({ testTimeout: 20_000 });
-
 const until = (check: () => unknown) => vi.waitFor(check, { timeout: 10_000 });
 
 const juguete = fileURLToPath(new URL("../fixtures/runs/juguete", import.meta.url));

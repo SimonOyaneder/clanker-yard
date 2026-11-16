@@ -6,6 +6,7 @@ import { newId } from "../store/conventions";
 import { DEF_SCOPES, defs, defVersions } from "../store/schema";
 import type { Store } from "../store/store";
 import { issuesAsLines } from "../errors/format";
+import { BadRequestError } from "../errors/domain";
 
 export type DefScope = (typeof DEF_SCOPES)[number];
 
@@ -52,7 +53,7 @@ export interface DefIssue {
 }
 
 /** El body no cumple el validador de su kind. */
-export class DefValidationError extends Error {
+export class DefValidationError extends BadRequestError {
   constructor(
     readonly kind: DefKind,
     readonly slug: string,

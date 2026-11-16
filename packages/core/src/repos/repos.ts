@@ -8,16 +8,17 @@ import { repos } from "../store/schema";
 import type { Store } from "../store/store";
 import { findRepos, inspectRepo } from "./inspect";
 import type { RepoConfig } from "../workspaces/workspaces";
+import { BadRequestError, NotFoundError } from "../errors/domain";
 
 /** El repo que se pidió no está registrado. */
-export class RepoNotFoundError extends Error {
+export class RepoNotFoundError extends NotFoundError {
   constructor(id: string) {
     super(`No existe el repo ${id}: regístralo con repos.add.`);
   }
 }
 
 /** El repo no se puede registrar: el mensaje dice por qué. */
-export class InvalidRepoError extends Error {}
+export class InvalidRepoError extends BadRequestError {}
 
 export interface Repos {
   /** Registra un checkout sin mirar git (para código y tests; la API usa `register`). El path es único. Devuelve el id que usan los flujos (`repo`). */

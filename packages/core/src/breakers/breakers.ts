@@ -1,6 +1,7 @@
 import { BreakerCause, DecisionId, type RepoId } from "@clanker/api";
 import { CLAUDE_RUNTIME_ID } from "../agents/claude/models";
 import { closeDecision, openDecision } from "../decisions/decisions";
+import { EnvironmentError } from "../flows/catalog";
 import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import { meta } from "../store/schema";
 import { readMetaJson } from "../store/meta-json";
@@ -16,6 +17,15 @@ export const GITHUB_SCOPE = "github";
 export const REPO_SCOPE_PREFIX = "repo:";
 export const repoScope = (repoId: RepoId): string => `${REPO_SCOPE_PREFIX}${repoId}`;
 export const runtimeScope = (runtime: string): string => `runtime:${runtime}`;
+
+/**
+ * GitHub rechazó el token de `account` al hablar con el remoto (fetch o push). La conexión ya quedó revocada y eso abre
+ * el breaker `github`: es un error del entorno, no del paso, así que el paso espera a que se reconecte en vez de fallar.
+ * `what` dice para qué hacía falta (`pushear cla-1`, `traer <repo>`).
+ */
+export function githubUnauthorized(account: string, what: string): EnvironmentError {
+  return new EnvironmentError(GITHUB_SCOPE, `GitHub rechazó el token de ${account} al ${what}: la conexión quedó revocada, reconéctala.`);
+}
 
 export type { BreakerCause };
 

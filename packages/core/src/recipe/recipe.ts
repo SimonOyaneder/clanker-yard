@@ -16,6 +16,7 @@ import type { Store } from "../store/store";
 import { excerpt } from "../workspaces/exec";
 import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 import { messageOf } from "../errors/format";
+import { BadRequestError } from "../errors/domain";
 
 export const RECIPE_PATH = ".clanker/recipe.json";
 
@@ -86,7 +87,7 @@ const SPEC_FILE = /(^|\/)(specs?|tests?|__tests__)\/|[._-](spec|test)\.[^/]+$/;
 const NO_RECIPE = Recipe.parse({ version: 1 });
 
 /** `.clanker/recipe.json` no es JSON. */
-export class RecipeSyntaxError extends Error {}
+export class RecipeSyntaxError extends BadRequestError {}
 
 /**
  * Lee y valida `.clanker/recipe.json` de `dir`. `undefined` si el repo no tiene receta: funciona

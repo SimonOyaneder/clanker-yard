@@ -31,6 +31,7 @@ import { connections } from "../store/schema";
 import type { Store } from "../store/store";
 import { OAuthSession } from "./oauth-session";
 import { messageOf } from "../errors/format";
+import { BadRequestError } from "../errors/domain";
 
 export interface ConnectInput {
   provider: ConnectionProvider;
@@ -87,7 +88,10 @@ export interface ClaudeOptions {
 const CLAUDE_API_KEY_ACCOUNT = "api-key" satisfies ClaudeMode;
 
 /** Claude no está listo para conectarse (pidió probar una API key que no hay, o Anthropic la rechazó). */
-export class ClaudeSetupError extends Error {}
+export class ClaudeSetupError extends BadRequestError {}
+
+/** La cuenta que se pide no está conectada, ya no tiene su credencial o se pidió conectar algo de la forma equivocada: el mensaje dice qué hacer. */
+export class ConnectionError extends BadRequestError {}
 
 /** La GitHub App del device flow (`docs/github-app.md`). */
 export interface GitHubAppOptions {
@@ -402,7 +406,7 @@ export function createConnections(
     const raw = await secrets.get(secretRef);
     const parsed = raw === undefined ? undefined : OAuthSession.safeParse(safeJson(raw));
     if (!parsed?.success) {
-      throw new Error(
+      throw new ConnectionError(
         `Falta o está dañado el token de ${ROTATING[provider].label} en el almacén de secretos: desconecta la cuenta y vuelve a conectarla.`,
       );
     }
@@ -474,7 +478,7 @@ export function createConnections(
     const key = sessionKey(provider, account);
     const row = find(provider, account);
     if (!row || (provider === "github" && row.auth !== "app")) {
-      throw new Error(`La cuenta de ${label} "${account}" se desconectó o cambió de credencial.`);
+      throw new ConnectionError(`La cuenta de ${label} "${account}" se desconectó o cambió de credencial.`);
     }
     if (row.status === "revoked") throw new Rejection(revokedMessage(provider, account));
     // Otro refresh pudo terminar mientras este esperaba su turno.
@@ -540,13 +544,13 @@ export function createConnections(
     githubAppConfigured: Boolean(githubApp?.clientId),
     async connect({ provider, account, scopes, token, expiresAt }, origin) {
       if (account === "" || token === "") {
-        throw new Error(`Conectar ${provider} necesita una cuenta y un token no vacíos.`);
+        throw new ConnectionError(`Conectar ${provider} necesita una cuenta y un token no vacíos.`);
       }
       if (provider === "linear") {
-        throw new Error("Linear se conecta con linearAuth: su token se refresca y no se pega.");
+        throw new ConnectionError("Linear se conecta con linearAuth: su token se refresca y no se pega.");
       }
       if (provider === "claude") {
-        throw new Error("Claude se conecta con testClaude (suscripción) o setClaudeApiKey (API key).");
+        throw new ConnectionError("Claude se conecta con testClaude (suscripción) o setClaudeApiKey (API key).");
       }
       return save({ provider, account, scopes, secret: token, expiresAt, ...(provider === "github" ? { auth: "pat" as const } : {}) }, origin);
     },
@@ -653,7 +657,7 @@ export function createConnections(
     githubClient(account) {
       const row = find("github", account);
       if (!row) {
-        throw new Error(`No hay una cuenta github conectada como "${account}": conéctala primero.`);
+        throw new ConnectionError(`No hay una cuenta github conectada como "${account}": conéctala primero.`);
       }
       let client = githubClients.get(account);
       if (!client) {
@@ -695,7 +699,7 @@ export function createConnections(
     async token(provider, account) {
       const row = find(provider, account);
       if (!row) {
-        throw new Error(`No hay una cuenta ${provider} conectada como "${account}": conéctala primero.`);
+        throw new ConnectionError(`No hay una cuenta ${provider} conectada como "${account}": conéctala primero.`);
       }
       if (provider === "linear" || (provider === "github" && row.auth === "app")) {
         if (row.status === "revoked") throw new ROTATING[provider].Rejection(revokedMessage(provider, account));
@@ -704,11 +708,11 @@ export function createConnections(
         return refresh(provider, account, false);
       }
       if (row.secretRef === "") {
-        throw new Error(`La cuenta ${provider} "${account}" no guarda ningún token: lo lee el programa que la usa.`);
+        throw new ConnectionError(`La cuenta ${provider} "${account}" no guarda ningún token: lo lee el programa que la usa.`);
       }
       const token = await secrets.get(row.secretRef);
       if (token === undefined) {
-        throw new Error(
+        throw new ConnectionError(
           `Falta el token de ${provider} "${account}" en el almacén de secretos: desconecta la cuenta y vuelve a conectarla.`,
         );
       }

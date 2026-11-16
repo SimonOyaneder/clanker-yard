@@ -18,15 +18,13 @@ import {
   type PrCommands,
   type Store,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 import { seedPr } from "@clanker/core/testing";
 
 // Lo que una persona le pide a un PR desde la app (`prs.merge`, `prs.requestReview`, `prs.rebase`, `prs.setHold`) con
 // el pack de ejemplo (`fixtures/packs/example`, salvo su alcance) sobre el GitHub simulado.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";

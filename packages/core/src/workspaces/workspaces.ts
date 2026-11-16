@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { IssueId, RepoId, type RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
+import { githubUnauthorized } from "../breakers/breakers";
 import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/catalog";
 import type { GitIdentity, GitIdentityOf } from "../git/identity";
 import { git, GitError, isAncestor, tryGit, USER_REMOTE_ENV } from "../git/git";
@@ -831,9 +832,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const row = rowOf(lease);
     const cfg = repoConfig(row.repoId);
     if (cfg.remote && (await fetchRepo(row.repoId)) === "unauthorized") {
-      throw new SyncBaseError(
-        `GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${row.repoId}: la conexión quedó revocada, reconéctala.`,
-      );
+      throw githubUnauthorized(cfg.remote.account, `traer ${row.repoId}`);
     }
     const from = baseSha(lease);
     const target = await resolveBase(cfg, row.baseRef);
@@ -935,9 +934,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const cfg = repoConfig(request.repo);
     const branch = request.branch.replace(/^refs\/heads\//, "");
     if (cfg.remote && (await fetchRepo(request.repo)) === "unauthorized") {
-      throw new AttachError(
-        `GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${request.repo}: la conexión quedó revocada, reconéctala.`,
-      );
+      throw githubUnauthorized(cfg.remote.account, `traer ${request.repo}`);
     }
     const remoteTip = await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE}/${branch}`]);
     if (remoteTip === undefined) {
@@ -1248,7 +1245,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const cfg = repoConfig(repo);
     await assertBranchAllowed(cfg, branch);
     if (cfg.remote && (await fetchRepo(repo)) === "unauthorized") {
-      throw new Error(`GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${repo}: la conexión quedó revocada, reconéctala.`);
+      throw githubUnauthorized(cfg.remote.account, `traer ${repo}`);
     }
     return withRepoLock(repo, async () => {
       const defaultSha = await resolveBase(cfg, cfg.defaultBranch);

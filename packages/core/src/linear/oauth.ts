@@ -1,12 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import * as z from "zod";
+import { BadRequestError } from "../errors/domain";
 
 /**
  * Linear rechazó definitivamente la autorización o el refresh (el usuario no aprobó, el código o el
  * refresh token ya no valen, la app fue revocada). Los fallos transitorios (red, 5xx) no son de este
  * tipo: suben como `Error` y no cambian el estado de la conexión.
  */
-export class LinearAuthError extends Error {
+export class LinearAuthError extends BadRequestError {
   override name = "LinearAuthError";
 }
 

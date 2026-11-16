@@ -1,11 +1,12 @@
 import * as z from "zod";
+import { BadRequestError } from "../errors/domain";
 
 /**
  * GitHub rechazó definitivamente el device flow o el refresh (el usuario no aprobó, el código venció, el
  * refresh token ya no vale, device flow sin habilitar en la App). Los fallos transitorios (red, 5xx) no
  * son de este tipo: suben como `Error` y no cambian el estado de la conexión.
  */
-export class GitHubAuthError extends Error {
+export class GitHubAuthError extends BadRequestError {
   override name = "GitHubAuthError";
   constructor(
     message: string,

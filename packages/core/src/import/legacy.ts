@@ -39,9 +39,11 @@ import {
 import type { Store } from "../store/store";
 import { type LegacyPrice, type LegacyProfile, parseLegacyProfiles } from "./legacy-profiles";
 import { type LegacyHistoryRow, type LegacyState, parseLegacyState } from "./legacy-state";
+import { BadRequestError } from "../errors/domain";
+import { messageOf } from "../errors/format";
 
 /** La carpeta no es el estado de un clanker-loop o una fila no cumple su formato: el mensaje dice cuál. Nada se escribió. */
-export class LegacyImportError extends Error {}
+export class LegacyImportError extends BadRequestError {}
 
 /**
  * `clanker import legacy`: lee la carpeta del clanker-loop (`~/.local/share/clanker-loop`) sin tocarla y escribe lo que falte;
@@ -161,38 +163,32 @@ function readSource(from: string): Source {
   if (!existsSync(metricsPath)) {
     throw new LegacyImportError(`No hay metrics.jsonl en ${from}: --from debe ser la carpeta del clanker-loop (~/.local/share/clanker-loop).`);
   }
-  try {
-    const states = new Map<string, LegacyState>();
-    const issueFiles = new Map<string, { name: string; content: string }[]>();
-    const projectsDir = join(from, "projects");
-    const dirs = existsSync(projectsDir) ? readdirSync(projectsDir, { withFileTypes: true }) : [];
-    for (const dir of dirs.filter((d) => d.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-      const statePath = join(projectsDir, dir.name, "state.md");
-      if (!existsSync(statePath)) continue;
-      try {
-        states.set(dir.name, parseLegacyState(readFileSync(statePath, "utf8")));
-      } catch (error) {
-        throw new Error(`${statePath}: ${(error as Error).message}`);
-      }
-      const issuesDir = join(projectsDir, dir.name, "issues");
-      if (existsSync(issuesDir)) {
-        const files = readdirSync(issuesDir).filter((name) => name.endsWith(".md")).sort();
-        issueFiles.set(dir.name, files.map((name) => ({ name, content: readFileSync(join(issuesDir, name), "utf8") })));
-      }
+  // Solo lo que no se puede leer como el loop lo escribe es un `LegacyImportError` (con el archivo); otro fallo es un bug.
+  const parsing = <T>(path: string, parse: () => T): T => {
+    try {
+      return parse();
+    } catch (error) {
+      throw new LegacyImportError(`${path}: ${messageOf(error)}`, { cause: error });
     }
-    const profilesPath = join(from, "profiles.json");
-    let profiles: Source["profiles"];
-    if (existsSync(profilesPath)) {
-      try {
-        profiles = parseLegacyProfiles(readFileSync(profilesPath, "utf8"));
-      } catch (error) {
-        throw new Error(`${profilesPath}: ${(error as Error).message}`);
-      }
+  };
+  const states = new Map<string, LegacyState>();
+  const issueFiles = new Map<string, { name: string; content: string }[]>();
+  const projectsDir = join(from, "projects");
+  const dirs = existsSync(projectsDir) ? readdirSync(projectsDir, { withFileTypes: true }) : [];
+  for (const dir of dirs.filter((d) => d.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+    const statePath = join(projectsDir, dir.name, "state.md");
+    if (!existsSync(statePath)) continue;
+    states.set(dir.name, parsing(statePath, () => parseLegacyState(readFileSync(statePath, "utf8"))));
+    const issuesDir = join(projectsDir, dir.name, "issues");
+    if (existsSync(issuesDir)) {
+      const files = readdirSync(issuesDir).filter((name) => name.endsWith(".md")).sort();
+      issueFiles.set(dir.name, files.map((name) => ({ name, content: readFileSync(join(issuesDir, name), "utf8") })));
     }
-    return { metrics: parseLegacyMetrics(readFileSync(metricsPath, "utf8")), states, issueFiles, profiles };
-  } catch (error) {
-    throw new LegacyImportError((error as Error).message);
   }
+  const profilesPath = join(from, "profiles.json");
+  const profiles = existsSync(profilesPath) ? parsing(profilesPath, () => parseLegacyProfiles(readFileSync(profilesPath, "utf8"))) : undefined;
+  const metrics = parsing(metricsPath, () => parseLegacyMetrics(readFileSync(metricsPath, "utf8")));
+  return { metrics, states, issueFiles, profiles };
 }
 
 /** El `fallo` de las primeras corridas es el mismo `falló` de las demás. */

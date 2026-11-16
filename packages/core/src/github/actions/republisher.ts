@@ -3,6 +3,7 @@ import type { IssueId, Origin, PrRef, PrRepublish, RepoId, RepublishInput, Repub
 import { and, eq, inArray, or } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
+import { githubUnauthorized } from "../../breakers/breakers";
 import type { Engine } from "../../flows/engine";
 import type { FetchOutcome } from "../../git/remote";
 import { freshIssueBranch } from "../../projects/branch-name";
@@ -201,7 +202,7 @@ export function createPrRepublisher(deps: PrRepublisherDeps): PrRepublisher {
       if (context) return skip(context);
 
       if (!batch.fetched.has(row.repoId)) {
-        if ((await deps.fetchRepo(row.repoId)) === "unauthorized") throw new Error(`GitHub rechazó el token de ${account}: reconecta la cuenta.`);
+        if ((await deps.fetchRepo(row.repoId)) === "unauthorized") throw githubUnauthorized(account, `traer ${repo}`);
         batch.fetched.add(row.repoId);
       }
       const names = batch.reserved.get(row.repoId) ?? new Set<string>();

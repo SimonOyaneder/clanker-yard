@@ -23,7 +23,7 @@ import {
   type Workspaces,
 } from "@clanker/core";
 import { startFakeGitHubOAuth, type FakeGitHubOAuth } from "@clanker/core/testing";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHttpServer } from "./git-http";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
@@ -31,8 +31,6 @@ import { startGitHubSim, type GitHubSim } from "./github-sim";
 // El core publica igual con el token de la GitHub App que con un PAT: el push (git por HTTP con Basic auth)
 // y el PR (API de GitHub) salen con el token del device flow, y con el rotado después del refresh. Todo es
 // local: OAuth falso (`startFakeGitHubOAuth`), GitHub simulado y un servidor git; nunca GitHub real.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const CLIENT_ID = "Iv23liTESTTESTTEST";
 const ACCOUNT = "octocat";

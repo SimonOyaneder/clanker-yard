@@ -8,13 +8,14 @@ import type { Repos } from "../../repos/repos";
 import { commentOnPr } from "./comment";
 import type { PrCache } from "../pr-cache";
 import type { Prs } from "../prs";
+import { BadRequestError, UiOnlyError } from "../../errors/domain";
 
 // Lo que una persona le pide al core sobre un PR desde la app (`prs.setHold`, `prs.merge`,
 // `prs.requestReview`, `prs.rebase`). Cada pedido relee el PR antes de actuar: lo que vale es lo que pasa
 // ahora, no lo que la pantalla mostraba.
 
 /** El pedido no se puede cumplir; el mensaje dice qué cambiar. */
-export class PrCommandError extends Error {}
+export class PrCommandError extends BadRequestError {}
 
 export interface PrCommandsDeps {
   store: Store;
@@ -29,7 +30,8 @@ export interface PrCommands {
   /** `PrCache.setHold`: solo para un PR que el core ya conoce. Emite `pr.hold_changed` con quién lo pidió. */
   setHold(ref: PrRef, hold: boolean, by: ClientOrigin): Promise<PrState>;
   /**
-   * Comenta el comando de la estrategia de merge del pack y devuelve el PR releído. Rechaza si el repo se
+   * Comenta el comando de la estrategia de merge del pack y devuelve el PR releído. Mergear lo decide una persona:
+   * solo con `by: "ui"` (`UiOnlyError` si no; un agente no lo hace por su cuenta por el CLI o el MCP). Rechaza si el repo se
    * mergea con el botón de GitHub, si el PR no está `merge.ready` (con lo que falta), si tiene `hold` o si
    * ya está en cola.
    */
@@ -73,6 +75,7 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache 
     },
 
     async merge(ref, by) {
+      if (by !== "ui") throw new UiOnlyError("Mergear lo pide una persona desde la app: un agente no lo hace por su cuenta.");
       const state = await prs.get(ref);
       const strategy = packOf(ref).mergeStrategy;
       if (state.merge.via !== "comment" || !strategy) {

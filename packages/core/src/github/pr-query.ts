@@ -1,5 +1,6 @@
 import { GraphqlResponseError } from "@octokit/graphql";
 import type { GitHubClient } from "./client";
+import { NotFoundError } from "../errors/domain";
 
 // La query de detalle de un PR (`docs/design.html#d-ops`, "CodeHost: polling con ETags"). Los nombres de
 // campos y enums son los de la GraphQL API de GitHub (docs.github.com/en/graphql/reference).
@@ -107,7 +108,7 @@ export interface PrNode {
 }
 
 /** El repo o el PR no existen, o la cuenta no los ve (GitHub no distingue). */
-export class PrNotFoundError extends Error {
+export class PrNotFoundError extends NotFoundError {
   constructor(repo: string, number: number) {
     super(`No existe el PR ${repo}#${number} o la cuenta no lo ve.`);
   }

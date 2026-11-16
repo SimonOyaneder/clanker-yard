@@ -1,7 +1,8 @@
 import { devContract } from "@clanker/api";
 import { implement, ORPCError } from "@orpc/server";
 import type { Flows } from "../flows/flows";
-import { asApiError, type CoreContext } from "./router";
+import { mapApiErrors } from "./api-errors";
+import type { CoreContext } from "./router";
 
 /**
  * Lo que quien lanza un core de desarrollo (el core de demo del testkit) le da al router `dev`
@@ -15,13 +16,13 @@ export interface DevTools {
   advanceClock(ms: number): number;
 }
 
-const os = implement(devContract).$context<CoreContext>();
+const os = implement(devContract).$context<CoreContext>().use(mapApiErrors);
 
 /** El router `dev`; se sirve bajo la clave `dev`, junto al de `contract`, solo cuando el core se lanzó con `DevTools`. */
 export function createDevRouter({ flows, dev }: { flows: Flows; dev: DevTools }) {
   return os.router({
     injectStepResult: os.injectStepResult.handler(({ input, context }) =>
-      asApiError(() => flows.getRun(flows.stepCommand(input.stepId, { force: input.outcome }, context.origin))),
+      flows.getRun(flows.stepCommand(input.stepId, { force: input.outcome }, context.origin)),
     ),
     loadFixture: os.loadFixture.handler(async ({ input }) => {
       const seed = Object.hasOwn(dev.fixtures, input.name) ? dev.fixtures[input.name] : undefined;

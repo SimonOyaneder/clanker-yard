@@ -224,6 +224,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       workspaces.extendLeases();
       slots.extendLeases();
     },
+    errors: reporter,
   });
   const prs = createPrs({ connections: opts.connections, packs, merge: createMergeScope({ store, repos, connections: opts.connections }) });
   const watchErrors = reporter.within("watch");

@@ -13,11 +13,9 @@ import {
   type Packs,
   type Store,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const REPO = "octocat/secret-project";

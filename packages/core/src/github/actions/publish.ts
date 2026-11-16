@@ -6,6 +6,7 @@ import { ApplyArgs, cleanMessage, commitsApplyAction } from "../../commits/apply
 import { preparePush } from "../../commits/prepare-push";
 import type { Connections } from "../../connections/connections";
 import { openDecision } from "../../decisions/decisions";
+import { githubUnauthorized } from "../../breakers/breakers";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
 import { claimPr } from "../../flows/subjects";
 import type { Packs } from "../../packs/packs";
@@ -176,7 +177,7 @@ async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, r
   if (watched.every((branch) => open.has(branch))) return unchanged;
 
   if ((await workspaces.fetch(row.repoId)) === "unauthorized") {
-    throw new Error(`GitHub rechazó el token de ${remote.account}: reconecta la cuenta para publicar ${ws.branch}.`);
+    throw githubUnauthorized(remote.account, `traer el repo para publicar ${ws.branch}`);
   }
   const parents = declared.filter((parent) => open.has(parent.branch));
   const baseRef = parents[0]?.branch ?? defaultBranch;

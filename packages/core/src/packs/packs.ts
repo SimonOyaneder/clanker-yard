@@ -5,12 +5,13 @@ import { NodeId, Pack, PackSettings, Role, type DefKind, type PackInfo, type Pac
 import * as z from "zod";
 import { DefValidationError, type DefIssue, type Defs } from "../defs/defs";
 import { issuesAsLines, messageOf } from "../errors/format";
+import { BadRequestError } from "../errors/domain";
 
 /** `PackSettings` sin ser estricto: lo que queda de un `Pack` al quitarle id, alcance y archivos. */
 const SettingsOfPack = z.object(PackSettings.shape);
 
 /** El pack de una carpeta no se pudo leer o no es válido; `file` es el archivo del problema. */
-export class PackLoadError extends Error {
+export class PackLoadError extends BadRequestError {
   constructor(
     readonly dir: string,
     readonly file: string,
@@ -24,7 +25,7 @@ export class PackLoadError extends Error {
 }
 
 /** Instalar o quitar un pack no se puede: el mensaje dice qué cambiar. */
-export class PackInstallError extends Error {}
+export class PackInstallError extends BadRequestError {}
 
 export interface Packs {
   /**

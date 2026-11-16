@@ -5,11 +5,12 @@ import { eq } from "drizzle-orm";
 import type * as z from "zod";
 import { agentSessions } from "../store/schema";
 import type { Store } from "../store/store";
+import { NotFoundError } from "../errors/domain";
 
 // El formato de los transcripts que dejan los runtimes bajo `home` (`transcripts/<sessionRef>.jsonl`) y cómo se leen.
 // Es de todos los runtimes: Claude escribe los mensajes de su SDK tal cual y los demás, entradas ya normalizadas.
 
-export class SessionNotFoundError extends Error {
+export class SessionNotFoundError extends NotFoundError {
   constructor(sessionId: string) {
     super(`No existe la sesión ${sessionId}.`);
   }

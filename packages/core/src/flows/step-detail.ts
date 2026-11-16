@@ -12,11 +12,12 @@ import { and, asc, eq, inArray, like, or } from "drizzle-orm";
 import { agentSessions, artifactRefs, artifacts, defs, stepRuns, stepUsage } from "../store/schema";
 import type { Store } from "../store/store";
 import { stepLogPath } from "../workspaces/exec";
+import { NotFoundError } from "../errors/domain";
 
 /** Cuánto del final de un log se lee: un test que imprime megas no pasa por la memoria del core. */
 const LOG_TAIL_BYTES = 4 * 1024 * 1024;
 
-export class StepNotFoundError extends Error {
+export class StepNotFoundError extends NotFoundError {
   constructor(stepId: StepRunId) {
     super(`No existe el paso ${stepId}.`);
   }

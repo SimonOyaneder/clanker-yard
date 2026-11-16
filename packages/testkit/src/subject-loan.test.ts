@@ -28,8 +28,6 @@ const WAIT = { timeout: 10_000 };
 // El préstamo del sujeto con Workspaces de verdad: la corrida de dev estacionada presta el PR y su
 // worktree al rebase, y al devolverlos sigue con el token nuevo. Va aquí y no en el core por los repos git reales.
 
-vi.setConfig({ testTimeout: 20_000 });
-
 const demoFixtures = fileURLToPath(new URL("../fixtures/runs/demo", import.meta.url));
 const PR = { type: "pr", id: "pr_1" } as const;
 

@@ -12,9 +12,11 @@ import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../repos/repos";
 import { type QueuePrFact, tickDev } from "./queue";
 import { openOwnedPrsOfIssues } from "../github/pr-rows";
+import { BadRequestError } from "../errors/domain";
+import { messageOf } from "../errors/format";
 
 /** El core no puede calcular la cola de este proyecto (no tiene el adapter de su tracker o no puede leerlo): el mensaje dice qué falta. */
-export class QueueUnavailableError extends Error {}
+export class QueueUnavailableError extends BadRequestError {}
 
 export interface ProjectQueueDeps {
   store: Store;
@@ -98,7 +100,7 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
         .map(({ params, ...run }) => ({ ...run, repoId: repoOfRun(params) }));
       // Sin saber quién es la persona no hay cola (decide qué issues son suyas); sin cuenta conectada el adapter lanza.
       const viewer = tracker.viewer().catch((error: unknown) => {
-        throw new QueueUnavailableError(`No se pudo leer tu usuario de ${project.tracker} para calcular la cola de ${project.slug}: ${(error as Error).message}`);
+        throw new QueueUnavailableError(`No se pudo leer tu usuario de ${project.tracker} para calcular la cola de ${project.slug}: ${messageOf(error)}`, { cause: error });
       });
       // Las issues con corridas siguen una cadena entre repos: de ellas solo importa qué PRs siguen abiertos.
       const ran = new Set(devRuns.map((run) => run.issueId));

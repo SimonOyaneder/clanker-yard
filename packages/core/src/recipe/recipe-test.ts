@@ -9,6 +9,7 @@ import type { Store } from "../store/store";
 import { excerpt, execStreaming } from "../workspaces/exec";
 import { RepoNotFoundError, type Repos } from "../repos/repos";
 import { readRecipe, RECIPE_PATH } from "./recipe";
+import { BadRequestError } from "../errors/domain";
 
 /** Una prueba que dura más se mata: un `setup` colgado no puede dejar la llamada abierta para siempre. */
 export const RECIPE_TEST_TIMEOUT_MS = 30 * 60_000;
@@ -17,7 +18,7 @@ export const OUTPUT_FLUSH_MS = 250;
 const OUTPUT_FLUSH_CHARS = 8 * 1024;
 
 /** No se puede probar la receta: el mensaje dice por qué (no hay receta, o ya hay una prueba corriendo). */
-export class RecipeTestError extends Error {}
+export class RecipeTestError extends BadRequestError {}
 
 export interface RecipeTester {
   /**

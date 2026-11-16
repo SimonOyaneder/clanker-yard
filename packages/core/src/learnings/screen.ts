@@ -2,9 +2,10 @@ import { tmpdir } from "node:os";
 import { type Learning, type LearningVerdict, LearningVerdicts } from "@clanker/api";
 import type { AgentRuntime } from "../agents/runtime";
 import { LEARNING_CRITERIA } from "./criteria";
+import { BadRequestError } from "../errors/domain";
 
 /** El filtro con el criterio no pudo correr o no entregó un veredicto válido: no cambió nada. */
-export class LearningScreenError extends Error {}
+export class LearningScreenError extends BadRequestError {}
 
 const SYSTEM_PROMPT = `Filtras learnings propuestos por agentes de código. Decides, uno por uno, si cumple el criterio. Solo juzgas el texto: no tienes acceso al repo.`;
 

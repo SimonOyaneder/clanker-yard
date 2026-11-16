@@ -29,14 +29,12 @@ import {
   type Store,
   type Workspaces,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
 // Las acciones del rebase de un PR abierto (`workspace.attach`, `workspace.rebase`, `pr.pushLease`) y el
 // `afterRebase` de `recipe.check`, sobre repos git reales, un remoto bare y el GitHub simulado.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";

@@ -8,20 +8,21 @@ import { readMetaJson } from "../store/meta-json";
 import { issues, meta, projectRepos, projects, repos, syncCursors } from "../store/schema";
 import { issuesCursorKey } from "../tracker/issues";
 import type { Store, Tx } from "../store/store";
+import { BadRequestError, NotFoundError } from "../errors/domain";
 
 type ProjectRow = typeof projects.$inferSelect;
 /** Lo que `projects.update` cambia en la fila: todo menos la lista de repos, que vive en `project_repos`. */
 type ProjectColumns = Omit<ProjectRow, "id">;
 
 /** El proyecto que se pidió no existe. */
-export class ProjectNotFoundError extends Error {
+export class ProjectNotFoundError extends NotFoundError {
   constructor(id: ProjectId) {
     super(`No existe el proyecto ${id}.`);
   }
 }
 
 /** Los datos no forman un proyecto válido: el mensaje dice qué cambiar. Nada se guardó. */
-export class InvalidProjectError extends Error {}
+export class InvalidProjectError extends BadRequestError {}
 
 export interface Projects {
   /** Por slug. */

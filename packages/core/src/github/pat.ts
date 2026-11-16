@@ -1,9 +1,10 @@
 import type { GitHubPatForm } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { createGitHubClient, isRateLimited, type GitHubApiOptions, type GitHubClient } from "./client";
+import { BadRequestError } from "../errors/domain";
 
 /** El token no sirve para Clanker Yard; el mensaje dice qué cambiar. */
-export class GitHubPatError extends Error {
+export class GitHubPatError extends BadRequestError {
   override name = "GitHubPatError";
 }
 

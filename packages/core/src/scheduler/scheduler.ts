@@ -19,6 +19,7 @@ import { messageOf } from "../errors/format";
 import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import type { LaneSettings } from "./lanes";
 import type { ProjectQueue } from "./project-queue";
+import { BadRequestError } from "../errors/domain";
 
 /** El tick periódico del diseño (`docs/design.html#d-ops`, "Scheduler: la cola"), además de los eventos que lo disparan. */
 export const SCHEDULER_TICK_MS = 5 * 60_000;
@@ -103,7 +104,7 @@ export interface Scheduler {
 }
 
 /** La issue no existe o no es del proyecto. */
-export class IssueNotInProjectError extends Error {}
+export class IssueNotInProjectError extends BadRequestError {}
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
   const { store, projects, issues, repos, lanes, breakers } = deps;
@@ -134,9 +135,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         again = false;
         try {
           await pass();
+          errors.clear(TICK_SCOPE);
         } catch (error) {
           // Un tick corre desde timers y eventos: un throw tumbaría el core.
-          console.error("El tick del Scheduler falló:", error);
+          errors.report(TICK_SCOPE, error);
         }
       } while (again && !closed);
     } finally {

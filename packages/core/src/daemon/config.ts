@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { messageOf } from "../errors/format";
 
 /** Variable de entorno que pisa `githubApp.clientId` del archivo; sirve en dev y en tests. */
 export const GITHUB_APP_CLIENT_ID_ENV = "CLANKER_GITHUB_APP_CLIENT_ID";
@@ -56,7 +57,7 @@ function readConfigFile(path: string): z.infer<typeof ConfigFile> {
   try {
     json = JSON.parse(text);
   } catch (error) {
-    throw new Error(`${path} no es JSON válido: ${(error as Error).message}`);
+    throw new Error(`${path} no es JSON válido: ${messageOf(error)}`, { cause: error });
   }
   const parsed = ConfigFile.safeParse(json);
   if (!parsed.success) {

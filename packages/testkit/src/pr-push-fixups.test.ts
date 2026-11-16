@@ -24,13 +24,11 @@ import {
   type WorkspaceLease,
   type Workspaces,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
 // Como pr-publish.test.ts: repos git reales (tempGitRepo), un remoto bare y el GitHub simulado.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";

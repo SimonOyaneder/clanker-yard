@@ -25,7 +25,7 @@ import {
   type Store,
   createRuntimeRegistry,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { z } from "zod";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
@@ -33,8 +33,6 @@ import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 
 // `pr.botReview`, `pr.ci`, `pr.merged` y `review.requestBot` sobre el GitHub simulado, dentro del motor
 // de flujos real: el sondeo (`probe`), el signal (`match`) y el plazo (`timeout`) de cada wait.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";

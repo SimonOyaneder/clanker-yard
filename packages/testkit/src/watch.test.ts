@@ -45,8 +45,6 @@ const WAIT = { timeout: 10_000 };
 // Watch contra el GitHub simulado: qué mira, cuándo, y lo que gasta de cuota. El reloj es el de `clock`
 // (Watch no usa timers en estos tests: cada `wake` es un `watch.tick()`), y el motor de flujos corre real.
 
-vi.setConfig({ testTimeout: 20_000 });
-
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";
 const REPO = "octocat/secret-project";

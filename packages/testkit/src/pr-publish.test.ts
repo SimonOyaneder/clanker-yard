@@ -31,7 +31,7 @@ import {
   type Workspaces,
   createRuntimeRegistry,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { z } from "zod";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
@@ -39,8 +39,6 @@ import { seedPr } from "@clanker/core/testing";
 
 // Se prueba aquí y no en el core: necesita repos git reales (tempGitRepo) y un remoto bare. GitHub es el
 // simulado (`startGitHubSim`): nunca GitHub ni tokens reales.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";

@@ -29,7 +29,7 @@ import {
   type Watch,
   createRuntimeRegistry,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
@@ -37,8 +37,6 @@ import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 // La estrategia de merge del pack de ejemplo (`fixtures/packs/example`, tal cual salvo su alcance) sobre el
 // GitHub simulado: qué hace el core cuando un PR queda listo (`pr.mergeReady`), con Watch, los eventos y las
 // reacciones reales (`docs/design.html#d-ops`, "Tres niveles de merge").
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";

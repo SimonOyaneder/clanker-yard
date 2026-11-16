@@ -12,9 +12,10 @@ import type { Repos } from "../repos/repos";
 import { RepoNotFoundError } from "../repos/repos";
 import { repoConfigPath, renderRepoFile } from "./files";
 import { messageOf } from "../errors/format";
+import { BadRequestError } from "../errors/domain";
 
 /** No se puede exportar: el mensaje dice por qué y qué hacer. */
-export class RepoExportError extends Error {}
+export class RepoExportError extends BadRequestError {}
 
 export interface RepoConfigExporter {
   /**

@@ -45,6 +45,8 @@ import { isTruthy, resolveRefs } from "./refs";
 import { calledFlows, LANE_BY_TRIGGER } from "./validate";
 import { issuesInline, messageOf } from "../errors/format";
 import { isRecord } from "../defs/defs";
+import { BadRequestError, NotFoundError } from "../errors/domain";
+import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 
 /** El lease de un paso: el core dueño lo renueva cada tercio mientras el paso vive. */
 const STEP_LEASE_TTL_MS = 120_000;
@@ -231,6 +233,8 @@ export interface EngineDeps extends SubjectsDeps {
   bootId?: string;
   /** Al despertar de un sleep, además de los leases de los pasos: extender los de lo que este core mantiene fuera del motor. */
   onClockJump?: () => void;
+  /** Donde queda lo que falla en un despertar del dispatcher (`flows.dispatch`); sin él, el que crea con el store. */
+  errors?: ErrorReporter;
   now?: () => number;
 }
 
@@ -320,22 +324,22 @@ export interface Engine {
 }
 
 /** `start` rechazó el pedido (flujo o perfil que no existen, params inválidos): no se creó nada y el mensaje dice qué cambiar. */
-export class RunStartError extends Error {}
+export class RunStartError extends BadRequestError {}
 
 /** La decisión pedida no existe. */
-export class DecisionNotFoundError extends Error {
+export class DecisionNotFoundError extends NotFoundError {
   constructor(id: DecisionId) {
     super(`No existe la decisión ${id}.`);
   }
 }
 
 /** La decisión no se puede resolver así (ya se resolvió, no estaciona a nadie o la opción no es suya): no cambió nada. */
-export class DecisionResolveError extends Error {}
+export class DecisionResolveError extends BadRequestError {}
 
 export { OUTPUT_INLINE_MAX_BYTES, RunNotFoundError };
 
 /** El comando no se puede aplicar a la corrida o al paso en su estado actual: no cambió nada y el mensaje dice qué hacer. */
-export class RunCommandError extends Error {}
+export class RunCommandError extends BadRequestError {}
 
 /** El `reason` del abort de los pasos de una corrida cancelada. */
 class RunCanceled extends Error {
@@ -428,11 +432,15 @@ interface BranchState {
   error: string | null;
 }
 
+/** El `scope` del evento `error` cuando falla un despertar del dispatcher. */
+const DISPATCH_SCOPE = "flows.dispatch";
+
 export function createEngine(deps: EngineDeps): Engine {
   const { store, defs, agents, artifacts, actions, consolidators, waits, workspaceOf, briefFor, environment, now = Date.now } = deps;
   const maxAgents = deps.maxAgents ?? DEFAULT_MAX_AGENTS;
   const probeEveryMs = (deps.probeEverySec ?? DEFAULT_PROBE_EVERY_SEC) * 1000;
   const bootId = deps.bootId ?? newId("boot");
+  const errors = deps.errors ?? createErrorReporter(store);
   const { flowOf, workspaceFor, lineage, resolveRef, selectStep, readArtifact, parallelStepOf, itemsOf, latestStep, getRun, listRuns } =
     createRunReads({ store, defs, artifacts, workspaceOf });
   const inFlight = new Set<Promise<void>>();
@@ -708,9 +716,10 @@ export function createEngine(deps: EngineDeps): Engine {
       // Una dueña que se estacionó o terminó puede dejar libre (o prestable) el sujeto de una corrida que espera, y una que terminó o se estacionó deja un cupo.
       if (hasWaiting(store.db)) store.tx((tx) => subjects.promoteQueued(tx));
       dispatch();
+      errors.clear(DISPATCH_SCOPE);
     } catch (error) {
       // Un wake que lanza tumbaría a quien lo llamó (un `start`, el cierre de otro paso, un timer).
-      console.error("El dispatcher de flujos falló:", error);
+      errors.report(DISPATCH_SCOPE, error);
     }
   }
 
