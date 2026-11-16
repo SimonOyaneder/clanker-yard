@@ -199,6 +199,7 @@ function setDemoControl(
 }
 
 const card = (page: Page, name: string) => page.getByRole("group", { name, exact: true });
+
 const snapBoth = async (page: Page, view: string) => {
   // Los toasts de la acción anterior taparían la captura.
   await page.addStyleTag({ content: "[data-sonner-toaster] { visibility: hidden !important; }" });
@@ -408,8 +409,8 @@ test("las resueltas guardan lo que se eligió y sin pendientes la bandeja dice q
 const openedUrl = (app: ElectronApplication) => app.evaluate(() => (globalThis as { openedUrl?: string }).openedUrl);
 const approve = async (app: ElectronApplication) => expect((await fetch((await openedUrl(app))!)).ok).toBe(true);
 const forgetOpened = (app: ElectronApplication) => app.evaluate(() => ((globalThis as { openedUrl?: string }).openedUrl = undefined));
-// El core de demo lee `demo-control.json` cada 200 ms: lo que hace "del lado de GitHub" no es instantáneo.
-const settle = (page: Page) => page.waitForTimeout(500);
+// El core de demo lee `demo-control.json` cada 200 ms: lo que hace "del lado de GitHub" no es instantáneo, así que lo que
+// depende de eso se reintenta (`toPass`) hasta ver el cambio en la vista, sin un sleep fijo.
 
 test("conectar con la GitHub App muestra el código en vivo, y al aprobarlo la cuenta aparece sola con su token", async ({ app, window: page }) => {
   await app.evaluate(({ ipcMain }) => {
@@ -478,12 +479,13 @@ test("si el código vence sin aprobarse la tarjeta avisa y ofrece intentar de nu
 test("sin instalar la App la cuenta conecta pero la tarjeta avisa y ofrece instalarla", async ({ home, app, window: page }) => {
   const github = card(page, "GitHub");
   setDemoControl(home, { githubInstalled: false });
-  await settle(page);
-  await sidebar(page).getByRole("button", { name: "Bandeja", exact: true }).click();
-  await sidebar(page).getByRole("button", { name: "Conexiones" }).click();
-
   const warning = github.getByRole("alert").filter({ hasText: "La GitHub App no está instalada" });
-  await expect(warning).toBeVisible();
+  // Volver a la vista relee las instalaciones; hasta que el demo lea el archivo siguen ahí.
+  await expect(async () => {
+    await sidebar(page).getByRole("button", { name: "Bandeja", exact: true }).click();
+    await sidebar(page).getByRole("button", { name: "Conexiones" }).click();
+    await expect(warning).toBeVisible({ timeout: 1_000 });
+  }).toPass();
   await snapBoth(page, "github-app-sin-instalar");
 
   await forgetOpened(app);
@@ -491,9 +493,10 @@ test("sin instalar la App la cuenta conecta pero la tarjeta avisa y ofrece insta
   await expect.poll(() => openedUrl(app)).toBe("https://github.com/apps/clanker-yard-demo/installations/new");
   // Al volver de instalarla, revisar de nuevo quita el aviso.
   setDemoControl(home, {});
-  await settle(page);
-  await warning.getByRole("button", { name: "Volver a revisar" }).click();
-  await expect(warning).toBeHidden();
+  await expect(async () => {
+    await warning.getByRole("button", { name: "Volver a revisar" }).click({ timeout: 1_000 });
+    await expect(warning).toBeHidden({ timeout: 1_000 });
+  }).toPass();
 });
 
 test("con el refresh token de la App vencido o rechazado, la tarjeta pide volver a conectar", async ({ home, window: page }) => {
@@ -511,7 +514,9 @@ test("con el refresh token de la App vencido o rechazado, la tarjeta pide volver
 
   // En el día 41 el access token (8 h) ya no sirve y GitHub rechaza el refresh: al revisar la instalación el core la deja revocada.
   setDemoControl(home, { clockDays: 41, githubRefresh: "rejected" });
-  await settle(page);
+  // El reloj nuevo rige al instante, pero el GitHub falso invalida los refresh tokens en su tick de 200 ms y eso no se ve en
+  // ningún lado: si la tarjeta revisa antes, el refresh sale bien y la cuenta nunca se revoca. Única espera fija del archivo.
+  await page.waitForTimeout(500);
   await reload();
   await expect(github.getByText("revocada", { exact: true })).toBeVisible();
   await expect(github.getByText("GitHub rechazó la renovación del token")).toBeVisible();

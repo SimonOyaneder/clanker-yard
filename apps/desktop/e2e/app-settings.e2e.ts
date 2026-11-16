@@ -67,7 +67,8 @@ test("instalar un pack desde una carpeta rige sin reiniciar, y quitarlo lo saca"
   await page.getByRole("menuitem", { name: "Quitar" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Quitar" }).click();
   await expect(packs.getByText("GitHub: acme-co")).toBeHidden();
-  expect((await client.packs.list()).map((p) => p.id)).not.toContain("acme");
+  // La lista se esconde antes de que el core termine de quitarlo: se pregunta hasta que lo diga.
+  await expect.poll(async () => (await client.packs.list()).map((p) => p.id)).not.toContain("acme");
 });
 
 test("los defaults de proyectos nuevos se guardan y el siguiente proyecto los toma", async ({ window: page, home }) => {
