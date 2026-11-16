@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, JUGUETE_FLOW, openDecision, openStore, startCore, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core";
-import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
+import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedLearnings, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
 // y tres repos git temporales (sin receta, con una válida y con una inválida). Publica `core.json` en
@@ -30,6 +30,9 @@ import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScena
 //
 // Con `DEMO_SCENARIO=prs` siembra los PRs de la vista de Stacks de PR (`prs-scenario.ts`) con el pack de ejemplo activado para
 // la org del simulador: un stack, riesgo alto, uno en cola, uno con la cola caída, uno en hold y una base combinada.
+//
+// Con `DEMO_SCENARIO=learnings` siembra la revisión de learnings (`learnings-scenario.ts`): los importados del clanker-loop
+// y los propuestos por agentes y personas, por revisar, más algunos ya aprobados, rechazados y retirados.
 //
 // Con `DEMO_SCENARIO=lanes` además siembra el proyecto de la vista de Operación (`lanes-scenario.ts`): dev lleno,
 // una corrida estacionada, un rebase en mantenimiento y un breaker abierto.
@@ -225,6 +228,12 @@ if (prsScenario) {
   // El PR de la base del stack lo "abrió" esta corrida: es la que abre "Ver corrida".
   const run = await client.runs.start({ projectId: project.id, issueId: demoIssues[0]!.id, params: { repo: repoId } });
   await seedPrs({ client, store, sim: github, repoId, origin: { issueId: demoIssues[0]!.id, runId: run.id } });
+}
+
+if (process.env.DEMO_SCENARIO === "learnings") {
+  // La corrida de la que dicen venir los learnings que propone un agente.
+  const run = await client.runs.start({ projectId: project.id, issueId: demoIssues[0]!.id, params: { repo: repoId } });
+  await seedLearnings({ client, store, repoId, demoProjectId: project.id, runId: run.id });
 }
 
 writeCoreJson(home, {

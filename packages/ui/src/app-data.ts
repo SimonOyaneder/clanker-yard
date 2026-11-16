@@ -21,6 +21,9 @@ import type {
   IssueId,
   IssueMetrics,
   Lanes,
+  Learning,
+  LearningId,
+  LearningPatch,
   ModelMetrics,
   NewProject,
   PrRef,
@@ -142,6 +145,14 @@ export interface AppData {
    * `needs_human` la corrida estacionada vuelve a la cola de su carril.
    */
   resolveDecision(id: DecisionId, option: string): Promise<Decision>
+  /** Todos los learnings, de cualquier estado, del más reciente al más antiguo: la UI filtra y cuenta. */
+  learnings(): Promise<Learning[]>
+  /** Un `proposed`, `rejected` o `archived` pasa a `approved` y entra a los briefs de su alcance. Solo la app puede (origin `ui`). */
+  approveLearning(id: LearningId): Promise<Learning>
+  /** Un `proposed` queda `rejected` y un `approved` queda `archived` (se retira). */
+  rejectLearning(id: LearningId): Promise<Learning>
+  /** Cambia texto, roles o tags; el alcance y el estado no se editan. Uno aprobado solo lo edita la app. */
+  updateLearning(patch: LearningPatch): Promise<Learning>
   /** Las cuentas conectadas, sin tokens. */
   connections(): Promise<Connection[]>
   /** El link prellenado del formulario del PAT y la lista de permisos que necesita. */

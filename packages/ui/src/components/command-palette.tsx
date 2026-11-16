@@ -1,5 +1,5 @@
 import type { CachedIssue, ClankerProject, Decision, DecisionId, QueueEntry, Run, RunId } from "@clanker/api"
-import { BarChart3, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, Table2, Undo2, X } from "lucide-react"
+import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, X } from "lucide-react"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs"
 import { repoNameOf } from "@/lib/prs"
@@ -24,11 +24,13 @@ import {
 } from "@/components/ui/command"
 import { useState } from "react"
 import type { SettingsControls } from "@/components/project/settings-view"
+import type { LearningsView } from "@/hooks/use-learnings-view"
 import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { useHost } from "@/host"
 import { useAppActions } from "@/lib/app-context"
 import { KIND_LABEL, optionLabel, optionsOf, takesText } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
+import { approveLabel, capsOf, rejectLabel, SOURCE_LABEL, SOURCES, STATUS_LABEL, STATUSES } from "@/lib/learnings"
 import { DEFAULT_RANGE, ORIGIN_LABELS, ORIGINS, RANGE_LABELS, RANGE_PRESETS } from "@/lib/summary"
 import type { RunCaps } from "@/lib/run-commands"
 import { barProjects } from "@/lib/projects"
@@ -50,6 +52,9 @@ interface Props {
   prsActive: boolean
   onGoPrs: () => void
   onGoInbox: () => void
+  onGoLearnings: () => void
+  /** Solo en Learnings: lo que se puede hacer con lo marcado o con el learning a la vista, y deshacer si hay algo que deshacer. */
+  learnings: { view: LearningsView; onUndo: (() => void) | null } | null
   /** Las decisiones pendientes: ⏎ en una la abre en la bandeja. */
   pendingDecisions: Decision[]
   onOpenDecision: (id: DecisionId) => void
@@ -72,7 +77,7 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, prsActive, onGoPrs, onGoInbox, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, onToggleSidebar, onOpenShortcuts, prs, prsActive, onGoPrs, onGoInbox, onGoLearnings, learnings, pendingDecisions, onOpenDecision, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
   const prCommands = usePrCommands()
@@ -158,6 +163,8 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             ) : null}
           </CommandGroup>
         ) : null}
+
+        {learnings ? <LearningsCommands {...learnings} run={run} /> : null}
 
         {onUndoDecision ? (
           <CommandGroup heading="Bandeja">
@@ -395,6 +402,10 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <Inbox /> Ir a la Bandeja
             <CommandShortcut>⇧⌘I</CommandShortcut>
           </CommandItem>
+          <CommandItem onSelect={run(onGoLearnings)}>
+            <BookCheck /> Ir a Learnings
+            <CommandShortcut>⇧⌘A</CommandShortcut>
+          </CommandItem>
           <CommandItem onSelect={run(onGoPrs)}>
             <GitPullRequest /> Ir a Stacks de PR
             <CommandShortcut>⇧⌘P</CommandShortcut>
@@ -430,5 +441,72 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
         </CommandGroup>
       </CommandList>
     </CommandDialog>
+  )
+}
+
+// Las acciones de la vista de Learnings: actúan sobre lo marcado o, si no hay nada marcado, sobre el que está a la vista.
+function LearningsCommands({ view, onUndo, run }: { view: LearningsView; onUndo: (() => void) | null; run: (fn: () => void) => () => void }) {
+  const { targets, current, selected } = view
+  const approvable = targets.filter((l) => capsOf(l).approve)
+  const rejectable = targets.filter((l) => capsOf(l).reject)
+  const count = (n: number) => (selected.length > 0 ? ` ${n}` : "")
+  return (
+    <CommandGroup heading={selected.length ? `${selected.length} learnings marcados` : "Este learning"}>
+      {approvable.length ? (
+        <CommandItem value="learning aprobar entra a los briefs" onSelect={run(() => view.act("approve"))}>
+          <Check /> {approveLabel(approvable[0]!)}
+          {count(approvable.length)}
+          <CommandShortcut>A</CommandShortcut>
+        </CommandItem>
+      ) : null}
+      {rejectable.length ? (
+        <CommandItem value="learning rechazar retirar descartar" onSelect={run(() => view.act("reject"))}>
+          <X /> {rejectLabel(rejectable[0]!)}
+          {count(rejectable.length)}
+          <CommandShortcut>R</CommandShortcut>
+        </CommandItem>
+      ) : null}
+      {current ? (
+        <CommandItem value="learning editar texto roles tags" onSelect={run(() => view.setEditing(true))}>
+          <Pencil /> Editar el texto y los roles
+          <CommandShortcut>E</CommandShortcut>
+        </CommandItem>
+      ) : null}
+      {view.items.length > selected.length ? (
+        <CommandItem value="learning marcar todos los que se ven selección en lote" onSelect={run(view.selectAll)}>
+          <SquareCheck /> Marcar los {view.items.length} que se ven
+          <CommandShortcut>⌘A</CommandShortcut>
+        </CommandItem>
+      ) : null}
+      {selected.length ? (
+        <CommandItem value="learning quitar la selección desmarcar" onSelect={run(view.clearSelection)}>
+          <X /> Quitar la selección
+          <CommandShortcut>⎋</CommandShortcut>
+        </CommandItem>
+      ) : null}
+      {onUndo ? (
+        <CommandItem value="learning deshacer la última decisión" onSelect={run(onUndo)}>
+          <Undo2 /> Deshacer la última decisión
+          <CommandShortcut>Z</CommandShortcut>
+        </CommandItem>
+      ) : null}
+      {STATUSES.filter((status) => status !== view.tab).map((status) => (
+        <CommandItem key={status} value={`learnings ver ${STATUS_LABEL[status]}`} onSelect={run(() => view.setTab(status))}>
+          <BookCheck /> Ver {STATUS_LABEL[status].toLowerCase()}
+          <CommandShortcut>{view.counts[status]}</CommandShortcut>
+        </CommandItem>
+      ))}
+      {SOURCES.map((source) => (
+        <CommandItem key={source} value={`learnings filtrar origen ${SOURCE_LABEL[source]}`} onSelect={run(() => view.setFilters({ source }))}>
+          <Filter /> Origen: {SOURCE_LABEL[source].toLowerCase()}
+          {view.filters.source === source ? <CommandShortcut>actual</CommandShortcut> : null}
+        </CommandItem>
+      ))}
+      {view.filtered ? (
+        <CommandItem value="learnings quitar filtros" onSelect={run(view.clearFilters)}>
+          <Filter /> Quitar los filtros
+        </CommandItem>
+      ) : null}
+    </CommandGroup>
   )
 }

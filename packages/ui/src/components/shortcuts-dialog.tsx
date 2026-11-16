@@ -16,6 +16,7 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
     title: "Navegación",
     items: [
       ["Bandeja (también G y luego I)", "⇧⌘I"],
+      ["Learnings (también G y luego A)", "⇧⌘A"],
       ["Stacks de PR", "⇧⌘P"],
       ["Conexiones (G y luego C)", "GC"],
       ["Ir al proyecto 1…9 de la barra", "⌘1"],
@@ -72,6 +73,20 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
       ["Responder con texto libre", "R"],
       ["Abrir la corrida de la decisión", "⏎"],
       ["Deshacer la última respuesta (unos segundos)", "Z"],
+    ],
+  },
+  {
+    title: "Learnings",
+    items: [
+      ["Learning siguiente / anterior", "JK"],
+      ["Marcar o desmarcar el learning a la vista", "X"],
+      ["Marcar todos los que se ven", "⌘A"],
+      ["Aprobar los marcados (o el que está a la vista)", "A"],
+      ["Rechazar o retirar los marcados (o el que está a la vista)", "R"],
+      ["Editar el texto y los roles", "E"],
+      ["Buscar en los learnings", "/"],
+      ["Quitar la selección", "⎋"],
+      ["Deshacer la última decisión (unos segundos)", "Z"],
     ],
   },
   {

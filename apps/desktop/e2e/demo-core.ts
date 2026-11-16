@@ -5,10 +5,10 @@ import { join } from "node:path";
 const testkitDir = join(import.meta.dirname, "../../../packages/testkit");
 
 /**
- * `lanes` siembra el proyecto de la vista de Operación, `summary` el del Resumen (lo importado del clanker-loop y corridas de Yard)
- * y `prs` los PRs de Stacks de PR, con el pack de ejemplo (`DEMO_SCENARIO` de `packages/testkit/scripts/demo-core.ts`).
+ * `lanes` siembra el proyecto de la vista de Operación, `summary` el del Resumen (lo importado del clanker-loop y corridas de Yard),
+ * `prs` los PRs de Stacks de PR, con el pack de ejemplo y `learnings` los de la revisión de learnings (`DEMO_SCENARIO` de `packages/testkit/scripts/demo-core.ts`).
  */
-export type DemoScenario = "default" | "lanes" | "summary" | "prs";
+export type DemoScenario = "default" | "lanes" | "summary" | "prs" | "learnings";
 
 export interface DemoCore {
   stop(): Promise<void>;

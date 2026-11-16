@@ -1,4 +1,4 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefRecord, type IssueId, type PrRef, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefRecord, type IssueId, type Learning, type LearningPatch, type PrRef, type ProjectId, type QueueEntry, type Repo, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildOpenPrs } from "@/seed-prs"
@@ -270,6 +270,35 @@ export function createMemoryAppData(now = Date.now()): AppData {
   }
   // Conexiones de ejemplo: GitHub en regla, Linear vencida y Claude sin configurar.
   const day = 86_400_000
+  // Learnings de los tres orígenes y los cuatro estados. Aprobar, rechazar y editar siguen las reglas del core.
+  const learning = (n: number, l: Pick<Learning, "text" | "status" | "source"> & Partial<Learning>): Learning => ({
+    id: id("lrn", n),
+    projectId: projects[0]!.id,
+    repoId: null,
+    roles: [],
+    tags: [],
+    sourceRunId: null,
+    createdAt: min(60 * n),
+    ...l,
+  })
+  const learnings: Learning[] = [
+    learning(1, { text: "El scope por organización se pasa siempre explícito: ningún query de un engine lee `Current.organization`.", status: "proposed", source: "agent", roles: ["review-bugs"], sourceRunId: runs[1]!.id }),
+    learning(2, { text: "Antes de tocar un engine, correr `bin/boundaries check` para ver qué dependencias ya están prohibidas.", status: "proposed", source: "import" }),
+    learning(3, { text: "Los specs de un engine no cargan fixtures de otro: se arman con las factories del propio engine.", status: "proposed", source: "import", roles: ["dev", "review-tests"] }),
+    learning(4, { text: "Nombrar los helpers de boundaries con el sufijo del engine dueño, como los vecinos.", status: "proposed", source: "agent", roles: ["review-patterns"], sourceRunId: runs[1]!.id }),
+    learning(5, { text: "El CLI viejo del loop se llamaba con `loop run`; en Yard es `clanker runs start`.", status: "proposed", source: "import" }),
+    learning(6, { text: "Usar `recipe.check` antes de `commit`: en las últimas corridas el commit falló por lint.", status: "proposed", source: "human", projectId: projects[1]!.id }),
+    learning(7, { text: "Cada PR de la cadena sale sobre la rama del anterior, no sobre main.", status: "approved", source: "import", tags: ["stack"] }),
+    learning(8, { text: "No mergear con `gh pr merge`: el pack comenta su comando y el merge lo hace el bot.", status: "approved", source: "human", roles: ["committer"] }),
+    learning(9, { text: "El hook de pre-commit tarda 40 s: no lo saltes, espéralo.", status: "rejected", source: "agent", sourceRunId: runs[2]!.id }),
+    learning(10, { text: "Las migraciones se generan con `--name`, nunca con el nombre aleatorio.", status: "archived", source: "import" }),
+  ]
+  const needLearning = (learningId: string) => {
+    const found = learnings.find((l) => l.id === learningId)
+    if (!found) throw new Error(`No existe el learning ${learningId}.`)
+    return found
+  }
+
   const connections: Connection[] = [
     { provider: "github", account: "octocat", scopes: ["contents", "pull_requests", "issues", "checks", "statuses"], status: "active", expiresAt: now + 60 * day, expiresSoon: false, auth: "pat" },
     { provider: "linear", account: "clanker-yard", scopes: ["read", "write"], status: "expired", expiresAt: now - 2 * day },
@@ -510,6 +539,24 @@ export function createMemoryAppData(now = Date.now()): AppData {
       Object.assign(found, { status: "answered", resolution: { option }, resolvedBy: "ui", resolvedAt: Date.now() })
       const parked = runs.find((r) => r.id === found.runId && r.status === "parked")
       if (parked && (found.kind === "gate" || found.kind === "needs_human")) Object.assign(parked, option === "cancel" ? { status: "canceled", parkReason: null } : { status: "running", parkReason: null })
+      return { ...found }
+    },
+    learnings: async () => learnings.toSorted((a, b) => (a.id < b.id ? 1 : -1)).map((l) => ({ ...l })),
+    approveLearning: async (learningId) => {
+      const found = needLearning(learningId)
+      found.status = "approved"
+      return { ...found }
+    },
+    rejectLearning: async (learningId) => {
+      const found = needLearning(learningId)
+      if (found.status === "proposed") found.status = "rejected"
+      else if (found.status === "approved") found.status = "archived"
+      return { ...found }
+    },
+    updateLearning: async ({ id: learningId, ...changes }: LearningPatch) => {
+      const found = needLearning(learningId)
+      if (changes.text && learnings.some((l) => l.id !== found.id && l.text === changes.text && l.projectId === found.projectId && l.repoId === found.repoId)) throw new Error("Ya existe ese texto en el mismo alcance.")
+      Object.assign(found, changes)
       return { ...found }
     },
     connections: async () => connections.map((c) => ({ ...c })),

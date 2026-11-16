@@ -1,5 +1,5 @@
 import type { ClankerProject, Run } from "@clanker/api"
-import { ChevronRight, Copy, GitPullRequest, Inbox, Keyboard, Plug, Plus, RefreshCw, Search } from "lucide-react"
+import { BookCheck, ChevronRight, Copy, GitPullRequest, Inbox, Keyboard, Plug, Plus, RefreshCw, Search } from "lucide-react"
 import { PlanUsage } from "@/components/connections/plan-usage"
 import type { ClaudePlan } from "@/hooks/use-claude-plan"
 import type { CoreState } from "@/host"
@@ -32,6 +32,10 @@ interface Props {
   /** Decisiones pendientes; ámbar si alguna estaciona su corrida. */
   inboxBadge: { count: number; parks: boolean } | null
   onSelectInbox: () => void
+  learningsActive: boolean
+  /** Learnings por revisar: sin número cuando no queda ninguno. */
+  learningsBadge: number
+  onSelectLearnings: () => void
   /** Las corridas vivas de todos los proyectos (cualquier estado menos terminadas). */
   liveRuns: Run[]
   selected: string | null
@@ -96,7 +100,7 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, plan, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
+export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, learningsActive, learningsBadge, onSelectLearnings, liveRuns, selected, prsActive, connectionsActive, connectionsAlert, onSelectConnections, plan, prsBadge, onSelectPrs, connected, error, core, onOpenPalette, onOpenShortcuts }: Props) {
   const actions = useAppActions()
   const status = footerStatus(core, { error, connected })
   const inBar = barProjects(projects)
@@ -108,7 +112,7 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
   const archived = group("archived")
 
   const item = (p: ClankerProject, index: number | null) => (
-    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!inboxActive && !prsActive && !connectionsActive && p.slug === selected} />
+    <ProjectItem key={p.id} project={p} live={liveOf(p)} index={index} active={!inboxActive && !learningsActive && !prsActive && !connectionsActive && p.slug === selected} />
   )
 
   return (
@@ -145,6 +149,18 @@ export function AppSidebar({ projects, inboxActive, inboxBadge, onSelectInbox, l
                 {inboxBadge ? (
                   <SidebarMenuBadge className={cn("text-[11px]", inboxBadge.parks ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>{inboxBadge.count}</SidebarMenuBadge>
                 ) : null}
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={learningsActive}
+                  onClick={onSelectLearnings}
+                  title={`Learnings · ⇧⌘A · G luego A${learningsBadge ? ` · ${learningsBadge === 1 ? "1 por revisar" : `${learningsBadge} por revisar`}` : " · nada por revisar"}`}
+                  className="h-8 pr-10"
+                >
+                  <BookCheck className="size-4" />
+                  <span>Learnings</span>
+                </SidebarMenuButton>
+                {learningsBadge ? <SidebarMenuBadge className="text-[11px] text-muted-foreground">{learningsBadge}</SidebarMenuBadge> : null}
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton isActive={prsActive} onClick={onSelectPrs} title={`Stacks de PR · ⇧⌘P${prsBadge?.count ? ` · ${prsBadge.tone === "red" ? `${prsBadge.count} necesitan acción tuya` : prsBadge.tone === "green" ? `${prsBadge.count} listos para merge` : `${prsBadge.count} abiertos`}` : ""}`} className="h-8 pr-10">

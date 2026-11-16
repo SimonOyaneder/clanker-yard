@@ -11,6 +11,7 @@ export type MenuAction =
   | "shortcuts"
   | "go-prs"
   | "go-inbox"
+  | "go-learnings"
 
 export type Theme = "system" | "light" | "dark"
 export type Unsubscribe = () => void

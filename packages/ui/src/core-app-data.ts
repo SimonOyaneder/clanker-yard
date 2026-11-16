@@ -2,10 +2,10 @@ import type { Client, EventType } from "@clanker/api"
 import type { AppData } from "@/app-data"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
-export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "connections" | "repos" | "metrics" | "defs">
+export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "learnings" | "connections" | "repos" | "metrics" | "defs">
 
 // Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos, las sesiones de agente que el
-// panel del paso y su transcript siguen en vivo, las decisiones de la bandeja, conexiones y pruebas de receta).
+// panel del paso y su transcript siguen en vivo, las decisiones de la bandeja, los learnings, conexiones y pruebas de receta).
 const LIVE_EVENTS = [
   "project.created",
   "project.updated",
@@ -39,6 +39,9 @@ const LIVE_EVENTS = [
   "agent.ended",
   "decision.opened",
   "decision.resolved",
+  "learning.proposed",
+  "learning.approved",
+  "learning.rejected",
   "connection.changed",
   "connection.login_failed",
   "recipe.test_started",
@@ -118,6 +121,10 @@ export function createCoreAppData(client: CoreClient): AppData {
     events: (after, signal) => client.events.stream({ after, filter: { types: [...LIVE_EVENTS] } }, { signal }),
     decisions: (filter) => client.decisions.list(filter),
     resolveDecision: (id, option) => client.decisions.resolve({ id, option }),
+    learnings: () => client.learnings.list(),
+    approveLearning: (id) => client.learnings.approve({ id }),
+    rejectLearning: (id) => client.learnings.reject({ id }),
+    updateLearning: (patch) => client.learnings.update(patch),
     connections: () => client.connections.list(),
     githubPatForm: () => client.connections.githubPatForm(),
     setGithubPat: (token) => client.connections.setPat({ token }),

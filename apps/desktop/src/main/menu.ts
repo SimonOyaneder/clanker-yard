@@ -64,6 +64,7 @@ export function buildMenu(h: MenuHandlers): void {
         { label: "Adelante", accelerator: "CmdOrCtrl+]", click: () => h.send("forward") },
         { type: "separator" },
         { label: "Bandeja", accelerator: "CmdOrCtrl+Shift+I", click: () => h.send("go-inbox") },
+        { label: "Learnings", accelerator: "CmdOrCtrl+Shift+A", click: () => h.send("go-learnings") },
         { label: "Stacks de PR", accelerator: "CmdOrCtrl+Shift+P", click: () => h.send("go-prs") },
       ],
     },

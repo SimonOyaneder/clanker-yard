@@ -388,8 +388,8 @@ test("las resueltas guardan lo que se eligió y sin pendientes la bandeja dice q
   const pending = () => inboxList(page).getByRole("listitem");
   await expect(pending()).toHaveCount(4);
   await page.locator("body").click({ position: { x: 1000, y: 800 } });
-  // Los dos primeros estacionan su corrida: su opción 2 es cancelar. Después viene la nota (1 la marca vista).
-  for (const option of ["2", "2", "1"]) await page.keyboard.press(option);
+  // Los dos primeros estacionan su corrida: su opción 3 es cancelar (la 2 es seguir con el perfil vigente). Después viene la nota (1 la marca vista).
+  for (const option of ["3", "3", "1"]) await page.keyboard.press(option);
 
   // La alerta no tiene botones: se cierra sola cuando la causa se va (aquí, cuando el demo la cierra).
   await expect(pending()).toHaveCount(1);

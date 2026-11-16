@@ -56,6 +56,8 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
               prsActive={false}
               onGoPrs={() => {}}
               onGoInbox={() => {}}
+              onGoLearnings={() => {}}
+              learnings={null}
               pendingDecisions={[]}
               onOpenDecision={() => {}}
               onUndoDecision={null}

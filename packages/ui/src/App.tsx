@@ -8,6 +8,7 @@ import { CommandPalette } from "@/components/command-palette"
 import { Shortcut } from "@/components/common"
 import { ConnectionsView } from "@/components/connections/connections-view"
 import { InboxView } from "@/components/inbox/inbox-view"
+import { LearningsView } from "@/components/learnings/learnings-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
 import { PROJECT_TABS, type ProjectTab, ProjectFrame, ProjectView, issuesById } from "@/components/project/project-view"
 import { ProjectSettingsTab, type SettingsControls } from "@/components/project/settings-view"
@@ -26,6 +27,8 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { useClaudePlan } from "@/hooks/use-claude-plan"
 import { useDecisionResolver } from "@/hooks/use-decision-resolver"
 import { useInbox } from "@/hooks/use-inbox"
+import { useLearningsView } from "@/hooks/use-learnings-view"
+import { useLearningTriage } from "@/hooks/use-learning-triage"
 import { useLinearLogin } from "@/hooks/use-linear-login"
 import { useSummaryControls } from "@/hooks/use-summary-controls"
 import { LiveProvider, useLive, useLiveQuery } from "@/hooks/use-live"
@@ -39,13 +42,14 @@ import { reviewStatus } from "@/lib/pr-status"
 import { openPrsOf } from "@/lib/prs"
 import { runCaps } from "@/lib/run-commands"
 import { shapeOf } from "@/lib/run-graph"
+import { withPending } from "@/lib/learnings"
 import { readPref, writePref } from "@/lib/prefs"
 import { messageOf, undoable } from "@/lib/undoable"
 import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 import { Hint } from "./components/common"
 
-type Module = "projects" | "prs" | "connections" | "inbox"
+type Module = "projects" | "prs" | "connections" | "inbox" | "learnings"
 // Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`
 // y `tab` el `:tab` de `/p/:proyecto/:tab`.
 type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null; tab: ProjectTab }
@@ -53,7 +57,7 @@ type Loc = { module: Module; slug: string | null; runId: RunId | null; decision:
 const sameLoc = (a: Loc, b: Loc) =>
   a.module === b.module && (a.module === "inbox" ? a.decision === b.decision : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId && a.tab === b.tab))
 
-const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox"]
+const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox", "learnings"]
 
 // Estas decisiones avisan con una notificación nativa: alguien las tiene que atender. Las notas esperan en la bandeja.
 const NOTIFY_KINDS = new Set(["gate", "needs_human", "alert"])
@@ -115,6 +119,13 @@ function Shell() {
   const { undo, resolve: resolveNow } = resolver
   const inbox = useInbox(decisions, resolver.resolving, decisionId)
   const inboxBadge = inbox.pending.length ? { count: inbox.pending.length, parks: inbox.pending.some(parksRun) } : null
+  // Los learnings: lo que espera su plazo de deshacer ya cuenta como aprobado o rechazado, en la lista y en el badge.
+  const learningsQuery = useLiveQuery("learnings", () => appData.learnings())
+  const triage = useLearningTriage(learningsQuery.data, learningsQuery.reload)
+  const learnings = useMemo(() => withPending(learningsQuery.data ?? [], triage.pending), [learningsQuery.data, triage.pending])
+  const undoLearnings = triage.undo
+  const learningsView = useLearningsView(learnings, triage.apply)
+  const toReview = learnings.filter((l) => l.status === "proposed").length
   const claudePlan = useClaudePlan(connectionsQuery.data, connectionsQuery.reload)
   const linearLogin = useLinearLogin(connectionOf(connections, "linear"), connectionsQuery.reload)
   const startLinearLogin = linearLogin.start
@@ -291,6 +302,7 @@ function Shell() {
 
   const goConnections = useCallback(() => go({ module: "connections" }), [go])
   const goInbox = useCallback(() => go({ module: "inbox", decision: null }), [go])
+  const goLearnings = useCallback(() => go({ module: "learnings" }), [go])
   const openDecision = useCallback((id: DecisionId) => go({ module: "inbox", decision: id }), [go])
   // J y K recorren la lista sin llenar el historial de atrás/adelante: reemplazan el lugar en vez de sumar uno.
   const selectDecision = useCallback(
@@ -322,24 +334,26 @@ function Shell() {
     if (status) toast(`Claude: ${status.state === "ready" ? "lista" : (status.message ?? status.state)}`)
   }, [goConnections, testClaude])
 
-  // G y luego I o C (como en Linear) va a la Bandeja o a Conexiones; ⇧⌘I también va a la Bandeja,
-  // ⇧⌘L conecta Linear y ⇧⌘T prueba Claude.
+  // G y luego I, A o C (como en Linear) va a la Bandeja, a Learnings o a Conexiones; ⇧⌘I y ⇧⌘A también van a la Bandeja y
+  // a Learnings, ⇧⌘L conecta Linear y ⇧⌘T prueba Claude.
   useEffect(() => {
     let armed: ReturnType<typeof setTimeout> | undefined
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "KeyL" || e.code === "KeyT" || e.code === "KeyI")) {
+      if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "KeyL" || e.code === "KeyT" || e.code === "KeyI" || e.code === "KeyA")) {
         e.preventDefault()
         if (e.code === "KeyL") connectLinear()
         else if (e.code === "KeyI") goInbox()
+        else if (e.code === "KeyA") goLearnings()
         else void probeClaude()
         return
       }
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
       if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return
       const key = e.key.toLowerCase()
-      if (armed && (key === "c" || key === "i")) {
+      if (armed && (key === "c" || key === "i" || key === "a")) {
         e.preventDefault()
         if (key === "c") goConnections()
+        else if (key === "a") goLearnings()
         else goInbox()
       }
       clearTimeout(armed)
@@ -350,7 +364,7 @@ function Shell() {
       clearTimeout(armed)
       window.removeEventListener("keydown", onKey)
     }
-  }, [goConnections, goInbox, connectLinear, probeClaude])
+  }, [goConnections, goInbox, goLearnings, connectLinear, probeClaude])
 
   // ⇧⌘1, ⇧⌘2 y ⇧⌘3: Operación, Resumen y Ajustes del proyecto (también desde una corrida: vuelve al proyecto).
   const goTab = useCallback((to: ProjectTab) => go({ module: "projects", runId: null, tab: to }), [go])
@@ -437,6 +451,7 @@ function Shell() {
       else if (action === "shortcuts") setShortcutsOpen(true)
       else if (action === "go-prs") go({ module: "prs" })
       else if (action === "go-inbox") goInbox()
+      else if (action === "go-learnings") goLearnings()
     })
     // Una notificación de una decisión abre esa decisión y nada más; la de un proyecto abre el proyecto.
     const offNav = host.onNavigate((target) => ("decisionId" in target ? openDecision(target.decisionId as DecisionId) : selectProject(target.slug)))
@@ -444,7 +459,7 @@ function Shell() {
       offMenu()
       offNav()
     }
-  }, [refresh, go, goBack, goForward, goInbox, openDecision, setSidebarOpen, sidebarOpen, selectProject, host])
+  }, [refresh, go, goBack, goForward, goInbox, goLearnings, openDecision, setSidebarOpen, sidebarOpen, selectProject, host])
 
   // Una decisión que alguien tiene que atender avisa con una notificación nativa, si la ventana no está a la vista.
   // Solo abre la decisión: aprobar o rechazar se hace en la bandeja.
@@ -464,14 +479,18 @@ function Shell() {
       if (e.key.toLowerCase() !== "z" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
       if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return
       const undone = undo()
-      if (!undone) return
+      if (!undone) {
+        // Sin una decisión que deshacer, Z devuelve la última de learnings que todavía no se mandó.
+        if (undoLearnings()) e.preventDefault()
+        return
+      }
       e.preventDefault()
       if (module === "inbox") selectDecision(undone)
       else toast("Volvió a la bandeja", { duration: 1500 })
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [undo, module, selectDecision])
+  }, [undo, undoLearnings, module, selectDecision])
 
   // Esc sube un nivel: del panel del paso a la corrida y de la corrida al proyecto, salvo que haya un diálogo o menú abierto.
   useEffect(() => {
@@ -542,6 +561,9 @@ function Shell() {
           inboxActive={module === "inbox"}
           inboxBadge={inboxBadge}
           onSelectInbox={goInbox}
+          learningsActive={module === "learnings"}
+          learningsBadge={toReview}
+          onSelectLearnings={goLearnings}
           prsActive={module === "prs"}
           connectionsActive={module === "connections"}
           connectionsAlert={connectionsAlert}
@@ -574,6 +596,8 @@ function Shell() {
                 ) : (
                   <span className="truncate px-1.5 font-medium">Bandeja</span>
                 )
+              ) : module === "learnings" ? (
+                <span className="truncate px-1.5 font-medium">Learnings</span>
               ) : module === "prs" ? (
                 <span className="truncate px-1.5 font-medium">Stacks de PR</span>
               ) : module === "connections" ? (
@@ -611,6 +635,20 @@ function Shell() {
               ) : decisionsQuery.error ? (
                 <div className="px-6 pt-5">
                   <Problem message={decisionsQuery.error} onRetry={decisionsQuery.reload} />
+                </div>
+              ) : (
+                <div className="px-6 pt-5">
+                  <Loading />
+                </div>
+              )}
+            </main>
+          ) : module === "learnings" ? (
+            <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
+              {learningsQuery.data ? (
+                <LearningsView learnings={learnings} projects={projects} view={learningsView} onEdited={learningsQuery.reload} />
+              ) : learningsQuery.error ? (
+                <div className="px-6 pt-5">
+                  <Problem message={learningsQuery.error} onRetry={learningsQuery.reload} />
                 </div>
               ) : (
                 <div className="px-6 pt-5">
@@ -690,6 +728,8 @@ function Shell() {
         prsActive={module === "prs"}
         onGoPrs={() => go({ module: "prs" })}
         onGoInbox={goInbox}
+        onGoLearnings={goLearnings}
+        learnings={module === "learnings" ? { view: learningsView, onUndo: triage.canUndo ? () => void triage.undo() : null } : null}
         pendingDecisions={inbox.pending}
         onOpenDecision={openDecision}
         onUndoDecision={resolver.canUndo ? () => void undo() : null}
