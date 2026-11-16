@@ -13,7 +13,7 @@ import { FlowDef,
   type RunWorkspace,
   type StepRunId,
   type SubjectRef, type RepoId } from "@clanker/api";
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, max, ne, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
 import { GITHUB_SCOPE, repoScope, runtimeScope, type Breakers } from "../breakers/breakers";
@@ -32,14 +32,13 @@ import {
   branchIds,
   joinStepId,
   parallelOf,
-  parseInlineBranch,
   stepNode,
   type ParallelNode,
 } from "./parallel";
-import { readRunDetail } from "./run-detail";
+import { createRunReads, OUTPUT_INLINE_MAX_BYTES, RunNotFoundError } from "./run-reads";
 import { createSubjects, hasWaiting, loanOf, type SubjectsDeps } from "./subjects";
 import { StepNotFoundError } from "./step-detail";
-import { isTruthy, navigate, refPath, resolveRefs } from "./refs";
+import { isTruthy, resolveRefs } from "./refs";
 import { calledFlows, LANE_BY_TRIGGER } from "./validate";
 import { issuesInline, messageOf } from "../errors/format";
 import { isRecord } from "../defs/defs";
@@ -99,8 +98,6 @@ export const TICK_MS = 5000;
 export const DEFAULT_MAX_AGENTS = 4;
 /** Cada cuánto se sondea un wait con `probe`; Watch avisa antes con `signal`, así que el sondeo es la red de seguridad. */
 export const DEFAULT_PROBE_EVERY_SEC = 60;
-/** Un valor resuelto de más de esto no entra al brief: va a artifacts y el brief recibe `{ artifact, size }`. */
-export const OUTPUT_INLINE_MAX_BYTES = 16 * 1024;
 /** Cuánto se espera antes de reintentar un paso frenado por el entorno (login vencido, cuota agotada). */
 const ENVIRONMENT_BACKOFF_MS = 60_000;
 
@@ -331,12 +328,7 @@ export class DecisionNotFoundError extends Error {
 /** La decisión no se puede resolver así (ya se resolvió, no estaciona a nadie o la opción no es suya): no cambió nada. */
 export class DecisionResolveError extends Error {}
 
-/** La corrida pedida no existe. */
-export class RunNotFoundError extends Error {
-  constructor(runId: RunId) {
-    super(`No existe la corrida ${runId}.`);
-  }
-}
+export { OUTPUT_INLINE_MAX_BYTES, RunNotFoundError };
 
 /** El comando no se puede aplicar a la corrida o al paso en su estado actual: no cambió nada y el mensaje dice qué hacer. */
 export class RunCommandError extends Error {}
@@ -437,7 +429,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const maxAgents = deps.maxAgents ?? DEFAULT_MAX_AGENTS;
   const probeEveryMs = (deps.probeEverySec ?? DEFAULT_PROBE_EVERY_SEC) * 1000;
   const bootId = deps.bootId ?? newId("boot");
-  const flowCache = new Map<string, FlowDef>();
+  const { flowOf, workspaceFor, lineage, resolveRef, selectStep, readArtifact, parallelStepOf, itemsOf, latestStep, getRun, listRuns } =
+    createRunReads({ store, defs, artifacts, workspaceOf });
   const inFlight = new Set<Promise<void>>();
   /** Cuándo toca el próximo sondeo de cada wait de este proceso. Sin entrada (tras un reinicio), toca ya. */
   const nextProbeAt = new Map<StepRunId, number>();
@@ -450,18 +443,6 @@ export function createEngine(deps: EngineDeps): Engine {
   let lastWakeAt = now();
   let ticker: NodeJS.Timeout | undefined;
   let closed = false;
-
-  function flowOf(run: RunRow): FlowDef {
-    const key = `${run.flowDefId}@${run.flowVersion}`;
-    let flow = flowCache.get(key);
-    if (!flow) {
-      const def = defs.get("flow", run.flowDefId, run.flowVersion);
-      if (!def) throw new Error(`La corrida ${run.id} apunta a un flujo que ya no existe (${key}).`);
-      flow = FlowDef.parse(def.body);
-      flowCache.set(key, flow);
-    }
-    return flow;
-  }
 
   const scopeOf = (run: RunRow, stepRunId?: StepRunId) => ({
     projectId: run.projectId ?? undefined,
@@ -1292,33 +1273,6 @@ export function createEngine(deps: EngineDeps): Engine {
     return undefined;
   }
 
-  /** El worktree que tiene tomada la corrida o, si es un subflujo, el de quien la llamó. */
-  function workspaceFor(run: RunRow): { path: string; base: string; repoId?: RepoId } | undefined {
-    for (const id of lineage(run)) {
-      const held = workspaceOf?.(id);
-      if (held) return held;
-    }
-    return undefined;
-  }
-
-  function lastDoneInLineage(run: RunRow, nodeId: string): StepRow | undefined {
-    for (const id of lineage(run)) {
-      const found = lastDone(id, nodeId);
-      if (found) return found;
-    }
-    return undefined;
-  }
-
-  /** La corrida y sus padres hasta la raíz: lo que un subflujo comparte con quien lo llamó (workspace, nodos, sesiones). */
-  function lineage(run: RunRow): RunId[] {
-    const ids = [run.id];
-    for (let parent = run.parentRunId; parent !== null; ) {
-      ids.push(parent);
-      parent = store.db.select({ parent: runs.parentRunId }).from(runs).where(eq(runs.id, parent)).get()?.parent ?? null;
-    }
-    return ids;
-  }
-
   async function once<T>(key: string, stage: string, fn: () => Promise<T>): Promise<T> {
     const done = store.db
       .select({ result: actionEffects.result })
@@ -1338,85 +1292,6 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   // --- refs ------------------------------------------------------------------------------------
-
-  function resolveRef(run: RunRow, step: StepRow, ref: string): unknown {
-    const [head = "", ...path] = refPath(ref);
-    let root: unknown;
-    switch (head) {
-      case "run":
-        root = { id: run.id, subject: { type: run.subjectType, id: run.subjectId }, params: run.params };
-        break;
-      case "prev":
-        root = step.prevStepRunId === null ? null : outputOf(selectStep(step.prevStepRunId));
-        break;
-      case "item": {
-        const inline = parseInlineBranch(step.nodeId);
-        root = inline && itemsOf(parallelStepOf(run.id, inline.parent))[inline.index];
-        break;
-      }
-      case "self":
-        root = outputOf(lastDone(run.id, step.nodeId, step.visit));
-        break;
-      default:
-        // "En la corrida o en sus padres": un subflujo ve los nodos de quien lo llamó.
-        root = withLiveToken(run, outputOf(lastDoneInLineage(run, head)));
-    }
-    return shrink(step, navigate(root, path));
-  }
-
-  /** El output de `workspace.acquire` guarda el token con que se tomó el worktree: si un préstamo lo subió, el vigente es el que tiene la corrida. */
-  function withLiveToken(run: RunRow, value: unknown): unknown {
-    if (!isRecord(value) || typeof value.workspaceId !== "string" || typeof value.fencingToken !== "number") return value;
-    for (const id of lineage(run)) {
-      const held = workspaceOf?.(id);
-      if (held?.workspaceId === value.workspaceId && held.fencingToken !== undefined) return { ...value, fencingToken: held.fencingToken };
-    }
-    return value;
-  }
-
-  function selectStep(id: StepRunId): StepRow | undefined {
-    return store.db.select().from(stepRuns).where(eq(stepRuns.id, id)).get();
-  }
-
-  /** `$nodo` es el output del último paso terminado de ese nodo; con `beforeVisit`, el de una visita anterior. */
-  function lastDone(runId: RunId, nodeId: string, beforeVisit?: number): StepRow | undefined {
-    return store.db
-      .select()
-      .from(stepRuns)
-      .where(
-        and(
-          eq(stepRuns.runId, runId),
-          eq(stepRuns.nodeId, nodeId),
-          eq(stepRuns.status, "done"),
-          beforeVisit === undefined ? undefined : lt(stepRuns.visit, beforeVisit),
-        ),
-      )
-      .orderBy(desc(stepRuns.visit))
-      .limit(1)
-      .get();
-  }
-
-  function outputOf(step: StepRow | undefined): unknown {
-    return readArtifact(step?.outputHash);
-  }
-
-  function readArtifact(hash: ArtifactHash | null | undefined): unknown {
-    if (!hash) return undefined;
-    const artifact = artifacts.get(hash);
-    if (!artifact) throw new Error(`Falta el artefacto ${hash}.`);
-    return JSON.parse(new TextDecoder().decode(artifact.content));
-  }
-
-  /** Un valor grande no viaja en el brief: se guarda como artefacto y el brief recibe su referencia. */
-  function shrink(step: StepRow, value: unknown): unknown {
-    const json = JSON.stringify(value);
-    if (json === undefined) return value;
-    const size = Buffer.byteLength(json);
-    if (size <= OUTPUT_INLINE_MAX_BYTES) return value;
-    const hash = artifacts.put(json, "report", { mime: "application/json" });
-    artifacts.ref(hash, { type: "step_run", id: step.id, role: "input" });
-    return { artifact: hash, size };
-  }
 
   // --- cierre de un paso -----------------------------------------------------------------------
 
@@ -2129,38 +2004,8 @@ export function createEngine(deps: EngineDeps): Engine {
     );
   }
 
-  /** La visita del parallel que espera a sus ramas. */
-  function parallelStepOf(runId: RunId, nodeId: string): StepRow {
-    const step = store.db
-      .select()
-      .from(stepRuns)
-      .where(and(eq(stepRuns.runId, runId), eq(stepRuns.nodeId, nodeId), eq(stepRuns.status, "waiting")))
-      .orderBy(desc(stepRuns.visit))
-      .limit(1)
-      .get();
-    if (!step) throw new Error(`El parallel "${nodeId}" de la corrida ${runId} no está esperando a sus ramas.`);
-    return step;
-  }
-
-  /** La lista que resolvió el forEach del parallel, guardada como su input. */
-  function itemsOf(parent: StepRow): unknown[] {
-    const list = readArtifact(parent.inputHash);
-    if (!Array.isArray(list)) throw new Error(`El parallel ${parent.id} no guardó la lista de su forEach.`);
-    return list;
-  }
-
   /** Una rama que ya dio ok (o se saltó) no se relanza con `rerun: "not-ok"`. */
   const isOk = (step: StepRow | undefined) => step?.status === "done" && (step.outcome === "ok" || step.outcome === "skipped");
-
-  function latestStep(runId: RunId, nodeId: string): StepRow | undefined {
-    return store.db
-      .select()
-      .from(stepRuns)
-      .where(and(eq(stepRuns.runId, runId), eq(stepRuns.nodeId, nodeId)))
-      .orderBy(desc(stepRuns.visit))
-      .limit(1)
-      .get();
-  }
 
   // --- flow ------------------------------------------------------------------------------------
 
@@ -2531,60 +2376,6 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   // --- lectura ---------------------------------------------------------------------------------
-
-  function viewOf(run: RunRow): RunSummary {
-    const flow = defs.get("flow", run.flowDefId, run.flowVersion);
-    return {
-      id: run.id,
-      projectId: run.projectId,
-      parentRunId: run.parentRunId,
-      borrowedFromRunId: run.borrowedFromRunId,
-      flow: { slug: flow?.slug ?? run.flowDefId, version: run.flowVersion },
-      subject: { type: run.subjectType, id: run.subjectId },
-      lane: run.lane,
-      status: run.status,
-      parkReason: run.parkReason,
-      outcome: run.outcome,
-      params: run.params,
-      rounds: run.rounds,
-      costMicros: run.costMicros,
-      startedAt: run.startedAt,
-      endedAt: run.endedAt,
-    };
-  }
-
-  function getRun(runId: RunId): RunView {
-    const run = store.db.select().from(runs).where(eq(runs.id, runId)).get();
-    if (!run) throw new RunNotFoundError(runId);
-    const steps = store.db.select().from(stepRuns).where(eq(stepRuns.runId, runId)).orderBy(asc(stepRuns.id)).all();
-    const { times, usage, workspace } = readRunDetail(store, runId, steps.map((s) => s.id));
-    return {
-      ...viewOf(run),
-      steps: steps.map(({ id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, waitKey, deadline, costMicros }) => ({
-        id, nodeId, visit, round, attempt, status, outcome, outputHash, error, notBefore, waitKey, deadline, costMicros,
-        startedAt: times.get(id)?.startedAt ?? null,
-        endedAt: times.get(id)?.endedAt ?? null,
-      })),
-      flowDef: flowOf(run),
-      workspace,
-      usage,
-    };
-  }
-
-  function listRuns({ projectId, status }: { projectId?: ProjectId; status?: readonly RunRow["status"][] } = {}) {
-    return store.db
-      .select()
-      .from(runs)
-      .where(
-        and(
-          projectId === undefined ? undefined : eq(runs.projectId, projectId),
-          status === undefined ? undefined : inArray(runs.status, [...status]),
-        ),
-      )
-      .orderBy(desc(runs.id))
-      .all()
-      .map(viewOf);
-  }
 
   async function close(opts?: { graceMs: number }): Promise<void> {
     closed = true;
