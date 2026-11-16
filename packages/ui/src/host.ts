@@ -46,6 +46,8 @@ export interface Host {
   notify(n: { title: string; body: string; target?: NavTarget }): void
   openExternal(url: string): void
   openInEditor(path: string): void
+  // El selector nativo de carpetas: la ruta elegida o `null` si se cancela. Falta donde el host no tiene uno (navegador).
+  pickDirectory?(): Promise<string | null>
   // La UI siempre sigue `prefers-color-scheme`; el host decide qué valor tiene.
   setTheme(theme: Theme): void
 }

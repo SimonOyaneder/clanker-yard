@@ -1,3 +1,4 @@
+import type { Repo } from "@clanker/api"
 import { ChevronDown, LayoutList, Network, RefreshCw, Repeat2, Search } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -75,10 +76,13 @@ interface Props {
   issueKeys: ReadonlyMap<string, string>
   loaded: boolean
   error: string | null
+  /** Los repos registrados: Watch solo descubre PRs en ellos. */
+  registered: readonly Repo[]
+  onOpenConnections: () => void
   onRefresh: () => void
 }
 
-export function PrsView({ prs, unread, issueKeys, loaded, error, onRefresh }: Props) {
+export function PrsView({ prs, unread, issueKeys, loaded, error, registered, onOpenConnections, onRefresh }: Props) {
   const [filter, setFilterState] = useState<Filter>(() => readPref<Filter>("prs.filter", "all"))
   const [mode, setModeState] = useState<Mode>(() => readPref<Mode>("prs.mode", "graph"))
   const [hiddenRepos, setHiddenRepos] = useState<string[]>(() => readPref<string[]>("prs.hiddenRepos", []))
@@ -307,7 +311,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, onRefresh }: Pr
 
       {!visible.length ? (
         <div className="m-6 rounded-lg border border-dashed px-4 py-8 text-center text-[13px] text-muted-foreground">
-          {prs.length ? "Ningún PR calza con este filtro." : unread ? "Watch todavía está leyendo tus PRs: aparecen acá apenas termine." : "No hay PRs abiertos. Los que abra el sistema y los tuyos aparecen acá solos."}
+          {prs.length ? "Ningún PR calza con este filtro." : unread ? "Watch todavía está leyendo tus PRs: aparecen acá apenas termine." : <NoPrs repos={registered} onOpenConnections={onOpenConnections} />}
         </div>
       ) : mode === "graph" ? (
         <div className="min-h-0 flex-1">
@@ -443,5 +447,29 @@ function PRRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
         </button>
       </PrContextMenu>
     </li>
+  )
+}
+
+/** Watch solo descubre los PRs abiertos del usuario (`author:@me`) en los repos registrados: el vacío dice en cuáles buscó. */
+function NoPrs({ repos, onOpenConnections }: { repos: readonly Repo[]; onOpenConnections: () => void }) {
+  if (!repos.length) {
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <p>
+          Registra un repo en{" "}
+          <button type="button" onClick={onOpenConnections} className="text-foreground underline underline-offset-2">
+            Conexiones
+          </button>{" "}
+          para ver tus PRs.
+        </p>
+        <p className="text-xs">Watch solo busca los PRs que abriste tú en los repos registrados.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <p>No hay PRs abiertos tuyos en {repos.length === 1 ? "el repo registrado" : "los repos registrados"}: {repos.map((r) => r.remote ?? r.name).join(", ")}.</p>
+      <p className="text-xs">Watch busca tus PRs abiertos en esos repos cada pocos minutos, y aparecen acá solos.</p>
+    </div>
   )
 }

@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, Decision, DecisionId, RunDetail, RunId, RunStatus } from "@clanker/api"
+import type { CachedIssue, ClankerProject, Decision, DecisionId, RunDetail, RunId, Repo, RunStatus } from "@clanker/api"
 import { ChevronRight, Plus, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast, Toaster } from "sonner"
@@ -64,6 +64,7 @@ const NOTIFY_KINDS = new Set(["gate", "needs_human", "alert"])
 
 const MAX_HISTORY = 50
 
+const NO_REPOS: readonly Repo[] = []
 const NO_ISSUE_KEYS: ReadonlyMap<string, string> = new Map()
 
 const LIVE_STATUSES: RunStatus[] = ["queued", "running", "waiting", "parked", "paused"]
@@ -176,6 +177,7 @@ function Shell() {
 
   // Los PRs vienen del caché del core (`prs.list`) y se releen con cada `pr.changed`: nada de polling en la UI.
   const prsQuery = useLiveQuery("prs", () => appData.openPrs())
+  const reposQuery = useLiveQuery("repos", () => appData.repos())
   const reloadPrs = prsQuery.reload
   useEffect(() => {
     if (module === "prs") reloadPrs()
@@ -658,7 +660,7 @@ function Shell() {
             </main>
           ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined} error={prsQuery.error} onRefresh={refresh} />
+              <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} onOpenConnections={goConnections} onRefresh={refresh} />
             </main>
           ) : module === "connections" ? (
             <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>

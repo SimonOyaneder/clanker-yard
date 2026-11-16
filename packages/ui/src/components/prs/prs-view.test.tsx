@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { Repo } from "@clanker/api"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest"
 import { AppDataProvider, type AppData } from "@/app-data"
@@ -43,7 +44,7 @@ async function setup() {
       <HostProvider value={host}>
         <TooltipProvider>
           <PrCommandsProvider prs={prs} projects={[]} onOpenRun={() => {}}>
-            <PrsView prs={prs} unread={0} issueKeys={new Map()} loaded error={null} onRefresh={() => {}} />
+            <PrsView prs={prs} unread={0} issueKeys={new Map()} loaded error={null} registered={[]} onOpenConnections={() => {}} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>
       </HostProvider>
@@ -131,7 +132,7 @@ test("sin PRs abiertos el estado vacío dice qué esperar", async () => {
       <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
         <TooltipProvider>
           <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}}>
-            <PrsView prs={[]} unread={2} issueKeys={new Map()} loaded error={null} onRefresh={() => {}} />
+            <PrsView prs={[]} unread={2} issueKeys={new Map()} loaded error={null} registered={[]} onOpenConnections={() => {}} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>
       </HostProvider>
@@ -139,4 +140,36 @@ test("sin PRs abiertos el estado vacío dice qué esperar", async () => {
   )
 
   expect(screen.getByText(/Watch todavía está leyendo tus PRs/)).toBeTruthy()
+})
+
+function renderEmpty(repos: Repo[], onOpenConnections = () => {}) {
+  render(
+    <AppDataProvider value={createMemoryAppData(NOW)}>
+      <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
+        <TooltipProvider>
+          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}}>
+            <PrsView prs={[]} unread={0} issueKeys={new Map()} loaded error={null} registered={repos} onOpenConnections={onOpenConnections} onRefresh={() => {}} />
+          </PrCommandsProvider>
+        </TooltipProvider>
+      </HostProvider>
+    </AppDataProvider>,
+  )
+}
+
+const repo = (name: string, remote: string | null): Repo => ({ id: `repo_${name}` as Repo["id"], name, path: `/code/${name}`, remote, defaultBranch: "main", mergeStrategy: null })
+
+test("sin repos registrados el vacío pide registrar uno y lleva a Conexiones", () => {
+  const onOpenConnections = vi.fn()
+  renderEmpty([], onOpenConnections)
+
+  expect(screen.getByText(/Registra un repo en/)).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Conexiones" }))
+  expect(onOpenConnections).toHaveBeenCalled()
+})
+
+test("con repos registrados y sin PRs el vacío dice en cuáles buscó y que Watch revisa cada pocos minutos", () => {
+  renderEmpty([repo("api", "acme/api"), repo("local", null)])
+
+  expect(screen.getByText(/acme\/api, local/)).toBeTruthy()
+  expect(screen.getByText(/cada pocos minutos/)).toBeTruthy()
 })

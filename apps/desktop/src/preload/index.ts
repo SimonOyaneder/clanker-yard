@@ -16,6 +16,7 @@ const bridge = {
   notify: (n: { title: string; body: string; target?: NavTarget }) => ipcRenderer.send("host:notify", n),
   openExternal: (url: string) => ipcRenderer.send("host:open-external", url),
   openInEditor: (path: string) => ipcRenderer.send("host:open-in-editor", path),
+  pickDirectory: () => ipcRenderer.invoke("host:pick-directory") as Promise<string | null>,
   setTheme: (theme: Theme) => ipcRenderer.send("host:set-theme", theme),
   core: {
     // Entrega el estado actual y cada cambio. Un cambio que llega antes de la respuesta inicial gana.

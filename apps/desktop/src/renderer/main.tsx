@@ -33,6 +33,7 @@ const host: Host = {
   notify: clanker.notify,
   openExternal: clanker.openExternal,
   openInEditor: clanker.openInEditor,
+  pickDirectory: clanker.pickDirectory,
   setTheme: clanker.setTheme,
 };
 

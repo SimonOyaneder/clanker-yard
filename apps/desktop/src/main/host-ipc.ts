@@ -58,6 +58,14 @@ export function registerHostIpc(opts: HostIpcOptions): void {
     void openInEditor(raw);
   });
 
+  // El payload no lleva nada: la ventana solo pide el selector, y la ruta que vuelve la valida el core al registrar el repo.
+  ipcMain.handle("host:pick-directory", async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender) ?? opts.getWindow();
+    const options = { properties: ["openDirectory" as const] };
+    const { canceled, filePaths } = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    return canceled ? null : (filePaths[0] ?? null);
+  });
+
   ipcMain.on("host:set-theme", (_e, theme: unknown) => {
     if (THEMES.includes(theme as Theme)) opts.setTheme(theme as Theme);
   });

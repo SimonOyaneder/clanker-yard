@@ -1,5 +1,5 @@
 import type { Repo } from "@clanker/api"
-import { Copy, FlaskConical, FolderGit2, Loader2, Plus } from "lucide-react"
+import { Copy, FlaskConical, FolderGit2, FolderOpen, Loader2, Plus } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { toast } from "sonner"
 import { useAppData, type RepoRow } from "@/app-data"
@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useHost } from "@/host"
 import { copy } from "@/lib/clipboard"
 import { tone } from "@/lib/format"
+import { looksLikeGitHubRepo } from "@/lib/repo-path"
 
 const RECIPE = {
   found: { label: "encontrada", tone: tone.green, hint: "El repo tiene .clanker/recipe.json y es válida." },
@@ -28,16 +29,52 @@ interface Props {
 // Los repos registrados con su receta (`.clanker/recipe.json`) y cómo salió su última prueba.
 export function ReposTable({ rows, onTest, onAdded }: Props) {
   const host = useHost()
-  const [adding, setAdding] = useState(false)
+  const appData = useAppData()
+  // El diálogo de texto solo abre si no hay selector nativo, si el registro falló o si se pide escribir la ruta.
+  const [dialog, setDialog] = useState<{ path: string; error: string | null } | null>(null)
+
+  // `true` si registró el repo; si no, deja el error en el diálogo para escribir otra ruta o elegir otra carpeta.
+  const register = async (raw: string): Promise<boolean> => {
+    const path = raw.trim()
+    try {
+      const repo = await appData.addRepo(path)
+      setDialog(null)
+      onAdded()
+      toast.success(`Registré ${repo.name}`)
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setDialog({
+        path,
+        error: looksLikeGitHubRepo(path) ? `"${path}" parece el repo de GitHub, pero acá se pide la carpeta local donde tienes clonado el repo (el checkout). ${message}` : message,
+      })
+      return false
+    }
+  }
+
+  // Con selector nativo (el Finder en macOS) elegir la carpeta ya registra el repo, sin diálogo de por medio.
+  const pickAndRegister = async () => {
+    const picked = await host.pickDirectory?.()
+    if (picked) await register(picked)
+  }
+  const typePath = () => setDialog({ path: "", error: null })
+  const add = () => (host.pickDirectory ? void pickAndRegister() : typePath())
 
   return (
     <section aria-label="Repos" className="flex flex-col gap-2">
       <SectionTitle
         count={rows.length}
         aside={
-          <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
-            <Plus /> Agregar repo
-          </Button>
+          <span className="flex items-center gap-2">
+            {host.pickDirectory ? (
+              <Button size="xs" variant="link" onClick={typePath}>
+                Escribir la ruta
+              </Button>
+            ) : null}
+            <Button size="xs" variant="outline" onClick={add}>
+              <Plus /> Agregar repo
+            </Button>
+          </span>
         }
       >
         Repos y recetas
@@ -46,7 +83,7 @@ export function ReposTable({ rows, onTest, onAdded }: Props) {
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-8 text-center">
           <FolderGit2 className="size-5 text-muted-foreground" />
           <p className="max-w-sm text-[13px] text-muted-foreground">Todavía no hay repos registrados. Las corridas trabajan sobre un repo: agrega el checkout y el core lee su receta.</p>
-          <Button size="sm" onClick={() => setAdding(true)}>
+          <Button size="sm" onClick={add}>
             <Plus /> Agregar repo
           </Button>
         </div>
@@ -127,53 +164,66 @@ export function ReposTable({ rows, onTest, onAdded }: Props) {
           </Table>
         </div>
       )}
-      <AddRepoDialog open={adding} onOpenChange={setAdding} onAdded={onAdded} />
+      <AddRepoDialog
+        state={dialog}
+        onClose={() => setDialog(null)}
+        onRegister={register}
+        onPick={host.pickDirectory ? () => void pickAndRegister() : undefined}
+      />
     </section>
   )
 }
 
-function AddRepoDialog({ open, onOpenChange, onAdded }: { open: boolean; onOpenChange: (open: boolean) => void; onAdded: () => void }) {
-  const appData = useAppData()
+interface DialogProps {
+  state: { path: string; error: string | null } | null
+  onClose: () => void
+  onRegister: (path: string) => Promise<boolean>
+  // Falta donde el host no tiene selector de carpetas.
+  onPick?: () => void
+}
+
+// La alternativa a elegir la carpeta: escribir la ruta (única forma sin selector nativo) y el error de un registro fallido.
+function AddRepoDialog({ state, onClose, onRegister, onPick }: DialogProps) {
   const [path, setPath] = useState("")
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [seen, setSeen] = useState(state)
+  // Cada estado nuevo del padre (otro error, otra carpeta) reinicia el campo.
+  if (state !== seen) {
+    setSeen(state)
+    if (state) setPath(state.path)
+  }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true)
-    setError(null)
-    try {
-      const repo = await appData.addRepo(path.trim())
-      setPath("")
-      onOpenChange(false)
-      onAdded()
-      toast.success(`Registré ${repo.name}`)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
+    await onRegister(path)
+    setBusy(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={state !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
       <DialogContent className="sm:max-w-md">
         <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Agregar repo</DialogTitle>
-            <DialogDescription>La ruta absoluta de la raíz de un checkout de git. El nombre, la branch por defecto y el remoto de GitHub salen de él.</DialogDescription>
+            <DialogDescription>La carpeta de tu computador donde tienes clonado el repo, no el repo de GitHub. Por ejemplo /Users/&lt;tú&gt;/code/mi-repo. El nombre, la branch por defecto y el remoto de GitHub salen de él.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="repo-path">Ruta del repo</Label>
-            <Input id="repo-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Users/tu-usuario/código/mi-repo" spellCheck={false} className="font-mono" aria-invalid={error !== null} />
-            {error ? (
+            <Input id="repo-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Users/<tú>/code/mi-repo" spellCheck={false} className="font-mono" aria-invalid={state?.error != null} />
+            {state?.error ? (
               <p role="alert" className="text-xs text-destructive">
-                {error}
+                {state.error}
               </p>
             ) : null}
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            {onPick ? (
+              <Button type="button" variant="outline" onClick={onPick}>
+                <FolderOpen /> Elegir otra carpeta…
+              </Button>
+            ) : null}
+            <Button type="button" variant="ghost" onClick={onClose}>
               Cancelar
             </Button>
             <Button type="submit" disabled={!path.trim() || busy}>
