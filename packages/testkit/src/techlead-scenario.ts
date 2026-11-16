@@ -198,6 +198,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
       coreVersion: "0.0.0",
       onShutdown: () => {},
       watch: options.watch ?? true,
+      pause: () => Promise.resolve(),
       ...(options.breakerBackoffMs && { breakerBackoffMs: options.breakerBackoffMs }),
     });
     return { core, client: createClient({ url: core.server.url, token: core.server.token, origin: "cli" }) };

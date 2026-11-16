@@ -188,8 +188,11 @@ describe("la noche", () => {
     expect(sql("SELECT id FROM pull_requests GROUP BY repo_id, number HAVING count(*) > 1")).toEqual([]);
     // Cada evento de Watch arrancó su flujo una sola vez, también el que cayó en el corte.
     for (const slug of ["restack", "rebase-conflicto", "council"]) expect(await runsOfFlow(slug)).toHaveLength(1);
-    expect(sql("SELECT pid FROM procs")).toEqual([]);
-    expect(sql("SELECT state FROM workspaces WHERE holder_run_id IS NOT NULL")).toEqual([]);
-    expect(sql("SELECT idx FROM slots WHERE holder_run_id IS NOT NULL")).toEqual([]);
+    // El cierre de un paso (kill del proceso, release del worktree y del slot) termina un instante después de `run.finished`.
+    await night.until("sin procesos, worktrees ni slots tomados", () => {
+      expect(sql("SELECT pid FROM procs")).toEqual([]);
+      expect(sql("SELECT state FROM workspaces WHERE holder_run_id IS NOT NULL")).toEqual([]);
+      expect(sql("SELECT idx FROM slots WHERE holder_run_id IS NOT NULL")).toEqual([]);
+    });
   });
 });

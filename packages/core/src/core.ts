@@ -112,6 +112,8 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   watch?: boolean;
   /** Los ms entre las pruebas de un circuit breaker (por defecto 1, 5, 15 y 30 min): un test los acorta para no esperar un minuto. */
   breakerBackoffMs?: readonly number[];
+  /** Cómo se espera entre dos escrituras a GitHub y entre las relecturas de `mergeable` (1 s y 10 s); un test lo reemplaza para no esperar. */
+  pause?: (ms: number) => Promise<void>;
 }
 
 export interface Core {
@@ -227,10 +229,11 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(prRebaseApprovalAction(rebasePr));
   flows.registerAction(workspaceCommitAfterRebaseAction(rebasePr));
   flows.registerAction(workspaceRebaseAbortAction(rebasePr));
-  const restackDeps = { store, workspaces, repos: repos.config, prs, connections: opts.connections };
+  const gap: { pause?: NonNullable<StartCoreOptions["pause"]> } = opts.pause ? { pause: opts.pause } : {};
+  const restackDeps = { store, workspaces, repos: repos.config, prs, connections: opts.connections, ...gap };
   flows.registerAction(stackRestackAction(restackDeps));
   flows.registerAction(stackRestackRewrittenAction(restackDeps));
-  const feedback = { connections: opts.connections, packs };
+  const feedback = { connections: opts.connections, packs, ...gap };
   for (const action of [councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction]) flows.registerAction(action(feedback));
   const headSeen = ({ repo, number }: PrRef) => {
     const registered = repos.byRemote(repo);
