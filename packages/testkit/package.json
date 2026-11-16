@@ -12,9 +12,11 @@
     "demo-core": "tsx scripts/demo-core.ts"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.325",
     "@clanker/api": "*",
     "@clanker/core": "*",
     "@modelcontextprotocol/client": "^2.4.0",
+    "@orpc/server": "^1.16.2",
     "tsx": "^4.23.15"
   },
   "dependencies": {

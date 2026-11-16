@@ -76,7 +76,7 @@ export default {
     },
     {
       name: "only-package-entrypoints",
-      comment: "Cada paquete exporta solo `src/index.ts` (más `@clanker/api/node` y `@clanker/ui/styles.css`); nada de imports a archivos internos de otro paquete.",
+      comment: "Cada paquete exporta solo `src/index.ts` (más `@clanker/api/node`, `@clanker/core/testing` y `@clanker/ui/styles.css`); nada de imports a archivos internos de otro paquete.",
       severity: "error",
       from: { path: "^((?:apps|packages)/[^/]+)/" },
       to: {
@@ -84,14 +84,40 @@ export default {
         pathNot: [
           "^$1/",
           "^(apps|packages)/[^/]+/src/index\\.ts$",
+          `^${dirs.core}/src/testing\\.ts$`,
           `^${dirs.api}/src/node\\.ts$`,
           `^${dirs.ui}/src/styles/globals\\.css$`,
         ],
       },
     },
+    {
+      name: "core-testing-only-in-tests",
+      comment: "Los GitHub y Linear falsos y la plantilla `juguete` (`@clanker/core/testing`) son de pruebas: el código de producción no los importa.",
+      severity: "error",
+      from: { path: "^(apps|packages)/[^/]+/src/", pathNot: ["\\.test\\.tsx?$", `^${dirs.testkit}/`, `^${dirs.core}/src/testing(\\.ts$|/)`] },
+      to: { path: `^${dirs.core}/src/testing(\\.ts$|/)` },
+    },
+    {
+      name: "no-non-package-json",
+      comment:
+        "Un paquete de npm que se importa tiene que estar en el package.json del paquete que lo importa: si no, solo resuelve por el hoisting del workspace y se rompe al empaquetar o instalar aparte.",
+      severity: "error",
+      from: {},
+      to: { dependencyTypes: ["npm-no-pkg", "npm-unknown"] },
+    },
+    {
+      name: "not-to-dev-dep",
+      comment:
+        "El código de producción no importa una devDependency: un bundle que no la incluya, o un `npm ci --omit=dev`, se rompe. Los tests, los E2E, los scripts y el testkit (solo de tests) sí pueden, y la app de escritorio también: electron-vite la bundlea entera y electron-builder exige `electron` como devDependency.",
+      severity: "error",
+      from: { path: "^(apps|packages)/[^/]+/src/", pathNot: ["\\.test\\.tsx?$", `^${dirs.testkit}/`, `^${dirs.desktop}/`, "/testing/", "/testing\\.ts$"] },
+      to: { dependencyTypes: ["npm-dev"], dependencyTypesNot: ["type-only"] },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },
+    // El package.json de cada paquete más el de la raíz (vitest, tipos de Node y el resto de las herramientas del repo).
+    combinedDependencies: true,
     tsPreCompilationDeps: true,
     tsConfig: { fileName: "tsconfig.base.json" },
     enhancedResolveOptions: { exportsFields: ["exports"], conditionNames: ["import", "require", "node", "default"] },
