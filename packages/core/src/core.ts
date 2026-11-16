@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { Role, type PrRef, type PrState, type RunId } from "@clanker/api";
+import { Role, type PrRef, type PrState } from "@clanker/api";
 import { createAgents } from "./agents/agents";
 import { createBriefs } from "./agents/brief";
 import { createStepBriefs } from "./agents/step-brief";
@@ -294,7 +294,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   // Al devolver un sujeto prestado la branch pudo moverse: la dueña relee su `head_sha` antes de seguir.
   const stopRereading = store.events.subscribe(
     ({ payload }) => {
-      workspaces.reread(payload.fromRunId as RunId).catch((error: unknown) => reporter.report("workspaces.reread", error));
+      workspaces.reread(payload.fromRunId).catch((error: unknown) => reporter.report("workspaces.reread", error));
     },
     { types: ["run.returned"] },
   );

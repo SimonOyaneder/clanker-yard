@@ -63,9 +63,9 @@ packages/testkit  runtime fake, fixtures, repos git temporales
 
 ## Base de datos
 
-El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run db:generate -w @clanker/core` deja una carpeta nueva en `packages/core/migrations/` (se commitea). Para triggers u otro SQL que drizzle-kit no modela: `npx drizzle-kit generate --custom --name <x>` desde `packages/core` y escribe el SQL a mano. No edites una migración ya mergeada. Una migración nueva cuelga de la última de `main` (`prevIds` de su `snapshot.json`): si al rebasear entró otra, borra tu carpeta y vuelve a correr `db:generate`, nunca parches `prevIds` a mano; `npm run lint` corre `drizzle-kit check` (`db:check`) y falla con dos migraciones en conflicto.
+El schema vive en `packages/core/src/store/schema.ts`. Tras cambiarlo: `npm run db:generate -w @clanker/core` deja una carpeta nueva en `packages/core/migrations/` (se commitea). Para triggers u otro SQL que drizzle-kit no modela: `npx drizzle-kit generate --custom --name <x>` desde `packages/core` y escribe el SQL a mano. No edites una migración ya mergeada. Un evento cuyo payload el core lee en proceso (un `store.events.subscribe` que mira su payload) declara ese payload en `EventPayloads` (`packages/api/src/event-payloads.ts`): `tx.emit` y `subscribe` lo tipan. Una migración nueva cuelga de la última de `main` (`prevIds` de su `snapshot.json`): si al rebasear entró otra, borra tu carpeta y vuelve a correr `db:generate`, nunca parches `prevIds` a mano; `npm run lint` corre `drizzle-kit check` (`db:check`) y falla con dos migraciones en conflicto.
 
-Lo que ya define `@clanker/api` (ids con prefijo, `EventType`, `Origin`, `SubjectRef`, `Event`, `EventFilter`) se importa de ahí, no se redeclara en el core: en el schema con `.$type<...>()`, que no cambia la migración.
+Lo que ya define `@clanker/api` (ids con prefijo, `EventType`, `Origin`, `SubjectRef`, `Event`, `EventFilter`, `EventPayloads`) se importa de ahí, no se redeclara en el core: en el schema con `.$type<...>()`, que no cambia la migración.
 
 Los ids de prueba salen de `newId("run")` o son ULIDs válidos (`run_00000000000000000000000001`): `run_1` pasa el tipo, pero el store rechaza el evento.
 
