@@ -31,10 +31,11 @@ async function setup(overrides: Partial<ClankerProject> = {}, which = 0) {
   const data = createMemoryAppData(NOW)
   const project = { ...(await data.projects())[which]!, ...overrides }
   const update = vi.fn<AppData["updateProject"]>((id, patch) => data.updateProject(id, patch))
+  const importConfig = vi.fn<AppData["importProjectConfig"]>((input) => data.importProjectConfig(input))
   const controls: { current: SettingsControls | null } = { current: null }
   const actions = { goConnections: vi.fn(), editQueueFilters: vi.fn() }
   const ui = (p: ClankerProject) => (
-    <AppDataProvider value={{ ...data, updateProject: update }}>
+    <AppDataProvider value={{ ...data, updateProject: update, importProjectConfig: importConfig }}>
       <AppActionsContext.Provider value={actions as unknown as AppActions}>
         <TooltipProvider>
           <ProjectSettingsTab project={p} focus={null} onFocused={() => {}} onControls={(c) => (controls.current = c)} />
@@ -45,7 +46,7 @@ async function setup(overrides: Partial<ClankerProject> = {}, which = 0) {
   const view = render(ui(project))
   // Los datos del core llegan async: el formulario aparece cuando están.
   await screen.findByRole("region", { name: "Repos" })
-  return { data, project, update, controls, actions, rerender: (p: ClankerProject) => view.rerender(ui(p)) }
+  return { data, project, update, importConfig, controls, actions, rerender: (p: ClankerProject) => view.rerender(ui(p)) }
 }
 
 const field = (name: string) => screen.getByRole("textbox", { name })
@@ -124,7 +125,7 @@ test("el índice lleva a cada sección y marca la que se clicó", async () => {
 
   expect(scrolled).toEqual(["settings-limits"])
   expect(within(nav).getByRole("button", { name: "Apilado y gasto" }).getAttribute("aria-current")).toBe("location")
-  expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Repos", "Proyecto del tracker", "Filtros de la cola", "Mapeo de estados", "Flujo y parámetros", "Apilado y gasto", "Convenciones"])
+  expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Repos", "Proyecto del tracker", "Filtros de la cola", "Mapeo de estados", "Flujo y parámetros", "Apilado y gasto", "Convenciones", "Exportar e importar"])
 })
 
 test("la ayuda de un parámetro avisa que otro flujo lo lee con otro default", async () => {
@@ -213,4 +214,63 @@ test("el mapeo de estados lista los estados de las issues con su categoría de h
   save()
 
   await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { statusMapping: { "In Staging": "in_review" } }))
+})
+
+const fileOf = (content: unknown, name = "config.json") => new File([typeof content === "string" ? content : JSON.stringify(content)], name, { type: "application/json" })
+const pickFile = (file: File) => fireEvent.change(screen.getByLabelText("Archivo de configuración"), { target: { files: [file] } })
+
+test("exportar baja la configuración del proyecto como archivo", async () => {
+  const { project } = await setup()
+  const blobs: Blob[] = []
+  URL.createObjectURL = (blob: Blob | MediaSource) => (blobs.push(blob as Blob), "blob:x")
+  URL.revokeObjectURL = () => {}
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+
+  fireEvent.click(screen.getByRole("button", { name: /Exportar configuración/ }))
+
+  await waitFor(() => expect(click).toHaveBeenCalled())
+  expect(JSON.parse(await blobs[0]!.text())).toMatchObject({ clankerProjectConfig: 1, name: project.name, trackerRef: project.trackerRef })
+  click.mockRestore()
+})
+
+test("importar muestra qué cambia y qué no se pudo mapear antes de escribir, y recién al confirmar aplica", async () => {
+  const { data, project, importConfig: apply } = await setup()
+  const config = { ...(await data.exportProjectConfig(project.id)), parallel: 3, repos: [{ name: "api", remote: "acme/api", labels: ["be"] }, { name: "x", remote: "acme/x", labels: [] }] }
+
+  pickFile(fileOf(config))
+
+  const dialog = await screen.findByRole("alertdialog")
+  expect(within(dialog).getByRole("list", { name: "Cambios" }).textContent).toContain("Cupo del carril dev (cambia)")
+  expect(within(dialog).getByRole("list", { name: "Cambios" }).textContent).toContain("Repos")
+  expect(within(dialog).getByRole("list", { name: "Sin mapear" }).textContent).toContain("acme/x no está registrado en esta máquina")
+  expect(apply).toHaveBeenCalledTimes(1)
+  expect(apply).toHaveBeenLastCalledWith({ projectId: project.id, config, dryRun: true })
+  expect((await data.projects())[0]!.parallel).toBe(1)
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Importar" }))
+
+  await waitFor(() => expect(apply).toHaveBeenLastCalledWith({ projectId: project.id, config, dryRun: false }))
+  await waitFor(async () => expect((await data.projects())[0]!.parallel).toBe(3))
+})
+
+test("un archivo que no es una configuración no deja importar y no escribe nada", async () => {
+  const { data, project, importConfig: apply } = await setup()
+
+  pickFile(fileOf("{ no es json"))
+  await waitFor(() => expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toContain("no es un JSON"))
+  expect(apply).not.toHaveBeenCalled()
+
+  pickFile(fileOf({ clankerProjectConfig: 1, name: "x", tracker: "linear", trackerRef: "t", parallel: 0 }))
+  const dialog = await screen.findByRole("alertdialog")
+  expect(within(dialog).getByRole("list", { name: "Cambios" }).textContent).toContain("Cupo del carril dev")
+  expect(within(dialog).queryByRole("button", { name: "Importar" })).toBeNull()
+  expect(apply).toHaveBeenCalledTimes(1)
+  expect((await data.projects())[0]!.parallel).toBe(project.parallel)
+})
+
+test("con ajustes sin guardar no se puede importar", async () => {
+  await setup()
+  fireEvent.change(screen.getByLabelText("Rondas de review"), { target: { value: "5" } })
+
+  expect((screen.getByRole("button", { name: /Importar…/ }) as HTMLButtonElement).disabled).toBe(true)
 })

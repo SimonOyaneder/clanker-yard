@@ -1,4 +1,4 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type PackInfo, Profile, type PrRef, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 import { buildOpenPrs } from "@/seed-prs"
@@ -761,6 +761,46 @@ export function createMemoryAppData(now = Date.now()): AppData {
       if (row.recipe.status !== "found") throw new Error(`${row.repo.name} no tiene una receta válida: no hay nada que probar.`)
       row.lastTest = { ok: true, at: Date.now() }
       return { ok: true, steps: [{ phase: "setup.worktree", name: "pnpm install", ok: true, exitCode: 0, extract: "Done in 4.2s" }] }
+    },
+    exportDefToRepo: async ({ kind, id: defId, repoId }) => {
+      const found = needDef(kind, defId)
+      if (found.scope !== "user") throw new Error(`El ${kind} "${found.slug}" no es tuyo: solo se exporta lo tuyo. Duplícalo para tener uno propio.`)
+      const row = repoRows.find((r) => r.repo.id === repoId)
+      if (!row?.repo.remote) throw new Error("Ese repo no tiene remoto de GitHub con una cuenta conectada: conecta GitHub en Conexiones.")
+      const dir = { flow: "flows", role: "roles", profile: "profiles" }[kind]
+      return { url: `https://github.com/${row.repo.remote}/pull/42`, number: 42, branch: `clanker/export-${kind}-${found.slug}-abc1234`, path: `.clanker/${dir}/${found.slug}.${kind === "role" ? "md" : "json"}` }
+    },
+    syncRepoConfig: async () => ({ loaded: 0, archived: 0, errors: [] }),
+    exportProjectConfig: async (projectId) => {
+      const project = projectOf(projectId)
+      if (!project) throw new Error(`No existe el proyecto ${projectId}`)
+      const { name, tracker, trackerRef, trackerAccount, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, statusMapping, flowParams, maxCostUsd, repos } = project
+      return { clankerProjectConfig: 1, name, tracker, trackerRef, trackerAccount, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, statusMapping, flowParams, maxCostUsd, repos: repos.flatMap(({ repoId, labels }) => repoRows.filter((r) => r.repo.id === repoId).map((r) => ({ name: r.repo.name, remote: r.repo.remote, labels }))) }
+    },
+    importProjectConfig: async ({ projectId, config, dryRun }) => {
+      const project = projectOf(projectId)
+      if (!project) throw new Error(`No existe el proyecto ${projectId}`)
+      const parsed = ProjectConfig.safeParse(config)
+      if (!parsed.success) {
+        const errors = parsed.error.issues.map(({ path, message }) => ({ path: path.map(String).join("."), message }))
+        if (!dryRun) throw new Error(`No se importó la configuración:\n${errors.map((e) => `  ${e.path || "(raíz)"}: ${e.message}`).join("\n")}`)
+        return { applied: false, errors, unmapped: [], changes: [] }
+      }
+      const { repos, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, statusMapping, flowParams, maxCostUsd } = parsed.data
+      const settings = { defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, statusMapping, flowParams, maxCostUsd }
+      const unmapped: DefIssue[] = []
+      const mapped = repos.flatMap(({ remote, name, labels }, i) => {
+        const row = repoRows.find((r) => (remote === null ? r.repo.name === name : r.repo.remote === remote))
+        if (row) return [{ repoId: row.repo.id, labels }]
+        unmapped.push({ path: `repos.${i}`, message: `${remote ?? name} no está registrado en esta máquina: regístralo en Conexiones y vuelve a importar.` })
+        return []
+      })
+      const patch = { ...settings, ...(mapped.length > 0 || repos.length === 0 ? { repos: mapped } : {}) }
+      const named = (r: ClankerProject["repos"]) => r.map(({ repoId, labels }) => ({ repo: repoRows.find((x) => x.repo.id === repoId)?.repo.name ?? repoId, labels }))
+      const view = (p: Pick<ClankerProject, "repos"> & Record<string, unknown>) => ({ ...p, repos: named(p.repos) })
+      const changes = diffLeaves(view(project), view({ ...project, ...patch }))
+      if (!dryRun) Object.assign(project, patch)
+      return { applied: !dryRun && changes.length > 0, errors: [], unmapped, changes }
     },
     addRepo: async (path) => {
       if (repoRows.some((r) => r.repo.path === path)) throw new Error(`${path} ya está registrado.`)

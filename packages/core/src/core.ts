@@ -39,7 +39,10 @@ import { createLinearTracker } from "./linear/tracker";
 import { createTrackers } from "./tracker/trackers";
 import { createTrackerProjects } from "./tracker/tracker-projects";
 import { createProcs, type Procs } from "./procs/procs";
+import { createProjectConfigs } from "./projects/config";
 import { createProjects } from "./projects/projects";
+import { createRepoConfigExporter } from "./repo-config/export";
+import { createRepoConfigSyncer, startRepoConfigSync } from "./repo-config/sync";
 import { createRunStarter } from "./projects/start-run";
 import { createLaneSettings } from "./scheduler/lanes";
 import { createProjectQueue } from "./scheduler/project-queue";
@@ -305,6 +308,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     runtime: runtime.id,
     breakers,
   });
+  const repoConfigSync = createRepoConfigSyncer({ defs, flows, repos });
+  const stopRepoConfigSync = startRepoConfigSync({ syncer: repoConfigSync, repos, errors: watchErrors });
   const stopTriggers = startTriggers({ store, defs, projects, repos, flows, errors: watchErrors });
   const mergeReactions = startMergeReactions({ store, repos, packs, prs, connections: opts.connections, errors: watchErrors });
   const watch = createWatch({
@@ -329,6 +334,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     projects,
     packs,
     repos,
+    repoConfigSync,
+    repoConfigExport: createRepoConfigExporter({ defs, repos, config: repos.config, remote: gitRemote, connections: opts.connections, dataDir, identity: GIT_IDENTITY }),
+    projectConfigs: createProjectConfigs({ projects, repos, defs }),
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
     runs,
     queue: scheduler.queue,
@@ -362,6 +370,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       await watch.stop();
       // Como el Scheduler: un cierre no abre corridas nuevas.
       stopTriggers();
+      await stopRepoConfigSync.stop();
       mergeReactions.stop();
       const graceMs = drain ? DRAIN_MS : 0;
       // Antes de apagar el motor: un cierre no abre corridas nuevas.

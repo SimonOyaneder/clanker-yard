@@ -1,6 +1,6 @@
 import type { ClankerProject, DefRecord } from "@clanker/api"
 import { expect, test } from "vitest"
-import { duplicateOf, isInternal, libraryRows } from "@/lib/defs-library"
+import { duplicateOf, isInternal, libraryRows, repoFilePath, repoOrigin, sourceLabel } from "@/lib/defs-library"
 import { SEED_TECHLEAD, SEED_TOY } from "@/seed-flows"
 
 let n = 0
@@ -76,4 +76,13 @@ test("duplicar uno tuyo da una copia con slug libre, que el flujo lleva en su id
 test("duplicar un rol no toca su body", () => {
   const role = def("role", "dev", { prompt: "x" })
   expect(duplicateOf(role, [role]).body).toBe(role.body)
+})
+
+test("una def que viene del repo dice archivo y commit; lo demás sigue como estaba", () => {
+  expect(repoOrigin("repo:.clanker/flows/mi-flujo.json@0123456789abcdef")).toEqual({ file: ".clanker/flows/mi-flujo.json", commit: "0123456" })
+  expect(sourceLabel("repo:.clanker/roles/dev.md@abcdef012345")).toBe("el repo (.clanker/roles/dev.md, commit abcdef0)")
+  expect(repoOrigin("ui")).toBeNull()
+  expect(sourceLabel("ui")).toBe("esta app")
+  expect(repoFilePath("role", "dev")).toBe(".clanker/roles/dev.md")
+  expect(repoFilePath("flow", "mi-flujo")).toBe(".clanker/flows/mi-flujo.json")
 })

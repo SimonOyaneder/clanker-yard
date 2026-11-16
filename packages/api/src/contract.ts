@@ -16,16 +16,16 @@ import {
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
 import { AgentOptions } from "./agents";
-import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
+import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefExported, DefExportToRepo, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
 import { Learning, LearningFilter, LearningPatch, NewLearning } from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
-import { ClankerProject, NewProject, ProjectDefaults, ProjectDefaultsPatch, ProjectUpdate } from "./projects";
+import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
 import { CachedPr, PrFilter, PrRef, PrState } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
-import { DetectedRepo, NewRepo, RecipeTestResult, Repo } from "./repos";
+import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync } from "./repos";
 import { Breaker, Lanes, LanesPatch, Run, RunDetail, RunFilter, StartRun, StepDetail, TranscriptPage, TranscriptQuery } from "./runs";
 import { CachedIssue, IssueFilter, NewLocalIssue, TrackerId, TrackerProject } from "./tracker";
 
@@ -245,6 +245,19 @@ const projects = {
    */
   update: base.input(ProjectUpdate).output(ClankerProject),
   /**
+   * La configuración del proyecto como archivo (`ProjectConfig`): repos por nombre y remoto, filtros, mapeo de estados,
+   * flujo y perfil por defecto, parámetros, convenciones y límites. `NOT_FOUND` si no existe.
+   */
+  exportConfig: base.input(z.object({ id: ProjectId })).output(ProjectConfig),
+  /**
+   * Aplica una configuración exportada (`config`, sin validar) a un proyecto existente: valida todo antes de escribir,
+   * y con `dryRun` solo devuelve qué cambiaría (`changes`) y qué no se pudo mapear a esta máquina (`unmapped`: un repo
+   * no registrado, un flujo o perfil que no existe). Lo no mapeable se omite; los `errors` (formato inválido, repos
+   * repetidos, un label en dos repos) impiden escribir: sin `dryRun` son `BAD_REQUEST`. El nombre, el tracker y su
+   * proyecto no se importan. `NOT_FOUND` si el proyecto no existe.
+   */
+  importConfig: base.input(z.object({ id: ProjectId, config: z.unknown(), dryRun: z.boolean().default(false) })).output(ProjectImportResult),
+  /**
    * Pausa el proyecto: el Scheduler deja de lanzar sus issues. No toca a otros proyectos ni lo que ya corre (sus
    * corridas y el carril de mantenimiento siguen). Emite `project.paused` con el actor. `NOT_FOUND` si no existe;
    * `BAD_REQUEST` si está archivado.
@@ -362,6 +375,12 @@ const repos = {
    * prueba en curso de ese repo, o si los slots de mantenimiento están ocupados; `NOT_FOUND` si no está registrado.
    */
   testRecipe: base.input(z.object({ repoId: RepoId })).output(RecipeTestResult),
+  /**
+   * Carga `.clanker/flows`, `roles` y `profiles` de la branch por defecto del repo como defs con scope `repo`
+   * (lo mismo que el core hace al registrar el repo y cada tanto). Un archivo inválido sale en `errors` y no
+   * frena a los demás. `NOT_FOUND` si el repo no está registrado.
+   */
+  syncConfig: base.input(z.object({ repoId: RepoId })).output(RepoConfigSync),
 };
 
 const packs = {
@@ -657,6 +676,14 @@ const defs = {
    * lee el esquema del perfil (`clanker://schema/profile`); la lista es para el selector de la UI.
    */
   agentOptions: base.output(AgentOptions),
+  /**
+   * "Exportar al repo": escribe la def propia (scope `user`) en `.clanker/` del repo (`flows/<slug>.json`,
+   * `roles/<slug>.md`, `profiles/<slug>.json`) en un worktree desechable sobre la branch por defecto, pushea una branch
+   * nueva y abre un PR en draft con la cuenta de GitHub del repo. Cuando se mergea, quien registre el repo recibe la def
+   * (`repos.syncConfig`). `BAD_REQUEST` si la def no es propia o está archivada, el repo no tiene remoto de GitHub ni
+   * cuenta conectada, o el archivo ya está igual en el repo; `NOT_FOUND` si la def o el repo no existen.
+   */
+  exportToRepo: base.input(DefExportToRepo).output(DefExported),
 };
 
 export const contract = { system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, metrics, defs, imports };

@@ -296,3 +296,46 @@ test("Editar JSON sigue ahí como alternativa avanzada en perfiles y roles", asy
   fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
   expect(await screen.findByRole("button", { name: /Editar JSON \(avanzado\)/ })).toBeTruthy()
 })
+
+test("Exportar al repo explica .clanker/, deja elegir el repo y abre el PR en draft con su link", async () => {
+  const exported: Parameters<AppData["exportDefToRepo"]>[0][] = []
+  const data = await openFlows({ exportDefToRepo: async (input) => (exported.push(input), { url: "https://github.com/acme/api/pull/7", number: 7, branch: "clanker/export-flow-x", path: ".clanker/flows/x.json" }) })
+  // Lo incluido no se exporta: primero se duplica para tener uno propio.
+  expect(screen.queryByRole("button", { name: /Exportar al repo/ })).toBeNull()
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
+  fireEvent.click(await screen.findByRole("button", { name: /Exportar al repo/ }))
+
+  const dialog = await screen.findByRole("dialog")
+  expect(within(dialog).getByText(/es la configuración que viaja con el repo: cualquiera que lo registre la recibe/)).toBeTruthy()
+  expect(within(dialog).getByText(/^\.clanker\/flows\/[a-z-]+\.json$/)).toBeTruthy()
+  await waitFor(() => expect((within(dialog).getByLabelText("Repo") as HTMLSelectElement).options.length).toBe(3))
+  fireEvent.change(within(dialog).getByLabelText("Repo"), { target: { value: (await data.repos())[1]!.repo.id } })
+  fireEvent.click(within(dialog).getByRole("button", { name: "Abrir PR en draft" }))
+
+  expect(await within(dialog).findByText(/Abrí el PR #7 en draft en acme\/web/)).toBeTruthy()
+  expect(exported).toEqual([{ kind: "flow", id: (await data.defs("flow")).find((d) => d.scope === "user")!.id, repoId: (await data.repos())[1]!.repo.id }])
+})
+
+test("si el core rechaza la exportación, el motivo queda en el diálogo", async () => {
+  await openFlows({ exportDefToRepo: () => Promise.reject(new Error("techlead-clasico.json ya está igual en main de api: no hay nada que exportar.")) })
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
+  fireEvent.click(await screen.findByRole("button", { name: /Exportar al repo/ }))
+  const dialog = await screen.findByRole("dialog")
+  await waitFor(() => expect((within(dialog).getByRole("button", { name: "Abrir PR en draft" }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(within(dialog).getByRole("button", { name: "Abrir PR en draft" }))
+  expect((await within(dialog).findByRole("alert")).textContent).toContain("no hay nada que exportar")
+})
+
+test("una def del repo dice de qué repo, archivo y commit viene", async () => {
+  const data = createMemoryAppData()
+  const [repoRow] = await data.repos()
+  const flow = (await data.defs("flow"))[0]!
+  const fromRepo: DefRecord = { ...flow, id: "def_repo_1", slug: "del-repo", scope: "repo", repoId: repoRow!.repo.id, source: "repo:.clanker/flows/del-repo.json@0123456789ab" }
+  await openFlows({ defs: async (kind, opts) => [...(await data.defs(kind, opts)), ...(kind === "flow" ? [fromRepo] : [])] })
+
+  fireEvent.click(within(await waitFor(() => rowOf("del-repo"))).getByRole("button"))
+
+  expect(await screen.findByText(/Del repo api/)).toBeTruthy()
+  expect(screen.getByText(".clanker/flows/del-repo.json", { selector: "span.font-mono" })).toBeTruthy()
+  expect(screen.getByText("0123456", { selector: "span.font-mono" })).toBeTruthy()
+})

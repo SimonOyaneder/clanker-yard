@@ -11,6 +11,7 @@ import type {
   ConnectionProvider,
   AgentOptions,
   DayMetrics,
+  DefExported,
   DefKind,
   DefRecord,
   DefWrite,
@@ -33,15 +34,18 @@ import type {
   NewProject,
   PackInfo,
   PrRef,
+  ProjectConfig,
   ProjectDefaults,
   ProjectDefaultsPatch,
   ProjectId,
+  ProjectImportResult,
   ProjectPatch,
   ProjectSummary,
   QueueEntry,
   RecipeStatus,
   RecipeTestResult,
   Repo,
+  RepoConfigSync,
   RepoId,
   Run,
   RunDetail,
@@ -217,6 +221,14 @@ export interface AppData {
   testRecipe(repoId: RepoId): Promise<RecipeTestResult>
   /** Registra el checkout de `path` (la raíz de un repo de git). */
   addRepo(path: string): Promise<Repo>
+  /** "Exportar al repo": abre un PR en draft que agrega la def tuya al `.clanker/` del repo. Rechaza con lo que hay que cambiar (la def no es tuya, el repo no tiene cuenta de GitHub, ya está igual). */
+  exportDefToRepo(input: { kind: DefWriteKind; id: string; repoId: RepoId }): Promise<DefExported>
+  /** Vuelve a leer `.clanker/` de la branch por defecto del repo y actualiza lo que el repo trae. */
+  syncRepoConfig(repoId: RepoId): Promise<RepoConfigSync>
+  /** La configuración del proyecto como archivo, para llevarla a otra máquina o proyecto. */
+  exportProjectConfig(projectId: ProjectId): Promise<ProjectConfig>
+  /** Aplica una configuración exportada al proyecto; con `dryRun` solo dice qué cambiaría y qué no se pudo mapear. */
+  importProjectConfig(input: { projectId: ProjectId; config: unknown; dryRun: boolean }): Promise<ProjectImportResult>
 }
 
 const AppDataContext = createContext<AppData | null>(null)

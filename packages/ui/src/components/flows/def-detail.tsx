@@ -1,11 +1,12 @@
 import { type DefRecord, type DefWrite, type DefWriteKind, FlowDef, Profile, Role } from "@clanker/api"
-import { Archive, ArchiveRestore, Braces, Copy, Pencil, Undo2 } from "lucide-react"
+import { Archive, ArchiveRestore, Braces, Copy, GitPullRequestDraft, Pencil, Undo2 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { Ago } from "@/components/common"
 import { ChangeDialog } from "@/components/flows/change-dialog"
 import { DefEditor } from "@/components/flows/def-editor"
+import { ExportToRepoDialog } from "@/components/flows/export-to-repo-dialog"
 import { RowPills, UsedBy } from "@/components/flows/flow-parts"
 import { ProfileForm } from "@/components/flows/profile-form"
 import { RoleForm } from "@/components/flows/role-form"
@@ -14,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button"
 import { useLiveQuery } from "@/hooks/use-live"
 import { profileSummary } from "@/lib/def-form"
-import { duplicateOf, isReadOnly, KIND_LABEL, type LibraryRow, nameOf, sourceLabel } from "@/lib/defs-library"
+import { duplicateOf, isReadOnly, KIND_LABEL, type LibraryRow, nameOf, repoOrigin, sourceLabel } from "@/lib/defs-library"
 import { messageOf, undoable } from "@/lib/undoable"
 import { cn } from "@/lib/utils"
 
@@ -35,8 +36,10 @@ export function DefDetail({ row, defs, onChanged }: Props) {
   const [confirmArchive, setConfirmArchive] = useState(false)
   // Roles y perfiles se editan con su formulario; el JSON es la salida avanzada y lo único que tienen los flujos.
   const [editing, setEditing] = useState<"form" | "json" | null>(null)
+  const [exporting, setExporting] = useState(false)
   const [revert, setRevert] = useState<{ to: DefRecord; write: DefWrite } | null>(null)
   const kind = def.kind as DefWriteKind
+  const repos = useLiveQuery("def-repos", () => appData.repos(), { live: false })
   const versions = useLiveQuery(`def-versions:${kind}:${def.id}:${def.currentVersion}`, () => appData.defVersions(kind, def.id), { live: false })
   const shown = versions.data?.find((v) => v.version === version) ?? versions.data?.[0]
   const readOnly = isReadOnly(def)
@@ -107,6 +110,7 @@ export function DefDetail({ row, defs, onChanged }: Props) {
           <div className="min-w-0">
             <h2 className="truncate text-base font-medium">{nameOf(def)}</h2>
             <p className="font-mono text-xs text-muted-foreground">{def.slug}</p>
+            {def.scope === "repo" ? <RepoOrigin def={def} repoName={repos.data?.find((r) => r.repo.id === def.repoId)?.repo.name} /> : null}
           </div>
           <div className="flex flex-none items-center gap-2">
             <Button size="sm" variant={readOnly ? "default" : "secondary"} onClick={() => void duplicate()}>
@@ -120,6 +124,11 @@ export function DefDetail({ row, defs, onChanged }: Props) {
             {editable && !editing ? (
               <Button size="sm" variant={kind === "flow" ? "default" : "secondary"} onClick={() => setEditing("json")}>
                 {kind === "flow" ? <Pencil /> : <Braces />} {kind === "flow" ? "Editar" : "Editar JSON (avanzado)"}
+              </Button>
+            ) : null}
+            {editable && def.scope === "user" ? (
+              <Button size="sm" variant="secondary" onClick={() => setExporting(true)}>
+                <GitPullRequestDraft /> Exportar al repo
               </Button>
             ) : null}
             {editable ? (
@@ -190,6 +199,7 @@ export function DefDetail({ row, defs, onChanged }: Props) {
         <p className="text-xs text-muted-foreground">Las corridas en curso siguen con la versión con que empezaron. Elige una versión para ver su contenido.{editable ? " Volver a una versión crea una versión nueva con ese contenido: no borra las demás." : ""}</p>
       </section>
 
+      {exporting ? <ExportToRepoDialog def={def} kind={kind} onClose={() => setExporting(false)} /> : null}
       {revert ? <ChangeDialog title={`Volver a la versión ${revert.to.version}`} confirmLabel="Volver a esta versión" write={revert.write} kind={kind} onConfirm={() => void confirmRevert()} onCancel={() => setRevert(null)} /> : null}
 
       <AlertDialog open={confirmArchive} onOpenChange={setConfirmArchive}>
@@ -207,6 +217,17 @@ export function DefDetail({ row, defs, onChanged }: Props) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+/** De qué repo, archivo y commit viene una def del repo (un archivo que se editó en la app ya no es el del commit, pero sigue siendo del repo). */
+function RepoOrigin({ def, repoName }: { def: DefRecord; repoName: string | undefined }) {
+  const origin = repoOrigin(def.source)
+  return (
+    <p className="text-xs text-muted-foreground">
+      Del repo {repoName ?? "(no registrado en esta máquina)"}
+      {origin ? <> · <span className="font-mono">{origin.file}</span> · commit <span className="font-mono">{origin.commit}</span></> : null}
+    </p>
   )
 }
 

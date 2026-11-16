@@ -103,6 +103,12 @@ const router = os.router({
     update: os.projects.update.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    exportConfig: os.projects.exportConfig.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    importConfig: os.projects.importConfig.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     pause: os.projects.pause.handler(() => {
       throw new Error("no se usa en este test");
     }),
@@ -160,6 +166,9 @@ const router = os.router({
     }),
     detect: os.repos.detect.handler(() => []),
     testRecipe: os.repos.testRecipe.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    syncConfig: os.repos.syncConfig.handler(() => {
       throw new Error("no se usa en este test");
     }),
   },
@@ -229,6 +238,10 @@ const router = os.router({
       throw new Error("no se usa en este test");
     }),
     agentOptions: os.defs.agentOptions.handler(() => ({ models: [], efforts: [] })),
+    exportToRepo: os.defs.exportToRepo.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+
   },
   decisions: {
     list: os.decisions.list.handler(() => []),

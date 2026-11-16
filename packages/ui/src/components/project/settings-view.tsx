@@ -2,6 +2,7 @@ import type { CachedIssue, ClankerProject, DefRecord } from "@clanker/api"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type RepoRow, useAppData } from "@/app-data"
 import { SaveBar, useSaveShortcut } from "@/components/project/settings-fields"
+import { ConfigPortSection } from "@/components/project/config-port-section"
 import { SettingsNav, type SettingsNavItem } from "@/components/project/settings-nav"
 import { ConventionsSection, FlowSection, LimitsSection, QueueSection, ReposSection, StatusMappingSection, TrackerSection } from "@/components/project/settings-sections"
 import { Button } from "@/components/ui/button"
@@ -70,6 +71,7 @@ const navOf = (project: ClankerProject): SettingsNavItem[] => [
   { id: "flow", label: "Flujo y parámetros" },
   { id: "limits", label: "Apilado y gasto" },
   { id: "conventions", label: "Convenciones" },
+  { id: "config", label: "Exportar e importar" },
 ]
 
 function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, repos, issues }: TabProps & Loaded) {
@@ -164,6 +166,7 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
           <FlowSection {...shared} flows={flows} profiles={profiles} groups={groups} />
           <LimitsSection {...shared} />
           <ConventionsSection {...shared} hasContext={project.conventions.context !== undefined} />
+          <ConfigPortSection project={project} disabled={dirty} />
 
           {dirty ? (
             <SaveBar

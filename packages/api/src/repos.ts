@@ -70,3 +70,14 @@ export const RecipeTestResult = z.object({
   steps: z.array(RecipeTestStep),
 });
 export type RecipeTestResult = z.infer<typeof RecipeTestResult>;
+
+/**
+ * Lo que dejó cargar `.clanker/` de un repo: cuántas defs cambiaron o se crearon (`loaded`), cuántas se archivaron
+ * porque su archivo ya no está (`archived`) y los archivos que no se pudieron leer, cada uno con su motivo.
+ */
+export const RepoConfigSync = z.object({
+  loaded: z.int().nonnegative(),
+  archived: z.int().nonnegative(),
+  errors: z.array(z.object({ file: z.string(), message: z.string() })),
+});
+export type RepoConfigSync = z.infer<typeof RepoConfigSync>;

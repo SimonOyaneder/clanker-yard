@@ -11,7 +11,9 @@ import { createDefs } from "../defs/defs";
 import { createFlows, type Flows } from "../flows/flows";
 import { createLegacyImporter } from "../import/legacy";
 import { createPacks } from "../packs/packs";
+import { createProjectConfigs } from "../projects/config";
 import { createProjects } from "../projects/projects";
+import { createRepoConfigSyncer } from "../repo-config/sync";
 import { createRunStarter } from "../projects/start-run";
 import { createLaneSettings } from "../scheduler/lanes";
 import { createProjectQueue } from "../scheduler/project-queue";
@@ -34,7 +36,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport"> & { flows: Flows } {
   const defs = createDefs(store);
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -75,6 +77,10 @@ export function apiDeps(
     projects,
     packs: createPacks({ defs }),
     repos,
+    repoConfigSync: createRepoConfigSyncer({ defs, flows, repos }),
+    // Sin remoto ni cuenta de GitHub: este core de pruebas no exporta.
+    repoConfigExport: { exportDef: () => Promise.reject(new Error("este core de pruebas no exporta al repo")) },
+    projectConfigs: createProjectConfigs({ projects, repos, defs }),
     recipeTester: createRecipeTester({ store, repos, slots: createSlots({ store }), dataDir }),
     runs,
     queue: scheduler.queue,

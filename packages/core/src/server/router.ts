@@ -25,6 +25,9 @@ import { PackInstallError, PackLoadError, type Packs } from "../packs/packs";
 import { DefValidationError, type Defs } from "../defs/defs";
 import { createDefWriter, DefNotFoundError, DefWriteError } from "../defs/write";
 import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
+import type { ProjectConfigs } from "../projects/config";
+import { RepoExportError, type RepoConfigExporter } from "../repo-config/export";
+import type { RepoConfigSyncer } from "../repo-config/sync";
 import { IssueNotCachedError, type RunStarter } from "../projects/start-run";
 import type { LaneSettings } from "../scheduler/lanes";
 import { QueueUnavailableError, type ProjectQueue } from "../scheduler/project-queue";
@@ -54,6 +57,12 @@ export interface RouterDeps {
   projects: Projects;
   packs: Packs;
   repos: Repos;
+  /** `repos.syncConfig`. */
+  repoConfigSync: RepoConfigSyncer;
+  /** `defs.exportToRepo`. */
+  repoConfigExport: RepoConfigExporter;
+  /** `projects.exportConfig` y `projects.importConfig`. */
+  projectConfigs: ProjectConfigs;
   recipeTester: RecipeTester;
   /** `runs.start`: reclama la issue y lanza el flujo. */
   runs: RunStarter;
@@ -288,6 +297,10 @@ export function createRouter(deps: RouterDeps) {
           return projects.update(id, trackerRef === undefined ? patch : { ...patch, trackerRef }, context.origin);
         }),
       ),
+      exportConfig: os.projects.exportConfig.handler(({ input }) => asApiError(() => deps.projectConfigs.export(input.id))),
+      importConfig: os.projects.importConfig.handler(({ input, context }) =>
+        asApiError(() => deps.projectConfigs.import(input.id, input.config, { dryRun: input.dryRun, origin: context.origin })),
+      ),
       pause: os.projects.pause.handler(({ input, context }) => asApiError(() => projects.pause(input.id, context.origin))),
       resume: os.projects.resume.handler(({ input, context }) => asApiError(() => projects.resume(input.id, context.origin))),
       setParallel: os.projects.setParallel.handler(({ input: { id, parallel }, context }) =>
@@ -328,11 +341,19 @@ export function createRouter(deps: RouterDeps) {
     },
     repos: {
       list: os.repos.list.handler(() => repos.list()),
-      add: os.repos.add.handler(({ input }) => asApiErrorAsync(() => repos.register(input.path, input.name))),
+      add: os.repos.add.handler(({ input }) =>
+        asApiErrorAsync(async () => {
+          const repo = await repos.register(input.path, input.name);
+          // Quien registra el repo recibe de una vez lo que el repo trae en `.clanker/`.
+          await deps.repoConfigSync.sync(repo.id);
+          return repo;
+        }),
+      ),
       detect: os.repos.detect.handler(({ input }) => asApiErrorAsync(() => repos.detect(input.folder))),
       testRecipe: os.repos.testRecipe.handler(({ input, context }) =>
         asApiErrorAsync(() => recipeTester.test(input.repoId, context.origin)),
       ),
+      syncConfig: os.repos.syncConfig.handler(({ input }) => asApiErrorAsync(() => deps.repoConfigSync.sync(input.repoId))),
     },
     runs: {
       list: os.runs.list.handler(({ input }) => flows.listRuns(input)),
@@ -411,6 +432,7 @@ export function createRouter(deps: RouterDeps) {
       update: os.defs.update.handler(({ input, context }) => asApiError(() => defWriter.update(input, context.origin))),
       archive: os.defs.archive.handler(({ input, context }) => asApiError(() => defWriter.archive(input.kind, input.id, context.origin))),
       agentOptions: os.defs.agentOptions.handler(() => CLAUDE_OPTIONS),
+      exportToRepo: os.defs.exportToRepo.handler(({ input }) => asApiErrorAsync(() => deps.repoConfigExport.exportDef(input))),
       restore: os.defs.restore.handler(({ input, context }) => asApiError(() => defWriter.restore(input.kind, input.id, context.origin))),
     },
     events: {
@@ -482,7 +504,8 @@ function toApiError(error: unknown): unknown {
     error instanceof DefWriteError ||
     error instanceof LegacyImportError ||
     error instanceof PackLoadError ||
-    error instanceof PackInstallError
+    error instanceof PackInstallError ||
+    error instanceof RepoExportError
   ) {
     return new ORPCError("BAD_REQUEST", { message: error.message, cause: error });
   }

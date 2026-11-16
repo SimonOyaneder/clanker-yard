@@ -127,5 +127,19 @@ export function duplicateOf(def: DefRecord, defs: readonly DefRecord[]): Duplica
 
 const SOURCE_LABEL: Record<string, string> = { builtin: "la app", ui: "esta app", cli: "la línea de comandos", mcp: "un agente (MCP)", repo: "el repo", import: "una importación" }
 
+/** El archivo y el commit de una def que viene del repo: su `source` es `repo:<archivo>@<commit>`. */
+export function repoOrigin(source: string): { file: string; commit: string } | null {
+  const match = /^repo:(.+)@([0-9a-f]+)$/.exec(source)
+  return match ? { file: match[1]!, commit: match[2]!.slice(0, 7) } : null
+}
+
 /** Quién guardó una versión, en palabras. */
-export const sourceLabel = (source: string) => SOURCE_LABEL[source] ?? source
+export function sourceLabel(source: string): string {
+  const origin = repoOrigin(source)
+  return origin ? `el repo (${origin.file}, commit ${origin.commit})` : (SOURCE_LABEL[source] ?? source)
+}
+
+const REPO_DIR = { flow: "flows", role: "roles", profile: "profiles" } as const
+
+/** El archivo de `.clanker/` donde "Exportar al repo" deja la def. */
+export const repoFilePath = (kind: DefWriteKind, slug: string): string => `.clanker/${REPO_DIR[kind]}/${slug}.${kind === "role" ? "md" : "json"}`

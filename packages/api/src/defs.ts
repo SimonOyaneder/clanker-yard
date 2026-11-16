@@ -95,3 +95,11 @@ export const DefWrite = z.object({
   def: DefRecord.nullable(),
 });
 export type DefWrite = z.infer<typeof DefWrite>;
+
+/** `defs.exportToRepo`: una def propia (scope `user`) y el repo registrado a cuyo `.clanker/` va. */
+export const DefExportToRepo = z.object({ kind: DefWriteKind, id: z.string().min(1), repoId: RepoId });
+export type DefExportToRepo = z.infer<typeof DefExportToRepo>;
+
+/** El PR en draft que abrió `defs.exportToRepo`: `path` es el archivo que agrega o cambia, dentro del repo. */
+export const DefExported = z.object({ url: z.string(), number: z.int().positive(), branch: z.string(), path: z.string() });
+export type DefExported = z.infer<typeof DefExported>;

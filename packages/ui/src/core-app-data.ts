@@ -178,5 +178,9 @@ export function createCoreAppData(client: CoreClient): AppData {
     },
     testRecipe: (repoId) => client.repos.testRecipe({ repoId }),
     addRepo: (path) => client.repos.add({ path }),
+    exportDefToRepo: (input) => client.defs.exportToRepo(input),
+    syncRepoConfig: (repoId) => client.repos.syncConfig({ repoId }),
+    exportProjectConfig: (id) => client.projects.exportConfig({ id }),
+    importProjectConfig: ({ projectId, config, dryRun }) => client.projects.importConfig({ id: projectId, config, dryRun }),
   }
 }

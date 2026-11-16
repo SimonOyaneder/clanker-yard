@@ -1,6 +1,8 @@
 import * as z from "zod";
+import { DefChange, DefIssue } from "./defs";
 import { ProjectId, RepoId } from "./domain";
 import { Conventions } from "./pack";
+import { RepoRemote } from "./repos";
 import { IssueFilter, StatusCategory, TrackerId } from "./tracker";
 
 export const ProjectStatus = z.enum(["active", "paused", "archived"]);
@@ -178,3 +180,45 @@ export type ProjectDefaults = z.infer<typeof ProjectDefaults>;
 /** Los campos de `ProjectDefaults` a cambiar; lo que no se pasa no cambia. */
 export const ProjectDefaultsPatch = ProjectDefaults.partial();
 export type ProjectDefaultsPatch = z.infer<typeof ProjectDefaultsPatch>;
+
+/**
+ * La configuración de un proyecto como archivo para llevarla a otra máquina o proyecto (`projects.exportConfig`,
+ * `projects.importConfig`). Los repos van por nombre y remoto de GitHub, no por id: el id es de esta máquina. El
+ * nombre, el tracker, su proyecto y su cuenta son informativos: importar no los cambia.
+ */
+export const ProjectConfig = z.strictObject({
+  /** La versión del formato. */
+  clankerProjectConfig: z.literal(1),
+  name: z.string().min(1),
+  tracker: TrackerId,
+  trackerRef: z.string().min(1),
+  /** La cuenta (workspace) del tracker de la que sale la cola; informativa como `trackerRef`. */
+  trackerAccount: z.string().min(1).nullable().default(null),
+  defaultFlowId: z.string().min(1).nullable().default(null),
+  defaultProfileId: z.string().min(1).nullable().default(null),
+  repos: z
+    .array(z.strictObject({ name: z.string().min(1), remote: RepoRemote.nullable(), labels: z.array(z.string().min(1)).default([]) }))
+    .default([]),
+  queueFilter: IssueFilter.default({}),
+  conventions: Conventions.default({}),
+  parallel: z.int().positive().default(1),
+  stackOn: StackOn.default("ci_green"),
+  statusMapping: StatusMapping.default({}),
+  flowParams: z.record(z.string(), z.unknown()).default({}),
+  maxCostUsd: MaxCostUsd.default(null),
+});
+export type ProjectConfig = z.infer<typeof ProjectConfig>;
+
+/**
+ * Lo que devuelve `projects.importConfig`. `errors` impide importar (el archivo no es una configuración válida o
+ * choca: nada se escribe); `unmapped` es lo que no se pudo llevar a esta máquina (un repo no registrado, un flujo o
+ * perfil que no existe) y se omite sin impedir el resto; `changes` es lo que cambia en el proyecto. `applied` es
+ * verdadero solo si se escribió.
+ */
+export const ProjectImportResult = z.object({
+  applied: z.boolean(),
+  errors: z.array(DefIssue),
+  unmapped: z.array(DefIssue),
+  changes: z.array(DefChange),
+});
+export type ProjectImportResult = z.infer<typeof ProjectImportResult>;
