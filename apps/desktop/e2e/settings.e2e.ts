@@ -83,6 +83,8 @@ test("un valor inválido dice qué escribir y no deja guardar; ⌘S guarda y Des
   const client = coreClient(home);
   const project = (await client.projects.list()).find((p) => p.slug === "ajustes")!;
   // El toast del guardado del test anterior también tiene "Deshacer", y deshacerlo devolvería otro valor: se espera a que se vaya.
+  // Con el puntero encima un toast no se cierra: se saca de donde quedó tras pulsar "Guardar cambios".
+  await page.mouse.move(0, 0);
   await expect(page.getByRole("button", { name: "Deshacer" })).toHaveCount(0, { timeout: 15_000 });
 
   await page.getByLabel("Rondas de review").fill("0");

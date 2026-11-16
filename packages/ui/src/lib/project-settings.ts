@@ -121,6 +121,8 @@ export interface Draft {
   params: Record<string, string>
   conventions: ConventionsDraft
   stackOn: StackOn
+  /** Cuántas corridas del proyecto a la vez; el core exige un entero de 1 en adelante. */
+  parallel: string
   /** Vacío es sin tope. */
   maxCostUsd: string
 }
@@ -148,6 +150,7 @@ export function draftOf(project: ClankerProject, managed: readonly string[]): Dr
       omitSections: [...(c.pr?.omitSections ?? [])],
     },
     stackOn: project.stackOn,
+    parallel: String(project.parallel),
     maxCostUsd: project.maxCostUsd === null ? "" : String(project.maxCostUsd),
   }
 }
@@ -199,6 +202,9 @@ export function validate(draft: Draft, params: readonly ParamSpec[]): Problems {
       problems[`param:${spec.name}`] = `Elige ${paramChoices(spec.name)!.map((c) => `"${c.value}"`).join(" o ")}, o déjalo vacío para usar el default del flujo.`
     }
   }
+
+  const parallel = draft.parallel.trim()
+  if (!/^[1-9]\d*$/.test(parallel)) problems.parallel = "Escribe un entero de 1 en adelante: cuántas corridas del proyecto pueden ir a la vez."
 
   const cost = draft.maxCostUsd.trim()
   if (cost !== "" && !(Number(cost) > 0 && Number.isFinite(Number(cost)))) {
@@ -267,6 +273,7 @@ export function patchOf(draft: Draft, base: Draft, project: ClankerProject, spec
   }
   if (!same(draft.conventions, base.conventions)) patch.conventions = conventionsOf(draft.conventions, project.conventions)
   if (draft.stackOn !== base.stackOn) patch.stackOn = draft.stackOn
+  if (draft.parallel.trim() !== base.parallel) patch.parallel = Number(draft.parallel)
   if (draft.maxCostUsd !== base.maxCostUsd) patch.maxCostUsd = draft.maxCostUsd.trim() === "" ? null : Number(draft.maxCostUsd)
   return patch
 }
@@ -291,6 +298,7 @@ export function changedSections(patch: ProjectPatch): string[] {
     ["flowParams", "parámetros del flujo"],
     ["conventions", "convenciones"],
     ["stackOn", "apilado"],
+    ["parallel", "corridas a la vez"],
     ["maxCostUsd", "tope de gasto"],
   ]
   return names.filter(([field]) => field in patch).map(([, label]) => label)

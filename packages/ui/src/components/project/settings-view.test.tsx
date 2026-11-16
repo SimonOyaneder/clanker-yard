@@ -80,6 +80,35 @@ test("un valor inválido dice qué escribir y no deja guardar", async () => {
   expect(update).not.toHaveBeenCalled()
 })
 
+test("las corridas a la vez del proyecto se editan en Apilado y gasto y se distinguen del carril", async () => {
+  const { update, project } = await setup({ parallel: 1 })
+  const limits = screen.getByRole("region", { name: "Apilado y gasto" })
+  expect(within(limits).getByText(/el carril es el tope de la máquina entera y se cambia desde Operación/)).toBeTruthy()
+
+  fireEvent.change(within(limits).getByLabelText("Corridas a la vez del proyecto"), { target: { value: "0" } })
+  expect(within(limits).getByRole("alert").textContent).toContain("entero de 1 en adelante")
+  expect((screen.getByRole("button", { name: /Guardar cambios/ }) as HTMLButtonElement).disabled).toBe(true)
+
+  fireEvent.change(within(limits).getByLabelText("Corridas a la vez del proyecto"), { target: { value: "3" } })
+  save()
+  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { parallel: 3 }))
+})
+
+test("el índice lleva a cada sección y marca la que se clicó", async () => {
+  await setup()
+  const scrolled: string[] = []
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.id)
+  }
+  const nav = screen.getByRole("navigation", { name: "Secciones de Ajustes" })
+
+  fireEvent.click(within(nav).getByRole("button", { name: "Apilado y gasto" }))
+
+  expect(scrolled).toEqual(["settings-limits"])
+  expect(within(nav).getByRole("button", { name: "Apilado y gasto" }).getAttribute("aria-current")).toBe("location")
+  expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Repos", "Filtros de la cola", "Mapeo de estados", "Flujo y parámetros", "Apilado y gasto", "Convenciones"])
+})
+
 test("la ayuda de un parámetro avisa que otro flujo lo lee con otro default", async () => {
   await setup()
 

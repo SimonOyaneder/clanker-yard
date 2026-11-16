@@ -2,6 +2,7 @@ import type { CachedIssue, ClankerProject, DefRecord } from "@clanker/api"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type RepoRow, useAppData } from "@/app-data"
 import { Shortcut } from "@/components/common"
+import { SettingsNav, type SettingsNavItem } from "@/components/project/settings-nav"
 import { ConventionsSection, FlowSection, LimitsSection, QueueSection, ReposSection, StatusMappingSection } from "@/components/project/settings-sections"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -47,7 +48,7 @@ export function ProjectSettingsTab(props: TabProps) {
     )
   }
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
+    <div className="mx-auto flex max-w-[900px] flex-col gap-4">
       <Skeleton className="h-40 w-full" />
       <Skeleton className="h-40 w-full" />
     </div>
@@ -60,6 +61,15 @@ interface Loaded {
   repos: RepoRow[]
   issues: CachedIssue[]
 }
+
+const NAV: SettingsNavItem[] = [
+  { id: "repos", label: "Repos" },
+  { id: "queue", label: "Filtros de la cola" },
+  { id: "status", label: "Mapeo de estados" },
+  { id: "flow", label: "Flujo y parámetros" },
+  { id: "limits", label: "Apilado y gasto" },
+  { id: "conventions", label: "Convenciones" },
+]
 
 function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, repos, issues }: TabProps & Loaded) {
   const appData = useAppData()
@@ -150,34 +160,39 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
 
   const shared = { draft, update, problems }
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
-      <ReposSection {...shared} project={project} registered={repos} />
-      <QueueSection {...shared} />
-      <StatusMappingSection {...shared} project={project} observed={observed} />
-      <FlowSection {...shared} flows={flows} profiles={profiles} groups={groups} />
-      <LimitsSection {...shared} />
-      <ConventionsSection {...shared} hasContext={project.conventions.context !== undefined} />
+    <div className="@container w-full">
+      <div className="mx-auto flex max-w-[1108px] flex-col gap-4 @4xl:flex-row @4xl:gap-8">
+        <SettingsNav items={NAV} />
+        <div className="@container flex max-w-[900px] min-w-0 flex-1 flex-col gap-4">
+          <ReposSection {...shared} project={project} registered={repos} />
+          <QueueSection {...shared} />
+          <StatusMappingSection {...shared} project={project} observed={observed} />
+          <FlowSection {...shared} flows={flows} profiles={profiles} groups={groups} />
+          <LimitsSection {...shared} />
+          <ConventionsSection {...shared} hasContext={project.conventions.context !== undefined} />
 
-      {dirty ? (
-        <div
-          role="region"
-          aria-label="Cambios sin guardar"
-          className="sticky bottom-0 z-10 -mx-6 -mb-10 flex items-center gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur"
-        >
-          <p className={problemList.length || saveError ? "text-[13px] text-destructive" : "text-[13px] text-muted-foreground"} role={saveError ? "alert" : undefined}>
-            {saveError ?? (problemList.length ? `${problemList.length === 1 ? "Un campo necesita" : `${problemList.length} campos necesitan`} corrección para guardar. Está marcado arriba.` : `Cambios sin guardar en ${changedSections(patch).join(", ")}.`)}
-          </p>
-          <div className="ml-auto flex items-center gap-2">
-            <Button size="sm" variant="ghost" onClick={discard} disabled={saving}>
-              Descartar
-            </Button>
-            <Button size="sm" onClick={() => void save()} disabled={saving || problemList.length > 0}>
-              Guardar cambios
-              <Shortcut keys="⌘S" className="ml-1 opacity-70" />
-            </Button>
-          </div>
+          {dirty ? (
+            <div
+              role="region"
+              aria-label="Cambios sin guardar"
+              className="sticky bottom-4 z-10 flex items-center gap-3 rounded-lg border bg-background/95 px-4 py-3 shadow-sm backdrop-blur"
+            >
+              <p className={problemList.length || saveError ? "text-[13px] text-destructive" : "text-[13px] text-muted-foreground"} role={saveError ? "alert" : undefined}>
+                {saveError ?? (problemList.length ? `${problemList.length === 1 ? "Un campo necesita" : `${problemList.length} campos necesitan`} corrección para guardar. Está marcado arriba.` : `Cambios sin guardar en ${changedSections(patch).join(", ")}.`)}
+              </p>
+              <div className="ml-auto flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={discard} disabled={saving}>
+                  Descartar
+                </Button>
+                <Button size="sm" onClick={() => void save()} disabled={saving || problemList.length > 0}>
+                  Guardar cambios
+                  <Shortcut keys="⌘S" className="ml-1 opacity-70" />
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </div>
   )
 }

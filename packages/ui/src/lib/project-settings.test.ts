@@ -84,6 +84,16 @@ test("sin cambios no hay patch; cada sección cambiada produce solo su campo", (
   expect(patchOf({ ...b, maxCostUsd: "" }, { ...b, maxCostUsd: "3" }, project({ maxCostUsd: 3 }), specs)).toEqual({ maxCostUsd: null })
 })
 
+test("las corridas a la vez del proyecto piden un entero de 1 en adelante y se guardan como número", () => {
+  const p = project({ parallel: 2 })
+  const b = base(p)
+
+  for (const bad of ["0", "-1", "1.5", "dos", ""]) expect(validate({ ...b, parallel: bad }, specs).parallel).toContain("entero de 1 en adelante")
+  expect(validate({ ...b, parallel: " 3 " }, specs).parallel).toBeUndefined()
+  expect(patchOf({ ...b, parallel: "4" }, b, p, specs)).toEqual({ parallel: 4 })
+  expect(patchOf({ ...b, parallel: " 2 " }, b, p, specs)).toEqual({})
+})
+
 test("los parámetros se guardan con su tipo, un campo vacío vuelve al default y los flowParams ajenos quedan igual", () => {
   const p = project({ flowParams: { repo: "repo_x", reviewRounds: 5, checkRounds: 4 } })
   const b = base(p)

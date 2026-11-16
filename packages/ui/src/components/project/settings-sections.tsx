@@ -327,7 +327,7 @@ function ParamField({ spec, draft, update, problems, readers, also }: SectionPro
     <Field id={id} label={paramLabel(spec.name)} hint={hint} error={error}>
       {choices ? (
         <Select value={value || NONE} onValueChange={(v) => set(v === NONE ? "" : v)}>
-          <SelectTrigger id={id} size="sm" aria-invalid={!!error} aria-describedby={describedBy(id, true, error)} className="w-72">
+          <SelectTrigger id={id} size="sm" aria-invalid={!!error} aria-describedby={describedBy(id, true, error)} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -348,7 +348,7 @@ function ParamField({ spec, draft, update, problems, readers, also }: SectionPro
           placeholder={spec.default === null ? "según el flujo" : String(spec.default)}
           aria-invalid={!!error}
           aria-describedby={describedBy(id, true, error)}
-          className="h-8 w-40 text-[13px]"
+          className="h-8 w-full text-[13px]"
         />
       )}
     </Field>
@@ -369,10 +369,10 @@ export function FlowSection({
       title="Flujo y parámetros"
       description="Los parámetros pisan los defaults del flujo en este proyecto, sin crear una versión nueva del flujo. Valen para las corridas nuevas; las que ya corren siguen con los suyos."
     >
-      <div className="flex flex-wrap gap-4">
+      <div className="grid gap-4 @xl:grid-cols-2">
         <Field id="default-flow" label="Flujo por defecto" hint="El que corre una issue si no se pide otro.">
           <Select value={draft.defaultFlowId ?? NONE} onValueChange={(v) => update({ defaultFlowId: v === NONE ? null : v })}>
-            <SelectTrigger id="default-flow" size="sm" className="w-60">
+            <SelectTrigger id="default-flow" size="sm" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -387,7 +387,7 @@ export function FlowSection({
         </Field>
         <Field id="default-profile" label="Perfil por defecto" hint="Con el que corren los pasos de agente.">
           <Select value={draft.defaultProfileId ?? NONE} onValueChange={(v) => update({ defaultProfileId: v === NONE ? null : v })}>
-            <SelectTrigger id="default-profile" size="sm" className="w-60">
+            <SelectTrigger id="default-profile" size="sm" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -406,7 +406,7 @@ export function FlowSection({
       ) : groups.own.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">El flujo {draft.defaultFlowId} no declara parámetros con default.</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 @xl:grid-cols-2 @3xl:grid-cols-3">
           {groups.own.map((spec) => (
             <ParamField key={spec.name} spec={spec} draft={draft} update={update} problems={problems} readers={spec.flows.filter((f) => f.slug !== draft.defaultFlowId)} also />
           ))}
@@ -418,7 +418,7 @@ export function FlowSection({
             <h3 className="text-[13px] font-medium">Flujos que arrancan solos</h3>
             <p className="text-xs text-muted-foreground">Un conflicto, un comentario o un merge lanzan estos flujos sin pasar por la cola. Leen los mismos parámetros del proyecto.</p>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 @xl:grid-cols-2 @3xl:grid-cols-3">
             {groups.triggered.map((spec) => (
               <ParamField key={spec.name} spec={spec} draft={draft} update={update} problems={problems} readers={spec.flows} also={false} />
             ))}
@@ -434,33 +434,55 @@ export function FlowSection({
 export function LimitsSection({ draft, update, problems }: SectionProps) {
   const option = STACK_ON_OPTIONS.find((o) => o.value === draft.stackOn)
   return (
-    <Section id="limits" title="Apilado y gasto" description="Cuándo una issue bloqueada se apila sobre el PR de su bloqueante, y cuánto puede gastar cada corrida.">
-      <Field id="stack-on" label="Apilar sobre el PR del bloqueante cuando" hint={option?.hint}>
-        <Select value={draft.stackOn} onValueChange={(v) => update({ stackOn: v as Draft["stackOn"] })}>
-          <SelectTrigger id="stack-on" size="sm" className="w-60">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STACK_ON_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
-      <Field id="max-cost" label="Tope de gasto por corrida (USD)" hint="Vacío es sin tope. Una corrida que lo pasa se estaciona y pide tu decisión." error={problems.maxCostUsd}>
-        <Input
-          id="max-cost"
-          value={draft.maxCostUsd}
-          onChange={(e) => update({ maxCostUsd: e.target.value })}
-          inputMode="decimal"
-          placeholder="Sin tope"
-          aria-invalid={!!problems.maxCostUsd}
-          aria-describedby={describedBy("max-cost", true, problems.maxCostUsd)}
-          className="h-8 w-40 text-[13px]"
-        />
-      </Field>
+    <Section
+      id="limits"
+      title="Apilado y gasto"
+      description="Cuándo una issue bloqueada se apila sobre el PR de su bloqueante, cuántas corridas del proyecto van a la vez y cuánto puede gastar cada corrida."
+    >
+      <div className="grid gap-4 @xl:grid-cols-2 @3xl:grid-cols-3">
+        <Field id="stack-on" label="Apilar sobre el PR del bloqueante cuando" hint={option?.hint}>
+          <Select value={draft.stackOn} onValueChange={(v) => update({ stackOn: v as Draft["stackOn"] })}>
+            <SelectTrigger id="stack-on" size="sm" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STACK_ON_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field
+          id="parallel"
+          label="Corridas a la vez del proyecto"
+          hint="Cuántas corridas de este proyecto pueden ir a la vez. No es el carril: el carril es el tope de la máquina entera y se cambia desde Operación."
+          error={problems.parallel}
+        >
+          <Input
+            id="parallel"
+            value={draft.parallel}
+            onChange={(e) => update({ parallel: e.target.value })}
+            inputMode="numeric"
+            aria-invalid={!!problems.parallel}
+            aria-describedby={describedBy("parallel", true, problems.parallel)}
+            className="h-8 w-full text-[13px]"
+          />
+        </Field>
+        <Field id="max-cost" label="Tope de gasto por corrida (USD)" hint="Vacío es sin tope. Una corrida que lo pasa se estaciona y pide tu decisión." error={problems.maxCostUsd}>
+          <Input
+            id="max-cost"
+            value={draft.maxCostUsd}
+            onChange={(e) => update({ maxCostUsd: e.target.value })}
+            inputMode="decimal"
+            placeholder="Sin tope"
+            aria-invalid={!!problems.maxCostUsd}
+            aria-describedby={describedBy("max-cost", true, problems.maxCostUsd)}
+            className="h-8 w-full text-[13px]"
+          />
+        </Field>
+      </div>
     </Section>
   )
 }
@@ -472,7 +494,7 @@ export function ConventionsSection({ draft, update, problems, hasContext }: Sect
   const set = (change: Partial<ConventionsDraft>) => update({ conventions: { ...c, ...change } })
   return (
     <Section id="conventions" title="Convenciones" description="Reglas del proyecto para los comentarios y los PRs. Lo que dejes vacío lo decide el pack.">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 @xl:grid-cols-2">
         <Field id="comment-prefix" label="Prefijo de los comentarios" hint="Empieza cada comentario que el sistema deja en un PR.">
           <Input id="comment-prefix" value={c.commentPrefix} onChange={(e) => set({ commentPrefix: e.target.value })} placeholder="[clanker]" className="h-8 text-[13px]" />
         </Field>
@@ -481,7 +503,7 @@ export function ConventionsSection({ draft, update, problems, hasContext }: Sect
         </Field>
         <Field id="commits" label="Formato de commits">
           <Select value={c.commits || NONE} onValueChange={(v) => set({ commits: v === NONE ? "" : (v as ConventionsDraft["commits"]) })}>
-            <SelectTrigger id="commits" size="sm" className="w-60">
+            <SelectTrigger id="commits" size="sm" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

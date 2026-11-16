@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 /** Una sección de Ajustes: `id` es el ancla a la que lleva "Editar filtros". */
 export function Section({ id, title, description, children }: { id: string; title: string; description: ReactNode; children: ReactNode }) {
   return (
-    <section id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} className="flex scroll-mt-4 flex-col gap-4 rounded-lg border bg-card p-4">
+    <section id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} className="flex scroll-mt-14 flex-col gap-4 rounded-lg border bg-card p-4">
       <header className="flex flex-col gap-0.5">
         <h2 id={`settings-${id}-title`} className="text-sm font-semibold">
           {title}
