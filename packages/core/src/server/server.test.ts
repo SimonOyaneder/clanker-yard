@@ -359,6 +359,17 @@ describe("artifacts", () => {
   });
 });
 
+describe("defs.agentOptions", () => {
+  test("sirve los modelos y esfuerzos del adapter de Claude", async () => {
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+
+    const options = await client.defs.agentOptions();
+    expect(options.models.map((m) => m.id)).toContain("opus");
+    expect(options.efforts.map((e) => e.id)).toContain("xhigh");
+  });
+});
+
 describe("runs.transcript", () => {
   const sessionId = "ses_01J0000000000000000000000A";
 

@@ -9,6 +9,7 @@ import { createPrCommands, PrCommandError } from "../github/pr-commands";
 import { createPrs } from "../github/prs";
 import { LinearAuthError } from "../linear/oauth";
 import { ClaudeSetupError, type Connections } from "../connections/connections";
+import { CLAUDE_OPTIONS } from "../agents/claude/models";
 import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
 import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
@@ -401,6 +402,7 @@ export function createRouter(deps: RouterDeps) {
       create: os.defs.create.handler(({ input, context }) => asApiError(() => defWriter.create(input, context.origin))),
       update: os.defs.update.handler(({ input, context }) => asApiError(() => defWriter.update(input, context.origin))),
       archive: os.defs.archive.handler(({ input, context }) => asApiError(() => defWriter.archive(input.kind, input.id, context.origin))),
+      agentOptions: os.defs.agentOptions.handler(() => CLAUDE_OPTIONS),
       restore: os.defs.restore.handler(({ input, context }) => asApiError(() => defWriter.restore(input.kind, input.id, context.origin))),
     },
     events: {

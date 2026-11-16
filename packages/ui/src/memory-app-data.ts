@@ -342,8 +342,10 @@ export function createMemoryAppData(now = Date.now()): AppData {
     def("role", "review-bugs", roleBody("Buscas bugs de producción en el cambio.", "review")),
     def("role", "juguete", roleBody("Saludas.", "saludar")),
     def("profile", "eco", { roles: { dev: { model: "sonnet", effort: "high" }, "review-bugs": { model: "sonnet" }, "review-tests": { model: "haiku" } } }),
-    def("profile", "medio", { roles: { dev: { model: "claude-sonnet-5", effort: "medium" }, "review-bugs": { model: "claude-sonnet-5" } } }),
-    def("profile", "juguete", { roles: { juguete: { model: "claude-haiku-4" } } }),
+    def("profile", "medio", { roles: { dev: { model: "sonnet", effort: "medium" }, "review-bugs": { model: "sonnet" }, "review-tests": { model: "haiku", effort: "high" }, committer: { model: "sonnet" } } }),
+    def("context", "lore", { description: "Lecciones de reviews anteriores", refs: ["rule:lore"] }),
+    def("context", "commits", { description: "Cómo se hacen los commits", refs: ["skill:commit"] }),
+    def("profile", "juguete", { roles: { juguete: { model: "haiku" } } }),
   ]
   // Los bodies de las versiones guardadas desde `updateDef`, por def.
   const bodies = new Map<string, Map<number, { body: unknown; source: string; createdAt: number }>>()
@@ -669,6 +671,18 @@ export function createMemoryAppData(now = Date.now()): AppData {
         return { ...found, version, body, source: own?.source ?? found.source, createdAt: own?.createdAt ?? (saved.get(firstSaved)?.createdAt ?? found.createdAt) - (Number.isFinite(firstSaved) ? firstSaved - version : -i) * 60_000 }
       })
     },
+    agentOptions: async () => ({
+      models: [
+        { id: "haiku", label: "Haiku", about: "El más rápido y barato; para tareas simples y revisiones livianas." },
+        { id: "sonnet", label: "Sonnet", about: "Equilibrado: buena calidad a costo medio." },
+        { id: "opus", label: "Opus", about: "Más potente y más caro; para el trabajo difícil." },
+      ],
+      efforts: [
+        { id: "low", about: "Responde casi sin pensar: rápido y barato." },
+        { id: "medium", about: "Piensa lo justo." },
+        { id: "high", about: "Piensa a fondo: el punto de partida habitual." },
+      ],
+    }),
     updateDef: async ({ kind, id: defId, body, dryRun }) => {
       const found = writableDef(kind, defId)
       const { parsed, errors } = checkBody(kind, found.slug, body)

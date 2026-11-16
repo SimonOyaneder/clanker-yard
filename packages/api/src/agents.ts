@@ -124,6 +124,25 @@ export const Profile = z.object({
 });
 export type Profile = z.infer<typeof Profile>;
 
+/** Un modelo que el runtime acepta en `ProfileRole.model`, de menos a más potente. */
+export const ModelOption = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  /** Una línea para quien no conoce el modelo: qué tan potente es y cuánto cuesta. */
+  about: z.string().min(1),
+});
+export type ModelOption = z.infer<typeof ModelOption>;
+
+export const EffortOption = z.object({ id: Effort, about: z.string().min(1) });
+export type EffortOption = z.infer<typeof EffortOption>;
+
+/** Los valores que un perfil puede elegir para un rol: los da el runtime, la UI no los lista. */
+export const AgentOptions = z.object({
+  models: z.array(ModelOption),
+  efforts: z.array(EffortOption),
+});
+export type AgentOptions = z.infer<typeof AgentOptions>;
+
 /** El sobre que el core arma para cualquier rol. */
 export const Brief = z.object({
   run: z.object({

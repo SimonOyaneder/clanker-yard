@@ -9,7 +9,9 @@ import type {
   ClaudeStatus,
   Connection,
   ConnectionProvider,
+  AgentOptions,
   DayMetrics,
+  DefKind,
   DefRecord,
   DefWrite,
   DefWriteKind,
@@ -178,7 +180,9 @@ export interface AppData {
   setClaudeApiKey(key: string): Promise<Connection>
   disconnect(provider: ConnectionProvider, account: string): Promise<void>
   /** Las defs vigentes del kind, cada una con su versión vigente (de ahí salen los parámetros con default y las opciones de Ajustes); con `includeArchived` también las archivadas. Puede haber varias con el mismo slug: una por scope. */
-  defs(kind: DefWriteKind, opts?: { includeArchived?: boolean }): Promise<DefRecord[]>
+  defs(kind: DefKind, opts?: { includeArchived?: boolean }): Promise<DefRecord[]>
+  /** Los modelos y esfuerzos que el runtime acepta en un perfil: los da el core, la UI no los lista. */
+  agentOptions(): Promise<AgentOptions>
   /** Todas las versiones de la def, de la más nueva a la más vieja, cada una con su body. */
   defVersions(kind: DefWriteKind, id: string): Promise<DefRecord[]>
   /** Crea una def tuya (scope `user`) con ese slug y ese body; si el slug es de un incluido o de un pack, la tuya pasa a mandar. */

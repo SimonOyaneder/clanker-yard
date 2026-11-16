@@ -140,3 +140,82 @@ test("un incluido no ofrece editar JSON", async () => {
   await screen.findByRole("button", { name: /Duplicar para editar/ })
   expect(screen.queryByRole("button", { name: /Editar JSON/ })).toBeNull()
 })
+
+const openTab = async (name: RegExp, slug: string) => {
+  fireEvent.mouseDown(await screen.findByRole("tab", { name }), { button: 0 })
+  await screen.findByText(slug, { selector: "span.font-mono" })
+}
+
+test("un perfil se explica en una línea y su resumen sale de sus roles", async () => {
+  await openFlows()
+  await openTab(/Perfiles/, "medio")
+  expect(screen.getAllByText(/más potente = mejor, pero más caro/).length).toBeGreaterThan(0)
+  fireEvent.click(within(rowOf("medio")).getByRole("button"))
+  expect(await screen.findByText("dev sonnet medium · reviews sonnet/haiku")).toBeTruthy()
+})
+
+test("crear un perfil propio con el dev en opus y los reviews en haiku, y verlo antes de guardar", async () => {
+  const data = await openFlows()
+  await openTab(/Perfiles/, "medio")
+  fireEvent.click(screen.getByRole("button", { name: /Nuevo perfil/ }))
+  const dialog = await screen.findByRole("dialog")
+  fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "dev-opus" } })
+  fireEvent.click(within(dialog).getByRole("button", { name: "Crear perfil" }))
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  expect((await data.defs("profile")).some((d) => d.slug === "dev-opus" && d.scope === "user")).toBe(true)
+
+  fireEvent.click(await screen.findByRole("button", { name: /^Editar$/ }))
+  fireEvent.change(await screen.findByLabelText("Modelo de dev"), { target: { value: "opus" } })
+  fireEvent.change(screen.getByLabelText("Modelo de review-bugs"), { target: { value: "haiku" } })
+  fireEvent.change(screen.getByLabelText("Esfuerzo de review-tests"), { target: { value: "" } })
+  expect(screen.getByLabelText("Resumen").textContent).toBe("dev opus medium · reviews haiku")
+
+  fireEvent.click(screen.getByRole("button", { name: /^Guardar…/ }))
+  const review = await screen.findByRole("alertdialog")
+  const changes = within(review).getByRole("list", { name: "Cambios" }).textContent
+  expect(changes).toContain("campo `roles.dev.model` (cambia)")
+  expect(changes).toContain("campo `roles.review-tests.effort` (se quita)")
+  fireEvent.click(within(review).getByRole("button", { name: "Guardar versión nueva" }))
+
+  expect(await screen.findByText("versión 2", { selector: "span.text-xs" })).toBeTruthy()
+  const saved = (await data.defs("profile")).find((d) => d.slug === "dev-opus")!
+  expect(saved.body).toMatchObject({ roles: { dev: { model: "opus", effort: "medium" }, "review-bugs": { model: "haiku" }, "review-tests": { model: "haiku" } } })
+})
+
+test("el nombre de un perfil nuevo no puede repetir uno existente", async () => {
+  await openFlows()
+  await openTab(/Perfiles/, "medio")
+  fireEvent.click(screen.getByRole("button", { name: /Nuevo perfil/ }))
+  const dialog = await screen.findByRole("dialog")
+  fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "medio" } })
+  expect(within(dialog).getByText(/Ya existe "medio"/)).toBeTruthy()
+  expect((within(dialog).getByRole("button", { name: "Crear perfil" }) as HTMLButtonElement).disabled).toBe(true)
+})
+
+test("un rol tuyo se edita con su prompt, herramientas y paquetes de contexto; los modos quedan como estaban", async () => {
+  const data = await openFlows()
+  await openTab(/Roles/, "dev")
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
+  fireEvent.click(await screen.findByRole("button", { name: /^Editar$/ }))
+
+  fireEvent.change(await screen.findByLabelText(/Instrucciones base/), { target: { value: "Eres quien implementa, con tests." } })
+  fireEvent.click(screen.getByLabelText("Puede usar todas"))
+  fireEvent.change(screen.getByLabelText(/Nunca estas/), { target: { value: "Bash" } })
+  fireEvent.click(screen.getByLabelText(/^commits/))
+  fireEvent.click(screen.getByRole("button", { name: /^Guardar…/ }))
+
+  const review = await screen.findByRole("alertdialog")
+  expect(within(review).getByRole("list", { name: "Cambios" }).textContent).toContain("campo `prompt` (cambia)")
+  fireEvent.click(within(review).getByRole("button", { name: "Guardar versión nueva" }))
+  await screen.findByText("versión 2", { selector: "span.text-xs" })
+
+  const saved = (await data.defs("role")).find((d) => d.slug === "dev" && d.scope === "user")!
+  expect(saved.body).toMatchObject({ prompt: "Eres quien implementa, con tests.", tools: { deny: ["Bash"] }, context: [{ kind: "pack", id: "commits" }], modes: { implement: { outcomes: ["ok"] } } })
+})
+
+test("Editar JSON sigue ahí como alternativa avanzada en perfiles y roles", async () => {
+  await openFlows()
+  await openTab(/Perfiles/, "medio")
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
+  expect(await screen.findByRole("button", { name: /Editar JSON \(avanzado\)/ })).toBeTruthy()
+})

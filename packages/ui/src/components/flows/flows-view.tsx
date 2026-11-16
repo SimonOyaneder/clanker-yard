@@ -1,9 +1,10 @@
 import type { ClankerProject, DefRecord, DefWriteKind } from "@clanker/api"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Plus } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useAppData } from "@/app-data"
 import { DefDetail } from "@/components/flows/def-detail"
 import { RowPills, UsedBy } from "@/components/flows/flow-parts"
+import { NewProfileDialog } from "@/components/flows/new-profile-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -16,8 +17,8 @@ const KINDS: readonly DefWriteKind[] = ["flow", "role", "profile"]
 
 const INTRO: Record<DefWriteKind, string> = {
   flow: "Un flujo es la receta con que trabaja una corrida: sus pasos y qué pasa después de cada uno.",
-  role: "Un rol define cómo trabaja un agente: sus instrucciones y sus modos.",
-  profile: "Un perfil elige el modelo y el esfuerzo de cada rol.",
+  role: "Un rol es un agente con una tarea fija (implementar, revisar bugs, hacer commits): sus instrucciones, sus herramientas y su contexto.",
+  profile: "Un perfil dice qué modelo usa cada agente del flujo: más potente = mejor, pero más caro.",
 }
 
 const NOTHING_YET: Record<DefWriteKind, string> = {
@@ -36,6 +37,7 @@ export function FlowsView({ projects }: { projects: ClankerProject[] }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
   const [showInternal, setShowInternal] = useState(false)
+  const [creatingProfile, setCreatingProfile] = useState(false)
 
   const flows = useLiveQuery("library:flow", () => appData.defs("flow", { includeArchived: true }))
   const roles = useLiveQuery("library:role", () => appData.defs("role", { includeArchived: true }))
@@ -77,6 +79,11 @@ export function FlowsView({ projects }: { projects: ClankerProject[] }) {
         <p className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground" title={INTRO[tab]}>
           {INTRO[tab]}
         </p>
+        {tab === "profile" && profiles.data ? (
+          <Button size="sm" variant="secondary" onClick={() => setCreatingProfile(true)}>
+            <Plus /> Nuevo perfil
+          </Button>
+        ) : null}
         {archivedCount > 0 || showArchived ? (
           <div className="flex items-center gap-2">
             <Checkbox id="show-archived" checked={showArchived} onCheckedChange={(v) => setShowArchived(v === true)} />
@@ -141,6 +148,7 @@ export function FlowsView({ projects }: { projects: ClankerProject[] }) {
           </div>
         </div>
       )}
+      {creatingProfile ? <NewProfileDialog profiles={profiles.data ?? []} onCreated={(created) => (setTab("profile"), open(created))} onClose={() => setCreatingProfile(false)} /> : null}
     </div>
   )
 }

@@ -15,6 +15,7 @@ import {
   StepRunId,
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
+import { AgentOptions } from "./agents";
 import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
 import { Learning, LearningFilter, LearningPatch, NewLearning } from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
@@ -622,6 +623,12 @@ const defs = {
     .output(DefRecord),
   /** Deshace `archive`; una vigente no cambia. `NOT_FOUND` si no existe; `BAD_REQUEST` si su scope es `builtin` o `pack`. Emite `def.restored`. Sin `meta.mcp`: el deshacer lo ofrece la UI. */
   restore: base.input(DefArchive).output(DefRecord),
+  /**
+   * Los modelos y esfuerzos que el runtime de Claude acepta en un perfil (`ProfileRole.model` y `effort`), de menos a más
+   * potente. Solo lectura: el core los define, quien arma un perfil no debe inventarlos. Sin `meta.mcp`: un agente
+   * lee el esquema del perfil (`clanker://schema/profile`); la lista es para el selector de la UI.
+   */
+  agentOptions: base.output(AgentOptions),
 };
 
 export const contract = { system, events, connections, artifacts, issues, trackers, projects, prs, repos, runs, decisions, learnings, metrics, defs, imports };

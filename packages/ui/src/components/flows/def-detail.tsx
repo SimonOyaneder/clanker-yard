@@ -1,5 +1,5 @@
 import { type DefRecord, type DefWrite, type DefWriteKind, FlowDef, Profile, Role } from "@clanker/api"
-import { Archive, ArchiveRestore, Copy, Pencil, Undo2 } from "lucide-react"
+import { Archive, ArchiveRestore, Braces, Copy, Pencil, Undo2 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
@@ -7,10 +7,13 @@ import { Ago } from "@/components/common"
 import { ChangeDialog } from "@/components/flows/change-dialog"
 import { DefEditor } from "@/components/flows/def-editor"
 import { RowPills, UsedBy } from "@/components/flows/flow-parts"
+import { ProfileForm } from "@/components/flows/profile-form"
+import { RoleForm } from "@/components/flows/role-form"
 import { FlowDefGraph } from "@/components/project/run-graph"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { useLiveQuery } from "@/hooks/use-live"
+import { profileSummary } from "@/lib/def-form"
 import { duplicateOf, isReadOnly, KIND_LABEL, type LibraryRow, nameOf, sourceLabel } from "@/lib/defs-library"
 import { messageOf, undoable } from "@/lib/undoable"
 import { cn } from "@/lib/utils"
@@ -30,7 +33,8 @@ export function DefDetail({ row, defs, onChanged }: Props) {
   const { def } = row
   const [version, setVersion] = useState<number | null>(null)
   const [confirmArchive, setConfirmArchive] = useState(false)
-  const [editing, setEditing] = useState(false)
+  // Roles y perfiles se editan con su formulario; el JSON es la salida avanzada y lo único que tienen los flujos.
+  const [editing, setEditing] = useState<"form" | "json" | null>(null)
   const [revert, setRevert] = useState<{ to: DefRecord; write: DefWrite } | null>(null)
   const kind = def.kind as DefWriteKind
   const versions = useLiveQuery(`def-versions:${kind}:${def.id}:${def.currentVersion}`, () => appData.defVersions(kind, def.id), { live: false })
@@ -76,6 +80,11 @@ export function DefDetail({ row, defs, onChanged }: Props) {
       setRevert(null)
     }
   }
+  const saved = () => {
+    setEditing(null)
+    setVersion(null)
+    onChanged()
+  }
   const archive = () =>
     undoable(
       `Archivé ${nameOf(def)}`,
@@ -103,9 +112,14 @@ export function DefDetail({ row, defs, onChanged }: Props) {
             <Button size="sm" variant={readOnly ? "default" : "secondary"} onClick={() => void duplicate()}>
               <Copy /> {readOnly ? "Duplicar para editar" : "Duplicar"}
             </Button>
+            {editable && !editing && kind !== "flow" ? (
+              <Button size="sm" onClick={() => setEditing("form")}>
+                <Pencil /> Editar
+              </Button>
+            ) : null}
             {editable && !editing ? (
-              <Button size="sm" onClick={() => setEditing(true)}>
-                <Pencil /> Editar JSON
+              <Button size="sm" variant={kind === "flow" ? "default" : "secondary"} onClick={() => setEditing("json")}>
+                {kind === "flow" ? <Pencil /> : <Braces />} Editar JSON{kind === "flow" ? "" : " (avanzado)"}
               </Button>
             ) : null}
             {editable ? (
@@ -131,18 +145,13 @@ export function DefDetail({ row, defs, onChanged }: Props) {
         </p>
       </header>
 
-      <section aria-label="Contenido" className={cn("flex flex-col gap-2", !editing && "min-h-0")}>
-        {editing ? (
-          <DefEditor
-            def={def}
-            kind={kind}
-            onCancel={() => setEditing(false)}
-            onSaved={() => {
-              setEditing(false)
-              setVersion(null)
-              onChanged()
-            }}
-          />
+      <section aria-label="Contenido" className={cn("flex flex-col gap-2", editing === null && "min-h-0")}>
+        {editing === "json" ? (
+          <DefEditor def={def} kind={kind} onCancel={() => setEditing(null)} onSaved={saved} />
+        ) : editing === "form" && kind === "profile" ? (
+          <ProfileForm def={def} onCancel={() => setEditing(null)} onSaved={saved} />
+        ) : editing === "form" && kind === "role" ? (
+          <RoleForm def={def} onCancel={() => setEditing(null)} onSaved={saved} />
         ) : !shown ? (
           <p className="text-[13px] text-muted-foreground">{versions.error ?? "Cargando…"}</p>
         ) : kind === "flow" ? (
@@ -201,6 +210,8 @@ export function DefDetail({ row, defs, onChanged }: Props) {
   )
 }
 
+const EDIT_HINT: Record<DefWriteKind, string> = { flow: '"Editar JSON"', role: '"Editar"', profile: '"Editar"' }
+
 /** Qué significa el estado de esta def y qué pasa si se toca. */
 function explain(row: LibraryRow, kind: DefWriteKind): string {
   const thing = KIND_LABEL[kind].singular
@@ -208,8 +219,8 @@ function explain(row: LibraryRow, kind: DefWriteKind): string {
   if (def.archivedAt !== null) return `Está archivado: no se usa. Conserva sus versiones y las corridas anteriores no cambian. Restáuralo para volver a usarlo.`
   if (row.overriddenBy) return `Hay un ${thing} ${row.overriddenBy === "repo" ? "del repo" : "tuyo"} con el mismo slug y manda sobre este. Este queda de respaldo: si archivas el otro, vuelve a usarse.`
   if (isReadOnly(def)) return `Viene ${def.scope === "pack" ? "en un pack" : "con la app"} y no se edita directo. "Duplicar para editar" crea uno tuyo con el mismo slug: desde ese momento manda el tuyo y este queda de respaldo.`
-  if (row.overrides) return `Es tuyo y manda sobre el ${row.overrides === "pack" ? "del pack" : "incluido"} con el mismo slug. Si lo archivas, vuelve a usarse el otro. "Editar JSON" lo cambia y guarda una versión nueva.`
-  return `Es ${def.scope === "repo" ? "del repo" : "tuyo"}. "Editar JSON" lo cambia y guarda una versión nueva; puedes archivarlo cuando ya no lo quieras y restaurarlo después.`
+  if (row.overrides) return `Es tuyo y manda sobre el ${row.overrides === "pack" ? "del pack" : "incluido"} con el mismo slug. Si lo archivas, vuelve a usarse el otro. ${EDIT_HINT[kind]} lo cambia y guarda una versión nueva.`
+  return `Es ${def.scope === "repo" ? "del repo" : "tuyo"}. ${EDIT_HINT[kind]} lo cambia y guarda una versión nueva; puedes archivarlo cuando ya no lo quieras y restaurarlo después.`
 }
 
 const Unreadable = ({ what }: { what: string }) => <p className="text-[13px] text-destructive">No pude leer {what}: su contenido no coincide con el formato esperado.</p>
@@ -253,6 +264,7 @@ function ProfileBody({ def }: { def: DefRecord }) {
   return (
     <>
       <h3 className="text-[13px] font-medium">Modelo de cada rol · versión {def.version}</h3>
+      <p className="text-[13px] text-muted-foreground">{profileSummary(profile.data)}</p>
       <ul className="divide-y rounded-lg border text-[13px]">
         {Object.entries(profile.data.roles).map(([role, spec]) => (
           <li key={role} className="flex items-baseline gap-3 px-3 py-2">
