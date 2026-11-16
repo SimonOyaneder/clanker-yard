@@ -254,6 +254,49 @@ describe("un plan que no se puede aplicar da replan", () => {
     expect(git("rev-parse", "HEAD")).toBe(base);
   });
 
+  test("un move partido (borrar en un commit y crear en otro) se rechaza y pide un solo commit", async () => {
+    const generator = lines(10);
+    await setup({ "old/generator.txt": generator });
+    git("rm", "--quiet", "--cached", "old/generator.txt");
+    rmSync(join(lease.path, "old", "generator.txt"));
+    write("new/generator.txt", generator.replace("linea 3\n", "linea 3 editada\n"));
+    const ids = await hunkIds();
+    const removed = ids["old/generator.txt @@ -1,10 +0,0 @@"]!;
+    const created = ids["new/generator.txt @@ -0,0 +1,10 @@"]!;
+
+    const result = await run([
+      { message: "feat: crea el generador nuevo", hunks: [created] },
+      { message: "refactor: borra el generador viejo", hunks: [removed] },
+    ]);
+
+    expect(result.outcome).toBe("replan");
+    expect((result.output as { failures: string }).failures).toContain(
+      "El move de old/generator.txt a new/generator.txt va en un solo commit",
+    );
+    expect(git("rev-parse", "HEAD")).toBe(base);
+  });
+
+  test("un move entero en un commit pasa", async () => {
+    const generator = lines(10);
+    await setup({ "old/generator.txt": generator });
+    git("rm", "--quiet", "--cached", "old/generator.txt");
+    rmSync(join(lease.path, "old", "generator.txt"));
+    write("new/generator.txt", generator);
+    write("c.txt", "otra cosa\n");
+    const ids = await hunkIds();
+
+    const result = await run([
+      {
+        message: "refactor: mueve el generador",
+        hunks: [ids["old/generator.txt @@ -1,10 +0,0 @@"]!, ids["new/generator.txt @@ -0,0 +1,10 @@"]!],
+      },
+      { message: "feat: c", hunks: [ids["c.txt @@ -0,0 +1 @@"]!] },
+    ]);
+
+    expect(result.outcome).toBe("ok");
+    expect(git("diff", "--name-status", "-M", `${base}~0`, "HEAD~1")).toContain("R100");
+  });
+
   test("un pack puede pedir otro formato de mensaje", async () => {
     await setup();
     write("b.txt", "b2\n");

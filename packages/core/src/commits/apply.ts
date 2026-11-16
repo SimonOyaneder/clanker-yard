@@ -7,6 +7,7 @@ import { GitError, tryGit } from "../git/git";
 import { diffBetween, listHunks, snapshotTree, type Hunk } from "../git/tree";
 import type { Recipes } from "../recipe/recipe";
 import { excerpt } from "../workspaces/exec";
+import { splitMoves } from "./split-moves";
 import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 
 /** Conventional Commits: el formato por defecto. Un pack que pida otro pasa su `messagePattern`. */
@@ -221,6 +222,7 @@ function planProblems(
       assigned.set(id, assigned.get(id) ?? i);
     }
   }
+  problems.push(...splitMoves(hunks, assigned));
   const unassigned = hunks.filter((h) => !assigned.has(h.id));
   if (unassigned.length > 0) {
     const shown = unassigned.slice(0, 20).map((h) => `${h.id} ${h.path} ${h.header}`);
