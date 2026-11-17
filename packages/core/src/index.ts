@@ -130,6 +130,7 @@ export { stackRestackAction, stackRestackRewrittenAction } from "./github/action
 
 export {
   councilThreadsAction,
+  prBotThreadsAction,
   prCommentAction,
   prReplyAction,
   prResolveThreadAction,

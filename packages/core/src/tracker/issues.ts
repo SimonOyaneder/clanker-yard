@@ -3,6 +3,7 @@ import type {
   Issue,
   IssueFilter,
   IssueId,
+  IssueRef,
   NewLocalIssue,
   Origin,
   ProjectId,
@@ -58,6 +59,13 @@ export function createIssues({ store, local = createLocalTracker({ store }) }: {
   const { db } = store;
 
   const cursorKeyOf = (tracker: Tracker, project: ProjectRef) => issuesCursorKey(tracker.id, project.id);
+  /** Si la issue ya está en el caché de ese proyecto de Clanker. */
+  const cachedIn = (ref: IssueRef, projectId: ProjectId): boolean =>
+    store.db
+      .select({ id: issues.id })
+      .from(issues)
+      .where(and(eq(issues.tracker, ref.tracker), eq(issues.trackerId, ref.id), eq(issues.projectId, projectId)))
+      .get() !== undefined;
   const savedCursor = (key: string) => db.select().from(syncCursors).where(eq(syncCursors.key, key)).get()?.cursor;
 
   const self: Issues = {
@@ -110,8 +118,12 @@ export function createIssues({ store, local = createLocalTracker({ store }) }: {
       } else {
         const changes = await tracker.changesSince(saved);
         cursor = changes.cursor;
-        // `changesSince` trae las issues de todos los proyectos del tracker.
+        // `changesSince` trae las issues de todos los proyectos del tracker. Las que dice que son de otro proyecto no
+        // se leen: en un workspace grande son la mayoría, y una que el adapter no puede leer cortaba el sync entero
+        // (el cursor no avanzaba y el proyecto dejaba de enterarse de sus propios cambios). Las que ya están en el
+        // caché de este proyecto sí se leen, aunque ahora digan otro proyecto.
         for (const ref of changes.changed) {
+          if (ref.project !== undefined && ref.project !== project.id && !cachedIn(ref, projectId)) continue;
           const issue = await tracker.getIssue(ref);
           if (issue.project === project.id) fetched.push(issue);
         }

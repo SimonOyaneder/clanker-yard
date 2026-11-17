@@ -236,7 +236,10 @@ export function createLocalTracker({ store, me = { id: "local", name: "Local" },
         .where(sql`${localIssues.rev} > ${since}`)
         .orderBy(asc(localIssues.rev))
         .all();
-      return { changed: changed.map(toRef), cursor: String(latestRev(db)) };
+      return {
+        changed: changed.map((row) => ({ ...toRef(row), project: row.project })),
+        cursor: String(latestRev(db)),
+      };
     },
 
     async currentCursor() {

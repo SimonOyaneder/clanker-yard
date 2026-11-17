@@ -258,12 +258,15 @@ describe("relaciones", () => {
 });
 
 describe("changesSince", () => {
+  /** Lo que devuelve `changesSince` por cada issue: su ref con su proyecto. */
+  const changedIn = (ref: IssueRef, project = "demo") => ({ ...ref, project });
+
   test("sin cursor devuelve todas las issues y un cursor para seguir", async () => {
     const [a, b] = [await create("a"), await create("b", "otro")];
 
     const { changed, cursor } = await tracker.changesSince();
 
-    expect(changed).toEqual([a, b]);
+    expect(changed).toEqual([changedIn(a), changedIn(b, "otro")]);
     expect(await tracker.changesSince(cursor)).toEqual({ changed: [], cursor });
   });
 
@@ -277,7 +280,7 @@ describe("changesSince", () => {
     await tracker.claim(c);
 
     const next = await tracker.changesSince(cursor);
-    expect(next.changed).toEqual([b, c]);
+    expect(next.changed).toEqual([changedIn(b), changedIn(c)]);
     expect(next.cursor).not.toBe(cursor);
     expect(await tracker.changesSince(next.cursor)).toEqual({
       changed: [],
@@ -290,11 +293,11 @@ describe("changesSince", () => {
     const { cursor } = await tracker.changesSince();
 
     await tracker.comment(a, "hola");
-    expect((await tracker.changesSince(cursor)).changed).toEqual([a]);
+    expect((await tracker.changesSince(cursor)).changed).toEqual([changedIn(a)]);
 
     const afterComment = (await tracker.changesSince(cursor)).cursor;
     await tracker.relate(b, "blocks", c);
-    expect((await tracker.changesSince(afterComment)).changed).toEqual([b, c]);
+    expect((await tracker.changesSince(afterComment)).changed).toEqual([changedIn(b), changedIn(c)]);
   });
 
   test("una base vacía devuelve el cursor de partida", async () => {

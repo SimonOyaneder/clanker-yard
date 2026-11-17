@@ -36,6 +36,26 @@ describe("traductor", () => {
     expect(out.step).toEqual({ finish: "tool-calls" });
   });
 
+  test("un proveedor que reporta costo 0 (suscripción) queda con lo que costaría a precio de lista, marcado estimate", () => {
+    const price = { input: 1, output: 5, cache_read: 0.05, cache_write: 1.25 };
+    const t = createTranslator(S, (model) => (model === "openai/gpt-6.1-terra" ? price : undefined));
+    t.translate(ev.stepStarted(S, "msg_1", { providerID: "openai", id: "gpt-6.1-terra" }));
+    const out = t.translate(ev.stepEnded(S, "msg_1", "stop", 0, { input: 1_000_000, output: 100_000, reasoning: 100_000, cache: { read: 2_000_000, write: 0 } }));
+
+    // 1M de entrada a 1 + 200k de salida a 5 + 2M de caché a 0,05 = USD 2,10
+    expect(out.events).toMatchObject([{ type: "usage", usage: { costMicros: 2_100_000, costSource: "estimate" } }]);
+  });
+
+  test("con costo reportado, o sin precio para el modelo, queda lo que dice opencode", () => {
+    const t = createTranslator(S, () => ({ input: 1, output: 5 }));
+    t.translate(ev.stepStarted(S, "msg_1", { providerID: "openai", id: "gpt-6.1-terra" }));
+    expect(t.translate(ev.stepEnded(S, "msg_1", "stop", 0.5)).events).toMatchObject([{ usage: { costMicros: 500_000, costSource: "runtime" } }]);
+
+    const unknown = createTranslator(S);
+    unknown.translate(ev.stepStarted(S, "msg_2", { providerID: "otro", id: "x" }));
+    expect(unknown.translate(ev.stepEnded(S, "msg_2", "stop", 0)).events).toMatchObject([{ usage: { costMicros: 0, costSource: "runtime" } }]);
+  });
+
   test("lo que gasta un subagente cuenta, pero sus pasos no son turnos de la sesión", () => {
     const out = createTranslator(S).translate(ev.stepEnded("ses_child", "msg_9", "stop", 0.3));
     expect(out.events).toMatchObject([{ type: "usage", usage: { costMicros: 300_000 } }]);

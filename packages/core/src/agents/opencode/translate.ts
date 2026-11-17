@@ -4,6 +4,7 @@ import type { AgentEvent, RunStatus, Usage } from "../runtime";
 import { clip, detailOf } from "../transcripts";
 import type { ModelRef, OpencodeError, OpencodeEvent, TokenUsage, ToolContent } from "./api";
 import { REPORT_TOOL } from "./config";
+import { estimateMicros, type PriceOf } from "./prices";
 
 const QUOTA = /usage limit|quota|insufficient_quota|rate.?limit|too many requests|billing|credit balance|\b429\b/i;
 const LOGIN = /token refresh failed|unauthori[sz]ed|\b401\b|\b403\b|invalid.{0,12}api.?key|authentication|not authenticated|credential|expired.{0,20}(token|login|session)/i;
@@ -25,8 +26,16 @@ export function statusOfError(error: OpencodeError, now = Date.now()): { status:
   return { status: "error", message: `opencode terminó con ${error.type}: ${error.message}` };
 }
 
-/** Lo gastado por un paso del agente. El razonamiento se cobra como salida. */
-export function usageOf(cost: number, tokens: TokenUsage): Usage {
+/**
+ * Lo gastado por un paso del agente. El razonamiento se cobra como salida. Un proveedor conectado con una suscripción
+ * (OpenAI con el login de ChatGPT) reporta costo 0: con el precio de lista del modelo (`price`) el paso queda con lo
+ * que habría costado por API, marcado `estimate`, como Claude con suscripción.
+ */
+export function usageOf(cost: number, tokens: TokenUsage, price?: ReturnType<PriceOf>): Usage {
+  const tokenCount = tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write;
+  if (cost === 0 && tokenCount > 0 && price !== undefined) {
+    return { ...usageOf(cost, tokens), costMicros: estimateMicros(price, tokens), costSource: "estimate" };
+  }
   return {
     turns: 1,
     tokensIn: tokens.input,
@@ -64,7 +73,7 @@ export interface Translated {
  * sesiones del servidor (un subagente también gasta, y el servidor es solo de este run); el fin, los pasos, los
  * reintentos, las herramientas y lo que espera a una persona, solo los de la sesión principal.
  */
-export function createTranslator(sessionID: string) {
+export function createTranslator(sessionID: string, priceOf: PriceOf = () => undefined) {
   const toolNames = new Map<string, string>();
   const stepModels = new Map<string, string>();
   let firstToken = false;
@@ -72,7 +81,8 @@ export function createTranslator(sessionID: string) {
 
   function usage(out: Translated, cost: number, tokens: TokenUsage, model: string | undefined): void {
     turn += 1;
-    out.events.push({ type: "usage", turn, usage: usageOf(cost, tokens), ...(model === undefined ? {} : { model }) });
+    const price = model === undefined ? undefined : priceOf(model);
+    out.events.push({ type: "usage", turn, usage: usageOf(cost, tokens, price), ...(model === undefined ? {} : { model }) });
   }
 
   function translate(event: OpencodeEvent): Translated {
