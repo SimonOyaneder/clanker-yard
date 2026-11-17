@@ -23,5 +23,5 @@ test("una corrida sobre un PR local, sin número en GitHub, no tiene repo#númer
   const local = { id: "pr_3", issueId: "iss_1", ref: null, local: { branch: "feat/y", base: "feat/x", title: "feat: y" } } as unknown as CachedPr
   const subjectOf = subjectLabeler([issue], [local])
 
-  expect(subjectOf({ subject: { type: "pr", id: "pr_3" } })).toEqual({ key: "PR", title: "PR que ya no está abierto" })
+  expect(subjectOf({ subject: { type: "pr", id: "pr_3" } })).toEqual({ key: "feat/y", title: "feat: y" })
 })
