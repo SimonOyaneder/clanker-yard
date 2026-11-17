@@ -215,6 +215,26 @@ function outcomeOf(result: string): "done" | "blocked" | "failed" {
 /** `https://linear.app/acme/project/soporte-0ab` → `soporte-0ab`: lo que `trackerRef` guarda hasta que el sync lo cambie por el id de Linear. */
 const trackerRefOf = (state: LegacyState | undefined, slug: string) => state?.trackerUrl?.split("/project/")[1]?.split(/[/?#]/)[0] || slug;
 
+/** Lo que la base ya tiene y la importación no repite: proyectos, repos, issues, corridas, PRs, learnings y notas. */
+function readKnown(db: Store["db"]) {
+  const knownProjects = new Map(db.select({ slug: projects.slug, id: projects.id }).from(projects).all().map((p) => [p.slug, p.id]));
+  const knownRepos = db.select().from(repos).all();
+  const linked = new Set(db.select().from(projectRepos).all().map((r) => `${r.projectId}:${r.repoId}`));
+  const nextOrd = new Map<ProjectId, number>();
+  for (const { projectId } of db.select().from(projectRepos).all()) nextOrd.set(projectId, (nextOrd.get(projectId) ?? 0) + 1);
+  const knownIssues = new Map(
+    db.select({ key: issues.trackerId, id: issues.id }).from(issues).where(eq(issues.tracker, "linear")).all().map((i) => [i.key, i.id]),
+  );
+  const knownRuns = new Map(db.select({ key: runs.sourceKey, id: runs.id }).from(runs).where(isNotNull(runs.sourceKey)).all().map((r) => [r.key!, r.id]));
+  /** `repoId#número` → id de la fila de `pull_requests`, la que ya estaba o la que este plan agrega. */
+  const pullIds = new Map(db.select({ id: pullRequests.id, repoId: pullRequests.repoId, number: pullRequests.number }).from(pullRequests).all().map((p) => [`${p.repoId}#${p.number}`, p.id]));
+  const knownLearnings = new Set(db.select({ projectId: learnings.projectId, text: learnings.text }).from(learnings).where(isNotNull(learnings.projectId)).all().map((l) => `${l.projectId}\0${l.text}`));
+  const knownNotes = new Set(
+    db.select({ projectId: decisions.projectId, kind: decisions.kind, body: decisions.body }).from(decisions).where(isNotNull(decisions.projectId)).all().map((d) => `${d.projectId}\0${d.kind}\0${d.body}`),
+  );
+  return { projects: knownProjects, repos: knownRepos, linked, nextOrd, issues: knownIssues, runs: knownRuns, pullIds, learnings: knownLearnings, notes: knownNotes };
+}
+
 function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metrics, states, issueFiles, profiles }: Source): Plan {
   const { db } = store;
   const plan: Plan = {
@@ -235,23 +255,18 @@ function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metric
   };
   const at = Date.now();
 
-  const knownProjects = new Map(db.select({ slug: projects.slug, id: projects.id }).from(projects).all().map((p) => [p.slug, p.id]));
-  const knownRepos = db.select().from(repos).all();
-  const linked = new Set(db.select().from(projectRepos).all().map((r) => `${r.projectId}:${r.repoId}`));
-  const nextOrd = new Map<ProjectId, number>();
-  for (const { projectId } of db.select().from(projectRepos).all()) nextOrd.set(projectId, (nextOrd.get(projectId) ?? 0) + 1);
-  const knownIssues = new Map(
-    db.select({ key: issues.trackerId, id: issues.id }).from(issues).where(eq(issues.tracker, "linear")).all().map((i) => [i.key, i.id]),
-  );
-  const knownRuns = new Map(db.select({ key: runs.sourceKey, id: runs.id }).from(runs).where(isNotNull(runs.sourceKey)).all().map((r) => [r.key!, r.id]));
-  /** `repoId#número` → id de la fila de `pull_requests`, la que ya estaba o la que este plan agrega. */
-  const pullIds = new Map(db.select({ id: pullRequests.id, repoId: pullRequests.repoId, number: pullRequests.number }).from(pullRequests).all().map((p) => [`${p.repoId}#${p.number}`, p.id]));
-  const knownLearnings = new Set(db.select({ projectId: learnings.projectId, text: learnings.text }).from(learnings).where(isNotNull(learnings.projectId)).all().map((l) => `${l.projectId}\0${l.text}`));
-  const knownNotes = new Set(
-    db.select({ projectId: decisions.projectId, kind: decisions.kind, body: decisions.body }).from(decisions).where(isNotNull(decisions.projectId)).all().map((d) => `${d.projectId}\0${d.kind}\0${d.body}`),
-  );
+  const {
+    projects: knownProjects,
+    repos: knownRepos,
+    linked,
+    nextOrd,
+    issues: knownIssues,
+    runs: knownRuns,
+    pullIds,
+    learnings: knownLearnings,
+    notes: knownNotes,
+  } = readKnown(db);
   const artifactCandidates: PlannedArtifact[] = [];
-  const afterProjects: (() => void)[] = [];
 
   const slugOf = (row: LegacyMetricsRow) => row.project ?? NO_PROJECT_SLUG;
   const slugs = [...new Set([...states.keys(), ...metrics.map(slugOf)])];
@@ -293,26 +308,32 @@ function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metric
     return id;
   };
 
-  // Primero los proyectos: issues y runs necesitan el id.
-  for (const slug of slugs) {
-    if (knownProjects.has(slug)) continue;
-    const state = states.get(slug);
-    const id = newId("prj");
-    knownProjects.set(slug, id);
-    plan.projects.push({
-      id,
-      slug,
-      name: state?.name ?? slug,
-      tracker: "linear",
-      trackerRef: trackerRefOf(state, slug),
-      parallel: state?.parallel ?? 1,
-      // Pausado: el trackerRef es un placeholder y la cola no debe tomar issues hasta que se revise.
-      status: "paused",
-      flowParams: {},
-    });
+  /** Los proyectos del loop que la base no tiene: issues y corridas necesitan su id. */
+  function planProjects(): void {
+    for (const slug of slugs) {
+      if (knownProjects.has(slug)) continue;
+      const state = states.get(slug);
+      const id = newId("prj");
+      knownProjects.set(slug, id);
+      plan.projects.push({
+        id,
+        slug,
+        name: state?.name ?? slug,
+        tracker: "linear",
+        trackerRef: trackerRefOf(state, slug),
+        parallel: state?.parallel ?? 1,
+        // Pausado: el trackerRef es un placeholder y la cola no debe tomar issues hasta que se revise.
+        status: "paused",
+        flowParams: {},
+      });
+    }
   }
 
-  for (const slug of slugs) {
+  /**
+   * Las issues, corridas, repos y PRs de un proyecto. Devuelve lo que sus notas necesitan (`subjectOf` busca la issue
+   * o el PR que nombra una viñeta), o nada si el loop no dejó su `state.md`.
+   */
+  function planProject(slug: string) {
     const projectId = knownProjects.get(slug)!;
     const state = states.get(slug);
     const trackerRef = trackerRefOf(state, slug);
@@ -408,7 +429,7 @@ function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metric
       }
     }
 
-    if (!state) continue;
+    if (!state) return undefined;
 
     // Repos del proyecto: la cabecera, luego los que aparecen en PRs y corridas.
     const names = new Map<string, string | undefined>(state.repos.map((r) => [r.name, r.path]));
@@ -494,7 +515,11 @@ function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metric
       const issueId = key === undefined ? undefined : knownIssues.get(key);
       return issueId === undefined ? undefined : { type: "issue", id: issueId };
     };
+    return { projectId, state, subjectOf };
+  }
 
+  /** Los learnings, notas y brief de un proyecto: una viñeta puede nombrar una issue o un PR que otro proyecto creó, por eso van después de todos. */
+  function planNotes({ projectId, state, subjectOf }: NonNullable<ReturnType<typeof planProject>>): void {
     for (const text of state.learnings) {
       const learningKey = `${projectId}\0${text}`;
       if (knownLearnings.has(learningKey)) continue;
@@ -506,79 +531,90 @@ function planImport(store: Store, defs: Pick<Defs, "list" | "resolve">, { metric
       { kind: "note", status: "accepted", texts: state.skipped },
     ] as const;
     // Una viñeta puede nombrar una issue que otro proyecto creó después: el sujeto se busca cuando ya están todas.
-    afterProjects.push(() => {
-      for (const { kind, status, texts } of notes) {
-        for (const text of texts) {
-          const noteKey = `${projectId}\0${kind}\0${text}`;
-          if (knownNotes.has(noteKey)) continue;
-          knownNotes.add(noteKey);
-          const subject = subjectOf(text);
-          plan.decisions.push({
-            id: newId("dec"),
-            projectId,
-            ...(subject && { subject }),
-            kind,
-            title: titleOf(text),
-            body: text,
-            options: [],
-            status,
-            ...(status === "accepted" && { resolvedBy: "import", resolvedAt: at }),
-            createdAt: at,
-          });
-        }
+    for (const { kind, status, texts } of notes) {
+      for (const text of texts) {
+        const noteKey = `${projectId}\0${kind}\0${text}`;
+        if (knownNotes.has(noteKey)) continue;
+        knownNotes.add(noteKey);
+        const subject = subjectOf(text);
+        plan.decisions.push({
+          id: newId("dec"),
+          projectId,
+          ...(subject && { subject }),
+          kind,
+          title: titleOf(text),
+          body: text,
+          options: [],
+          status,
+          ...(status === "accepted" && { resolvedBy: "import", resolvedAt: at }),
+          createdAt: at,
+        });
       }
-    });
+    }
 
     if (state.brief !== undefined) artifactCandidates.push(artifactOf({ type: "project", id: projectId, role: "legacy:brief" }, "legacy", state.brief));
   }
 
-  for (const resolve of afterProjects) resolve();
-
-  // Los archivos de issues/ cuelgan de la última corrida importada de la issue o, sin corrida, de la issue. Va después de
-  // todos los proyectos por lo mismo: una issue que otro proyecto creó tiene que estar antes de buscarle dueño.
-  for (const [slug, files] of issueFiles) {
-    for (const { name, content } of files) {
-      const file = /^([A-Z][A-Z0-9]*-\d+)(?:-(.+))?\.md$/.exec(name);
-      if (!file) continue;
-      const key = file[1]!;
-      const suffix = file[2];
-      const lastRun = (plannedRuns.get(`${slug}:${key}`) ?? []).reduce<{ id: RunId; endedAt: number } | undefined>((last, r) => (!last || r.endedAt >= last.endedAt ? r : last), undefined);
-      const issueId = knownIssues.get(key);
-      const owner = lastRun ? { type: "run" as const, id: lastRun.id } : issueId ? { type: "issue" as const, id: issueId } : undefined;
-      if (!owner) continue;
-      const kind: ArtifactKind = suffix?.startsWith("pr") ? "pr_body" : "legacy";
-      artifactCandidates.push(artifactOf({ ...owner, role: `legacy:${suffix ?? "checkpoint"}` }, kind, content));
+  /** Los archivos de `issues/`, colgados de la última corrida importada de la issue o, sin corrida, de la issue. */
+  function planIssueFiles(): void {
+    for (const [slug, files] of issueFiles) {
+      for (const { name, content } of files) {
+        const file = /^([A-Z][A-Z0-9]*-\d+)(?:-(.+))?\.md$/.exec(name);
+        if (!file) continue;
+        const key = file[1]!;
+        const suffix = file[2];
+        const lastRun = (plannedRuns.get(`${slug}:${key}`) ?? []).reduce<{ id: RunId; endedAt: number } | undefined>((last, r) => (!last || r.endedAt >= last.endedAt ? r : last), undefined);
+        const issueId = knownIssues.get(key);
+        const owner = lastRun ? { type: "run" as const, id: lastRun.id } : issueId ? { type: "issue" as const, id: issueId } : undefined;
+        if (!owner) continue;
+        const kind: ArtifactKind = suffix?.startsWith("pr") ? "pr_body" : "legacy";
+        artifactCandidates.push(artifactOf({ ...owner, role: `legacy:${suffix ?? "checkpoint"}` }, kind, content));
+      }
     }
   }
 
-  // Un artefacto cuyo dueño ya tiene ese contenido en ese role no cambia nada; uno que cambió reemplaza al anterior.
-  const owners = [...new Set(artifactCandidates.map((a) => a.owner.id))];
-  const existingRefs = new Map(
-    owners.length === 0
-      ? []
-      : db
-          .select()
-          .from(artifactRefs)
-          .where(inArray(artifactRefs.ownerId, owners))
-          .all()
-          .map((r) => [`${r.ownerType}:${r.ownerId}:${r.role}`, r.hash]),
-  );
-  plan.artifacts = artifactCandidates.filter((a) => existingRefs.get(`${a.owner.type}:${a.owner.id}:${a.owner.role}`) !== a.hash);
-
-  if (profiles) {
-    const existing = new Set(defs.list("profile", { includeArchived: true }).filter((d) => d.scope === "user").map((d) => d.slug));
-    for (const { slug, roles } of profiles.profiles) {
-      // Un perfil que la persona ya tiene (o editó) no se pisa.
-      if (existing.has(slug)) continue;
-      // La def de usuario tapa a la de la plantilla entera: los roles que el loop viejo no conocía (`triage`) se heredan de ella.
-      const inherited = defs.resolve("profile", slug);
-      const parsed = Profile.safeParse({ roles: { ...(inherited ? Profile.parse(inherited.body).roles : {}), ...roles } });
-      if (!parsed.success) throw new LegacyImportError(`profiles.json: el perfil "${slug}" no es válido:\n${z.prettifyError(parsed.error)}`);
-      plan.profiles.push({ slug, body: parsed.data });
-    }
-    const priced = new Set(db.select({ model: modelPrices.model }).from(modelPrices).where(eq(modelPrices.validFrom, 0)).all().map((p) => p.model));
-    plan.modelPrices = profiles.prices.filter((p) => !priced.has(p.model)).map((p) => ({ ...p, validFrom: 0 }));
+  /** Un artefacto cuyo dueño ya tiene ese contenido en ese role no cambia nada; uno que cambió reemplaza al anterior. */
+  function planArtifacts(): void {
+    const owners = [...new Set(artifactCandidates.map((a) => a.owner.id))];
+    const existingRefs = new Map(
+      owners.length === 0
+        ? []
+        : db
+            .select()
+            .from(artifactRefs)
+            .where(inArray(artifactRefs.ownerId, owners))
+            .all()
+            .map((r) => [`${r.ownerType}:${r.ownerId}:${r.role}`, r.hash]),
+    );
+    plan.artifacts = artifactCandidates.filter((a) => existingRefs.get(`${a.owner.type}:${a.owner.id}:${a.owner.role}`) !== a.hash);
   }
+
+  /** Los perfiles y precios de `profiles.json`, sin pisar los que la persona ya tiene. */
+  function planProfiles(): void {
+    if (profiles) {
+      const existing = new Set(defs.list("profile", { includeArchived: true }).filter((d) => d.scope === "user").map((d) => d.slug));
+      for (const { slug, roles } of profiles.profiles) {
+        // Un perfil que la persona ya tiene (o editó) no se pisa.
+        if (existing.has(slug)) continue;
+        // La def de usuario tapa a la de la plantilla entera: los roles que el loop viejo no conocía (`triage`) se heredan de ella.
+        const inherited = defs.resolve("profile", slug);
+        const parsed = Profile.safeParse({ roles: { ...(inherited ? Profile.parse(inherited.body).roles : {}), ...roles } });
+        if (!parsed.success) throw new LegacyImportError(`profiles.json: el perfil "${slug}" no es válido:\n${z.prettifyError(parsed.error)}`);
+        plan.profiles.push({ slug, body: parsed.data });
+      }
+      const priced = new Set(db.select({ model: modelPrices.model }).from(modelPrices).where(eq(modelPrices.validFrom, 0)).all().map((p) => p.model));
+      plan.modelPrices = profiles.prices.filter((p) => !priced.has(p.model)).map((p) => ({ ...p, validFrom: 0 }));
+    }
+  }
+
+  planProjects();
+  // Las notas nombran issues y PRs de cualquier proyecto: se planean cuando ya están las de todos.
+  const planned = slugs.flatMap((slug) => planProject(slug) ?? []);
+  for (const project of planned) planNotes(project);
+  // Los archivos de issues/ buscan la issue de cualquier proyecto: también van después de todos.
+  planIssueFiles();
+  planArtifacts();
+  planProfiles();
   return plan;
 }
 
