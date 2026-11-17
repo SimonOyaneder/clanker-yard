@@ -21,7 +21,7 @@ export function subjectLabeler(issues: readonly CachedIssue[], prs: readonly Cac
       return issue ? ofIssue(issue) : { key: subject.id, title: "issue fuera del caché" }
     }
     const pr = prById.get(subject.id)
-    if (!pr) return { key: "PR", title: "PR que ya no está abierto" }
+    if (!pr?.ref) return { key: "PR", title: "PR que ya no está abierto" }
     const issue = pr.issueId === null ? undefined : issueById.get(pr.issueId)
     return { key: `${pr.ref.repo.split("/").pop()}#${pr.ref.number}`, title: issue?.title ?? "PR sin issue en el caché" }
   }

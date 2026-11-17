@@ -18,3 +18,10 @@ test("una corrida sobre un PR lleva repo#número y el título de la issue que lo
   expect(subjectOf({ subject: { type: "pr", id: "pr_1" } })).toEqual({ key: "api#4251", title: "Lint de imports entre engines" })
   expect(subjectOf({ subject: { type: "pr", id: "pr_2" } })).toEqual({ key: "PR", title: "PR que ya no está abierto" })
 })
+
+test("una corrida sobre un PR local, sin número en GitHub, no tiene repo#número", () => {
+  const local = { id: "pr_3", issueId: "iss_1", ref: null, local: { branch: "feat/y", base: "feat/x", title: "feat: y" } } as unknown as CachedPr
+  const subjectOf = subjectLabeler([issue], [local])
+
+  expect(subjectOf({ subject: { type: "pr", id: "pr_3" } })).toEqual({ key: "PR", title: "PR que ya no está abierto" })
+})

@@ -409,7 +409,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
   const breakers: Breaker[] = []
   const prs: CachedPr[] = buildOpenPrs(now)
   const prOf = (ref: PrRef): CachedPr => {
-    const found = prs.find((p) => p.ref.repo === ref.repo && p.ref.number === ref.number)
+    const found = prs.find((p) => p.ref?.repo === ref.repo && p.ref.number === ref.number)
     if (!found?.state) throw new Error(`El core no conoce el PR ${ref.repo}#${ref.number}`)
     return found
   }

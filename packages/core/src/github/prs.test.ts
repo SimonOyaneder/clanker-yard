@@ -223,7 +223,7 @@ describe("API", () => {
     const client = await clientFor(connections, repos);
 
     expect(await client.prs.list({})).toEqual([
-      { id: expect.any(String), ref: REPO, owned: true, issueId: null, runId: null, parents: [], signals: [], reviewBot: false, state: null, readAt: null },
+      { id: expect.any(String), ref: REPO, local: null, owned: true, issueId: null, runId: null, parents: [], signals: [], reviewBot: false, state: null, readAt: null },
     ]);
     expect(graphqlRequests()).toEqual([]);
 

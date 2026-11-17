@@ -33,6 +33,7 @@ import {
   type Watch,
   createRuntimeRegistry,
 } from "@clanker/core";
+import { seedPr } from "@clanker/core/testing";
 import * as z from "zod";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -191,7 +192,7 @@ describe("descubrir y detectar", () => {
 
     await wake();
 
-    expect(cache.list().map(({ ref, owned, state }) => [ref.number, owned, state?.state])).toEqual([[1, false, "open"]]);
+    expect(cache.list().map(({ ref, owned, state }) => [ref?.number, owned, state?.state])).toEqual([[1, false, "open"]]);
   });
 
   test("un PR cerrado que GitHub reabre vuelve a open y Watch lo vigila otra vez", async () => {
@@ -208,6 +209,17 @@ describe("descubrir y detectar", () => {
 
     expect(cache.list()[0]?.state).toMatchObject({ state: "open" });
     expect(cache.open().map((row) => row.number)).toEqual([1]);
+  });
+
+  test("un PR local no se vigila ni rompe el despertar", async () => {
+    sim.openPr({ head: "one" });
+    seedPr(store, { repoId: repos.byRemote(REPO)!.id, number: null, state: "local", headRef: "two", title: "feat: two" });
+
+    await wake();
+
+    expect(cache.open().map((row) => row.number)).toEqual([1]);
+    expect(sim.requests.filter((r) => r.path.includes("/pulls/null"))).toEqual([]);
+    expect(store.db.$client.prepare("SELECT payload FROM events WHERE type = 'error'").all()).toEqual([]);
   });
 
   test("un 304 no consume cuota", async () => {
@@ -243,7 +255,7 @@ describe("descubrir y detectar", () => {
     expect(pullReads(requests, 2)).toBe(1);
     expect(detailReads(requests, 1)).toBe(1);
     expect(detailReads(requests, 2)).toBe(0);
-    expect(cache.list().find((p) => p.ref.number === 1)?.state?.state).toBe("draft");
+    expect(cache.list().find((p) => p.ref?.number === 1)?.state?.state).toBe("draft");
   });
 
   test("una review o un comentario mueven el ETag del PR: se ven sin pedir /reviews ni /comments", async () => {
@@ -365,8 +377,8 @@ describe("presupuesto de cuota", () => {
     expect(pullReads(requests, waited.number)).toBe(1);
     expect(pullReads(requests, other.number)).toBe(0);
     expect(requests.filter((r) => r.path.startsWith("/search/"))).toEqual([]);
-    expect(cache.list().find((p) => p.ref.number === waited.number)?.state?.state).toBe("draft");
-    expect(cache.list().find((p) => p.ref.number === other.number)?.state?.state).toBe("open");
+    expect(cache.list().find((p) => p.ref?.number === waited.number)?.state?.state).toBe("draft");
+    expect(cache.list().find((p) => p.ref?.number === other.number)?.state?.state).toBe("open");
   });
 
   test("sin cuota no sale ninguna request hasta el reset", async () => {

@@ -7,7 +7,7 @@ import { prParents, pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Repos } from "../repos/repos";
 import type { Prs } from "./prs";
-import { prRefOf } from "./pr-rows";
+import { githubPulls, type GithubPrRow } from "./pr-rows";
 
 /** Lo que Watch lee de un PR de la API REST (`GET /repos/{owner}/{repo}/pulls/{n}`). */
 export const RestPull = z.object({
@@ -30,8 +30,9 @@ export type PrRow = typeof pullRequests.$inferSelect;
  */
 export interface PrCache {
   /**
-   * Los PRs del caché, sin ir a GitHub: los que abrió el sistema y los que descubrió Watch. Omite los
-   * de repos sin remoto de GitHub con una cuenta conectada (`RepoConfig.remote`): sin cuenta no hay `PrRef`.
+   * Los PRs del caché, sin ir a GitHub: los que abrió el sistema, los que descubrió Watch y los `local`
+   * (con `ref: null`). Omite los de repos sin remoto de GitHub con una cuenta conectada (`RepoConfig.remote`):
+   * sin cuenta no hay `PrRef` ni pack.
    */
   list(filter?: PrFilter): CachedPr[];
   /**
@@ -48,7 +49,7 @@ export interface PrCache {
    */
   setHold(ref: PrRef, hold: boolean): Promise<PrState>;
   /** Los que siguen abiertos (o en draft): lo que Watch vigila. */
-  open(): PrRow[];
+  open(): GithubPrRow[];
   /**
    * Deja lo que dice la REST: crea la fila si no estaba (un PR que el sistema no abrió) y, si el head se
    * movió, anota cuándo. Devuelve la fila ya al día.
@@ -127,13 +128,14 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
         parents.set(childId, [...(parents.get(childId) ?? []), parentId]);
       }
       return rows.flatMap((row) => {
-        const ref = prRefOf(repos, row);
-        if (!ref || (repo !== undefined && ref.repo !== repo)) return [];
-        const pack = packs.packFor({ githubOrg: ref.repo.split("/")[0]! });
+        const remote = repos.get(row.repoId) && repos.config(row.repoId).remote;
+        if (!remote || (repo !== undefined && remote.repo !== repo)) return [];
+        const pack = packs.packFor({ githubOrg: remote.repo.split("/")[0]! });
         return [
           {
             id: row.id,
-            ref,
+            ref: row.number === null ? null : { account: remote.account, repo: remote.repo, number: row.number },
+            local: row.state === "local" ? { branch: row.headRef, base: row.baseRef, title: row.title! } : null,
             owned: row.owned,
             issueId: row.issueId,
             runId: row.runId,
@@ -157,7 +159,7 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
       return refresh(ref);
     },
 
-    open: () => store.db.select().from(pullRequests).where(eq(pullRequests.state, "open")).all(),
+    open: () => githubPulls(store.db, eq(pullRequests.state, "open")),
 
     saveRest(repoId, pull, at = now()) {
       return store.tx(({ db }) => {
