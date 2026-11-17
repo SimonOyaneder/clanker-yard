@@ -233,7 +233,69 @@ export const PR_FEEDBACK: FlowDef = {
       event: "pr.ci",
       args: { pr: "$run.params.pr" },
       timeoutSec: 5400,
-      on: { ok: "@done", fail: "ci-triage", timeout: { to: "@done", note: "CI sigue corriendo" } },
+      on: { ok: "ci-bots", fail: "ci-triage", timeout: { to: "@done", note: "CI sigue corriendo" } },
+    },
+    // Con el CI verde, los threads que dejaron los otros bots que el pack deja resolver (lint, cobertura): pasan
+    // por triage, se arreglan con fixups y se responden y resuelven, y el CI vuelve a correr sobre el push.
+    "ci-bots": {
+      type: "action",
+      action: "pr.botThreads",
+      args: { pr: "$run.params.pr" },
+      on: { ok: "ci-bots-triage", none: "@done" },
+    },
+    "ci-bots-triage": {
+      type: "agent",
+      role: "triage",
+      mode: "bot",
+      brief: { items: "$ci-bots.items" },
+      on: {
+        fix: {
+          to: "ci-bots-fix",
+          counter: "external",
+          maxRounds: "$run.params.externalRounds",
+          exhausted: { to: "ci-bots-reply", note: "Los bots del CI siguen comentando tras las rondas externas" },
+        },
+        reply: "ci-bots-reply",
+      },
+    },
+    "ci-bots-fix": {
+      type: "agent",
+      role: "dev",
+      mode: "fix",
+      resumeFrom: "implement",
+      brief: { input: "$prev" },
+      on: { ok: "ci-bots-checks" },
+    },
+    "ci-bots-checks": {
+      type: "action",
+      action: "recipe.check",
+      args: { ws: "$run.params.ws", scope: "changed" },
+      on: { ok: "ci-bots-fixups", fail: { to: "ci-bots-fix", maxRounds: 2, exhausted: "ci-bots-fixups" } },
+    },
+    "ci-bots-fixups": {
+      type: "action",
+      action: "pr.pushFixups",
+      args: { ws: "$run.params.ws", items: "$ci-bots.items", route: "$ci-bots-route" },
+      on: { ok: "ci-bots-reply-fixed", route: { to: "ci-bots-route", maxRounds: 1, exhausted: "@failed" } },
+    },
+    "ci-bots-route": {
+      type: "agent",
+      role: "committer",
+      mode: "route",
+      brief: { hunks: "$ci-bots-fixups.unrouted" },
+      on: { ok: "ci-bots-fixups" },
+    },
+    "ci-bots-reply-fixed": {
+      type: "action",
+      action: "pr.reply",
+      args: { pr: "$run.params.pr", triage: "$ci-bots-triage", shas: "$ci-bots-fixups.byItem" },
+      on: { ok: "ci-wait" },
+    },
+    "ci-bots-reply": {
+      type: "action",
+      action: "pr.reply",
+      args: { pr: "$run.params.pr", triage: "$ci-bots-triage" },
+      on: { ok: "@done" },
     },
     "ci-triage": {
       type: "agent",

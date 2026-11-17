@@ -38,6 +38,7 @@ const ACTIONS = {
   "pr.pushLease": ["draft", "ready"],
   "pr.rebaseApproval": ["proceed", "ask"],
   "council.threads": ["ok", "none"],
+  "pr.botThreads": ["ok", "none"],
   "pr.reply": ["ok"],
   "review.requestBot": ["ok", "none"],
   "stack.restack": ["ok", "conflict"],

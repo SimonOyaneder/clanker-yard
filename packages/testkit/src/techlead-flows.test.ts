@@ -243,6 +243,7 @@ describe("techlead-clasico con el runtime fake", () => {
       ["bot-req", "ok"],
       ["bot-wait", "lgtm"],
       ["ci-wait", "ok"],
+      ["ci-bots", "none"],
     ]);
     expect(feedback!.params).toMatchObject({ externalRounds: 3, pr: { repo: "acme/web", number: 1 } });
     // `review.requestBot` es la real: le pidió review al bot del pack con su comando.
@@ -360,6 +361,7 @@ describe("pr-feedback con los waits reales sobre el GitHub simulado", () => {
       ["bot-req", "ok"],
       ["bot-wait", "lgtm"],
       ["ci-wait", "ok"],
+      ["ci-bots", "none"],
     ]);
   });
 

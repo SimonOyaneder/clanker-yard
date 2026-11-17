@@ -40,6 +40,13 @@ const SPECS: Record<string, StubSpec> = {
       },
     },
   },
+  // `none` primero: sin guion, un flujo no encuentra threads de los bots del CI y termina como antes.
+  "pr.botThreads": {
+    kind: "action",
+    outcomes: ["none", "ok"],
+    effects: "local",
+    outputs: { ok: { items: [{ id: "r1", kind: "bot", path: "app/models/transfer.rb", line: 7, text: "Layout/LineLength: Line is too long. [101/100]" }] } },
+  },
   "workspace.syncBase": {
     kind: "action",
     outcomes: ["same", "rebased", "conflict"],

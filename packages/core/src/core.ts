@@ -19,7 +19,7 @@ import { createFlows } from "./flows/flows";
 import { createAskpass } from "./git/askpass";
 import { createLegacyImporter } from "./import/legacy";
 import { createGitRemote } from "./git/remote";
-import { councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/actions/pr-feedback";
+import { councilThreadsAction, prBotThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/actions/pr-feedback";
 import { createPrCache, type PrRow } from "./github/pr-cache";
 import { prWaits, signalPr } from "./github/pr-waits";
 import { createMergeScope } from "./github/merge-scope";
@@ -260,7 +260,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(stackRestackAction(restackDeps));
   flows.registerAction(stackRestackRewrittenAction(restackDeps));
   const feedback = { connections: opts.connections, packs, ...gap };
-  for (const action of [councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction]) flows.registerAction(action(feedback));
+  for (const action of [councilThreadsAction, prBotThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction]) flows.registerAction(action(feedback));
   const headSeen = ({ repo, number }: PrRef) => {
     const registered = repos.byRemote(repo);
     const row = registered && prCache.row(registered.id, number);
