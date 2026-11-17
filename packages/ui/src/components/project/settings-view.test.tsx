@@ -30,7 +30,7 @@ afterEach(() => {
 async function setup(overrides: Partial<ClankerProject> = {}, which = 0) {
   const data = createMemoryAppData(NOW)
   const project = { ...(await data.projects())[which]!, ...overrides }
-  const update = vi.fn<AppData["updateProject"]>((id, patch) => data.updateProject(id, patch))
+  const update = vi.fn<AppData["updateProject"]>((input) => data.updateProject(input))
   const importConfig = vi.fn<AppData["importProjectConfig"]>((input) => data.importProjectConfig(input))
   const controls: { current: SettingsControls | null } = { current: null }
   const actions = { goConnections: vi.fn(), editQueueFilters: vi.fn() }
@@ -61,13 +61,13 @@ test("cambiar reviewRounds y guardar manda solo flowParams, con un toast que lo 
   fireEvent.change(rounds, { target: { value: "5" } })
   save()
 
-  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { flowParams: { repo: "repo_x", reviewRounds: 5 } }))
+  await waitFor(() => expect(update).toHaveBeenCalledWith({ id: project.id, flowParams: { repo: "repo_x", reviewRounds: 5 } }))
   const [message, options] = vi.mocked(toast).mock.calls[0]!
   expect(message).toContain("parámetros del flujo")
   const action = options?.action
   if (!action || typeof action !== "object" || !("onClick" in action)) throw new Error("el toast no ofrece Deshacer")
   action.onClick({} as never)
-  await waitFor(() => expect(update).toHaveBeenLastCalledWith(project.id, { flowParams: { repo: "repo_x" } }))
+  await waitFor(() => expect(update).toHaveBeenLastCalledWith({ id: project.id, flowParams: { repo: "repo_x" } }))
 })
 
 test("el proyecto del tracker se cambia con el mismo selector y se guarda como trackerRef", async () => {
@@ -80,7 +80,7 @@ test("el proyecto del tracker se cambia con el mismo selector y se guarda como t
   fireEvent.click(await screen.findByRole("option", { name: "Facturación mensual" }))
   save()
 
-  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { trackerRef: "c43b8e70-91d2-4e0c-a6f5-3b1e8d2f6c03" }))
+  await waitFor(() => expect(update).toHaveBeenCalledWith({ id: project.id, trackerRef: "c43b8e70-91d2-4e0c-a6f5-3b1e8d2f6c03" }))
 })
 
 test("un proyecto local no muestra el proyecto del tracker", async () => {
@@ -111,7 +111,7 @@ test("las corridas a la vez del proyecto se editan en Apilado y gasto y se disti
 
   fireEvent.change(within(limits).getByLabelText("Corridas a la vez del proyecto"), { target: { value: "3" } })
   save()
-  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { parallel: 3 }))
+  await waitFor(() => expect(update).toHaveBeenCalledWith({ id: project.id, parallel: 3 }))
 })
 
 test("el índice lleva a cada sección y marca la que se clicó", async () => {
@@ -171,7 +171,7 @@ test("quitar un repo y hacer otro el de por defecto reordena la lista que se gua
   save()
 
   await waitFor(() =>
-    expect(update).toHaveBeenCalledWith(project.id, { repos: [{ repoId: web, labels: ["web"] }, { repoId: api, labels: [] }] }),
+    expect(update).toHaveBeenCalledWith({ id: project.id, repos: [{ repoId: web, labels: ["web"] }, { repoId: api, labels: [] }] }),
   )
 })
 
@@ -189,7 +189,7 @@ test("⌘S guarda y la paleta recibe los controles mientras hay cambios", async 
   expect(controls.current).toMatchObject({ dirty: true, blocked: false })
   fireEvent.keyDown(window, { key: "s", code: "KeyS", metaKey: true })
 
-  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { maxCostUsd: 4.5 }))
+  await waitFor(() => expect(update).toHaveBeenCalledWith({ id: project.id, maxCostUsd: 4.5 }))
 })
 
 test("mientras se edita, que el proyecto llegue con otros datos no pisa lo escrito", async () => {
@@ -214,7 +214,7 @@ test("el mapeo de estados lista los estados de las issues con su categoría de h
   fireEvent.click(await screen.findByRole("option", { name: "En review" }))
   save()
 
-  await waitFor(() => expect(update).toHaveBeenCalledWith(project.id, { statusMapping: { "In Staging": "in_review" } }))
+  await waitFor(() => expect(update).toHaveBeenCalledWith({ id: project.id, statusMapping: { "In Staging": "in_review" } }))
 })
 
 const fileOf = (content: unknown, name = "config.json") => new File([typeof content === "string" ? content : JSON.stringify(content)], name, { type: "application/json" })

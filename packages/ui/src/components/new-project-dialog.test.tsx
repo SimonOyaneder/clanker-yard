@@ -127,7 +127,7 @@ test("con Linear, los proyectos salen con los míos primero, se filtran por text
 
 test("con Linear sin conectar muestra el error del core y un botón a Conexiones", async () => {
   const data = createMemoryAppData(NOW)
-  await data.disconnect("linear", "clanker-yard")
+  await data.disconnect({ provider: "linear", account: "clanker-yard" })
   const { onOpenConnections } = setup({ trackerProjects: data.trackerProjects })
 
   expect((await screen.findByRole("alert")).textContent).toContain("Linear no está conectado")

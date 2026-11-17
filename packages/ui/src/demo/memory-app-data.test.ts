@@ -41,12 +41,12 @@ test("marcar hold apaga la oferta de merge y quitarlo la devuelve; mergear un PR
   const data = createMemoryAppData(NOW)
   const ready = openPrsOf(await data.openPrs()).find((p) => p.state.key === "ledger#421")!
 
-  await data.setPrHold(ready.ref, true)
+  await data.setPrHold({ ref: ready.ref, hold: true })
   const held = openPrsOf(await data.openPrs()).find((p) => p.id === ready.id)!
   expect(held.state).toMatchObject({ hold: true, merge: { offer: false } })
   await expect(data.mergePr(ready.ref)).rejects.toThrow(/no está listo/)
 
-  await data.setPrHold(ready.ref, false)
+  await data.setPrHold({ ref: ready.ref, hold: false })
   expect(openPrsOf(await data.openPrs()).find((p) => p.id === ready.id)!.state.merge.offer).toBe(true)
 })
 
@@ -73,7 +73,7 @@ test("conectar Linear deja la cuenta activa y desconectar la quita", async () =>
   await data.linearAuth()
   expect((await data.connections()).find((c) => c.provider === "linear")?.status).toBe("active")
 
-  await data.disconnect("linear", "clanker-yard")
+  await data.disconnect({ provider: "linear", account: "clanker-yard" })
   expect((await data.connections()).some((c) => c.provider === "linear")).toBe(false)
 })
 

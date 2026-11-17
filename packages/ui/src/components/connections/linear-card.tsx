@@ -53,7 +53,7 @@ function WorkspaceCard({ connection, login, projects, accounts, onChanged }: { c
   const disconnect = async () => {
     if (!connection) return
     try {
-      await appData.disconnect("linear", connection.account)
+      await appData.disconnect({ provider: "linear", account: connection.account })
       onChanged()
       toast.success(`Linear desconectado de ${connection.account}`)
     } catch (e) {

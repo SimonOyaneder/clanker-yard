@@ -62,7 +62,7 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, children }: Props
       rebase: (pr) => void perform(() => appData.rebasePr(pr.ref), `Rebase de ${pr.state.key} en marcha: corre en el carril de mantenimiento`),
       toggleHold: (pr) =>
         void perform(
-          () => appData.setPrHold(pr.ref, !pr.state.hold),
+          () => appData.setPrHold({ ref: pr.ref, hold: !pr.state.hold }),
           pr.state.hold ? `${pr.state.key} sin hold: vuelve a ofrecerse cuando esté listo` : `${pr.state.key} en hold: no se ofrece ni se mergea`,
         ),
       openRun: (pr) => {

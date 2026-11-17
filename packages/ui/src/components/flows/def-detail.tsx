@@ -65,7 +65,7 @@ export function DefDetail({ row, defs, onChanged, onFocusChange }: Props) {
         onChanged(created)
       },
       async () => {
-        if (created) await appData.archiveDef(kind, created.id)
+        if (created) await appData.archiveDef({ kind, id: created.id })
         onChanged()
       },
     )
@@ -100,14 +100,14 @@ export function DefDetail({ row, defs, onChanged, onFocusChange }: Props) {
   const archive = () =>
     undoable(
       `Archivé ${nameOf(def)}`,
-      () => appData.archiveDef(kind, def.id).then(() => onChanged()),
-      () => appData.restoreDef(kind, def.id).then(() => onChanged()),
+      () => appData.archiveDef({ kind, id: def.id }).then(() => onChanged()),
+      () => appData.restoreDef({ kind, id: def.id }).then(() => onChanged()),
     )
   const restore = () =>
     undoable(
       `Restauré ${nameOf(def)}`,
-      () => appData.restoreDef(kind, def.id).then(() => onChanged()),
-      () => appData.archiveDef(kind, def.id).then(() => onChanged()),
+      () => appData.restoreDef({ kind, id: def.id }).then(() => onChanged()),
+      () => appData.archiveDef({ kind, id: def.id }).then(() => onChanged()),
     )
   // Archivar lo que un proyecto usa y nada más lo reemplaza lo deja sin eso: antes se pregunta.
   const askArchive = () => (row.projects.length > 0 && row.overrides === null ? setConfirmArchive(true) : void archive())

@@ -72,7 +72,7 @@ test("desconectar un workspace que usan proyectos avisa cuáles se quedan sin tr
   expect(dialog.textContent).not.toContain("Yard MVP")
   fireEvent.click(within(dialog).getByRole("button", { name: "Desconectar" }))
 
-  await waitFor(() => expect(disconnect).toHaveBeenCalledWith("linear", "acme"))
+  await waitFor(() => expect(disconnect).toHaveBeenCalledWith({ provider: "linear", account: "acme" }))
   await waitFor(() => expect(onChanged).toHaveBeenCalled())
 })
 

@@ -115,7 +115,7 @@ test("el panel de un agente en curso ofrece reintentar, interrumpir y dejarle un
   fireEvent.change(message, { target: { value: "usa el helper que ya existe" } })
   fireEvent.click(send)
 
-  await waitFor(() => expect(spies.steerStep).toHaveBeenCalledWith(expect.stringMatching(/^stp_/), "usa el helper que ya existe"))
+  await waitFor(() => expect(spies.steerStep).toHaveBeenCalledWith({ stepId: expect.stringMatching(/^stp_/), message: "usa el helper que ya existe" }))
 })
 
 test("el panel de una acción en curso fuerza uno de los outcomes que declara su nodo, con confirmación", async () => {
@@ -130,5 +130,5 @@ test("el panel de una acción en curso fuerza uno de los outcomes que declara su
   expect(spies.forceOutcome).not.toHaveBeenCalled()
   fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Forzar resultado" }))
 
-  await waitFor(() => expect(spies.forceOutcome).toHaveBeenCalledWith(expect.stringMatching(/^stp_/), "ok"))
+  await waitFor(() => expect(spies.forceOutcome).toHaveBeenCalledWith({ stepId: expect.stringMatching(/^stp_/), outcome: "ok" }))
 })

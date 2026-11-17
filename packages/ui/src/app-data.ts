@@ -91,11 +91,11 @@ export interface ProjectMetrics {
 export interface AppData {
   projects(): Promise<ClankerProject[]>
   createProject(input: NewProject): Promise<ClankerProject>
-  updateProject(id: ProjectId, patch: ProjectPatch): Promise<ClankerProject>
+  updateProject(input: { id: ProjectId } & ProjectPatch): Promise<ClankerProject>
   /** Saca la issue de la cola (`skipped`) o la devuelve. */
-  skipIssue(projectId: ProjectId, issueId: IssueId, skipped: boolean): Promise<void>
+  skipIssue(input: { id: ProjectId; issueId: IssueId; skipped: boolean }): Promise<void>
   /** Sube la issue al principio de la cola o la devuelve a su lugar. */
-  boostIssue(projectId: ProjectId, issueId: IssueId, boosted: boolean): Promise<void>
+  boostIssue(input: { id: ProjectId; issueId: IssueId; boosted: boolean }): Promise<void>
   /** La capacidad de cada carril de la máquina y cuánto está en uso. */
   lanes(): Promise<Lanes>
   /** Cambia la capacidad de los carriles de la máquina; rige al instante y nunca interrumpe lo que corre. */
@@ -119,7 +119,7 @@ export interface AppData {
   /** Relee cada PR de GitHub y deja el estado en el caché: los cambios llegan después por `events` como `pr.changed`. */
   refreshPrs(refs: PrRef[]): Promise<void>
   /** Marca o desmarca "no mergear nunca". */
-  setPrHold(ref: PrRef, hold: boolean): Promise<void>
+  setPrHold(input: { ref: PrRef; hold: boolean }): Promise<void>
   /** Mergea según la estrategia del pack (comenta su comando); el core rechaza si el PR ya no está listo. */
   mergePr(ref: PrRef): Promise<void>
   /** Le pide review al bot del pack. */
@@ -153,9 +153,9 @@ export interface AppData {
   /** El nodo del paso corre de nuevo como una visita nueva con sesión nueva, y lo que la corrida tenía en marcha se cancela. */
   retryStep(stepId: StepRunId): Promise<RunDetail>
   /** Le deja un mensaje al agente del paso y retoma su sesión con él. */
-  steerStep(stepId: StepRunId, message: string): Promise<RunDetail>
+  steerStep(input: { stepId: StepRunId; message: string }): Promise<RunDetail>
   /** Sigue el edge de `outcome` sin ejecutar el paso: solo pasos action y wait. */
-  forceOutcome(stepId: StepRunId, outcome: string): Promise<RunDetail>
+  forceOutcome(input: { stepId: StepRunId; outcome: string }): Promise<RunDetail>
   /** El Scheduler deja de lanzar sus issues; lo que ya corre sigue. */
   pauseProject(id: ProjectId): Promise<ClankerProject>
   resumeProject(id: ProjectId): Promise<ClankerProject>
@@ -170,7 +170,7 @@ export interface AppData {
    * Resuelve una decisión con una de sus opciones (o con un texto libre si no bloquea). En un gate o un
    * `needs_human` la corrida estacionada vuelve a la cola de su carril.
    */
-  resolveDecision(id: DecisionId, option: string): Promise<Decision>
+  resolveDecision(input: { id: DecisionId; option: string }): Promise<Decision>
   /** Deja un learning de una persona en `proposed`; si el mismo texto ya existe en ese alcance devuelve el que había, sea cual sea su estado. */
   proposeLearning(learning: NewLearning): Promise<Learning>
   /** Todos los learnings, de cualquier estado, del más reciente al más antiguo: la UI filtra y cuenta. */
@@ -201,7 +201,7 @@ export interface AppData {
   testClaude(mode?: ClaudeMode): Promise<ClaudeStatus>
   /** La prueba antes de guardar: una key rechazada no queda guardada. */
   setClaudeApiKey(key: string): Promise<Connection>
-  disconnect(provider: ConnectionProvider, account: string): Promise<void>
+  disconnect(input: { provider: ConnectionProvider; account: string }): Promise<void>
   /** Las defs vigentes del kind, cada una con su versión vigente (de ahí salen los parámetros con default y las opciones de Ajustes); con `includeArchived` también las archivadas. Puede haber varias con el mismo slug: una por scope. */
   defs(kind: DefKind, opts?: { includeArchived?: boolean }): Promise<DefRecord[]>
   /** Los modelos y esfuerzos que el runtime acepta en un perfil: los da el core, la UI no los lista. */
@@ -216,8 +216,8 @@ export interface AppData {
    */
   updateDef(input: { kind: DefWriteKind; id: string; body: unknown; dryRun: boolean }): Promise<DefWrite>
   /** La def deja de resolverse por slug pero conserva sus versiones. Solo las tuyas y las del repo. */
-  archiveDef(kind: DefWriteKind, id: string): Promise<DefRecord>
-  restoreDef(kind: DefWriteKind, id: string): Promise<DefRecord>
+  archiveDef(input: { kind: DefWriteKind; id: string }): Promise<DefRecord>
+  restoreDef(input: { kind: DefWriteKind; id: string }): Promise<DefRecord>
   /** Los proyectos del tracker de las cuentas conectadas, los de la persona primero. Rechaza (con el paso a seguir) si no hay cuenta conectada. */
   trackerProjects(tracker: TrackerId): Promise<TrackerProject[]>
   repos(): Promise<RepoRow[]>

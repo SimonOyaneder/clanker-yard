@@ -85,7 +85,7 @@ test("marcar hold desde el menú contextual lo manda al core y quitarlo también
   fireEvent.contextMenu(screen.getByText("Prohibir imports cruzados entre engines"))
   fireEvent.click(await screen.findByRole("menuitem", { name: /Marcar hold/ }))
 
-  await waitFor(() => expect(spies.setPrHold).toHaveBeenCalledWith(pr.ref, true))
+  await waitFor(() => expect(spies.setPrHold).toHaveBeenCalledWith({ ref: pr.ref, hold: true }))
 })
 
 test("mergear confirma antes, nombra el comando del pack y solo entonces lo pide al core", async () => {
@@ -123,7 +123,7 @@ test("los atajos actúan sobre el PR enfocado: B pide la review del bot y H marc
   fireEvent.keyDown(document.body, { key: "b" })
   await waitFor(() => expect(spies.requestPrReview).toHaveBeenCalledWith(pr.ref))
   fireEvent.keyDown(document.body, { key: "h" })
-  await waitFor(() => expect(spies.setPrHold).toHaveBeenCalledWith(pr.ref, true))
+  await waitFor(() => expect(spies.setPrHold).toHaveBeenCalledWith({ ref: pr.ref, hold: true }))
 })
 
 test("sin PRs abiertos el estado vacío dice qué esperar", async () => {

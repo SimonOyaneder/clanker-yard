@@ -104,8 +104,8 @@ function SettingsForm({ project, focus, onFocused, onControls, flows, profiles, 
     setSaving(true)
     const failure = await undoable(
       `Ajustes de ${project.name} guardados: ${changedSections(patch).join(", ")}`,
-      () => appData.updateProject(project.id, patch),
-      () => appData.updateProject(project.id, undoPatch(project, patch)),
+      () => appData.updateProject({ id: project.id, ...patch }),
+      () => appData.updateProject({ id: project.id, ...undoPatch(project, patch) }),
     )
     setSaving(false)
     setSaveError(failure)

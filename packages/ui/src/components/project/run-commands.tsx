@@ -83,7 +83,7 @@ export function RunCommandsProvider({ children }: { children: ReactNode }) {
           description: `El paso no se ejecuta (o deja de esperar) y la corrida sigue por el edge «${outcome}». Queda registrado quién lo forzó.`,
           action: "Forzar resultado",
           destructive: true,
-          run: () => appData.forceOutcome(stepId, outcome),
+          run: () => appData.forceOutcome({ stepId, outcome }),
           done: `${label} terminó con «${outcome}»`,
         }),
       pauseProject: (project) => void perform(() => appData.pauseProject(project.id), `${project.name} pausado: no lanza issues nuevas, lo que ya corre sigue`),
@@ -118,7 +118,7 @@ export function RunCommandsProvider({ children }: { children: ReactNode }) {
         target={steer}
         onClose={() => setSteer(null)}
         onSend={(message) => {
-          if (steer) void perform(() => appData.steerStep(steer.stepId, message), `Mensaje enviado a ${steer.label}`)
+          if (steer) void perform(() => appData.steerStep({ stepId: steer.stepId, message }), `Mensaje enviado a ${steer.label}`)
           setSteer(null)
         }}
       />

@@ -307,8 +307,8 @@ function Shell() {
       setParallel: (p, parallel) =>
         reversible(
           `${p.name}: ${parallel} ${parallel === 1 ? "corrida" : "corridas"} a la vez en dev`,
-          () => appData.updateProject(p.id, { parallel }),
-          () => appData.updateProject(p.id, { parallel: p.parallel }),
+          () => appData.updateProject({ id: p.id, parallel }),
+          () => appData.updateProject({ id: p.id, parallel: p.parallel }),
         ),
       setLanes: async (lane, capacity, from) => {
         const apply = (n: number) => appData.setLanes({ [lane]: n }).then(live.refresh)
@@ -321,14 +321,14 @@ function Shell() {
       skipIssue: (p, issue, skipped) =>
         reversible(
           skipped ? `No tomaré ${issueKey(issue)}` : `${issueKey(issue)} vuelve a la cola`,
-          () => appData.skipIssue(p.id, issue.id, skipped),
-          () => appData.skipIssue(p.id, issue.id, !skipped),
+          () => appData.skipIssue({ id: p.id, issueId: issue.id, skipped }),
+          () => appData.skipIssue({ id: p.id, issueId: issue.id, skipped: !skipped }),
         ),
       boostIssue: (p, issue) =>
         reversible(
           `${issueKey(issue)} sube al principio de la cola`,
-          () => appData.boostIssue(p.id, issue.id, true),
-          () => appData.boostIssue(p.id, issue.id, false),
+          () => appData.boostIssue({ id: p.id, issueId: issue.id, boosted: true }),
+          () => appData.boostIssue({ id: p.id, issueId: issue.id, boosted: false }),
         ),
       editQueueFilters: () => {
         setSettingsFocus("queue")

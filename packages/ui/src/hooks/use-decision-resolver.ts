@@ -41,7 +41,7 @@ export function useDecisionResolver(decisions: Decision[], reload: () => void) {
       clearTimeout(timers.current.get(id))
       timers.current.delete(id)
       update((next) => next.set(id, { ...entry, sent: true }))
-      appData.resolveDecision(id, entry.option).then(reload, (e: unknown) => {
+      appData.resolveDecision({ id, option: entry.option }).then(reload, (e: unknown) => {
         update((next) => next.delete(id))
         toast.error(messageOf(e))
         reload()
