@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { useState } from "react"
 import { afterEach, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
-import { LocalPrView } from "@/components/prs/local-pr-view"
+import { type LocalPrControls, LocalPrView } from "@/components/prs/local-pr-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 import { type LocalPr, openPrsOf } from "@/lib/prs/prs"
@@ -108,4 +109,31 @@ test("S cambia a lado a lado: lo borrado a la izquierda, lo agregado a la derech
   expect(pair.querySelector(".hljs-keyword")?.textContent).toBe("return")
   fireEvent.keyDown(window, { key: "s" })
   localStorage.removeItem("clanker.localPr.diffMode")
+})
+
+test("pasarle sus controles a un padre que los guarda en su estado (como App) no rehace la vista en loop", async () => {
+  const data = createMemoryAppData(NOW)
+  const local = openPrsOf(await data.openPrs()).find((p): p is LocalPr => p.local !== null)!
+  let renders = 0
+  function Parent() {
+    const [controls, setControls] = useState<LocalPrControls | null>(null)
+    renders++
+    return (
+      <>
+        <span data-testid="mode">{controls?.mode ?? "-"}</span>
+        <LocalPrView pr={local} onBack={() => {}} onControls={setControls} />
+      </>
+    )
+  }
+  render(
+    <AppDataProvider value={data}>
+      <TooltipProvider>
+        <Parent />
+      </TooltipProvider>
+    </AppDataProvider>,
+  )
+
+  expect(await screen.findByRole("heading", { name: "Qué cambia" })).toBeTruthy()
+  expect(screen.getByTestId("mode").textContent).toBe("unified")
+  expect(renders).toBeLessThan(10)
 })

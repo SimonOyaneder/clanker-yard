@@ -101,9 +101,11 @@ export function LocalPrView({ pr, onBack, onControls }: { pr: LocalPr; onBack: (
   }, [commits, at, showCommit])
   const toggleMode = useCallback(() => setMode(mode === "split" ? "unified" : "split"), [mode, setMode])
 
+  // Un objeto nuevo solo cuando algo cambia: el padre los guarda en su estado, y uno nuevo en cada render sería un loop.
+  const controls = useMemo<LocalPrControls>(() => ({ mode, toggleMode, prevCommit: prev, nextCommit: next, allCommits: all }), [mode, toggleMode, prev, next, all])
   useEffect(() => {
-    onControls?.({ mode, toggleMode, prevCommit: prev, nextCommit: next, allCommits: all })
-  })
+    onControls?.(controls)
+  }, [controls, onControls])
   useEffect(() => () => onControls?.(null), [onControls])
 
   useEffect(() => {
