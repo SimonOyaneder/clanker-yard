@@ -107,6 +107,7 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
     items: [
       ["Conectar con Linear", "⇧⌘L"],
       ["Probar Claude (llamada mínima, gasta un poco de cuota)", "⇧⌘T"],
+      ["Reintentar ahora lo que está en pausa (del proyecto a la vista, o todo)", "⇧⌘E"],
     ],
   },
   {

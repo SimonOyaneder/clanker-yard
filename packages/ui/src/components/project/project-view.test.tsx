@@ -36,6 +36,7 @@ async function setup({ entries = () => [], queueError, runs = () => [], decision
     setLanes: vi.fn(() => Promise.resolve()),
     skipIssue: vi.fn(() => Promise.resolve()),
     boostIssue: vi.fn(() => Promise.resolve()),
+    retryBreakers: vi.fn(() => Promise.resolve()),
     refresh: () => {},
     editQueueFilters: vi.fn(),
     editFlow: vi.fn(),
@@ -258,6 +259,28 @@ test("un breaker abierto muestra la causa, qué pausa y el próximo reintento", 
   expect(within(strip).getByText(/Próximo reintento/)).toBeTruthy()
   // El de un repo que el proyecto no usa no le afecta.
   expect(within(strip).queryByText("En pausa: repo otro")).toBeNull()
+})
+
+test("reintentar ahora prueba ese breaker sin esperar al próximo reintento, desde el botón o el menú contextual", async () => {
+  const breaker: Breaker = {
+    scope: "github",
+    label: "github",
+    cause: "connection_lost",
+    reason: "La conexión de github (simon) quedó revoked: reconéctala.",
+    openedAt: NOW - 60_000,
+    probes: 2,
+    nextProbeAt: NOW + 30 * 60_000,
+    decisionId: id("dec", 9) as Breaker["decisionId"],
+  }
+  const { actions } = await setup({ breakers: [breaker] })
+  const strip = screen.getByRole("region", { name: "Breakers abiertos" })
+
+  fireEvent.click(within(strip).getByRole("button", { name: "Reintentar ahora" }))
+  expect(actions.retryBreakers).toHaveBeenCalledWith(null, "github")
+
+  fireEvent.contextMenu(within(strip).getByRole("status"))
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Reintentar ahora/ }))
+  expect(actions.retryBreakers).toHaveBeenCalledTimes(2)
 })
 
 test("sin breakers no hay franja", async () => {

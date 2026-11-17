@@ -97,7 +97,7 @@ export function apiDeps(
     trackerProjects: { list: () => Promise.reject(new Error("este core de pruebas no lista proyectos")), resolve: (_tracker, ref) => Promise.resolve(ref), normalize: (id) => Promise.resolve(projects.get(id)!), binding: storedBinding },
     scheduler,
     lanes,
-    breakers: { list: () => [] },
+    breakers: { list: () => [], retry: () => Promise.resolve(undefined) },
     flows,
     artifacts,
     decisions: createDecisions({ store }),

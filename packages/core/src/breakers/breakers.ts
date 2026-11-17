@@ -79,6 +79,13 @@ export interface Breakers {
   trip(input: { scope: string; cause: BreakerCause; reason: string; resetsAt?: number }): void;
   /** Los abiertos, con el nombre legible de su ámbito (`label`). */
   list(): (OpenBreaker & { label: string })[];
+  /**
+   * Prueba el breaker de `scope` ya, sin esperar al backoff (el "Reintentar ahora" de la app). Es la misma prueba
+   * que la programada: si la causa se fue lo cierra; si no, cuenta como una fallida más y el backoff sigue. Con una
+   * prueba en curso espera esa en vez de lanzar otra. Devuelve el breaker si sigue abierto, o `undefined` si se
+   * cerró o no estaba abierto.
+   */
+  retry(scope: string): Promise<(OpenBreaker & { label: string }) | undefined>;
   /** Retoma los breakers que dejó un corte y empieza a escuchar las conexiones y la cuota de GitHub. */
   start(): void;
   close(): void;
@@ -105,7 +112,8 @@ export interface BreakersOptions {
 export function createBreakers({ store, runtimes, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS, errors = createErrorReporter({ store }) }: BreakersOptions): Breakers {
   const entries = new Map<string, OpenBreaker>();
   const timers = new Map<string, NodeJS.Timeout>();
-  const probing = new Set<string>();
+  /** La prueba en curso de cada ámbito: un reintento manual la espera en vez de lanzar otra. */
+  const probing = new Map<string, Promise<void>>();
   let unsubscribe: (() => void) | undefined;
   let closed = false;
 
@@ -133,17 +141,25 @@ export function createBreakers({ store, runtimes, probe, label = (scope) => scop
     timers.set(entry.scope, timer);
   }
 
-  async function attempt(scope: string): Promise<void> {
-    if (probing.has(scope) || !entries.has(scope)) return;
-    probing.add(scope);
+  function attempt(scope: string): Promise<void> {
+    const running = probing.get(scope);
+    if (running) return running;
+    if (!entries.has(scope)) return Promise.resolve();
+    // La prueba arranca en el microtask siguiente, ya en `probing`: lo que ella emita no la dispara de nuevo.
+    // `runProbe` se saca de ahí apenas termina la prueba, antes de cerrar o reprogramar, y nunca rechaza.
+    const done = Promise.resolve().then(() => runProbe(scope));
+    probing.set(scope, done);
+    return done;
+  }
+
+  async function runProbe(scope: string): Promise<void> {
     let failure: string | undefined;
     try {
       failure = await probe(scope);
     } catch (error) {
       failure = messageOf(error);
-    } finally {
-      probing.delete(scope);
     }
+    probing.delete(scope);
     const entry = entries.get(scope);
     if (!entry || closed) return;
     try {
@@ -215,6 +231,12 @@ export function createBreakers({ store, runtimes, probe, label = (scope) => scop
     openReason: (scope) => entries.get(scope)?.reason,
     trip,
     list: () => [...entries.values()].map((entry) => ({ ...entry, label: label(entry.scope) })),
+
+    async retry(scope) {
+      await attempt(scope);
+      const entry = entries.get(scope);
+      return entry && { ...entry, label: label(entry.scope) };
+    },
 
     start() {
       for (const entry of readMetaJson(store.db, META_KEY, z.array(OpenBreakerSchema)) ?? []) {

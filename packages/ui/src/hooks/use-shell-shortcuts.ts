@@ -20,6 +20,8 @@ export interface ShellShortcuts {
   goTab(tab: ProjectTab): void
   connectLinear(): void
   probeClaude(): Promise<void>
+  /** Reintenta ya los breakers abiertos: los del proyecto a la vista, o todos. */
+  retryBreakers(): void
   /** Deshace la última decisión respondida; devuelve su id si había una. */
   undoDecision(): DecisionId | null
   /** Deshace la última decisión de learnings que todavía no se mandó. */
@@ -59,13 +61,14 @@ export function useShellShortcuts(shortcuts: ShellShortcuts): void {
         s.selectProject(target)
         return true
       },
-      // ⇧⌘I y ⇧⌘A van a la Bandeja y a Learnings, ⇧⌘L conecta Linear y ⇧⌘T prueba Claude.
+      // ⇧⌘I y ⇧⌘A van a la Bandeja y a Learnings, ⇧⌘L conecta Linear, ⇧⌘T prueba Claude y ⇧⌘E reintenta lo que está en pausa.
       (e, s) => {
         if (!e.metaKey || !e.shiftKey || e.altKey || e.ctrlKey) return
         if (e.code === "KeyL") s.connectLinear()
         else if (e.code === "KeyI") s.goInbox()
         else if (e.code === "KeyA") s.goLearnings()
         else if (e.code === "KeyT") void s.probeClaude()
+        else if (e.code === "KeyE") s.retryBreakers()
         else return
         return true
       },

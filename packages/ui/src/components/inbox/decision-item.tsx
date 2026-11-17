@@ -1,8 +1,10 @@
-import type { Decision } from "@clanker/api"
+import type { Breaker, Decision } from "@clanker/api"
 import { CornerDownLeft, Plug, Reply, Send, X } from "lucide-react"
 import { useState } from "react"
 import { Ago, Hint, Pill, Shortcut } from "@/components/common"
 import { type DecisionScope, KindPill, RunChip } from "@/components/inbox/decision-parts"
+import { nextRetry, RetryBreakerButton, useRetryBreaker } from "@/components/project/breaker-strip"
+import { useNow } from "@/hooks/use-now"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { isBlocking, isDestructive, optionLabel, optionsOf, RESOLVED_HINT, RESOLVED_LABEL, resolutionText, takesText } from "@/lib/decisions"
@@ -20,12 +22,16 @@ interface Props {
   onOpenRun: (() => void) | null
   /** Lleva a Conexiones: una alerta suele venir de una conexión vencida o caída. */
   onGoConnections: () => void
+  /** El breaker abierto que dejó esta alerta, si la dejó uno: se puede reintentar ya. */
+  breaker?: Breaker
 }
 
 // La decisión a la vista: la pregunta, su contexto y las opciones numeradas con el atajo de cada una. Un gate o
 // un needs_human solo se contestan con sus opciones (son los outcomes del flujo); lo que no bloquea admite
 // además una respuesta en texto libre.
-export function DecisionItem({ decision, scope, responding, onRespondingChange, onResolve, onOpenRun, onGoConnections }: Props) {
+export function DecisionItem({ decision, scope, responding, onRespondingChange, onResolve, onOpenRun, onGoConnections, breaker }: Props) {
+  const now = useNow(breaker !== undefined)
+  const { retrying, retry } = useRetryBreaker(breaker?.scope)
   const pending = decision.status === "pending"
   const options = optionsOf(decision)
   const canRespond = takesText(decision)
@@ -53,8 +59,13 @@ export function DecisionItem({ decision, scope, responding, onRespondingChange, 
 
       {resolvesItself ? (
         <div className="flex flex-col gap-2">
-          <p className="text-xs text-muted-foreground">Esta alerta no se resuelve a mano: se cierra sola cuando la causa se va.</p>
-          <div>
+          <p className="text-xs text-muted-foreground">
+            {breaker
+              ? `Se cierra sola cuando la causa se va. Próximo reintento: ${nextRetry(breaker.nextProbeAt, now)}. Si ya la arreglaste, reinténtala ahora.`
+              : "Esta alerta no se resuelve a mano: se cierra sola cuando la causa se va."}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {breaker ? <RetryBreakerButton retrying={retrying} onRetry={retry} variant="default" /> : null}
             <Hint label="Ver el estado de las conexiones" keys="GC">
               <Button variant="secondary" onClick={onGoConnections}>
                 <Plug /> Ir a Conexiones

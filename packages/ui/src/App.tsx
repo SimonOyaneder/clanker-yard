@@ -346,6 +346,7 @@ function Shell() {
     goTab,
     connectLinear,
     probeClaude,
+    retryBreakers: () => void actions.retryBreakers(module === "projects" ? project : null),
     undoDecision: undo,
     undoLearnings,
     selectDecision,

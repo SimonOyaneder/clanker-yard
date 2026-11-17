@@ -514,6 +514,11 @@ export function createMemoryAppData(now = Date.now()): AppData {
     },
     coreInfo: async () => ({ dataDir: "/Users/ana/Library/Application Support/Clanker Yard", linearClientId: "60358f9aaddae2ba3a9c09e1419c2579", githubApp: false }),
     breakers: async () => breakers.map((b) => ({ ...b })),
+    retryBreaker: async (scope) => {
+      const at = breakers.findIndex((b) => b.scope === scope)
+      if (at !== -1) breakers.splice(at, 1)
+      return null
+    },
     openPrs: async () => prs.map((p) => ({ ...p })),
     refreshPrs: async () => {},
     setPrHold: async ({ ref, hold }) => {

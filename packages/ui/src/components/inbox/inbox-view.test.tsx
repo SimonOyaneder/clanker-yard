@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Event } from "@clanker/api"
+import type { Breaker, Event } from "@clanker/api"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest"
 import { App } from "@/App"
@@ -146,6 +146,33 @@ test("una alerta no tiene botones para resolver: se cierra sola y lleva a Conexi
   key("r")
   expect(screen.queryByRole("textbox", { name: "Tu respuesta" })).toBeNull()
   expect(titles()).toContain("La conexión de Linear venció")
+})
+
+test("la alerta de un breaker abierto se puede reintentar ya, sin esperar al próximo reintento", async () => {
+  const data = createMemoryAppData(NOW)
+  const alert = (await data.decisions()).find((d) => d.kind === "alert" && d.status === "pending")!
+  const breaker: Breaker = {
+    scope: "runtime:claude-sdk",
+    label: "runtime:claude-sdk",
+    cause: "login_expired",
+    reason: "login vencido",
+    openedAt: NOW,
+    probes: 0,
+    nextProbeAt: NOW + 5 * 60_000,
+    decisionId: alert.id,
+  }
+  const retryBreaker = vi.fn(() => Promise.resolve(null))
+  await openInbox({ ...data, breakers: () => Promise.resolve([breaker]), retryBreaker })
+
+  fireEvent.click(within(rows()[3]!).getByRole("button"))
+  // La lista de breakers llega en su propia lectura: el reloj de la prueba está falseado, así que se avanza a mano.
+  await act(() => vi.advanceTimersByTimeAsync(0))
+  const detail = screen.getByRole("article", { name: alert.title })
+  expect(within(detail).getByText(/Si ya la arreglaste, reinténtala ahora/)).toBeTruthy()
+  fireEvent.click(within(detail).getByRole("button", { name: "Reintentar ahora" }))
+  await act(() => vi.advanceTimersByTimeAsync(0))
+
+  expect(retryBreaker).toHaveBeenCalledWith("runtime:claude-sdk")
 })
 
 test("sin pendientes dice qué pasa y cuántas se resolvieron hoy, y ofrece ver las resueltas", async () => {

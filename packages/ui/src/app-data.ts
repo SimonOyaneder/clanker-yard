@@ -116,6 +116,8 @@ export interface AppData {
   coreInfo(): Promise<{ dataDir: string; linearClientId: string; githubApp: boolean }>
   /** Los circuit breakers abiertos: qué está en pausa y cuándo se vuelve a probar. */
   breakers(): Promise<Breaker[]>
+  /** Prueba ya el breaker de `scope`: devuelve el breaker si sigue abierto, o `null` si se cerró. */
+  retryBreaker(scope: string): Promise<Breaker | null>
   /** Los PRs abiertos que Watch conoce (los que abrió el sistema y los de tu búsqueda), con su estado ya leído y las señales de su pack. */
   openPrs(): Promise<CachedPr[]>
   /** Relee cada PR de GitHub y deja el estado en el caché: los cambios llegan después por `events` como `pr.changed`. */
