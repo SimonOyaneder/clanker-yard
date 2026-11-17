@@ -17,6 +17,7 @@ import {
   newId,
   openStore,
   PermanentActionError,
+  prPromoteAction,
   prPublishAction,
   stackRestackAction,
   stackRestackRewrittenAction,
@@ -48,6 +49,7 @@ let github: GitHubSim;
 let restack: ReturnType<typeof stackRestackAction>;
 let restackRewritten: ReturnType<typeof stackRestackRewrittenAction>;
 let publish: ReturnType<typeof prPublishAction>;
+let promote: ReturnType<typeof prPromoteAction>;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-restack-"));
@@ -82,6 +84,7 @@ beforeEach(async () => {
   const recipes = createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) });
   const prs = createPrs({ connections, packs });
   publish = prPublishAction({ store, workspaces, recipes, repoConfig: repos, connections, packs });
+  promote = prPromoteAction({ store, workspaces, repoConfig: repos, connections });
   const restackDeps = { store, workspaces, repoConfig: repos, prs, connections, pause: () => Promise.resolve() };
   restack = stackRestackAction(restackDeps);
   restackRewritten = stackRestackRewrittenAction(restackDeps);
@@ -525,6 +528,66 @@ describe("stack.restack con PRs locales", () => {
     expect((result.output as Output).children).toMatchObject([{ branch: "cla-2", status: "conflict", files: ["a.txt"] }]);
     expect(repo.git("rev-parse", "cla-2")).toBe(before);
     expect(() => remoteSha("cla-2")).toThrow();
+  });
+});
+
+describe("pr.promote", () => {
+  /** El worktree de la branch del PR local, tomado como lo hace `promote-local`. */
+  async function leaseOf(branch: string, base: string) {
+    const lease = await workspaces.acquire({ repo: "repo_r1", branch, base, runId: newId("run") });
+    const { workspaceId, path, baseSha, fencingToken } = lease;
+    return { lease, ws: { workspaceId, path, branch, baseSha, fencingToken } };
+  }
+
+  test("el PR local que quedó sobre main sale como draft con su título y cuerpo, en la misma fila", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    github.pr(1).merge({ sha: squashOnMain("cla-1") });
+    await run(1);
+    const { lease, ws } = await leaseOf("cla-2", "main");
+
+    const result = await promote.run(promote.args.parse({ ws, prId: b }), ctx());
+    workspaces.release(lease);
+
+    expect(result).toMatchObject({ outcome: "ok", output: { pr: { number: 2 }, head: remoteSha("cla-2") } });
+    expect(github.pulls().map((p) => [p.number, p.base.ref, p.title, p.draft])).toEqual([[1, "main", "[cla-1] cambio", true], [2, "main", "[cla-2] cambio", true]]);
+    expect(sql(`SELECT id, number, state, base_ref FROM pull_requests WHERE head_ref = 'cla-2'`)).toEqual([{ id: b, number: 2, state: "open", base_ref: "main" }]);
+    expect(store.events.since(0, { types: ["pr.opened"] }).filter((e) => e.subject?.id === b)).toHaveLength(1);
+  });
+
+  test("publicar ahora sobre un padre abierto apunta a su branch y sigue colgando de él", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const { lease, ws } = await leaseOf("cla-2", "cla-1");
+
+    await promote.run(promote.args.parse({ ws, prId: b }), ctx());
+    workspaces.release(lease);
+
+    expect(github.pulls().map((p) => [p.number, p.base.ref])).toEqual([[1, "main"], [2, "cla-1"]]);
+    expect(sql("SELECT child_id FROM pr_parents")).toEqual([{ child_id: b }]);
+  });
+
+  test("un corte entre el push y el PR retoma sin duplicar", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const { lease, ws } = await leaseOf("cla-2", "cla-1");
+    const shared = ctx();
+    const once = shared.once;
+    let cut = true;
+    shared.once = async (stage, fn) => {
+      if (stage === "pr" && cut) {
+        cut = false;
+        throw new Error("corte");
+      }
+      return once(stage, fn);
+    };
+
+    await expect(promote.run(promote.args.parse({ ws, prId: b }), shared)).rejects.toThrow("corte");
+    const again = await promote.run(promote.args.parse({ ws, prId: b }), shared);
+    workspaces.release(lease);
+
+    expect(again.outcome).toBe("ok");
+    expect(github.pulls()).toHaveLength(2);
   });
 });
 

@@ -323,6 +323,7 @@ describe("arranque", () => {
       { slug: "council" },
       { slug: "juguete" },
       { slug: "pr-feedback" },
+      { slug: "promote-local" },
       { slug: "rebase-conflicto" },
       { slug: "republish-pr" },
       { slug: "restack" },

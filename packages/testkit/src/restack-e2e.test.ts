@@ -123,6 +123,7 @@ describe("restack con el core real", () => {
     expect(run.params).toMatchObject({ pr: ref(1), externalRounds: 3 });
     expect(run.steps.map((s) => [s.nodeId, s.outcome])).toEqual([
       ["restack", "ok"],
+      ["promote", "done"],
       ["feedback", "done"],
       ["feedback[0]", "done"],
     ]);
@@ -167,6 +168,7 @@ describe("restack con el core real", () => {
     expect(run).toMatchObject({ status: "done", outcome: "done" });
     expect(run.steps.map((s) => [s.nodeId, s.outcome])).toEqual([
       ["restack", "ok"],
+      ["promote", "done"],
       ["feedback", "done"],
     ]);
     expect(remoteLog("main..cla-3")).toEqual(["feat: cla-3", "feat: cla-2"]);
