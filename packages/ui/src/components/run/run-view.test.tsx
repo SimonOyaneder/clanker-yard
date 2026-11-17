@@ -2,8 +2,8 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
-import { RunCommandsProvider } from "@/components/project/run-commands"
-import { RunView } from "@/components/project/run-view"
+import { RunCommandsProvider } from "@/components/run/run-commands"
+import { RunView } from "@/components/run/run-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 

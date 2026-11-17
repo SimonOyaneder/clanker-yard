@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { PR_KEYS } from "@/components/prs/pr-menu"
-import { RUN_KEYS } from "@/lib/run-commands"
+import { RUN_KEYS } from "@/lib/project/run-commands"
 import { Shortcut } from "./common"
 
 const SECTIONS: { title: string; items: [string, string][] }[] = [

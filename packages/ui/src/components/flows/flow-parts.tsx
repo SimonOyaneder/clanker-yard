@@ -1,7 +1,7 @@
 import type { ClankerProject } from "@clanker/api"
 import { Pill } from "@/components/common"
 import { tone } from "@/lib/format"
-import { SCOPE_HINT, SCOPE_LABEL, type LibraryRow } from "@/lib/defs-library"
+import { SCOPE_HINT, SCOPE_LABEL, type LibraryRow } from "@/lib/flows/defs-library"
 
 const SCOPE_TONE = { builtin: tone.neutral, pack: tone.violet, user: tone.green, repo: tone.sky } as const
 

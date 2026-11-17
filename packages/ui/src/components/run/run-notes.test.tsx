@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, expect, test } from "vitest"
 import { AppDataProvider } from "@/app-data"
-import { RunNotes } from "@/components/project/run-notes"
+import { RunNotes } from "@/components/run/run-notes"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 
 afterEach(cleanup)

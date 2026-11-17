@@ -1,6 +1,6 @@
 import { FlowDef, type RunDetail, type Step } from "@clanker/api"
 import { describe, expect, test } from "vitest"
-import { runCaps, stepCaps } from "@/lib/run-commands"
+import { runCaps, stepCaps } from "@/lib/project/run-commands"
 import { shapeOf } from "@/lib/run-graph"
 
 const flowDef = FlowDef.parse({

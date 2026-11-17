@@ -1,6 +1,6 @@
 import { type FlowDef, Role } from "@clanker/api"
 import { expect, test } from "vitest"
-import { addStep, branchOwners, connect, marksOf, outcomesOf, positionsOf, removeNodes, setNode, withEdge } from "@/lib/flow-canvas"
+import { addStep, branchOwners, connect, marksOf, outcomesOf, positionsOf, removeNodes, setNode, withEdge } from "@/lib/flows/flow-canvas"
 import { SEED_TECHLEAD } from "@/demo/seed-flows"
 
 const hints = { role: "dev", mode: "plan", action: "workspace.acquire", event: "pr.ci", flow: "pr-feedback" }

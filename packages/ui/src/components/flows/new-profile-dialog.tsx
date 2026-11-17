@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { profileSummary, slugProblem } from "@/lib/def-form"
-import { nameOf } from "@/lib/defs-library"
+import { profileSummary, slugProblem } from "@/lib/flows/def-form"
+import { nameOf } from "@/lib/flows/defs-library"
 import { messageOf } from "@/lib/utils"
 
 interface Props {

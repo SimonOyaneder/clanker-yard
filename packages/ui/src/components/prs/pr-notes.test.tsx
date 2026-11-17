@@ -2,7 +2,7 @@
 import type { Decision } from "@clanker/api"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, test } from "vitest"
-import type { OpenPr } from "@/lib/prs"
+import type { OpenPr } from "@/lib/prs/prs"
 import { PrNotes, PrNotesContext } from "./pr-notes"
 
 afterEach(cleanup)

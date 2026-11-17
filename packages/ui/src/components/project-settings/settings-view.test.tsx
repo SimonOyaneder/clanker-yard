@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { toast } from "sonner"
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider, type AppData } from "@/app-data"
-import { type SettingsControls, ProjectSettingsTab } from "@/components/project/settings-view"
+import { type SettingsControls, ProjectSettingsTab } from "@/components/project-settings/settings-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
 import { createMemoryAppData } from "@/demo/memory-app-data"

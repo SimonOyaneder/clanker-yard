@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useLiveQuery } from "@/hooks/use-live"
 import { useHost } from "@/host"
-import { KIND_LABEL, nameOf, repoFilePath } from "@/lib/defs-library"
+import { KIND_LABEL, nameOf, repoFilePath } from "@/lib/flows/defs-library"
 import { messageOf } from "@/lib/utils"
 
 interface Props {

@@ -1,8 +1,8 @@
 import type { ReactNode } from "react"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useHost } from "@/host"
-import { whyNotMerge } from "@/lib/pr-commands"
-import type { OpenPr } from "@/lib/prs"
+import { whyNotMerge } from "@/lib/prs/pr-commands"
+import type { OpenPr } from "@/lib/prs/prs"
 import { copy } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 

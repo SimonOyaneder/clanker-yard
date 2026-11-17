@@ -1,5 +1,5 @@
 import { type ReviewStatus, reviewStatusOf } from "@clanker/api"
-import { tone } from "./format"
+import { tone } from "../format"
 import type { OpenPr } from "./prs"
 import { isDraft } from "./prs"
 

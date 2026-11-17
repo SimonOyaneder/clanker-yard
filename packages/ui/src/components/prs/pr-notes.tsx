@@ -5,7 +5,7 @@ import { NoteItem } from "@/components/notes"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { alsoInRuns, notesOfPr } from "@/lib/notes"
 import { tone } from "@/lib/format"
-import type { OpenPr } from "@/lib/prs"
+import type { OpenPr } from "@/lib/prs/prs"
 import { cn } from "@/lib/utils"
 
 /** Las notas de los agentes (`review_note` y `note`) de todos los PRs; cada PR lee las suyas. */

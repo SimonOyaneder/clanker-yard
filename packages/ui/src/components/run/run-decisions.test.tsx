@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
-import { ParkedCallout } from "@/components/project/run-decisions"
+import { ParkedCallout } from "@/components/run/run-decisions"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { type AppActions, AppActionsContext } from "@/lib/app-context"
 import { createMemoryAppData } from "@/demo/memory-app-data"

@@ -1,6 +1,6 @@
 import type { Breaker, CachedPr, ClankerProject, Decision, Lanes, Run } from "@clanker/api"
 import { expect, test } from "vitest"
-import { borrowers, breakersOf, decisionOf, holdsLane, laneUsage, parkedRuns, projectPrs, spentToday } from "@/lib/project-ops"
+import { borrowers, breakersOf, decisionOf, holdsLane, laneUsage, parkedRuns, projectPrs, spentToday } from "@/lib/project/project-ops"
 
 const id = (prefix: string, n: number) => `${prefix}_${String(n).padStart(26, "0")}`
 

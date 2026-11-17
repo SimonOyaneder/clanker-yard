@@ -1,6 +1,6 @@
 import { TriangleAlert } from "lucide-react"
 import { useRef } from "react"
-import type { LineIssue } from "@/lib/def-edit"
+import type { LineIssue } from "@/lib/flows/def-edit"
 import { cn } from "@/lib/utils"
 
 const LINE = 20 // px; la gutter y el texto comparten altura de línea para que cada marca caiga en su línea.

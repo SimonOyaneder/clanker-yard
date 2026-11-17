@@ -9,9 +9,9 @@ import { useLiveQuery } from "@/hooks/use-live"
 import { useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
 import { costUsd, elapsed, tone } from "@/lib/format"
-import { holdsLane, type LaneUsage } from "@/lib/project-ops"
-import { type Stepper, stepperOf } from "@/lib/stepper"
-import type { SubjectLabel } from "@/lib/subject"
+import { holdsLane, type LaneUsage } from "@/lib/project/project-ops"
+import { type Stepper, stepperOf } from "@/lib/project/stepper"
+import type { SubjectLabel } from "@/lib/project/subject"
 import { cn } from "@/lib/utils"
 
 const LANE = {

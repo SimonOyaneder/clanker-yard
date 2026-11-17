@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
-import { openPrsOf } from "@/lib/prs"
-import { buildStackForest, listStackGroups } from "@/lib/stack"
+import { openPrsOf } from "@/lib/prs/prs"
+import { buildStackForest, listStackGroups } from "@/lib/prs/stack"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")

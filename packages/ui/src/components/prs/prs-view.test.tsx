@@ -7,7 +7,7 @@ import { PrsView } from "@/components/prs/prs-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { HostProvider, type Host } from "@/host"
-import { openPrsOf } from "@/lib/prs"
+import { openPrsOf } from "@/lib/prs/prs"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")

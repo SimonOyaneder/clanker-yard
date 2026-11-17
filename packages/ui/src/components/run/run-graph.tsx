@@ -4,9 +4,9 @@ import "@xyflow/react/dist/style.css"
 import { useEffect, useMemo } from "react"
 import { FlowEdge, type FlowEdgeType } from "@/components/graph/flow-edge"
 import { FlowNode, type FlowNodeData, type NodeCommands } from "@/components/graph/flow-node"
-import { type RunCommands, useRunCommands } from "@/components/project/run-commands"
+import { type RunCommands, useRunCommands } from "@/components/run/run-commands"
 import { useColorMode } from "@/hooks/use-color-mode"
-import { stepCaps } from "@/lib/run-commands"
+import { stepCaps } from "@/lib/project/run-commands"
 import { IDLE_NODE, layoutShape, nodeStates, resolveMax, roundsOf, shapeOf, type GraphEdge, type GraphShape, type NodeState } from "@/lib/run-graph"
 
 const nodeTypes = { flow: FlowNode }

@@ -4,7 +4,7 @@ import { useAppData } from "@/app-data"
 import { DefFormFrame } from "@/components/flows/def-form-frame"
 import { SelectField } from "@/components/flows/select-field"
 import { useLiveQuery } from "@/hooks/use-live"
-import { profileSummary, withRole } from "@/lib/def-form"
+import { profileSummary, withRole } from "@/lib/flows/def-form"
 
 interface Props {
   def: DefRecord

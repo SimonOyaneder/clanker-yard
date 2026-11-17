@@ -1,6 +1,6 @@
 import type { DefWrite, DefWriteKind } from "@clanker/api"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
-import { changeKind, describePath, plain, showValue } from "@/lib/def-edit"
+import { changeKind, describePath, plain, showValue } from "@/lib/flows/def-edit"
 
 interface Props {
   title: string

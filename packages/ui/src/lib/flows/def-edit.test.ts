@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { describePath, lineIssues, lineOfPath, syntaxIssue } from "@/lib/def-edit"
+import { describePath, lineIssues, lineOfPath, syntaxIssue } from "@/lib/flows/def-edit"
 
 const flow = JSON.stringify({ id: "demo", nodes: { plan: { type: "agent", on: { ok: "@done", "fail": ["a", "b"] } }, sync: { type: "action" } } }, null, 2)
 

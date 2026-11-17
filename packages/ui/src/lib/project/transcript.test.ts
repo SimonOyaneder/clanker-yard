@@ -1,6 +1,6 @@
 import type { TranscriptEntry } from "@clanker/api"
 import { expect, test } from "vitest"
-import { rowsOf } from "@/lib/transcript"
+import { rowsOf } from "@/lib/project/transcript"
 
 const call = (id: string): TranscriptEntry => ({ kind: "tool_call", id, tool: "Read", detail: "a.rb", input: "{}", truncated: false })
 const result = (id: string, isError = false): TranscriptEntry => ({ kind: "tool_result", id, text: "ok", isError, truncated: false })

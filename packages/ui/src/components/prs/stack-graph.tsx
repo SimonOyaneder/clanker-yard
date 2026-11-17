@@ -12,10 +12,10 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { useEffect, useMemo, useState } from "react"
-import type { OpenPr } from "@/lib/prs"
+import type { OpenPr } from "@/lib/prs/prs"
 import { useColorMode } from "@/hooks/use-color-mode"
 import { useHost } from "@/host"
-import { buildStackForest, layoutStackGroups, listStackGroups } from "@/lib/stack"
+import { buildStackForest, layoutStackGroups, listStackGroups } from "@/lib/prs/stack"
 import { NODE_HEIGHT, NODE_WIDTH, PrNode, type PrNodeData } from "./pr-node"
 
 const nodeTypes = { pr: PrNode }

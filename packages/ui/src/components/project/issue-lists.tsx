@@ -7,8 +7,8 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
 import { issueKey, tone } from "@/lib/format"
-import { decisionOf, parkReasonOf } from "@/lib/project-ops"
-import type { SubjectLabel } from "@/lib/subject"
+import { decisionOf, parkReasonOf } from "@/lib/project/project-ops"
+import type { SubjectLabel } from "@/lib/project/subject"
 import { cn } from "@/lib/utils"
 
 const QUEUE_STATE = {

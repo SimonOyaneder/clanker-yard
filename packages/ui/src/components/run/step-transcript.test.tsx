@@ -3,7 +3,7 @@ import type { AgentSessionId, TranscriptEntry, TranscriptPage } from "@clanker/a
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider, type AppData } from "@/app-data"
-import { StepTranscript } from "@/components/project/step-transcript"
+import { StepTranscript } from "@/components/run/step-transcript"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const SESSION = "ses_00000000000000000000000001" as AgentSessionId

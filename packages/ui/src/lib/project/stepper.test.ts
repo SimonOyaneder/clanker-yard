@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 import { createMemoryAppData } from "@/demo/memory-app-data"
-import { stepperOf } from "@/lib/stepper"
+import { stepperOf } from "@/lib/project/stepper"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 const runId = (n: number) => `run_${String(n).padStart(26, "0")}` as const

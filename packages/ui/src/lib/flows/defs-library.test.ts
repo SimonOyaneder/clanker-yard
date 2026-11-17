@@ -1,6 +1,6 @@
 import type { ClankerProject, DefRecord } from "@clanker/api"
 import { expect, test } from "vitest"
-import { duplicateOf, isInternal, libraryRows, repoFilePath, repoOrigin, sourceLabel } from "@/lib/defs-library"
+import { duplicateOf, isInternal, libraryRows, repoFilePath, repoOrigin, sourceLabel } from "@/lib/flows/defs-library"
 import { SEED_TECHLEAD, SEED_TOY } from "@/demo/seed-flows"
 
 let n = 0

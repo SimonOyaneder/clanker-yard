@@ -1,7 +1,7 @@
 import type { Step, StepDetail, StepSession } from "@clanker/api"
 import { ChevronRight, Copy } from "lucide-react"
 import { Pill } from "@/components/common"
-import { ArtifactText, Code, EmptyNote } from "@/components/project/step-parts"
+import { ArtifactText, Code, EmptyNote } from "@/components/run/step-parts"
 import { sessionLook, stepLook } from "@/components/project/status"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"

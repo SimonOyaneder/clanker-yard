@@ -5,8 +5,8 @@ import { useAppData } from "@/app-data"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { useHost } from "@/host"
 import { useToastedCommand } from "@/hooks/use-toasted-command"
-import { type PrCaps, prCaps } from "@/lib/pr-commands"
-import type { OpenPr } from "@/lib/prs"
+import { type PrCaps, prCaps } from "@/lib/prs/pr-commands"
+import type { OpenPr } from "@/lib/prs/prs"
 import { messageOf } from "@/lib/utils"
 
 // Lo que una persona le pide a un PR (`prs.*` del core): mergear según la estrategia del pack, pedir la review del
