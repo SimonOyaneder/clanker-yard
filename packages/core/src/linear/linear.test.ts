@@ -300,12 +300,12 @@ describe("disconnect", () => {
   test("borra los tokens de Linear y la cuenta, y emite connection.changed", async () => {
     await connectLinear();
 
-    await connections.disconnect("linear", "clanker-yard", "cli");
+    await connections.disconnect("linear", "clanker-yard", "ui");
 
     expect(connections.list()).toEqual([]);
     expect(await secrets.get("connection:linear:clanker-yard")).toBeUndefined();
     expect(store.events.since(0).at(-1)).toMatchObject({
-      origin: "cli",
+      origin: "ui",
       payload: { provider: "linear", account: "clanker-yard", status: "disconnected" },
     });
   });
@@ -325,7 +325,7 @@ describe("disconnect", () => {
 
     const refreshing = connections.token("linear", "clanker-yard");
     await saving;
-    const disconnecting = connections.disconnect("linear", "clanker-yard", "cli");
+    const disconnecting = connections.disconnect("linear", "clanker-yard", "ui");
     release();
     await refreshing;
     await disconnecting;

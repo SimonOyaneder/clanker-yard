@@ -31,7 +31,7 @@ import { connections } from "../store/schema";
 import type { Store } from "../store/store";
 import { OAuthSession } from "./oauth-session";
 import { messageOf } from "../errors/format";
-import { BadRequestError } from "../errors/domain";
+import { BadRequestError, requireUiOrigin } from "../errors/domain";
 
 export interface ConnectInput {
   provider: ConnectionProvider;
@@ -133,7 +133,7 @@ export interface Connections {
   /**
    * Valida un PAT classic de GitHub y lo conecta con la cuenta a la que pertenece (`GitHubPatError`
    * si no sirve, sin guardar nada). Sus scopes quedan como `scopes`. Emite
-   * `connection.changed`.
+   * `connection.changed`. Solo desde la app (`UiOnlyError` con otro origin): cambiar la credencial es de una persona.
    */
   setPat(token: string, origin: Origin): Promise<Connection>;
   /**
@@ -172,7 +172,8 @@ export interface Connections {
   /**
    * Guarda la API key de Anthropic en `Secrets` y deja la cuenta `claude/api-key` activa: desde entonces
    * `claudeCredentials` la usa. Antes la prueba; si Anthropic la rechaza o no se pudo probar lanza
-   * `ClaudeSetupError` sin guardar nada. Volver a la suscripción es `disconnect("claude", "api-key")`.
+   * `ClaudeSetupError` sin guardar nada. Volver a la suscripción es `disconnect("claude", "api-key")`. Solo desde la
+   * app (`UiOnlyError` con otro origin).
    */
   setClaudeApiKey(key: string, origin: Origin): Promise<Connection>;
   /**
@@ -215,7 +216,7 @@ export interface Connections {
   token(provider: ConnectionProvider, account: string): Promise<string>;
   /**
    * Borra el token y la cuenta y emite `connection.changed`. No hace nada si no estaba conectada. Con
-   * Linear y GitHub, espera a que termine un refresh en vuelo.
+   * Linear y GitHub, espera a que termine un refresh en vuelo. Solo desde la app (`UiOnlyError` con otro origin).
    */
   disconnect(provider: ConnectionProvider, account: string, origin: Origin): Promise<void>;
 }
@@ -555,6 +556,7 @@ export function createConnections({ store, secrets, github = {}, githubApp, line
     },
 
     async setPat(token, origin) {
+      requireUiOrigin(origin, "Un token de GitHub se pega desde la app, en Conexiones.");
       const { login, scopes, expiresAt } = await validatePat(token, github);
       return self.connect(
         { provider: "github", account: login, scopes, token, expiresAt },
@@ -638,6 +640,7 @@ export function createConnections({ store, secrets, github = {}, githubApp, line
     },
 
     async setClaudeApiKey(key, origin) {
+      requireUiOrigin(origin, "La API key de Anthropic se pega desde la app, en Conexiones.");
       if (key === "") throw new ClaudeSetupError("La API key de Claude no puede estar vacía.");
       const status = await probe(apiKeyCredentials(key, { env: claudeEnv }));
       if (status.state !== "ready" && status.state !== "quota_exhausted") {
@@ -719,6 +722,7 @@ export function createConnections({ store, secrets, github = {}, githubApp, line
     },
 
     async disconnect(provider, account, origin) {
+      requireUiOrigin(origin, "Una cuenta se desconecta desde la app, en Conexiones.");
       if (provider === "linear" || provider === "github") {
         // Después de un refresh en vuelo, no antes: si no, escribiría el secreto recién borrado.
         const key = sessionKey(provider, account);

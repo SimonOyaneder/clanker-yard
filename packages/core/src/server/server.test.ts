@@ -190,15 +190,17 @@ describe("connections", () => {
     expect(JSON.stringify(listed)).not.toContain(token);
   });
 
-  test("disconnect borra la cuenta con el origen de la llamada", async () => {
+  test("disconnect es de la app: la CLI recibe FORBIDDEN y la app borra la cuenta con su origin", async () => {
     await connections.connect({ provider: "github", account: "simon", scopes: [], token: "ghp_x" }, "ui");
     const core = await start();
-    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+    const cli = createClient({ url: core.url, token: core.token, origin: "cli" });
+    const app = createClient({ url: core.url, token: core.token, origin: "ui", uiKey: UI_KEY });
 
-    await client.connections.disconnect({ provider: "github", account: "simon" });
+    await expect(cli.connections.disconnect({ provider: "github", account: "simon" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await app.connections.disconnect({ provider: "github", account: "simon" });
 
-    expect(await client.connections.list()).toEqual([]);
-    expect(store.events.since(0).at(-1)).toMatchObject({ origin: "cli", payload: { status: "disconnected" } });
+    expect(await app.connections.list()).toEqual([]);
+    expect(store.events.since(0).at(-1)).toMatchObject({ origin: "ui", payload: { status: "disconnected" } });
   });
 
   test("testClaude devuelve plan y uso, y connections.list muestra claude con su estado", async () => {

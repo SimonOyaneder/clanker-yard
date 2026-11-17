@@ -5,7 +5,7 @@ import { newId } from "../store/conventions";
 import { learnings } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import { LearningScreenError, screenLearnings } from "./screen";
-import { BadRequestError, NotFoundError, UiOnlyError } from "../errors/domain";
+import { BadRequestError, NotFoundError, requireUiOrigin, UiOnlyError } from "../errors/domain";
 
 /** El learning pedido no existe. */
 export class LearningNotFoundError extends NotFoundError {
@@ -101,7 +101,7 @@ export function createLearnings({ store, runtime }: { store: Store; runtime?: Ag
     get: (id) => find(store.db, id),
     propose: (input, by) => store.tx((tx) => proposeLearning(tx, { ...input, source: by === "import" ? "import" : "human", origin: by })),
     approve: (id, by) => {
-      if (by !== "ui") throw new UiOnlyError("Un learning lo aprueba una persona desde la app.");
+      requireUiOrigin(by, "Un learning lo aprueba una persona desde la app.");
       return move(id, by, (status) => (status === "approved" ? undefined : { to: "approved", type: "learning.approved" }));
     },
     reject: (id, by) =>

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { join } from "node:path";
 import { createClient, type Client, type DefRecord, type RepoId } from "@clanker/api";
+import { hashUiKey, isolatedUiKey } from "@clanker/api/node";
 import { createConnections, createFileSecrets, createRepos, openStore, type Core, type Store } from "@clanker/core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -60,12 +61,14 @@ async function boot(checkout: TempGitRepo): Promise<Machine> {
     connections,
     runtimes: [createFakeRuntime({ fixtures: home.path, speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
+    // Exportar al repo abre un PR con la cuenta del usuario: lo pide una persona desde la app.
+    uiKeyHash: hashUiKey(isolatedUiKey(home.path)),
     scheduler: false,
     gitUrl: () => `file://${repo.remoteDir}`,
     coreVersion: "0.0.0",
     onShutdown: () => {},
   });
-  const machine = { home, store, core, repoId, client: createClient({ url: core.server.url, token: core.server.token, origin: "cli" }) };
+  const machine = { home, store, core, repoId, client: createClient({ url: core.server.url, token: core.server.token, origin: "ui", uiKey: isolatedUiKey(home.path) }) };
   machines.push(machine);
   return machine;
 }

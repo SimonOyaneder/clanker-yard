@@ -138,6 +138,8 @@ const core = await startCore({
 });
 
 const client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
+// Lo que en la app hace una persona (pegar el PAT del simulador) va con la llave de la app, como lo haría la ventana.
+const app = createClient({ url: core.server.url, token: core.server.token, origin: "ui", uiKey: isolatedUiKey(home) });
 const repos = createRepos({ store });
 const lanes = process.env.DEMO_SCENARIO === "lanes";
 // En los escenarios con PRs el repo tiene remoto, para que `prs.list` conozca los que deja sembrados.
@@ -223,7 +225,7 @@ if (process.env.DEMO_INBOX) {
 
 if (lanes) {
   // Sin una cuenta de GitHub conectada, `prs.list` no conoce el remoto del repo y los PRs sembrados no salen.
-  await client.connections.setPat({ token: "ghp_demo" });
+  await app.connections.setPat({ token: "ghp_demo" });
   await seedLanes({ client, store, repoId });
 }
 
@@ -231,7 +233,7 @@ if (process.env.DEMO_SCENARIO === "summary") await seedSummary({ client, store }
 
 if (prsScenario) {
   // Sin una cuenta de GitHub conectada, `prs.list` no conoce el remoto del repo y los PRs sembrados no salen.
-  await client.connections.setPat({ token: "ghp_demo" });
+  await app.connections.setPat({ token: "ghp_demo" });
   // El PR de la base del stack lo "abrió" esta corrida: es la que abre "Ver corrida".
   const run = await client.runs.start({ projectId: project.id, issueId: demoIssues[0]!.id, params: { repo: repoId } });
   await seedPrs({ client, store, sim: github, repoId, origin: { issueId: demoIssues[0]!.id, runId: run.id } });

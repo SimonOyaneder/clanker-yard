@@ -10,3 +10,8 @@ export class BadRequestError extends Error {}
 
 /** Solo lo puede hacer una persona desde la app (origin `ui`): lo que publica con su identidad o entra a los briefs sin otra revisión. */
 export class UiOnlyError extends Error {}
+
+/** Lanza `UiOnlyError` con `message` (por qué y dónde hacerlo) si `origin` no es la app. */
+export function requireUiOrigin(origin: string, message: string): void {
+  if (origin !== "ui") throw new UiOnlyError(message);
+}

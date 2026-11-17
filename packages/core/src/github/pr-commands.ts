@@ -8,7 +8,7 @@ import type { Repos } from "../repos/repos";
 import { commentOnPr } from "./comment";
 import type { PrCache } from "./pr-cache";
 import type { Prs } from "./prs";
-import { BadRequestError, UiOnlyError } from "../errors/domain";
+import { BadRequestError, requireUiOrigin } from "../errors/domain";
 
 // Lo que una persona le pide al core sobre un PR desde la app (`prs.setHold`, `prs.merge`,
 // `prs.requestReview`, `prs.rebase`). Cada pedido relee el PR antes de actuar: lo que vale es lo que pasa
@@ -75,7 +75,7 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache 
     },
 
     async merge(ref, by) {
-      if (by !== "ui") throw new UiOnlyError("Mergear lo pide una persona desde la app: un agente no lo hace por su cuenta.");
+      requireUiOrigin(by, "Mergear lo pide una persona desde la app: un agente no lo hace por su cuenta.");
       const state = await prs.get(ref);
       const strategy = packOf(ref).mergeStrategy;
       if (state.merge.via !== "comment" || !strategy) {

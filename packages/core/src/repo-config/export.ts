@@ -13,7 +13,7 @@ import { RepoNotFoundError } from "../repos/repos";
 import type { Store } from "../store/store";
 import { repoConfigPath, renderRepoFile } from "./files";
 import { messageOf } from "../errors/format";
-import { BadRequestError } from "../errors/domain";
+import { BadRequestError, requireUiOrigin } from "../errors/domain";
 
 /** No se puede exportar: el mensaje dice por qué y qué hacer. */
 export class RepoExportError extends BadRequestError {}
@@ -24,7 +24,8 @@ export interface RepoConfigExporter {
    * escribe en un worktree desechable sobre `origin/<default>` (recién traído), se commitea, se pushea a una
    * branch nueva `clanker/export-<kind>-<slug>-<n>` con la cuenta de GitHub del repo y el PR sale con esa
    * misma cuenta, como el de `pr.publish`. El checkout del usuario no se toca. Lanza `RepoExportError`,
-   * `DefNotFoundError` o `RepoNotFoundError`. Con el PR abierto emite `def.exported` con quién lo pidió.
+   * `DefNotFoundError` o `RepoNotFoundError`. Con el PR abierto emite `def.exported` con quién lo pidió. Solo desde la
+   * app (`UiOnlyError` con otro origin): el PR sale con la identidad del usuario.
    */
   exportDef(input: DefExportToRepo, by: Origin): Promise<DefExported>;
 }
@@ -51,6 +52,7 @@ export function createRepoConfigExporter({ store, defs, repos, config, remote, c
 
   return {
     async exportDef({ kind, id, repoId }, by) {
+      requireUiOrigin(by, "Exportar al repo abre un PR con tu cuenta: se pide desde la app.");
       const def = defs.get(kind, id);
       if (!def) throw new DefNotFoundError(kind, id);
       if (def.scope !== "user") {

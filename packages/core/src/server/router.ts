@@ -38,7 +38,7 @@ import { type Repos } from "../repos/repos";
 import { isMergeOffer } from "../watch/merge-reactions";
 import { eventsAfter } from "./event-stream";
 import { mapApiErrors } from "./api-errors";
-import { UiOnlyError } from "../errors/domain";
+import { requireUiOrigin } from "../errors/domain";
 
 /** Lo que cada llamada trae consigo, venga por HTTP o en proceso (`createRouterClient`, MCP). */
 export interface CoreContext {
@@ -325,7 +325,7 @@ export function createRouter(deps: RouterDeps) {
       }),
       resolve: os.decisions.resolve.handler(({ input, context }) => {
         if (isMergeOffer(store, input.id)) {
-          requireUi(context, "Una oferta de merge la aprueba una persona desde la app: comenta el comando de merge con tu identidad.");
+          requireUiOrigin(context.origin, "Una oferta de merge la aprueba una persona desde la app: comenta el comando de merge con tu identidad.");
         }
         deps.flows.resolveGate(input.id, input.option, context.origin);
         const decision = deps.decisions.get(input.id);
@@ -383,14 +383,6 @@ export function createRouter(deps: RouterDeps) {
 }
 
 export type CoreRouter = ReturnType<typeof createRouter>;
-
-/**
- * Lo que solo una persona puede pedir desde la app (origin `ui`, que exige la llave de la app): un agente con
- * el CLI o el MCP recibe `FORBIDDEN` con `message`, que dice por qué.
- */
-function requireUi(context: CoreContext, message: string): void {
-  if (context.origin !== "ui") throw new UiOnlyError(message);
-}
 
 /** El `Last-Event-ID` del reconectado manda sobre `after`: es lo último que el cliente vio. */
 function resumeFrom(lastEventId: string | undefined, after: number | undefined): number {
