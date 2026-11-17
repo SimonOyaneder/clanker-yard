@@ -32,6 +32,7 @@ const project = (extra: Partial<ClankerProject> = {}): ClankerProject => ({
   conventions: {},
   parallel: 1,
   stackOn: "ci_green",
+  stackMode: "remote",
   statusMapping: {},
   status: "active",
   flowParams: {},

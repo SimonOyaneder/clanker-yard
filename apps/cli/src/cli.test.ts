@@ -22,6 +22,7 @@ const project = ClankerProject.parse({
   conventions: {},
   parallel: 2,
   stackOn: "ci_green",
+  stackMode: "remote",
   statusMapping: {},
   status: "active",
   flowParams: {},

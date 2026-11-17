@@ -52,6 +52,7 @@ describe("create", () => {
       conventions: {},
       parallel: 1,
       stackOn: "ci_green",
+      stackMode: "remote",
       statusMapping: {},
       status: "active",
       flowParams: {},
@@ -289,6 +290,12 @@ describe("update", () => {
     expect(events("project.updated")).toMatchObject([
       { origin: "cli", projectId: project.id, payload: { fields: ["name", "parallel"] } },
     ]);
+  });
+
+  test("stackMode se guarda y emite project.updated con ese campo", () => {
+    expect(projects.update(project.id, { stackMode: "local" }, "ui")).toEqual({ ...project, stackMode: "local" });
+    expect(projects.get(project.id)?.stackMode).toBe("local");
+    expect(events("project.updated")).toMatchObject([{ payload: { fields: ["stackMode"] } }]);
   });
 
   test("trackerRef cambia en un proyecto de tracker externo, suelta su cursor y no se repite entre proyectos", () => {

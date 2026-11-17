@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `stack_mode` text DEFAULT 'remote' NOT NULL;
