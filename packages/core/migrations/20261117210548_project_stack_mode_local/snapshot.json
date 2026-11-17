@@ -1,11 +1,11 @@
 {
-  "version": "7",
-  "dialect": "sqlite",
-  "id": "166017b0-1735-42ad-8944-1820067e076b",
+  "id": "65542991-3192-475a-830d-9695a9192f04",
   "prevIds": [
     "639f6cc2-569e-454c-95a1-52f192321b69",
     "a941497a-d0dc-46ff-9518-df404c14eb85"
   ],
+  "version": "7",
+  "dialect": "sqlite",
   "ddl": [
     {
       "name": "action_effects",
@@ -108,10 +108,6 @@
       "entityType": "tables"
     },
     {
-      "name": "pull_requests",
-      "entityType": "tables"
-    },
-    {
       "name": "repos",
       "entityType": "tables"
     },
@@ -149,6 +145,10 @@
     },
     {
       "name": "workspaces",
+      "entityType": "tables"
+    },
+    {
+      "name": "pull_requests",
       "entityType": "tables"
     },
     {
@@ -2053,16 +2053,6 @@
     },
     {
       "table": "projects",
-      "name": "stack_mode",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "'local'",
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "projects",
       "name": "status",
       "type": "text",
       "notNull": true,
@@ -2118,186 +2108,6 @@
       "notNull": true,
       "autoincrement": false,
       "default": "'{}'",
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "id",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "repo_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "number",
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "node_id",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "head_ref",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "base_ref",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "head_sha",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "state",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "is_draft",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "issue_id",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "run_id",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "owned",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "false",
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "detail",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "detail_at",
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "head_changed_at",
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "hold",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "false",
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "title",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "pull_requests",
-      "name": "body",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
       "generated": null,
       "entityType": "columns"
     },
@@ -3332,6 +3142,196 @@
       "entityType": "columns"
     },
     {
+      "table": "projects",
+      "name": "stack_mode",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'remote'",
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "id",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "repo_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "number",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "node_id",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "head_ref",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "base_ref",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "head_sha",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "state",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "is_draft",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "issue_id",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "run_id",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "owned",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "detail",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "detail_at",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "head_changed_at",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "hold",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "title",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "pull_requests",
+      "name": "body",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
       "table": "agent_sessions",
       "name": "agent_sessions_runtime_session_ref",
       "columns": [
@@ -3706,42 +3706,6 @@
       "entityType": "indexes"
     },
     {
-      "table": "pull_requests",
-      "name": "pull_requests_repo_number",
-      "columns": [
-        {
-          "value": "repo_id",
-          "isExpression": false
-        },
-        {
-          "value": "number",
-          "isExpression": false
-        }
-      ],
-      "isUnique": true,
-      "where": null,
-      "origin": "manual",
-      "entityType": "indexes"
-    },
-    {
-      "table": "pull_requests",
-      "name": "pull_requests_repo_branch_local",
-      "columns": [
-        {
-          "value": "repo_id",
-          "isExpression": false
-        },
-        {
-          "value": "head_ref",
-          "isExpression": false
-        }
-      ],
-      "isUnique": true,
-      "where": "\"pull_requests\".\"state\" = 'local'",
-      "origin": "manual",
-      "entityType": "indexes"
-    },
-    {
       "table": "repos",
       "name": "repos_path",
       "columns": [
@@ -3964,6 +3928,42 @@
       "entityType": "indexes"
     },
     {
+      "table": "pull_requests",
+      "name": "pull_requests_repo_number",
+      "columns": [
+        {
+          "value": "repo_id",
+          "isExpression": false
+        },
+        {
+          "value": "number",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "pull_requests",
+      "name": "pull_requests_repo_branch_local",
+      "columns": [
+        {
+          "value": "repo_id",
+          "isExpression": false
+        },
+        {
+          "value": "head_ref",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"pull_requests\".\"state\" = 'local'",
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
       "table": "agent_sessions",
       "name": "fk_agent_sessions_resumed_from_agent_sessions_id_fk",
       "columns": [
@@ -4146,51 +4146,6 @@
       "entityType": "fks"
     },
     {
-      "table": "merge_offers",
-      "name": "fk_merge_offers_pr_id_pull_requests_id_fk",
-      "columns": [
-        "pr_id"
-      ],
-      "tableTo": "pull_requests",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "NO ACTION",
-      "nameExplicit": false,
-      "entityType": "fks"
-    },
-    {
-      "table": "pr_parents",
-      "name": "fk_pr_parents_child_id_pull_requests_id_fk",
-      "columns": [
-        "child_id"
-      ],
-      "tableTo": "pull_requests",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "NO ACTION",
-      "nameExplicit": false,
-      "entityType": "fks"
-    },
-    {
-      "table": "pr_parents",
-      "name": "fk_pr_parents_parent_id_pull_requests_id_fk",
-      "columns": [
-        "parent_id"
-      ],
-      "tableTo": "pull_requests",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "NO ACTION",
-      "nameExplicit": false,
-      "entityType": "fks"
-    },
-    {
       "table": "project_repos",
       "name": "fk_project_repos_project_id_projects_id_fk",
       "columns": [
@@ -4336,21 +4291,6 @@
         "session_id"
       ],
       "tableTo": "agent_sessions",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "NO ACTION",
-      "nameExplicit": false,
-      "entityType": "fks"
-    },
-    {
-      "table": "watch_marks",
-      "name": "fk_watch_marks_pr_id_pull_requests_id_fk",
-      "columns": [
-        "pr_id"
-      ],
-      "tableTo": "pull_requests",
       "columnsTo": [
         "id"
       ],
@@ -4630,15 +4570,6 @@
       "entityType": "pks"
     },
     {
-      "table": "pull_requests",
-      "name": "pull_requests_pk",
-      "columns": [
-        "id"
-      ],
-      "nameExplicit": false,
-      "entityType": "pks"
-    },
-    {
       "table": "repos",
       "name": "repos_pk",
       "columns": [
@@ -4695,6 +4626,15 @@
     {
       "table": "workspaces",
       "name": "workspaces_pk",
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "pull_requests",
+      "name": "pull_requests_pk",
       "columns": [
         "id"
       ],
@@ -4870,18 +4810,6 @@
       "entityType": "checks"
     },
     {
-      "table": "pull_requests",
-      "name": "pull_requests_number_iff_not_local",
-      "value": "(\"state\" = 'local') = (\"number\" IS NULL) AND (\"state\" = 'local') = (\"node_id\" IS NULL)",
-      "entityType": "checks"
-    },
-    {
-      "table": "pull_requests",
-      "name": "pull_requests_local_title",
-      "value": "\"state\" != 'local' OR \"title\" IS NOT NULL",
-      "entityType": "checks"
-    },
-    {
       "table": "run_metrics",
       "name": "run_metrics_rounds_json",
       "value": "json_valid(\"rounds\")",
@@ -4909,6 +4837,18 @@
       "table": "runs",
       "name": "runs_rounds_json",
       "value": "json_valid(\"rounds\")",
+      "entityType": "checks"
+    },
+    {
+      "table": "pull_requests",
+      "name": "pull_requests_number_iff_not_local",
+      "value": "(\"state\" = 'local') = (\"number\" IS NULL) AND (\"state\" = 'local') = (\"node_id\" IS NULL)",
+      "entityType": "checks"
+    },
+    {
+      "table": "pull_requests",
+      "name": "pull_requests_local_title",
+      "value": "\"state\" != 'local' OR \"title\" IS NOT NULL",
       "entityType": "checks"
     }
   ],
