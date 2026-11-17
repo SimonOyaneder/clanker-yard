@@ -1047,7 +1047,9 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       onto = await resolveBase(cfg, target);
       const head = await inWorktree("rev-parse", "HEAD");
       if (inProgress) throw new RebaseError(`${row.branch} ya tiene un rebase en curso: sigue con \`continue\` o abórtalo.`);
-      if (row.remoteSha === null || head !== row.remoteSha) {
+      // Sin `remote_sha` ni `origin/<branch>` es un PR local (stacks locales): no hay nada que pisar en el remoto.
+      const published = row.remoteSha !== null || (await refExists(cfg, `refs/remotes/${REMOTE}/${row.branch}`));
+      if (published && head !== row.remoteSha) {
         throw new RebaseError(
           `HEAD de ${row.branch} (${head.slice(0, 9)}) no es lo último que se pusheó (${row.remoteSha?.slice(0, 9) ?? "nada"}): ` +
             "rebasearlo pisaría o perdería commits. Retoma la branch con attach.",

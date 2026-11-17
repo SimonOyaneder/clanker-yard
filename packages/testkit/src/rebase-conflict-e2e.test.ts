@@ -193,3 +193,57 @@ describe("rebase-conflicto con el core real", () => {
     expect(scenario!.remoteLog(branch)).toEqual(published);
   });
 });
+
+describe("rebase-conflicto-local con el core real", () => {
+  test("un PR local que choca con su base nueva se resuelve en la máquina y, sobre la branch por defecto, se publica", async () => {
+    scenario = await startTechleadScenario({ bot: BOT, fixtures: [fixtures("resolved")] });
+    const { store, repo, github, project } = scenario;
+    const { run } = await scenario.run();
+    expect(await scenario.finished(run.id)).toMatchObject({ status: "done" });
+
+    // El PR pasa a vivir solo en la máquina: sin PR ni branch en GitHub, como lo dejaría `pr.publish` en modo local.
+    const branch = github.pulls()[0]!.head.ref;
+    const head = repo.git("rev-parse", branch);
+    github.pr(1).close();
+    repo.git("push", "--quiet", "origin", "--delete", branch);
+    repo.git("fetch", "--quiet", "--prune", "origin");
+    const pr = store.db.$client.prepare("SELECT id FROM pull_requests").get() as { id: string };
+    store.db.$client.prepare("UPDATE pull_requests SET state = 'local', number = NULL, node_id = NULL, title = 'Validar el monto', body = 'Cuerpo guardado' WHERE id = ?").run(pr.id);
+    store.db.$client.prepare("UPDATE workspaces SET remote_sha = NULL WHERE branch = ?").run(branch);
+
+    writeFileSync(join(repo.dir, "src/transfer.ts"), 'export function createTransfer(amount: number) {\n  return { amount, status: "pending" };\n}\n');
+    repo.git("add", "--all");
+    repo.git("commit", "--quiet", "--message", "feat: transfers start pending");
+    repo.git("push", "--quiet", "origin", "main");
+    const main = repo.git("rev-parse", "HEAD");
+
+    // Lo que anota `stack.restack` al no poder restackear un hijo local.
+    store.tx((tx) =>
+      tx.emit({ type: "pr.conflict", origin: "watch", projectId: project.id, subject: { type: "pr", id: pr.id }, payload: { repo: REPO, prId: pr.id, local: true, sha: head, base: "main" } }),
+    );
+    const started = store.db.$client
+      .prepare("SELECT defs.slug, runs.id FROM runs JOIN defs ON defs.id = runs.flow_def_id WHERE defs.slug LIKE 'rebase-conflicto%'")
+      .all() as { slug: string; id: string }[];
+    expect(started.map((r) => r.slug)).toEqual(["rebase-conflicto-local"]);
+
+    const done = await scenario.finished(started[0]!.id as RunId);
+
+    expect(done).toMatchObject({ status: "done", outcome: "done", flow: { slug: "rebase-conflicto-local" }, lane: "maintenance" });
+    expect(done.params).toMatchObject({ prId: pr.id, branch, base: "main" });
+    expect(nodesOf(done).filter(([node]) => !String(node).startsWith("lr-"))).toEqual([
+      ["ws", "ok"],
+      ["rebase", "conflict"],
+      ["resolve", "resolved"],
+      ["continue", "clean"],
+      ["checks", "ok"],
+      ["commit", "ok"],
+      ["save", "promotable"],
+      ["promote", "ok"],
+      ["feedback", "done"],
+    ]);
+    // Quedó sobre la punta nueva de main y salió a GitHub como un PR nuevo con lo guardado, en la misma fila.
+    expect(repo.git("--git-dir", repo.remoteDir!, "merge-base", "main", branch)).toBe(main);
+    expect(github.pulls().at(-1)).toMatchObject({ number: 2, title: "Validar el monto", body: "Cuerpo guardado", draft: true, state: "open" });
+    expect(store.db.$client.prepare("SELECT id, number, state FROM pull_requests").all()).toEqual([{ id: pr.id, number: 2, state: "open" }]);
+  });
+});

@@ -112,6 +112,7 @@ export const EventType = z.enum([
   "lease.released",
   "lease.expired",
   "pr.opened",
+  "pr.saved_local",
   "pr.changed",
   "pr.botReview",
   "pr.ci",

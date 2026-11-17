@@ -156,6 +156,9 @@ const router = os.router({
     rebase: os.prs.rebase.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    publishLocal: os.prs.publishLocal.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     republish: os.prs.republish.handler(() => ({ id: "rep_1", done: true, results: [] })),
     republishProgress: os.prs.republishProgress.handler(() => ({ id: "rep_1", done: true, results: [] })),
   },

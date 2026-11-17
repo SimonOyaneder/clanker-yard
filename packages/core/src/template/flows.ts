@@ -122,7 +122,11 @@ export const TECHLEAD_CLASICO: FlowDef = {
       type: "action",
       action: "pr.publish",
       args: { ws: "$ws", plan: "$commit", draft: true, dependsOn: "$run.params.dependsOn" },
-      on: { ok: "feedback", replan: { to: "commit", maxRounds: 2, exhausted: "@failed" } },
+      on: {
+        ok: "feedback",
+        local: { to: "@done", note: "PR local: se publica cuando se mergee su base" },
+        replan: { to: "commit", maxRounds: 2, exhausted: "@failed" },
+      },
     },
     feedback: {
       type: "flow",
@@ -377,7 +381,7 @@ export const REBASE_CONFLICTO: FlowDef = {
   id: "rebase-conflicto",
   name: "Rebase por conflicto",
   internal: true,
-  trigger: { type: "pr.conflict" },
+  trigger: { type: "pr.conflict", filter: { local: false } },
   lane: "maintenance",
   params: {
     pr: "PrRef",
@@ -513,6 +517,117 @@ export const REBASE_CONFLICTO: FlowDef = {
 };
 
 /**
+ * "Rebase por conflicto" de un PR local (stacks locales, `pr.conflict` con `local: true`): el restack no pudo dejarlo
+ * sobre su base nueva. Como `rebase-conflicto` pero en la máquina: `workspace.acquire` en vez de `attach` (la branch no
+ * está en el remoto), sin `pr.rebaseApproval` (un PR local se trata como un draft: un conflicto de comportamiento
+ * sigue con la resolución conservadora y una nota) y sin push: `pr.saveLocal` guarda la punta y la base en la fila.
+ * Si quedó sobre la branch por defecto se publica (`pr.promote` y `pr-feedback`); si no, sigue local.
+ */
+export const REBASE_CONFLICTO_LOCAL: FlowDef = {
+  schema: 1,
+  id: "rebase-conflicto-local",
+  name: "Rebase por conflicto de un PR local",
+  internal: true,
+  trigger: { type: "pr.conflict", filter: { local: true } },
+  lane: "maintenance",
+  params: {
+    prId: "string",
+    repo: "RepoRef",
+    branch: "string",
+    base: "string",
+    conflictRounds: { type: "number", default: 20 },
+    checkRounds: { type: "number", default: 2 },
+    externalRounds: { type: "number", default: 3 },
+  },
+  limits: { maxCostUsd: null, maxSteps: 200 },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.acquire",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "rebase" },
+    },
+    rebase: {
+      type: "action",
+      action: "workspace.rebase",
+      args: { ws: "$ws", base: "$run.params.base" },
+      on: {
+        clean: "checks",
+        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: REBASE_ROUNDS_EXHAUSTED },
+        error: { to: "@blocked", note: "El rebase del PR local falló sin conflicto: la branch quedó como estaba" },
+      },
+    },
+    resolve: {
+      type: "agent",
+      role: "dev",
+      mode: "conflict",
+      brief: { failures: "$prev.failures" },
+      on: {
+        resolved: "continue",
+        behavior: { to: "continue", note: "Resolver el conflicto exigía decidir comportamiento: se aplicó la resolución más conservadora, revísala" },
+      },
+    },
+    continue: {
+      type: "action",
+      action: "workspace.rebase",
+      args: { ws: "$ws", base: "$run.params.base", continue: true },
+      on: {
+        clean: "checks",
+        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: REBASE_ROUNDS_EXHAUSTED },
+        error: { to: "@blocked", note: "El rebase del PR local falló sin conflicto: la branch quedó como estaba" },
+      },
+    },
+    checks: {
+      type: "action",
+      action: "recipe.check",
+      args: { ws: "$ws", scope: "changed", afterRebase: true },
+      on: {
+        ok: "commit",
+        fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "commit", note: "Tests o lint siguen rojos tras el rebase" } },
+      },
+    },
+    fix: {
+      type: "agent",
+      role: "dev",
+      mode: "fix",
+      brief: { failures: "$prev.failures" },
+      on: { ok: "checks" },
+    },
+    commit: {
+      type: "action",
+      action: "workspace.commitAfterRebase",
+      args: { ws: "$ws" },
+      on: { ok: "save" },
+    },
+    save: {
+      type: "action",
+      action: "pr.saveLocal",
+      args: { ws: "$ws", prId: "$run.params.prId" },
+      on: { local: { to: "@done", note: "PR local: se publica cuando se mergee su base" }, promotable: "promote" },
+    },
+    promote: {
+      type: "action",
+      action: "pr.promote",
+      args: { ws: "$ws", prId: "$run.params.prId" },
+      on: { ok: "feedback" },
+    },
+    feedback: {
+      type: "flow",
+      flow: "pr-feedback",
+      params: { ws: "$ws", pr: "$promote.pr", externalRounds: "$run.params.externalRounds" },
+      on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+    },
+    abort: {
+      type: "action",
+      action: "workspace.rebaseAbort",
+      args: { ws: "$ws" },
+      on: { ok: "@blocked" },
+    },
+  },
+};
+
+/**
  * Le pide `/review` a cada draft que el restack pusheó (`stack.restack` y `stack.restackRewritten` dejan
  * `changedDrafts` en el nodo `restack` de quien lo llama): una corrida de `restack-feedback` por PR, en
  * paralelo, cada una con su propio worktree. Sin drafts cambiados la lista es vacía, no corre ninguna rama y no
@@ -574,11 +689,103 @@ export const RESTACK_FEEDBACK: FlowDef = {
 };
 
 /**
+ * Publica en GitHub cada PR local que el restack dejó sobre la branch por defecto (`promotable` del nodo `restack` de
+ * quien lo llama): una corrida de `promote-local` por PR, en paralelo. Sin promovibles no corre nada.
+ */
+const PROMOTE_LOCALS: Node = {
+  type: "parallel",
+  branches: {
+    forEach: "$restack.promotable",
+    branch: {
+      type: "flow",
+      flow: "promote-local",
+      params: {
+        prId: "$item.prId",
+        repo: "$run.params.repo",
+        branch: "$item.branch",
+        base: "$item.base",
+        externalRounds: "$run.params.externalRounds",
+      },
+    },
+  },
+  join: "flows.worst",
+  on: { done: "feedback", blocked: "@blocked", failed: "@failed" },
+};
+
+/**
+ * Subflujo (stacks locales): un PR que vivía solo en la máquina sale a GitHub. Su base cambió desde que pasó los
+ * checks (el restack o una persona que pidió publicarlo ya), así que corren todos otra vez; rojos, el dev los arregla
+ * y el core commitea lo que dejó. `pr.promote` pushea y abre el PR draft en la misma fila, y `pr-feedback` sigue como
+ * con cualquier PR nuevo.
+ */
+export const PROMOTE_LOCAL: FlowDef = {
+  schema: 1,
+  id: "promote-local",
+  name: "Publicar un PR local",
+  internal: true,
+  trigger: { type: "subflow" },
+  // Como subflujo hereda el carril de quien lo llama; `prs.publishLocal` lo arranca solo, en mantenimiento.
+  lane: "maintenance",
+  params: {
+    prId: "string",
+    repo: "RepoRef",
+    branch: "string",
+    base: "string",
+    checkRounds: { type: "number", default: 3 },
+    externalRounds: { type: "number", default: 3 },
+  },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.acquire",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "checks" },
+    },
+    checks: {
+      type: "action",
+      action: "recipe.check",
+      args: { ws: "$ws", scope: "all" },
+      on: {
+        ok: "commit",
+        fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "commit", note: "Tests o lint siguen rojos antes de publicar el PR local" } },
+      },
+    },
+    fix: {
+      type: "agent",
+      role: "dev",
+      mode: "fix",
+      brief: { failures: "$prev.failures" },
+      on: { ok: "checks" },
+    },
+    commit: {
+      type: "action",
+      action: "workspace.commitAfterRebase",
+      args: { ws: "$ws" },
+      on: { ok: "promote" },
+    },
+    promote: {
+      type: "action",
+      action: "pr.promote",
+      args: { ws: "$ws", prId: "$run.params.prId", base: "$run.params.base" },
+      on: { ok: "feedback" },
+    },
+    feedback: {
+      type: "flow",
+      flow: "pr-feedback",
+      params: { ws: "$ws", pr: "$promote.pr", externalRounds: "$run.params.externalRounds" },
+      on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+    },
+  },
+};
+
+/**
  * "Restack": se mergeó un PR del sistema (`pr.merged`) y los que iban encima tienen que quedar sobre la base
  * donde se mergeó. Corre en mantenimiento. `stack.restack` rebasea la cadena sin agentes; un hijo que choca no
  * frena a los demás, anota su `pr.conflict` y lo resuelve `rebase-conflicto`, por lo que el conflicto también
  * sigue a `feedback`: los hijos que sí se restackearon lo necesitan. Los que quedaron en draft piden `/review`
- * otra vez (la regla del clanker-loop); el resto no pasa por ningún agente.
+ * otra vez (la regla del clanker-loop); el resto no pasa por ningún agente. Los PRs locales que quedaron sobre la
+ * branch por defecto se publican antes (`promote-local`).
  */
 export const RESTACK: FlowDef = {
   schema: 1,
@@ -595,8 +802,9 @@ export const RESTACK: FlowDef = {
       type: "action",
       action: "stack.restack",
       args: { pr: "$run.params.pr" },
-      on: { ok: "feedback", conflict: { to: "feedback", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
+      on: { ok: "promote", conflict: { to: "promote", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
     },
+    promote: PROMOTE_LOCALS,
     feedback: FEEDBACK_CHANGED_DRAFTS,
   },
 };
@@ -622,8 +830,9 @@ export const RESTACK_REWRITTEN: FlowDef = {
       type: "action",
       action: "stack.restackRewritten",
       args: { pr: "$run.params.pr", from: "$run.params.from", to: "$run.params.to" },
-      on: { ok: "feedback", conflict: { to: "feedback", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
+      on: { ok: "promote", conflict: { to: "promote", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
     },
+    promote: PROMOTE_LOCALS,
     feedback: FEEDBACK_CHANGED_DRAFTS,
   },
 };
@@ -841,8 +1050,14 @@ export const REPUBLISH_PR: FlowDef = {
         plan: { commits: "$commit.commits", pr: { title: "$run.params.title", body: "$run.params.body" } },
         draft: "$run.params.draft",
         expectTree: "$replay.tree",
+        forceRemote: true,
       },
-      on: { ok: "supersede", replan: { to: "commit", maxRounds: 2, exhausted: "discard" }, error: "discard" },
+      on: {
+        ok: "supersede",
+        local: "discard",
+        replan: { to: "commit", maxRounds: 2, exhausted: "discard" },
+        error: "discard",
+      },
     },
     discard: {
       type: "action",
@@ -869,7 +1084,9 @@ export const flows: Record<string, FlowDef> = {
   "techlead-clasico": TECHLEAD_CLASICO,
   "pr-feedback": PR_FEEDBACK,
   "rebase-conflicto": REBASE_CONFLICTO,
+  "rebase-conflicto-local": REBASE_CONFLICTO_LOCAL,
   "restack-feedback": RESTACK_FEEDBACK,
+  "promote-local": PROMOTE_LOCAL,
   restack: RESTACK,
   "restack-rewritten": RESTACK_REWRITTEN,
   council: COUNCIL,

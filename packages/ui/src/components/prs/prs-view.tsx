@@ -162,6 +162,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
       else if (key === PR_KEYS.rebase && caps.rebase && !selected.local) commands.rebase(selected)
       else if (key === PR_KEYS.hold && caps.hold && !selected.local) commands.toggleHold(selected)
       else if (key === PR_KEYS.run && caps.run) commands.openRun(selected)
+      else if (key === PR_KEYS.publishLocal && caps.publishLocal && selected.local) commands.publishLocal(selected)
       else return
       e.preventDefault()
     }

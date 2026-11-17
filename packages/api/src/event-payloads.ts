@@ -9,6 +9,7 @@ import type { BreakerCause } from "./runs";
  * silencio. Los demás eventos llevan un registro libre; se suman aquí cuando alguien los lee.
  */
 export interface EventPayloads {
+  "pr.saved_local": { repo: string; branch: string; base: string };
   /** Una corrida devolvió el sujeto que pidió prestado: la dueña (`fromRunId`) relee su branch. */
   "run.returned": { runId: RunId; fromRunId: RunId };
   "breaker.opened": { scope: string; cause: BreakerCause; reason: string; retryAt: number };

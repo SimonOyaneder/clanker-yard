@@ -148,7 +148,7 @@ export async function startNightScenario(): Promise<NightScenario> {
         commands: { test: "npm test -- {{files}}" },
         checks: ["test"],
       },
-      project: { parallel: 2, maxCostUsd: 5 },
+      project: { parallel: 2, maxCostUsd: 5, stackMode: "remote" },
       // La prueba de un breaker sale de un `setTimeout` real (el reloj falso no lo mueve): a los 250 ms, no al minuto.
       breakerBackoffMs: [250],
     });

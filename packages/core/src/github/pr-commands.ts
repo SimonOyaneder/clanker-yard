@@ -1,10 +1,13 @@
-import { mergeBlocker, rebaseBlocker, type ClientOrigin, type PrRef, type PrState } from "@clanker/api";
+import { mergeBlocker, rebaseBlocker, type ClientOrigin, type PrRef, type PrState, type RunId } from "@clanker/api";
 import { eq } from "drizzle-orm";
 import type { Packs } from "../packs/packs";
 import { runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Connections } from "../connections/connections";
 import type { Repos } from "../repos/repos";
+import type { Engine } from "../flows/engine";
+import type { Projects } from "../projects/projects";
+import { prById } from "./pr-rows";
 import { commentOnPr } from "./comment";
 import type { PrCache } from "./pr-cache";
 import type { Prs } from "./prs";
@@ -24,6 +27,9 @@ export interface PrCommandsDeps {
   packs: Pick<Packs, "packFor">;
   prs: Pick<Prs, "get">;
   cache: Pick<PrCache, "refresh" | "setHold" | "row">;
+  /** Para `publishLocal`, que arranca `promote-local`. */
+  flows: Pick<Engine, "start">;
+  projects: Pick<Projects, "get">;
 }
 
 export interface PrCommands {
@@ -44,9 +50,14 @@ export interface PrCommands {
    * cerrado o con threads de council.
    */
   rebase(ref: PrRef, by: ClientOrigin): Promise<void>;
+  /**
+   * Arranca `promote-local` sobre un PR local con su base de hoy: sale en GitHub apilado sobre su padre. Publica con la
+   * identidad del usuario sin preguntar: solo con `by: "ui"` (`UiOnlyError` si no).
+   */
+  publishLocal(id: string, by: ClientOrigin): RunId;
 }
 
-export function createPrCommands({ store, repos, connections, packs, prs, cache }: PrCommandsDeps): PrCommands {
+export function createPrCommands({ store, repos, connections, packs, prs, cache, flows, projects }: PrCommandsDeps): PrCommands {
   const packOf = (ref: PrRef) => packs.packFor({ githubOrg: ref.repo.split("/")[0]! });
   const label = ({ repo, number }: PrRef) => `${repo}#${number}`;
   /** La fila del PR en el caché; los pedidos que la necesitan solo valen para PRs que Watch o `pr.publish` ya registraron. */
@@ -109,6 +120,21 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache 
           subject: { type: "pr", id: row.id },
           payload: { repo: ref.repo, number: ref.number, sha: state.headSha, base: state.baseRef },
         }),
+      );
+    },
+
+    publishLocal(id, by) {
+      requireUiOrigin(by, "Publicar un PR local lo pide una persona desde la app: sale en GitHub con tu cuenta.");
+      const row = prById(store.db, id);
+      if (!row) throw new PrCommandError(`No existe el PR ${id}.`);
+      if (row.state !== "local" || !row.owned) throw new PrCommandError(`${row.headRef} ya no es un PR local: no hay nada que publicar.`);
+      const projectId = row.runId ? store.db.select({ id: runs.projectId }).from(runs).where(eq(runs.id, row.runId)).get()?.id : undefined;
+      const project = projectId ? projects.get(projectId) : undefined;
+      return flows.start(
+        "promote-local",
+        { type: "pr", id: row.id },
+        { prId: row.id, repo: row.repoId, branch: row.headRef, base: row.baseRef },
+        { ...(projectId && { projectId }), repoId: row.repoId, ...(project?.defaultProfileId && { profile: project.defaultProfileId }), by },
       );
     },
   };

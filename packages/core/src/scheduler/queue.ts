@@ -31,6 +31,7 @@ export interface QueueRun {
 export interface QueuePrFact {
   issueId: IssueId;
   repoId: RepoId;
+  local: boolean;
   /** `repo#número`. */
   key: string;
   headRef: string;
@@ -191,6 +192,9 @@ function chainOf(issue: CachedIssue, next: NonNullable<Extract<IssuePlan, { kind
     return { state: "blocked", reason: `su corrida en ${before} no terminó bien: resuélvela antes de que corra en ${after}` };
   }
   const open = (world.prsOf.get(issue.id) ?? []).filter((pr) => pr.repoId === next.after);
+  if (open.some((pr) => pr.local)) {
+    return { state: "waiting", reason: `espera a ${before}: su PR es local, se publica cuando se mergee su base` };
+  }
   return { state: "ready", dependsOn: open.map((pr) => pr.key) };
 }
 
@@ -204,8 +208,11 @@ function judge(ref: IssueRef, repo: string | undefined, world: World): Verdict {
 
   const open = world.prsOf.get(blocker.id) ?? [];
   const runs = world.runsOf.get(blocker.id) ?? [];
-  const stack = open.filter((pr) => pr.repoId === repo && stacksOn(pr, runs, world.project.stackOn));
   const cross = open.filter((pr) => pr.repoId !== repo);
+  if (cross.some((pr) => pr.local)) {
+    return { kind: "waiting", reason: `espera a ${blocker.ref.key}: su PR es local, se publica cuando se mergee su base` };
+  }
+  const stack = open.filter((pr) => pr.repoId === repo && stacksOn(pr, runs, world.project.stackOn));
   if (stack.length > 0 || cross.length > 0) return { kind: "pr", stack, cross };
 
   // Aquí todo PR abierto del bloqueante es del mismo repo y no cumple `stackOn`: los que sirven ya volvieron arriba.
@@ -220,7 +227,7 @@ function judge(ref: IssueRef, repo: string | undefined, world: World): Verdict {
 
 /** Si el PR deja que otra issue se apile sobre él, según el `stackOn` del proyecto. */
 function stacksOn(pr: QueuePrFact, blockerRuns: readonly QueueRun[], stackOn: TickDevInput["project"]["stackOn"]): boolean {
-  switch (stackOn) {
+  switch (pr.local ? "ready" : stackOn) {
     case "any_open":
       return true;
     case "ci_green":
@@ -231,6 +238,7 @@ function stacksOn(pr: QueuePrFact, blockerRuns: readonly QueueRun[], stackOn: Ti
 }
 
 function pendingReason(pr: QueuePrFact, stackOn: TickDevInput["project"]["stackOn"]): string {
+  if (pr.local) return `el PR local ${pr.key} todavía no tiene una corrida terminada done`;
   if (stackOn === "ci_green" && pr.ci === "unread") return `no se pudo leer el CI de ${pr.key} (${pr.ciError ?? "sin detalle"})`;
   return `el PR ${pr.key} todavía no cumple stackOn ${stackOn}`;
 }

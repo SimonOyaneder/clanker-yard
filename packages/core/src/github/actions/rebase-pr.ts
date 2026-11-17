@@ -1,7 +1,9 @@
 import { PrRef, type RepoId } from "@clanker/api";
+import { and, eq } from "drizzle-orm";
 import * as z from "zod";
 import { preparePush } from "../../commits/prepare-push";
 import { PermanentActionError, type ActionCtx, type ActionDef } from "../../flows/catalog";
+import { pullRequests, workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
 import type { RepoConfig } from "../../repos/repos";
 import { RebaseError, WorkspaceOutput, type Workspaces } from "../../workspaces/workspaces";
@@ -56,8 +58,8 @@ export function workspaceRebaseAction(deps: RebasePrDeps): ActionDef<typeof Reba
     effects: "local",
     run: ({ ws, base, continue: resume }, ctx: ActionCtx) =>
       ctx.once("rebase", async () => {
-        const { ref } = ownedOpenPr(deps, ws, REBASE);
-        const council = (await deps.prs.get(ref)).threads.councilEver;
+        // Un PR local (stacks locales) no está en GitHub: sin council ni PR que leer.
+        const council = isLocalPr(deps.store, ws) ? false : (await deps.prs.get(ownedOpenPr(deps, ws, REBASE).ref)).threads.councilEver;
         try {
           const { outcome, ...output } = await deps.workspaces.rebase(ws, { council, continue: resume, ...(base !== undefined && { base }) });
           return { outcome, output };
@@ -67,6 +69,19 @@ export function workspaceRebaseAction(deps: RebasePrDeps): ActionDef<typeof Reba
         }
       }),
   };
+}
+
+/** Si la branch del workspace es la de un PR `local` del sistema. */
+function isLocalPr(store: Store, ws: { workspaceId: string; branch: string }): boolean {
+  const row = store.db.select({ repoId: workspacesTable.repoId }).from(workspacesTable).where(eq(workspacesTable.id, ws.workspaceId)).get();
+  if (!row) return false;
+  return (
+    store.db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, ws.branch), eq(pullRequests.state, "local"), eq(pullRequests.owned, true)))
+      .get() !== undefined
+  );
 }
 
 const PushLeaseArgs = z.object({ ws: WorkspaceOutput });

@@ -17,6 +17,7 @@ import {
   newId,
   openStore,
   PermanentActionError,
+  prPromoteAction,
   prPublishAction,
   stackRestackAction,
   stackRestackRewrittenAction,
@@ -48,6 +49,7 @@ let github: GitHubSim;
 let restack: ReturnType<typeof stackRestackAction>;
 let restackRewritten: ReturnType<typeof stackRestackRewrittenAction>;
 let publish: ReturnType<typeof prPublishAction>;
+let promote: ReturnType<typeof prPromoteAction>;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-restack-"));
@@ -82,6 +84,7 @@ beforeEach(async () => {
   const recipes = createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) });
   const prs = createPrs({ connections, packs });
   publish = prPublishAction({ store, workspaces, recipes, repoConfig: repos, connections, packs });
+  promote = prPromoteAction({ store, workspaces, repoConfig: repos, connections });
   const restackDeps = { store, workspaces, repoConfig: repos, prs, connections, pause: () => Promise.resolve() };
   restack = stackRestackAction(restackDeps);
   restackRewritten = stackRestackRewrittenAction(restackDeps);
@@ -443,6 +446,161 @@ describe("stack.restack", () => {
 
     expect(result.outcome).toBe("ok");
     expect(outputOf(result).children).toEqual([]);
+  });
+});
+
+/**
+ * Un PR local (stacks locales): `branch` sale de `base` con un commit que escribe `files`, sin push ni PR en GitHub.
+ * Su fila queda `local` colgando del PR de `base`. Devuelve su id.
+ */
+async function localPr(branch: string, base: string, files: Record<string, string>): Promise<string> {
+  const lease = await workspaces.acquire({ repo: "repo_r1", branch, base, runId: newId("run") });
+  for (const [path, content] of Object.entries(files)) writeFileSync(join(lease.path, path), content);
+  repo.git("-C", lease.path, "add", "--all");
+  repo.git("-C", lease.path, "commit", "--quiet", "--message", `feat: ${branch}`);
+  const head = repo.git("-C", lease.path, "rev-parse", "HEAD");
+  workspaces.release(lease);
+  const id = newId("pr");
+  store.db.$client
+    .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned, title, body) VALUES (?, 'repo_r1', NULL, NULL, ?, ?, ?, 'local', 1, 1, ?, '')")
+    .run(id, branch, base, head, `[${branch}] cambio`);
+  const parent = sql<{ id: string }>(`SELECT id FROM pull_requests WHERE head_ref = '${base}'`)[0]!;
+  store.db.$client.prepare("INSERT INTO pr_parents (child_id, parent_id) VALUES (?, ?)").run(id, parent.id);
+  return id;
+}
+
+describe("stack.restack con PRs locales", () => {
+  test("cadena remoto → local → local: B queda sobre main y es promovible, C sobre B, sin push ni request por ellos", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const c = await localPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
+    const squash = squashOnMain("cla-1");
+    github.pr(1).merge({ sha: squash });
+    const requests = github.requests.length;
+
+    const result = await run(1);
+
+    expect(result.outcome).toBe("ok");
+    const output = result.output as Output & { promotable: unknown[]; children: { prId: string; pr?: unknown; status: string }[] };
+    expect(output.children).toMatchObject([
+      { prId: b, branch: "cla-2", status: "restacked" },
+      { prId: c, branch: "cla-3", status: "restacked" },
+    ]);
+    expect(output.children.every((child) => child.pr === undefined)).toBe(true);
+    expect(output.promotable).toEqual([{ prId: b, branch: "cla-2", base: "main" }]);
+    expect(output.changedDrafts).toEqual([]);
+    // Nada de B ni C llegó al remoto ni se escribió en GitHub.
+    expect(() => remoteSha("cla-2")).toThrow();
+    expect(() => remoteSha("cla-3")).toThrow();
+    expect(github.requests.slice(requests).filter((r) => r.method === "PATCH" || (r.method === "POST" && r.path !== "/graphql"))).toEqual([]);
+    expect(repo.git("merge-base", "--is-ancestor", squash, "cla-2")).toBe("");
+    expect(repo.git("merge-base", "--is-ancestor", repo.git("rev-parse", "cla-2"), "cla-3")).toBe("");
+    expect(sql(`SELECT id, base_ref, state, head_sha FROM pull_requests WHERE state = 'local' ORDER BY head_ref`)).toEqual([
+      { id: b, base_ref: "main", state: "local", head_sha: repo.git("rev-parse", "cla-2") },
+      { id: c, base_ref: "cla-2", state: "local", head_sha: repo.git("rev-parse", "cla-3") },
+    ]);
+    expect(sql("SELECT child_id, parent_id FROM pr_parents")).toEqual([{ child_id: c, parent_id: b }]);
+  });
+
+  test("un corte después del restack de un hijo local no lo repite al reintentar", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    github.pr(1).merge({ sha: squashOnMain("cla-1") });
+    const shared = ctx();
+    const once = shared.once;
+    let cut = true;
+    shared.once = async (stage, fn) => {
+      if (stage === `retarget:${b}` && cut) {
+        cut = false;
+        throw new Error("corte");
+      }
+      return once(stage, fn);
+    };
+    await expect(restack.run(restack.args.parse({ pr: ref(1) }), shared)).rejects.toThrow("corte");
+    const head = repo.git("rev-parse", "cla-2");
+
+    const again = await restack.run(restack.args.parse({ pr: ref(1) }), shared);
+
+    expect(repo.git("rev-parse", "cla-2")).toBe(head);
+    expect((again.output as Output).children).toMatchObject([{ branch: "cla-2", status: "restacked" }]);
+    expect(sql(`SELECT base_ref, head_sha FROM pull_requests WHERE id = '${b}'`)).toEqual([{ base_ref: "main", head_sha: head }]);
+  });
+
+  test("un hijo local en conflicto queda como estaba, no se pushea y anota pr.conflict con local para su flujo", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
+    const before = repo.git("rev-parse", "cla-2");
+    github.pr(1).merge({ sha: squashOnMain("cla-1", { "a.txt": "a1\nparent\nmain\n" }) });
+
+    const result = await run(1);
+
+    expect(result.outcome).toBe("conflict");
+    expect((result.output as Output).children).toMatchObject([{ branch: "cla-2", status: "conflict", files: ["a.txt"] }]);
+    expect(repo.git("rev-parse", "cla-2")).toBe(before);
+    expect(() => remoteSha("cla-2")).toThrow();
+    expect(store.events.since(0, { types: ["pr.conflict"] })).toMatchObject([
+      { subject: { type: "pr", id: b }, payload: { prId: b, local: true, sha: before, base: "main", files: ["a.txt"] } },
+    ]);
+  });
+});
+
+describe("pr.promote", () => {
+  /** El worktree de la branch del PR local, tomado como lo hace `promote-local`. */
+  async function leaseOf(branch: string, base: string) {
+    const lease = await workspaces.acquire({ repo: "repo_r1", branch, base, runId: newId("run") });
+    const { workspaceId, path, baseSha, fencingToken } = lease;
+    return { lease, ws: { workspaceId, path, branch, baseSha, fencingToken } };
+  }
+
+  test("el PR local que quedó sobre main sale como draft con su título y cuerpo, en la misma fila", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    github.pr(1).merge({ sha: squashOnMain("cla-1") });
+    await run(1);
+    const { lease, ws } = await leaseOf("cla-2", "main");
+
+    const result = await promote.run(promote.args.parse({ ws, prId: b }), ctx());
+    workspaces.release(lease);
+
+    expect(result).toMatchObject({ outcome: "ok", output: { pr: { number: 2 }, head: remoteSha("cla-2") } });
+    expect(github.pulls().map((p) => [p.number, p.base.ref, p.title, p.draft])).toEqual([[1, "main", "[cla-1] cambio", true], [2, "main", "[cla-2] cambio", true]]);
+    expect(sql(`SELECT id, number, state, base_ref FROM pull_requests WHERE head_ref = 'cla-2'`)).toEqual([{ id: b, number: 2, state: "open", base_ref: "main" }]);
+    expect(store.events.since(0, { types: ["pr.opened"] }).filter((e) => e.subject?.id === b)).toHaveLength(1);
+  });
+
+  test("publicar ahora sobre un padre abierto apunta a su branch y sigue colgando de él", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const { lease, ws } = await leaseOf("cla-2", "cla-1");
+
+    await promote.run(promote.args.parse({ ws, prId: b }), ctx());
+    workspaces.release(lease);
+
+    expect(github.pulls().map((p) => [p.number, p.base.ref])).toEqual([[1, "main"], [2, "cla-1"]]);
+    expect(sql("SELECT child_id FROM pr_parents")).toEqual([{ child_id: b }]);
+  });
+
+  test("un corte entre el push y el PR retoma sin duplicar", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const { lease, ws } = await leaseOf("cla-2", "cla-1");
+    const shared = ctx();
+    const once = shared.once;
+    let cut = true;
+    shared.once = async (stage, fn) => {
+      if (stage === "pr" && cut) {
+        cut = false;
+        throw new Error("corte");
+      }
+      return once(stage, fn);
+    };
+
+    await expect(promote.run(promote.args.parse({ ws, prId: b }), shared)).rejects.toThrow("corte");
+    const again = await promote.run(promote.args.parse({ ws, prId: b }), shared);
+    workspaces.release(lease);
+
+    expect(again.outcome).toBe("ok");
+    expect(github.pulls()).toHaveLength(2);
   });
 });
 

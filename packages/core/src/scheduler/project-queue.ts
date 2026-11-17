@@ -1,5 +1,5 @@
 import type { IssueId, ProjectId, QueueEntry } from "@clanker/api";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import type { Prs } from "../github/prs";
 import { repoOfRun } from "../projects/issue-repos";
 import { ProjectNotFoundError, type Projects } from "../projects/projects";
@@ -53,11 +53,12 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
         const fact = {
           issueId: row.issueId!,
           repoId: row.repoId,
-          key: `${repo?.name ?? row.repoId}#${row.number}`,
+          local: row.state === "local",
+          key: row.state === "local" ? `${repo?.name ?? row.repoId}@${row.headRef}` : `${repo?.name ?? row.repoId}#${row.number}`,
           headRef: row.headRef,
           baseRef: row.baseRef,
         };
-        if (!readCi) return { ...fact, ci: "not_green" };
+        if (fact.local || !readCi) return { ...fact, ci: "not_green" };
         const ref = prRefOf(repos, row);
         if (!ref) return { ...fact, ci: "unread", ciError: "el repo no tiene remoto de GitHub o no hay una cuenta conectada" };
         try {
@@ -95,7 +96,7 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
       const devRuns = store.db
         .select({ issueId: runs.subjectId, status: runs.status, outcome: runs.outcome, params: runs.params })
         .from(runs)
-        .where(and(eq(runs.projectId, project.id), eq(runs.subjectType, "issue"), eq(runs.lane, "dev"), isNull(runs.parentRunId)))
+        .where(and(or(eq(runs.projectId, project.id), inArray(runs.subjectId, [...blockerIds])), eq(runs.subjectType, "issue"), eq(runs.lane, "dev"), isNull(runs.parentRunId)))
         .all()
         .map(({ params, ...run }) => ({ ...run, repoId: repoOfRun(params) }));
       // Sin saber quién es la persona no hay cola (decide qué issues son suyas); sin cuenta conectada el adapter lanza.

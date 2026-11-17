@@ -528,6 +528,9 @@ export function createMemoryAppData(now = Date.now()): AppData {
     },
     requestPrReview: async (ref) => void prOf(ref),
     rebasePr: async (ref) => void prOf(ref),
+    publishLocalPr: async (id) => {
+      if (!prs.some((p) => p.id === id && p.local)) throw new Error(`${id} no es un PR local`)
+    },
     // Solo el primer proyecto tiene corridas cerradas de ejemplo; el otro trae su Resumen vacío.
     projectMetrics: async (projectId, range) =>
       aggregate(projectId === projects[0]!.id ? seedClosedRuns(issues.slice(0, 4).map((i) => i.id)) : [], range, now),
