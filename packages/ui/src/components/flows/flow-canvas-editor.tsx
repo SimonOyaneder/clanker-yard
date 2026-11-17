@@ -233,7 +233,7 @@ function Editor({ defId, flow, onChange, errors, warnings }: Props) {
             }
             onPaneClick={() => setSelection({ nodes: [], edges: [] })}
             proOptions={{ hideAttribution: true }}
-            className="cc-flow"
+            className="flow-canvas"
           >
             <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
             <Controls position="bottom-right" showInteractive={false} />

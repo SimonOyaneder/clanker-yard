@@ -3,7 +3,7 @@ import { Ellipsis, Plus } from "lucide-react"
 import { useState } from "react"
 import type { RepoRow } from "@/app-data"
 import { Hint, Pill } from "@/components/common"
-import { DefOption } from "@/components/def-option"
+import { DefSelect } from "@/components/def-option"
 import { listsProjects, TrackerProjectPicker } from "@/components/tracker-project-picker"
 import { ChipsInput, Field, Section } from "@/components/settings/settings-fields"
 import { Button } from "@/components/ui/button"
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useAppActions } from "@/lib/app-context"
-import { defName, selectableFlows } from "@/lib/defs"
+import { selectableFlows } from "@/lib/defs"
 import { tone } from "@/lib/format"
 import {
   CATEGORY_LABELS,
@@ -389,7 +389,7 @@ export function FlowSection({
   profiles,
   groups,
 }: SectionProps & { flows: DefRecord[]; profiles: DefRecord[]; groups: FlowParamGroups }) {
-  const flowOf = flows.find((f) => f.slug === draft.defaultFlowId)
+
   return (
     <Section
       id="flow"
@@ -398,34 +398,10 @@ export function FlowSection({
     >
       <div className="grid gap-4 @xl:grid-cols-2">
         <Field id="default-flow" label="Flujo por defecto" hint="El que corre una issue si no se pide otro.">
-          <Select value={draft.defaultFlowId ?? NONE} onValueChange={(v) => update({ defaultFlowId: v === NONE ? null : v })}>
-            <SelectTrigger id="default-flow" size="sm" className="w-full">
-              <SelectValue>{flowOf ? defName(flowOf) : (draft.defaultFlowId ?? "Sin flujo")}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE}>Sin flujo</SelectItem>
-              {selectableFlows(flows, draft.defaultFlowId).map((f) => (
-                <SelectItem key={f.slug} value={f.slug}>
-                  <DefOption def={f} />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <DefSelect id="default-flow" size="sm" value={draft.defaultFlowId} defs={selectableFlows(flows, draft.defaultFlowId)} emptyLabel="Sin flujo" onChange={(slug) => update({ defaultFlowId: slug })} />
         </Field>
         <Field id="default-profile" label="Perfil por defecto" hint="Con el que corren los pasos de agente.">
-          <Select value={draft.defaultProfileId ?? NONE} onValueChange={(v) => update({ defaultProfileId: v === NONE ? null : v })}>
-            <SelectTrigger id="default-profile" size="sm" className="w-full">
-              <SelectValue>{draft.defaultProfileId ?? "Sin perfil"}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE}>Sin perfil</SelectItem>
-              {profiles.map((p) => (
-                <SelectItem key={p.slug} value={p.slug}>
-                  <DefOption def={p} />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <DefSelect id="default-profile" size="sm" value={draft.defaultProfileId} defs={profiles} emptyLabel="Sin perfil" onChange={(slug) => update({ defaultProfileId: slug })} />
         </Field>
       </div>
       {draft.defaultFlowId === null ? (

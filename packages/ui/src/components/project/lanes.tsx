@@ -215,7 +215,7 @@ function FlowStepper({ stepper }: { stepper: Stepper }) {
             <Hint label={`${item.label} · ${state}`}>
               <div
                 data-state={item.current ? "current" : item.reached ? item.status : "pending"}
-                className={cn("h-1.5 rounded-full bg-muted", item.reached && SEGMENT[item.status], item.current && "cc-blink bg-violet-500")}
+                className={cn("h-1.5 rounded-full bg-muted", item.reached && SEGMENT[item.status], item.current && "animate-blink bg-violet-500")}
               />
             </Hint>
             <span className="sr-only">

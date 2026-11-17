@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { type Client, type Event, type EventFilter, EventType, RunId } from "@clanker/api";
-import type { Command } from "./cli";
+import type { Command } from "./command";
 import { projectBySlug } from "./projects";
 
 const PAGE = 500;

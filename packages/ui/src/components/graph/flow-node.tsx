@@ -66,7 +66,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
             node.kind === "end" && "items-center rounded-full",
             !reached && node.kind !== "end" && "border-dashed bg-card/60 text-muted-foreground",
             state.status === "failed" && "border-destructive/60",
-            state.current && "cc-pulse border-primary",
+            state.current && "animate-pulse-ring border-primary",
             selected && "ring-2 ring-ring",
           )}
         >
@@ -89,7 +89,7 @@ export function FlowNode({ data, selected }: NodeProps & { data: FlowNodeData })
                 {reached ? <Tags state={state} /> : null}
                 <Hint label={reached ? look.hint : "El flujo todavía no llega a este nodo."}>
                   <span className="flex-none">
-                    <look.Icon aria-label={reached ? look.label : "pendiente"} className={cn("size-3.5", look.iconClass, look.pulse && "cc-blink")} />
+                    <look.Icon aria-label={reached ? look.label : "pendiente"} className={cn("size-3.5", look.iconClass, look.pulse && "animate-blink")} />
                   </span>
                 </Hint>
               </div>

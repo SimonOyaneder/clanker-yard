@@ -380,7 +380,7 @@ Una issue bloqueada por PRs en cadenas distintas sale de una base sintética (`d
 
 ## CLI
 
-`apps/cli` es el binario `clanker` (`clanker --help` lista los comandos). Cada comando es un `Command` (`src/cli.ts`) que recibe un `CliContext`, así que se prueba con un cliente de mentira (`cli.test.ts`) sin tocar `main.ts`; para sumar uno, agrégalo a `commands`. `core.test.ts` corre el binario empaquetado contra el core real y el de demo.
+`apps/cli` es el binario `clanker` (`clanker --help` lista los comandos). Cada comando es un `Command` (`src/command.ts`) que recibe un `CliContext`, así que se prueba con un cliente de mentira (`cli.test.ts`) sin tocar `main.ts`; para sumar uno, agrégalo a `commands`. `core.test.ts` corre el binario empaquetado contra el core real y el de demo.
 
 Para probarlo sin instalar: `npm run clanker -w @clanker/cli -- status` (con `CLANKER_HOME=$(mktemp -d)` delante no toca tus datos; si no hay core, lo lanza desde `packages/core/dist/main.js`). Para tenerlo en el PATH: `npm run build -w @clanker/cli && npm link -w @clanker/cli`.
 

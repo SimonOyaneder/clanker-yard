@@ -8,7 +8,8 @@ import { connectToCore, isPidAlive, readCoreJson } from "@clanker/api/node";
 import { Client as McpClient } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
-import { type CliContext, runCli } from "./cli";
+import type { CliContext } from "./command";
+import { runCli } from "./cli";
 import { buildCli } from "../scripts/build";
 
 // Contra cores de verdad sobre un CLANKER_HOME temporal: el real (para `status` y el arranque) y el de

@@ -18,7 +18,7 @@ import { copy } from "@/lib/clipboard"
 import { absolute, compactCount, costUsd, elapsed, issueKey, tone } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
 import { currentRound, type GraphNodeKind, shapeOf } from "@/lib/run-graph"
-import { type RunCaps, runCaps } from "@/lib/run-commands"
+import { RUN_KEYS, type RunCaps, runCaps } from "@/lib/run-commands"
 import { cn } from "@/lib/utils"
 
 const OUTCOME = { done: "terminó el flujo", blocked: "terminó sin completar la issue", failed: "un paso falló sin salida" } as const
@@ -180,21 +180,21 @@ function RunActions({ run, caps }: { run: RunDetail; caps: RunCaps }) {
   return (
     <div className="ml-auto flex items-center gap-1.5">
       {failedStep ? (
-        <Hint label={`Vuelve a correr ${failedStep.nodeId} con una sesión nueva y sigue el flujo desde ahí`} keys="⇧⌘R">
+        <Hint label={`Vuelve a correr ${failedStep.nodeId} con una sesión nueva y sigue el flujo desde ahí`} keys={RUN_KEYS.retry}>
           <Button size="sm" onClick={() => commands.retry(failedStep.id, failedStep.nodeId)}>
             <RotateCcw /> Reintentar paso
           </Button>
         </Hint>
       ) : null}
       {caps.resume ? (
-        <Hint label="Vuelve a despachar los pasos de la corrida; el agente interrumpido sigue su sesión" keys="⇧⌘.">
+        <Hint label="Vuelve a despachar los pasos de la corrida; el agente interrumpido sigue su sesión" keys={RUN_KEYS.pauseResume}>
           <Button size="sm" onClick={() => commands.resume(run.id)}>
             <Play /> Retomar
           </Button>
         </Hint>
       ) : null}
       {caps.pause ? (
-        <Hint label="No despacha pasos nuevos; el agente en curso termina lo suyo. Sigue ocupando su cupo" keys="⇧⌘.">
+        <Hint label="No despacha pasos nuevos; el agente en curso termina lo suyo. Sigue ocupando su cupo" keys={RUN_KEYS.pauseResume}>
           <Button size="sm" variant="outline" onClick={() => commands.pause(run.id)}>
             <Pause /> Pausar
           </Button>
@@ -244,7 +244,7 @@ function StepRow({ step, now, selected, kind, onOpen, onCopySessionId }: { step:
             className={cn("flex cursor-pointer flex-col gap-1 px-3 py-2 outline-none hover:bg-muted/50 focus-visible:bg-muted/50", selected && "bg-muted/60")}
           >
             <div className="flex min-h-5 items-center gap-3">
-              <look.Icon aria-label={look.label} className={cn("size-3.5 flex-none", look.iconClass, look.pulse && "cc-blink")} />
+              <look.Icon aria-label={look.label} className={cn("size-3.5 flex-none", look.iconClass, look.pulse && "animate-blink")} />
               <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">{step.nodeId}</span>
               {step.visit > 1 ? (
                 <Pill className={tone.neutral} hint={`El flujo volvió a este nodo: es su visita número ${step.visit}.`}>

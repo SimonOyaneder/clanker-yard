@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { LegacyImportResult } from "@clanker/api";
-import type { Command } from "./cli";
+import type { Command } from "./command";
 import { formatTable } from "./format";
 
 export const IMPORT_LEGACY_USAGE = "clanker import legacy --from <carpeta del clanker-loop> [--dry-run] [--json]";

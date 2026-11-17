@@ -1,4 +1,4 @@
-import type { Client } from "@clanker/api";
+import type { CliContext, Command } from "./command";
 import { events } from "./events";
 import { importLegacy } from "./import";
 import { mcp } from "./mcp";
@@ -7,27 +7,6 @@ import { projectsList } from "./projects";
 import { prsRepublish } from "./prs";
 import { runsGet, runsStart } from "./runs";
 import { status } from "./status";
-
-/** Lo que un comando necesita del mundo; `main.ts` lo arma con el core real y los tests con uno de prueba. */
-export interface CliContext {
-  /** El cliente del core. Lo levanta si no corre, así que un comando lo pide después de validar sus argumentos. */
-  client(): Promise<Client>;
-  /** Dónde está el MCP del core (`/mcp`) y el token que pide. Lo levanta si no corre. */
-  mcpEndpoint(): Promise<{ url: string; token: string }>;
-  /** Una línea de salida. */
-  write(line: string): void;
-  readFile(path: string): string;
-  /** Espera `ms`; vuelve antes si se aborta `signal`. */
-  sleep(ms: number): Promise<void>;
-  /** Se aborta con Ctrl+C: es lo que termina un `events tail --follow`. */
-  signal: AbortSignal;
-}
-
-export interface Command {
-  /** `clanker <comando> <args>`, tal como se muestra en la ayuda y en los errores de uso. */
-  usage: string;
-  run(args: string[], ctx: CliContext): Promise<void>;
-}
 
 const commands: Record<string, Command> = {
   status,

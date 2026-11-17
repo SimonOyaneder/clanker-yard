@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { useHost } from "@/host"
-import { usePerform } from "@/hooks/use-perform"
+import { useToastedCommand } from "@/hooks/use-toasted-command"
 import { type PrCaps, prCaps } from "@/lib/pr-commands"
 import type { OpenPr } from "@/lib/prs"
 import { messageOf } from "@/lib/utils"
@@ -50,7 +50,7 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, children }: Props
   const [selectedId, select] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<OpenPr | null>(null)
 
-  const perform = usePerform()
+  const perform = useToastedCommand()
 
   const commands = useMemo<PrCommands>(
     () => ({

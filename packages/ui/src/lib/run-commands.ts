@@ -65,3 +65,16 @@ export function stepCaps(run: Pick<RunDetail, "status" | "steps" | "flowDef">, s
     force: !branch && (node.kind === "action" || node.kind === "wait") && (open || waitingForPerson) ? Object.keys(declared ?? {}) : [],
   }
 }
+
+/**
+ * Los atajos de una corrida, como los muestran la paleta, el diálogo de atajos, el panel del paso y la vista de la
+ * corrida; los dispara `useShellShortcuts` (grafo y línea de tiempo, la vista de la corrida).
+ */
+export const RUN_KEYS = {
+  graph: "G",
+  timeline: "L",
+  interrupt: "⌘.",
+  pauseResume: "⇧⌘.",
+  retry: "⇧⌘R",
+  cancel: "⇧⌘⌫",
+} as const

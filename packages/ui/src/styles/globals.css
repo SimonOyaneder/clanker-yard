@@ -194,23 +194,23 @@
 }
 
 /* Agente trabajando: anillo violeta que late */
-@keyframes cc-pulse {
+@keyframes pulse-ring {
   0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 55%, transparent); }
   70% { box-shadow: 0 0 0 6px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
-.cc-pulse {
-  animation: cc-pulse 1.8s ease-out infinite;
+.animate-pulse-ring {
+  animation: pulse-ring 1.8s ease-out infinite;
 }
-@keyframes cc-blink {
+@keyframes blink {
   50% { opacity: 0.35; }
 }
-.cc-blink {
-  animation: cc-blink 1.6s ease-in-out infinite;
+.animate-blink {
+  animation: blink 1.6s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .cc-pulse,
-  .cc-blink {
+  .animate-pulse-ring,
+  .animate-blink {
     animation: none;
   }
 }
@@ -221,7 +221,7 @@
 }
 
 /* xyflow con los tokens de la app (claro y oscuro). Doble clase para ganarle a .react-flow.dark */
-.react-flow.cc-flow {
+.react-flow.flow-canvas {
   --xy-background-color: var(--background);
   --xy-background-pattern-color: var(--border);
   --xy-minimap-background-color: var(--card);
@@ -236,12 +236,12 @@
   --xy-node-boxshadow-hover: none;
   --xy-node-boxshadow-selected: none;
 }
-.react-flow.cc-flow .react-flow__controls,
-.react-flow.cc-flow .react-flow__minimap {
+.react-flow.flow-canvas .react-flow__controls,
+.react-flow.flow-canvas .react-flow__minimap {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.react-flow.cc-flow .react-flow__node {
+.react-flow.flow-canvas .react-flow__node {
   cursor: default;
 }

@@ -3,7 +3,7 @@ import { Copy, Ellipsis, FolderOpen, TriangleAlert } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
-import { DefOption } from "@/components/def-option"
+import { DefSelect } from "@/components/def-option"
 import { Hint, Pill } from "@/components/common"
 import { LaneStepper } from "@/components/project/lanes-control"
 import { Field, Section } from "@/components/settings/settings-fields"
@@ -11,7 +11,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useHost } from "@/host"
 import { type DefaultsDraft, orgsWithoutPack } from "@/lib/app-settings"
 import { copy } from "@/lib/clipboard"
@@ -21,7 +20,6 @@ import type { FieldProblems } from "@/lib/project-settings"
 import { messageOf } from "@/lib/utils"
 
 // Radix Select no admite un valor vacío en un ítem: "sin valor" se representa con un valor propio.
-const NONE = "__none__"
 
 // ───────────────────────── Carriles
 
@@ -229,7 +227,6 @@ const describedBy = (id: string, error: string | undefined) => [`${id}-hint`, er
 
 export function DefaultsSection({ draft, update, problems, flows, profiles }: DefaultsProps) {
   const choosable = selectableFlows(flows, draft.defaultFlowId)
-  const flowOf = flows.find((f) => f.slug === draft.defaultFlowId)
   // Sin default, Nuevo proyecto preselecciona el flujo y el perfil de siempre: el vacío se llama por lo que hace.
   const autoFlow = flows.find((f) => f.slug === defaultFlowSlug(choosable))
   const noFlow = autoFlow ? `Automático (${defName(autoFlow)})` : "Sin flujo"
@@ -243,34 +240,10 @@ export function DefaultsSection({ draft, update, problems, flows, profiles }: De
     >
       <div className="grid gap-4 @xl:grid-cols-2">
         <Field id="new-default-flow" label="Flujo" hint="Los pasos que sigue cada issue: por ejemplo, planear, programar y abrir el PR.">
-          <Select value={draft.defaultFlowId ?? NONE} onValueChange={(v) => update({ defaultFlowId: v === NONE ? null : v })}>
-            <SelectTrigger id="new-default-flow" size="sm" className="w-full">
-              <SelectValue>{flowOf ? defName(flowOf) : (draft.defaultFlowId ?? noFlow)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE}>{noFlow}</SelectItem>
-              {choosable.map((f) => (
-                <SelectItem key={f.slug} value={f.slug}>
-                  <DefOption def={f} />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <DefSelect id="new-default-flow" size="sm" value={draft.defaultFlowId} defs={choosable} emptyLabel={noFlow} onChange={(slug) => update({ defaultFlowId: slug })} />
         </Field>
         <Field id="new-default-profile" label="Perfil" hint="Qué modelo usan los agentes y cuánto razonan.">
-          <Select value={draft.defaultProfileId ?? NONE} onValueChange={(v) => update({ defaultProfileId: v === NONE ? null : v })}>
-            <SelectTrigger id="new-default-profile" size="sm" className="w-full">
-              <SelectValue>{draft.defaultProfileId ?? noProfile}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE}>{noProfile}</SelectItem>
-              {profiles.map((p) => (
-                <SelectItem key={p.slug} value={p.slug}>
-                  <DefOption def={p} />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <DefSelect id="new-default-profile" size="sm" value={draft.defaultProfileId} defs={profiles} emptyLabel={noProfile} onChange={(slug) => update({ defaultProfileId: slug })} />
         </Field>
         <Field id="new-default-parallel" label="Corridas a la vez" hint="Cuántas issues del proyecto se trabajan al mismo tiempo." error={problems.parallel}>
           <Input

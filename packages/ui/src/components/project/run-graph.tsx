@@ -128,7 +128,7 @@ function GraphCanvas({ nodes, edges, label, onSelect }: { nodes: Node<FlowNodeDa
           nodesDraggable={false}
           onNodeClick={(_, node) => node.data.node.kind !== "end" && onSelect?.(node.id)}
           proOptions={{ hideAttribution: true }}
-          className="cc-flow"
+          className="flow-canvas"
         >
           <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
           <Controls position="bottom-right" showInteractive={false} />

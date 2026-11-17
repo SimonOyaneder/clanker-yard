@@ -17,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useLiveQuery } from "@/hooks/use-live"
 import { copy } from "@/lib/clipboard"
 import { tone } from "@/lib/format"
-import { stepCaps, type StepCaps } from "@/lib/run-commands"
+import { RUN_KEYS, stepCaps, type StepCaps } from "@/lib/run-commands"
 import type { GraphNode, GraphNodeKind, GraphShape } from "@/lib/run-graph"
 import { messageOf } from "@/lib/utils"
 
@@ -125,7 +125,7 @@ function StepActions({ run, step, label, caps }: { run: RunDetail; step: Step; l
       {caps.retry ? (
         <Hint
           label={caps.retry === "este" ? "Vuelve a correr este paso con una sesión nueva; lo que la corrida tenía en marcha se cancela" : "Vuelve a correr desde este paso con una sesión nueva: lo que vino después se cancela"}
-          keys={step.status === "failed" ? "⇧⌘R" : undefined}
+          keys={step.status === "failed" ? RUN_KEYS.retry : undefined}
           side="bottom"
         >
           <Button size="xs" variant="outline" onClick={() => commands.retry(step.id, label)}>
@@ -134,7 +134,7 @@ function StepActions({ run, step, label, caps }: { run: RunDetail; step: Step; l
         </Hint>
       ) : null}
       {caps.interrupt ? (
-        <Hint label="Detiene al agente con su sesión guardada y pausa la corrida" keys="⌘." side="bottom">
+        <Hint label="Detiene al agente con su sesión guardada y pausa la corrida" keys={RUN_KEYS.interrupt} side="bottom">
           <Button size="xs" variant="outline" onClick={() => commands.interrupt(run.id)}>
             <Square /> Interrumpir
           </Button>

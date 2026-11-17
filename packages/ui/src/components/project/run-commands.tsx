@@ -5,7 +5,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { usePerform } from "@/hooks/use-perform"
+import { useToastedCommand } from "@/hooks/use-toasted-command"
 
 // Lo que una persona le pide a una corrida, a un paso o a un proyecto. Cada comando le habla al core, avisa el
 // resultado con un toast y hace releer lo que se ve. Lo irreversible o que corta trabajo (cancelar, interrumpir,
@@ -51,7 +51,7 @@ export function RunCommandsProvider({ children }: { children: ReactNode }) {
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [steer, setSteer] = useState<{ stepId: StepRunId; label: string } | null>(null)
 
-  const perform = usePerform()
+  const perform = useToastedCommand()
 
   const commands = useMemo<RunCommands>(
     () => ({

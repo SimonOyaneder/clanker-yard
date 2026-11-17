@@ -6,12 +6,12 @@ import { draftTone, reviewStatus, reviewTone } from "@/lib/pr-status"
 import { isDraft, type OpenPr, repoNameOf } from "@/lib/prs"
 import { cn } from "@/lib/utils"
 import { Hint, Pill } from "../common"
-import { CIBadge, CombinedBaseChip, Labels, MergePill, mergeRing, PRStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
+import { CiBadge, CombinedBaseChip, Labels, MergePill, mergeRing, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 import { PrContextMenu } from "./pr-menu"
 import { PrNotes } from "./pr-notes"
 
-export interface PRNodeData extends Record<string, unknown> {
+export interface PrNodeData extends Record<string, unknown> {
   pr: OpenPr
   // Está en el stack de un PR que calza con el filtro, pero él no calza.
   dimmed?: boolean
@@ -24,7 +24,7 @@ export interface PRNodeData extends Record<string, unknown> {
 export const NODE_WIDTH = 296
 export const NODE_HEIGHT = 196
 
-export function PRNode({ data }: NodeProps & { data: PRNodeData }) {
+export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
   const host = useHost()
   const commands = usePrCommands()
   const { pr, dimmed, issueKey, combined } = data
@@ -55,7 +55,7 @@ export function PRNode({ data }: NodeProps & { data: PRNodeData }) {
         <Handle type="source" position={Position.Bottom} isConnectable={false} className="!opacity-0" />
 
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <PRStateIcon pr={pr} />
+          <PrStateIcon pr={pr} />
           <span className="truncate">{repoNameOf(pr)}</span>
           <span className="font-mono">#{pr.ref.number}</span>
           <span className="ml-auto flex items-center gap-1">
@@ -97,7 +97,7 @@ export function PRNode({ data }: NodeProps & { data: PRNodeData }) {
         <Labels pr={pr} />
 
         <div className="mt-auto flex items-center justify-between gap-2 border-t pt-2 text-[11px] text-muted-foreground tabular-nums">
-          <CIBadge ci={state.ci} />
+          <CiBadge ci={state.ci} />
           <span className="flex items-center gap-2">
             <span className="text-emerald-600 dark:text-emerald-400">+{state.additions}</span>
             <span className="text-red-600 dark:text-red-400">−{state.deletions}</span>

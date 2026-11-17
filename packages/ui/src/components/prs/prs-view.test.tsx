@@ -23,7 +23,7 @@ beforeAll(() => {
     m22 = 1
   } as unknown as typeof DOMMatrixReadOnly
 })
-beforeEach(() => localStorage.setItem("cc.prs.mode", JSON.stringify("list")))
+beforeEach(() => localStorage.setItem("clanker.prs.mode", JSON.stringify("list")))
 afterEach(() => {
   cleanup()
   localStorage.clear()

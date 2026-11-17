@@ -46,11 +46,10 @@ export function LearningsView({ learnings, projects, view, onEdited }: Props) {
   const [creating, setCreating] = useState(false)
 
   // El nombre de cada repo con learnings: solo se piden las recetas si hay alguno con alcance de repo.
-  const { repos: repoIds } = useMemo(() => scopesOf(learnings), [learnings])
-  const repoData = useLiveQuery(`learning-repos:${repoIds.join(",")}`, async () => (repoIds.length ? await appData.repos() : []), { live: false })
+  const scopes = useMemo(() => scopesOf(learnings), [learnings])
+  const repoData = useLiveQuery(`learning-repos:${scopes.repos.join(",")}`, async () => (scopes.repos.length ? await appData.repos() : []), { live: false })
   const repoNames = useMemo(() => new Map<RepoId, string>((repoData.data ?? []).map((r) => [r.repo.id, r.repo.name])), [repoData.data])
   const roles = useMemo(() => rolesOf(learnings), [learnings])
-  const scopes = useMemo(() => scopesOf(learnings), [learnings])
   const scopeOf = (l: Learning) => scopeName(l, projects, repoNames)
   const openRunOf = (l: Learning) => {
     const slug = projects.find((p) => p.id === l.projectId)?.slug
