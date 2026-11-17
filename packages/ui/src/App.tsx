@@ -19,7 +19,7 @@ import { RunCommandsProvider, useRunCommands } from "@/components/run/run-comman
 import type { StepTab } from "@/components/run/step-panel"
 import { RunView, type RunTab } from "@/components/run/run-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
-import { LocalPrView } from "@/components/prs/local-pr-view"
+import { type LocalPrControls, LocalPrView } from "@/components/prs/local-pr-view"
 import { PrsView } from "@/components/prs/prs-view"
 import { SetupChecklist } from "@/components/setup-checklist"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
@@ -119,6 +119,8 @@ function Shell() {
   const connections = useMemo(() => connectionsQuery.data ?? [], [connectionsQuery.data])
   const [decisionId, setDecisionId] = useState<DecisionId | null>(null)
   const [prId, setPrId] = useState<string | null>(null)
+  // Lo que la vista del PR local abierta le deja hacer a la paleta (modo del diff, commit anterior o siguiente).
+  const [localPrControls, setLocalPrControls] = useState<LocalPrControls | null>(null)
   const decisionsQuery = useLiveQuery("decisions", () => appData.decisions({ kind: ACTIONABLE_KINDS }))
   const decisions = useMemo(() => decisionsQuery.data ?? [], [decisionsQuery.data])
   const resolver = useDecisionResolver(decisions, decisionsQuery.reload)
@@ -461,7 +463,7 @@ function Shell() {
             </main>
           ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              {localPr ? <LocalPrView pr={localPr} onBack={closeLocalPr} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
+              {localPr ? <LocalPrView pr={localPr} onBack={closeLocalPr} onControls={setLocalPrControls} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
             </main>
           ) : module === "flows" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
@@ -519,6 +521,7 @@ function Shell() {
         queue={module === "projects" && !runId ? (detail?.queue ?? []) : null}
         prs={openPrs}
         prsActive={module === "prs"}
+        localPr={module === "prs" && localPr ? localPrControls : null}
         learnings={module === "learnings" ? { view: learningsView, onUndo: triage.canUndo ? () => void triage.undo() : null } : null}
         pendingDecisions={inbox.pending}
         onUndoDecision={resolver.canUndo ? () => void undo() : null}

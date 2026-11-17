@@ -32,6 +32,7 @@ import type {
   LearningPatch,
   NewLearning,
   LearningVerdict,
+  LocalCommitDiff,
   LocalPrDetail,
   ModelMetrics,
   NewProject,
@@ -131,6 +132,8 @@ export interface AppData {
   publishLocalPr(id: string): Promise<void>
   /** Lo que se ve de un PR local sin GitHub (descripción, commits y diff contra su base), leído del repo. */
   localPrDetail(id: string): Promise<LocalPrDetail>
+  /** El diff de un commit de un PR local, para revisarlo commit por commit. */
+  localCommitDiff(id: string, sha: string): Promise<LocalCommitDiff>
   /** Las issues del caché del proyecto. */
   issues(projectId: ProjectId): Promise<CachedIssue[]>
   /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */

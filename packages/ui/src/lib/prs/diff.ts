@@ -68,3 +68,45 @@ export function parsePatch(patch: string): DiffFile[] {
   }
   return files
 }
+
+/** Una fila del diff lado a lado: la línea vieja a la izquierda y la nueva a la derecha; un hunk o una nota ocupan las dos. */
+export type SplitRow = { kind: "full"; line: DiffLine } | { kind: "pair"; left?: DiffLine; right?: DiffLine }
+
+/**
+ * Las líneas de un archivo para verlas lado a lado, como GitHub: el contexto va en los dos lados y cada bloque de
+ * borradas se empareja con el bloque de agregadas que lo sigue, línea a línea; lo que sobra de uno queda solo.
+ */
+export function splitRows(lines: readonly DiffLine[]): SplitRow[] {
+  const rows: SplitRow[] = []
+  let dels: DiffLine[] = []
+  let adds: DiffLine[] = []
+  const flush = () => {
+    for (let i = 0; i < Math.max(dels.length, adds.length); i++) rows.push({ kind: "pair", left: dels[i], right: adds[i] })
+    dels = []
+    adds = []
+  }
+  for (const line of lines) {
+    if (line.kind === "del") {
+      // Una borrada después de agregadas empieza otro bloque.
+      if (adds.length > 0) flush()
+      dels.push(line)
+    } else if (line.kind === "add") {
+      adds.push(line)
+    } else {
+      flush()
+      rows.push(line.kind === "ctx" ? { kind: "pair", left: line, right: line } : { kind: "full", line })
+    }
+  }
+  flush()
+  return rows
+}
+
+/** Una huella corta del cambio de un archivo: "visto" vale mientras el diff del archivo no cambie (como GitHub). */
+export function fileFingerprint(file: DiffFile): string {
+  let hash = 5381
+  for (const line of file.lines) {
+    const text = `${line.kind}:${line.text}`
+    for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  }
+  return `${file.path}@${(hash >>> 0).toString(36)}`
+}

@@ -1,4 +1,4 @@
-import type { CachedPr, IssueId, LocalPrDetail, PrSignal, PrState, ReviewerState } from "@clanker/api"
+import type { CachedPr, IssueId, LocalCommitDiff, LocalPrDetail, PrSignal, PrState, ReviewerState } from "@clanker/api"
 
 // Stacks de PR de ejemplo para desarrollar la UI sin core: lo que `prs.list` serviría con el caché de Watch ya
 // leído. Todo cuelga de `now`, así "hace 2 min" se ve igual cada vez que se abre y los tests no dependen del reloj.
@@ -305,4 +305,12 @@ export function seedLocalPrDetail(id: string, local: NonNullable<CachedPr["local
     ].join("\n"),
     truncated: false,
   }
+}
+
+/** El diff de un commit del detalle de ejemplo: el primero cambia el modelo y el segundo agrega el spec. */
+export function seedLocalCommitDiff(detail: LocalPrDetail, sha: string): LocalCommitDiff {
+  const at = detail.commits.findIndex((c) => c.sha === sha)
+  if (at === -1) throw new Error(`El commit ${sha.slice(0, 9)} no es de ${detail.branch}.`)
+  const parts = detail.patch.split(/(?=^diff --git )/m)
+  return { sha, files: [detail.files[at]!], patch: parts[at] ?? "", truncated: false }
 }

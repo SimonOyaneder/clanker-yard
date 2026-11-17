@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { parsePatch } from "./diff"
+import { fileFingerprint, parsePatch, splitRows } from "./diff"
 
 const PATCH = `diff --git a/src/a.ts b/src/a.ts
 index 1111111..2222222 100644
@@ -43,4 +43,24 @@ test("parte el diff por archivo con sus conteos y los números de línea de cada
 
 test("un diff vacío no tiene archivos", () => {
   expect(parsePatch("")).toEqual([])
+})
+
+test("lado a lado empareja cada bloque de borradas con las agregadas que lo siguen y deja el contexto en los dos lados", () => {
+  const [a] = parsePatch(PATCH)
+  const rows = splitRows(a!.lines)
+
+  expect(rows.map((r) => (r.kind === "full" ? ["full", r.line.kind] : [r.left?.text ?? null, r.right?.text ?? null]))).toEqual([
+    ["full", "hunk"],
+    ["const x = 1", "const x = 1"],
+    ["const y = 2", "const y = 3"],
+    [null, "const z = 4"],
+    ["return x", "return x"],
+  ])
+})
+
+test("la huella de un archivo cambia solo si cambia su diff", () => {
+  const [a, b] = parsePatch(PATCH)
+  expect(fileFingerprint(a!)).toBe(fileFingerprint(parsePatch(PATCH)[0]!))
+  expect(fileFingerprint(a!)).not.toBe(fileFingerprint({ ...a!, lines: a!.lines.slice(1) }))
+  expect(fileFingerprint(b!).startsWith("src/b.ts@")).toBe(true)
 })

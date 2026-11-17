@@ -315,5 +315,9 @@ export const LocalPrDetail = z.object({
 });
 export type LocalPrDetail = z.infer<typeof LocalPrDetail>;
 
+/** `prs.localCommitDiff`: el diff de un solo commit de un PR local (contra su padre), para revisarlo commit por commit. */
+export const LocalCommitDiff = z.object({ sha: z.string(), files: z.array(LocalPrFile), patch: z.string(), truncated: z.boolean() });
+export type LocalCommitDiff = z.infer<typeof LocalCommitDiff>;
+
 /** Hasta dónde llega el `patch` de `prs.localDetail`: más que esto no se lee en pantalla y congela la vista. */
 export const LOCAL_PR_PATCH_MAX = 2_000_000;

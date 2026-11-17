@@ -25,11 +25,14 @@ async function setup() {
   return { local, onBack }
 }
 
-const openTab = (name: RegExp) => {
-  const tab = screen.getByRole("tab", { name })
+async function openTab(name: RegExp) {
+  const tab = await screen.findByRole("tab", { name })
   fireEvent.mouseDown(tab)
   fireEvent.click(tab)
 }
+
+/** La fila del diff que tiene `text`: con el resaltado, el texto de una línea va partido en varios `span`. */
+const rowWith = (text: string) => [...document.querySelectorAll("tr")].find((tr) => tr.textContent?.includes(text))
 
 test("muestra la descripción con sus títulos, los commits y el diff contra la base, como GitHub", async () => {
   const { local } = await setup()
@@ -38,17 +41,71 @@ test("muestra la descripción con sus títulos, los commits y el diff contra la 
   expect(await screen.findByRole("heading", { name: "Qué cambia" })).toBeTruthy()
   expect(screen.getByText("Suma un test que cubre el caso sin entradas.")).toBeTruthy()
 
-  openTab(/Commits 2/)
+  await openTab(/Commits 2/)
   expect(await screen.findByText("test(entries): cubrir el caso sin entradas")).toBeTruthy()
 
-  openTab(/Archivos 2/)
+  await openTab(/Archivos 2/)
   expect(await screen.findByText("app/models/entry_index.rb")).toBeTruthy()
-  expect(screen.getByText("return if entries.none?").closest("tr")?.dataset.kind).toBe("add")
-  expect(screen.getByText("rebuild").closest("tr")?.dataset.kind).toBe("del")
+  expect(rowWith("return if entries.none?")?.dataset.kind).toBe("add")
+  expect([...document.querySelectorAll("tr[data-kind='del']")].map((tr) => tr.textContent?.replace(/\s+/g, " ").trim())).toEqual(["13− rebuild"])
 })
 
 test("Esc vuelve a los stacks", async () => {
   const { onBack } = await setup()
   fireEvent.keyDown(window, { key: "Escape" })
   expect(onBack).toHaveBeenCalled()
+})
+
+test("abrir un commit muestra solo lo que cambió ese commit, y ] [ y A se mueven entre commits", async () => {
+  await setup()
+  await screen.findByRole("heading", { name: "Qué cambia" })
+  await openTab(/Commits 2/)
+  fireEvent.click(await screen.findByText("test(entries): cubrir el caso sin entradas"))
+
+  expect(await screen.findByText("spec/models/entry_index_spec.rb")).toBeTruthy()
+  expect(screen.queryByText("app/models/entry_index.rb")).toBeNull()
+
+  fireEvent.keyDown(window, { key: "[" })
+  expect(await screen.findByText("app/models/entry_index.rb")).toBeTruthy()
+  expect(screen.queryByText("spec/models/entry_index_spec.rb")).toBeNull()
+
+  fireEvent.keyDown(window, { key: "a" })
+  expect(await screen.findByText("spec/models/entry_index_spec.rb")).toBeTruthy()
+  expect(screen.getByText("app/models/entry_index.rb")).toBeTruthy()
+})
+
+test("un archivo visto se pliega, cuenta en el progreso y se recuerda al volver", async () => {
+  const { local } = await setup()
+  await openTab(/Archivos 2/)
+  await screen.findByText("app/models/entry_index.rb")
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Marcar app/models/entry_index.rb como visto" }))
+
+  expect(screen.getByText("1 de 2 archivos vistos")).toBeTruthy()
+  expect(rowWith("return if entries.none?")).toBeUndefined()
+  cleanup()
+  await setup()
+  await openTab(/Archivos 2/)
+  expect(await screen.findByText("1 de 2 archivos vistos")).toBeTruthy()
+  localStorage.removeItem(`clanker.localPr.viewed.${local.id}`)
+})
+
+test("S cambia a lado a lado: lo borrado a la izquierda, lo agregado a la derecha y el código con el color de su lenguaje", async () => {
+  await setup()
+  await openTab(/Archivos 2/)
+  await screen.findByText("app/models/entry_index.rb")
+
+  fireEvent.keyDown(window, { key: "s" })
+
+  const pair = rowWith("return if entries.none?")!
+  expect(pair.dataset.kind).toBe("pair")
+  expect([...pair.querySelectorAll("td[data-side]")].map((td) => [td.getAttribute("data-side"), td.getAttribute("data-kind")])).toEqual([
+    ["old", "del"],
+    ["new", "add"],
+  ])
+  expect(pair.textContent).toContain("rebuild")
+  // highlight.js marca `return` como palabra clave de Ruby.
+  expect(pair.querySelector(".hljs-keyword")?.textContent).toBe("return")
+  fireEvent.keyDown(window, { key: "s" })
+  localStorage.removeItem("clanker.localPr.diffMode")
 })

@@ -74,3 +74,16 @@ test("un PR que no existe o que ya está en GitHub se rechaza diciendo por qué"
   insert("open");
   await expect(details().get("pr_b")).rejects.toThrow("ya no es un PR local");
 });
+
+test("el diff de un commit trae solo lo que cambió ese commit, y uno que no es del PR se rechaza", async () => {
+  insert("local");
+  const [first, second] = (await details().get("pr_b")).commits;
+
+  const diff = await details().commit("pr_b", second!.sha.slice(0, 9));
+
+  expect(diff.sha).toBe(second!.sha);
+  expect(diff.files).toEqual([{ path: "b.test.txt", additions: 1, deletions: 0 }]);
+  expect(diff.patch).not.toContain("b.txt b/b.txt");
+  expect((await details().commit("pr_b", first!.sha)).files.map((f) => f.path)).toEqual(["b.txt"]);
+  await expect(details().commit("pr_b", repo.git("rev-parse", "main"))).rejects.toThrow("no es de cla-2");
+});

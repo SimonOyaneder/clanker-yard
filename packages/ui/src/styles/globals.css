@@ -51,6 +51,16 @@
   --viz-8: #e34948;
   --viz-other: oklch(0.62 0.01 270);
   --viz-measure: oklch(0.56 0.17 285);
+  /* Código en un diff (highlight.js), con la paleta de GitHub. */
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-comment: #6e7781;
+  --syntax-number: #0550ae;
+  --syntax-title: #8250df;
+  --syntax-type: #953800;
+  --syntax-attr: #0550ae;
+  --syntax-variable: #953800;
+  --syntax-tag: #116329;
 }
 
 .dark {
@@ -91,6 +101,15 @@
   --viz-8: #e66767;
   --viz-other: oklch(0.6 0.01 270);
   --viz-measure: oklch(0.68 0.16 285);
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-comment: #8b949e;
+  --syntax-number: #79c0ff;
+  --syntax-title: #d2a8ff;
+  --syntax-type: #ffa657;
+  --syntax-attr: #79c0ff;
+  --syntax-variable: #ffa657;
+  --syntax-tag: #7ee787;
 }
 
 @theme inline {
@@ -245,3 +264,18 @@
 .react-flow.flow-canvas .react-flow__node {
   cursor: default;
 }
+
+/* Las clases de highlight.js en el diff de un PR local, con los tokens --syntax-*. */
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in.hljs-keyword, .hljs-meta .hljs-keyword, .hljs-doctag { color: var(--syntax-keyword); }
+.hljs-string, .hljs-regexp, .hljs-meta .hljs-string, .hljs-template-string { color: var(--syntax-string); }
+.hljs-comment, .hljs-quote { color: var(--syntax-comment); font-style: italic; }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet { color: var(--syntax-number); }
+.hljs-title, .hljs-title.function_, .hljs-section { color: var(--syntax-title); }
+.hljs-type, .hljs-title.class_, .hljs-built_in, .hljs-class .hljs-title { color: var(--syntax-type); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id, .hljs-meta { color: var(--syntax-attr); }
+.hljs-variable, .hljs-template-variable, .hljs-params { color: var(--syntax-variable); }
+.hljs-name, .hljs-tag, .hljs-selector-pseudo { color: var(--syntax-tag); }
+.hljs-addition { color: var(--syntax-tag); }
+.hljs-deletion { color: var(--syntax-keyword); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }

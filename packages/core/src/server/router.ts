@@ -276,6 +276,7 @@ export function createRouter(deps: RouterDeps) {
       rebase: os.prs.rebase.handler(({ input, context }) => prCommands.rebase(input, context.origin)),
       publishLocal: os.prs.publishLocal.handler(({ input, context }) => ({ runId: prCommands.publishLocal(input.id, context.origin) })),
       localDetail: os.prs.localDetail.handler(({ input }) => localPrDetails.get(input.id)),
+      localCommitDiff: os.prs.localCommitDiff.handler(({ input }) => localPrDetails.commit(input.id, input.sha)),
       republish: os.prs.republish.handler(({ input, context }) => deps.republisher.republish(input, context.origin)),
       republishProgress: os.prs.republishProgress.handler(({ input }) => deps.republisher.progress(input.id)),
     },
