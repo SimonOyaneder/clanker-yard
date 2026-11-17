@@ -1,4 +1,4 @@
-import type { ClankerProject, DefRecord, StatusCategory } from "@clanker/api"
+import type { ClankerProject, DefRecord, RepoId, StatusCategory } from "@clanker/api"
 import { Ellipsis, Plus } from "lucide-react"
 import { useState } from "react"
 import type { RepoRow } from "@/app-data"
@@ -75,9 +75,9 @@ export function ReposSection({ draft, update, problems, project, registered }: S
   const actions = useAppActions()
   const byId = new Map(registered.map((r) => [r.repo.id, r.repo]))
   const available = registered.filter((r) => !draft.repos.some((d) => d.repoId === r.repo.id))
-  const setLabels = (repoId: string, labels: string[]) => update({ repos: draft.repos.map((r) => (r.repoId === repoId ? { ...r, labels } : r)) })
-  const makeDefault = (repoId: string) => update({ repos: [...draft.repos.filter((r) => r.repoId === repoId), ...draft.repos.filter((r) => r.repoId !== repoId)] })
-  const remove = (repoId: string) => update({ repos: draft.repos.filter((r) => r.repoId !== repoId) })
+  const setLabels = (repoId: RepoId, labels: string[]) => update({ repos: draft.repos.map((r) => (r.repoId === repoId ? { ...r, labels } : r)) })
+  const makeDefault = (repoId: RepoId) => update({ repos: [...draft.repos.filter((r) => r.repoId === repoId), ...draft.repos.filter((r) => r.repoId !== repoId)] })
+  const remove = (repoId: RepoId) => update({ repos: draft.repos.filter((r) => r.repoId !== repoId) })
 
   return (
     <Section
@@ -93,7 +93,7 @@ export function ReposSection({ draft, update, problems, project, registered }: S
       ) : (
         <ul className="overflow-hidden rounded-lg border">
           {draft.repos.map((entry, i) => {
-            const row = byId.get(entry.repoId as never)
+            const row = byId.get(entry.repoId)
             const name = row?.name ?? entry.repoId
             const error = problems[`repo:${entry.repoId}`]
             const id = `repo-labels-${entry.repoId}`
@@ -163,7 +163,10 @@ export function ReposSection({ draft, update, problems, project, registered }: S
       <div className="flex items-center gap-2">
         <Select
           value=""
-          onValueChange={(repoId) => update({ repos: [...draft.repos, { repoId, labels: [] }] })}
+          onValueChange={(id) => {
+            const picked = available.find((r) => r.repo.id === id)
+            if (picked) update({ repos: [...draft.repos, { repoId: picked.repo.id, labels: [] }] })
+          }}
           disabled={available.length === 0}
         >
           <SelectTrigger size="sm" aria-label="Agregar un repo registrado" className="w-72">

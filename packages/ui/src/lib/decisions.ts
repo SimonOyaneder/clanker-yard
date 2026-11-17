@@ -72,8 +72,8 @@ export const takesText = (decision: Pick<Decision, "kind" | "status">) => decisi
 
 /** Lo que se eligió o respondió, para leerlo en las resueltas. */
 export function resolutionText(decision: Decision): string | null {
-  const option = (decision.resolution as { option?: unknown } | null)?.option
-  return typeof option === "string" ? optionLabel(decision, option) : null
+  const option = decision.resolution?.option
+  return option == null ? null : optionLabel(decision, option)
 }
 
 export type InboxTab = "pending" | "resolved"

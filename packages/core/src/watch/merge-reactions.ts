@@ -1,4 +1,4 @@
-import { DecisionId, type Event, type MergeStrategy, type PrRef, type PrState } from "@clanker/api";
+import type { DecisionId, EventOf, MergeStrategy, PrRef, PrState } from "@clanker/api";
 import { and, eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
 import { closeDecision, openDecision } from "../decisions/decisions";
@@ -111,7 +111,7 @@ export function startMergeReactions({ store, repos, packs, prs, connections, err
     });
   }
 
-  async function onMergeReady(event: Event): Promise<void> {
+  async function onMergeReady(event: EventOf<"pr.mergeReady">): Promise<void> {
     const found = event.subject?.type === "pr" ? ownedPr(event.subject.id) : undefined;
     if (!found) return;
     const { row, ref } = found;
@@ -130,8 +130,8 @@ export function startMergeReactions({ store, repos, packs, prs, connections, err
   }
 
   /** Una persona respondió una oferta: con la opción que comenta, se comenta si el PR sigue como se ofreció. */
-  async function onDecisionResolved(event: Event): Promise<void> {
-    const decisionId = DecisionId.parse(event.payload.decisionId);
+  async function onDecisionResolved(event: EventOf<"decision.resolved">): Promise<void> {
+    const { decisionId } = event.payload;
     const row = store.db.select().from(mergeOffers).where(eq(mergeOffers.decisionId, decisionId)).get();
     const decision = row && store.db.select().from(decisions).where(eq(decisions.id, row.decisionId)).get();
     if (!row || decision?.status !== "answered") return;
@@ -142,7 +142,7 @@ export function startMergeReactions({ store, repos, packs, prs, connections, err
     if (!found) return;
     const { row: pr, ref } = found;
     const command = strategyOf(ref)?.command;
-    if (command === undefined || (decision.resolution as { option?: string } | null)?.option !== approveOption(command)) return;
+    if (command === undefined || decision.resolution?.option !== approveOption(command)) return;
 
     const state = await prs.get(ref);
     const still = state.headSha === row.headSha && state.merge.offer && state.merge.via === "comment" && state.merge.queue === null;

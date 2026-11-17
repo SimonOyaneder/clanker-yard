@@ -1,4 +1,4 @@
-import type { Decision, DecisionFilter, DecisionId } from "@clanker/api";
+import type { Decision, DecisionFilter, DecisionId, DecisionResolution } from "@clanker/api";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { newId } from "../store/conventions";
 import { decisions, pullRequests } from "../store/schema";
@@ -78,7 +78,7 @@ export function openDecision(tx: Tx, decision: NewDecision): Decision {
 export function closeDecision(
   tx: Tx,
   id: DecisionId,
-  closing: { status: "answered" | "expired" | "superseded"; resolution?: unknown; by: string },
+  closing: { status: "answered" | "expired" | "superseded"; resolution?: DecisionResolution; by: string },
 ): Decision | undefined {
   const open = tx.db
     .select()

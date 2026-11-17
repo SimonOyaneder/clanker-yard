@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { RepoId, type DetectedRepo, type RecipeStatus, type Repo, type RepoOverview } from "@clanker/api";
+import { isEventOf, RepoId, type DetectedRepo, type RecipeStatus, type Repo, type RepoOverview } from "@clanker/api";
 import { asc, eq } from "drizzle-orm";
 import { DefValidationError } from "../defs/defs";
 import { readRecipe, RecipeSyntaxError } from "../recipe/recipe";
@@ -97,8 +97,7 @@ export function createRepos(store: Store, { remote: remoteOf }: ReposOptions = {
     overview() {
       const lastTest = new Map<string, { ok: boolean; at: number }>();
       for (const event of store.events.since(0, { types: ["recipe.test_finished"] })) {
-        const repoId = event.payload.repoId;
-        if (typeof repoId === "string") lastTest.set(repoId, { ok: event.payload.ok === true, at: event.ts });
+        if (isEventOf(event, "recipe.test_finished")) lastTest.set(event.payload.repoId, { ok: event.payload.ok, at: event.ts });
       }
       return self.list().map((repo) => ({
         repo,

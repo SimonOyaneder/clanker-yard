@@ -37,7 +37,7 @@ export interface Store {
    */
   tx<T>(fn: (tx: Tx) => T): T;
   events: {
-    /** Eventos con `seq` mayor que `seq`, en orden; con `limit`, solo los primeros. */
+    /** Eventos con `seq` mayor que `seq`, en orden; con `limit`, solo los primeros. `isEventOf` tipa el payload de uno. */
     since(seq: number, filter?: EventFilter, limit?: number): Event[];
     /** Llama a `listener` por cada evento confirmado que cumpla el filtro. Devuelve cómo cancelar. */
     subscribe<T extends EventType = EventType>(listener: (event: EventOf<T>) => void, filter?: Omit<EventFilter, "types"> & { types?: T[] }): () => void;

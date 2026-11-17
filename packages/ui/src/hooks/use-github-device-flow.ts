@@ -1,4 +1,4 @@
-import { type Connection, type GitHubDeviceFlow, LoginFailure } from "@clanker/api"
+import { isEventOf, type Connection, type GitHubDeviceFlow, type LoginFailure, type PayloadOf } from "@clanker/api"
 import { useCallback, useEffect, useEffectEvent, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
@@ -51,12 +51,12 @@ export function useGitHubDeviceFlow(connection: Connection | undefined, onChange
     }
   }, [appData, openGitHub, connection, onChanged])
 
-  const rejected = useEffectEvent((payload: Record<string, unknown>) => {
-    if (!pending || payload.provider !== "github") return
+  const rejected = useEffectEvent(({ reason, message }: PayloadOf<"connection.login_failed">) => {
+    if (!pending) return
     setPending(null)
-    setFailure({ reason: LoginFailure.catch("failed").parse(payload.reason), message: String(payload.message) })
+    setFailure({ reason, message })
   })
-  useEffect(() => subscribe((event) => event.type === "connection.login_failed" && rejected(event.payload)), [subscribe])
+  useEffect(() => subscribe((event) => isEventOf(event, "connection.login_failed") && rejected(event.payload)), [subscribe])
 
   const done = pending !== null && connectionSignature(connection) !== pending.before
   useEffect(() => {

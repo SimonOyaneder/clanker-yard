@@ -1,4 +1,4 @@
-import type { Brief, IssueId, RepoId } from "@clanker/api";
+import type { Brief, IssueId} from "@clanker/api";
 import { and, eq } from "drizzle-orm";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { StepBriefRequest } from "../flows/engine";

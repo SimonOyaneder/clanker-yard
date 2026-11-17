@@ -156,5 +156,5 @@ export async function seedLanes({ client, store, repoId, now = Date.now() }: { c
   pr(4249, shipped, shippedRun, "prohibir-imports-cruzados");
 
   // GitHub cortó las requests por cuota: el breaker abre solo y se vuelve a probar cuando la cuota se reinicia.
-  store.tx((tx) => tx.emit({ type: "sync.rate_limited", origin: "core", payload: { resetAt: now + 40 * MIN } }));
+  store.tx((tx) => tx.emit({ type: "sync.rate_limited", origin: "core", payload: { provider: "github", account: "demo", resetAt: now + 40 * MIN } }));
 }

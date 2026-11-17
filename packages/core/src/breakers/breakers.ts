@@ -1,4 +1,4 @@
-import { BreakerCause, DecisionId, RepoId } from "@clanker/api";
+import { BreakerCause, DecisionId, RepoId, type ConnectionProvider, type EventOf } from "@clanker/api";
 import { CLAUDE_RUNTIME_ID } from "../agents/claude/models";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import { EnvironmentError } from "../flows/catalog";
@@ -110,7 +110,7 @@ export function createBreakers({ store, runtimes, probe, label = (scope) => scop
   let closed = false;
 
   /** La conexión de la que depende cada ámbito global. */
-  const scopeOfProvider = (provider: unknown): string | undefined =>
+  const scopeOfProvider = (provider: ConnectionProvider): string | undefined =>
     provider === "github" ? GITHUB_SCOPE : provider === "claude" && runtimes.includes(CLAUDE_RUNTIME_ID) ? runtimeScope(CLAUDE_RUNTIME_ID) : undefined;
 
   /** Guarda lo que sobrevive a un corte, en la misma transacción que el cambio. */
@@ -195,22 +195,16 @@ export function createBreakers({ store, runtimes, probe, label = (scope) => scop
     schedule(entries.get(scope)!);
   }
 
-  function onEvent({ type, payload }: { type: string; payload: Record<string, unknown> }): void {
-    if (type === "sync.rate_limited") {
-      const resetAt = typeof payload.resetAt === "number" ? payload.resetAt : undefined;
-      trip({
-        scope: GITHUB_SCOPE,
-        cause: "rate_limited",
-        reason: "GitHub cortó las requests por cuota.",
-        ...(resetAt === undefined ? {} : { resetsAt: resetAt }),
-      });
+  function onEvent(event: EventOf<"connection.changed" | "sync.rate_limited">): void {
+    if (event.type === "sync.rate_limited") {
+      trip({ scope: GITHUB_SCOPE, cause: "rate_limited", reason: "GitHub cortó las requests por cuota.", resetsAt: event.payload.resetAt });
       return;
     }
-    const scope = scopeOfProvider(payload.provider);
+    const { provider, account, status } = event.payload;
+    const scope = scopeOfProvider(provider);
     if (scope === undefined) return;
-    const { status, account } = payload;
     if (status === "expired" || status === "revoked") {
-      trip({ scope, cause: "connection_lost", reason: `La conexión de ${String(payload.provider)} (${String(account)}) quedó ${String(status)}: reconéctala.` });
+      trip({ scope, cause: "connection_lost", reason: `La conexión de ${provider} (${account}) quedó ${status}: reconéctala.` });
     } else if (entries.has(scope) && !probing.has(scope)) {
       // Reconectar la causa: se prueba ya, sin esperar al backoff.
       void attempt(scope);

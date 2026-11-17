@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { renderTemplate, type Origin, type Recipe, type RecipeTestPhase, type RecipeTestResult, type RecipeTestStep, type RepoId, type TemplateVars } from "@clanker/api";
+import { renderTemplate, type Origin, type PayloadOf, type Recipe, type RecipeTestPhase, type RecipeTestResult, type RecipeTestStep, type RepoId, type TemplateVars } from "@clanker/api";
 import { git as runGit } from "../git/git";
 import type { Procs } from "../procs/procs";
 import type { SlotLease, Slots } from "../slots/slots";
@@ -55,8 +55,8 @@ export function createRecipeTester({ store, repos, slots, dataDir, procs }: Reci
       if (running.has(repoId)) throw new RecipeTestError(`Ya hay una prueba de la receta de ${repo.name} en curso.`);
       running.add(repoId);
 
-      const emit = (type: "recipe.test_started" | "recipe.test_output" | "recipe.test_finished", payload: Record<string, unknown>) =>
-        store.tx((tx) => tx.emit({ type, origin, payload: { repoId, ...payload } }));
+      const emit = <T extends "recipe.test_started" | "recipe.test_output" | "recipe.test_finished">(type: T, payload: Omit<PayloadOf<T>, "repoId">) =>
+        store.tx((tx) => tx.emit<T>({ type, origin, payload: { repoId, ...payload } as PayloadOf<T> }));
       const scratchRoot = join(dataDir, "recipe-tests");
       mkdirSync(scratchRoot, { recursive: true });
       const scratch = mkdtempSync(join(scratchRoot, "t-"));

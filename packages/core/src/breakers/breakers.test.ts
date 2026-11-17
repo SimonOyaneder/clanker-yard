@@ -1,3 +1,4 @@
+import type { PayloadOf } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createDecisions } from "../decisions/decisions";
 import { openStore, type Store } from "../store/store";
@@ -141,8 +142,8 @@ describe("backoff y cierre", () => {
 });
 
 describe("eventos de conexión y cuota", () => {
-  const emit = (type: "connection.changed" | "sync.rate_limited", payload: Record<string, unknown>) =>
-    store.tx((tx) => tx.emit({ type, origin: "core", payload }));
+  const emit = <T extends "connection.changed" | "sync.rate_limited">(type: T, payload: PayloadOf<T>) =>
+    store.tx((tx) => tx.emit<T>({ type, origin: "core", payload }));
 
   test("sync.rate_limited abre github hasta el reset de GitHub", async () => {
     const b = breakers();

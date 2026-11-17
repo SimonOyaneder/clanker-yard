@@ -1,4 +1,4 @@
-import type { ClankerProject, Conventions, DefRecord, ProjectPatch, StackOn, StatusCategory } from "@clanker/api"
+import type { ClankerProject, Conventions, DefRecord, ProjectPatch, RepoId, StackOn, StatusCategory } from "@clanker/api"
 import { FlowDef } from "@clanker/api"
 
 // El modelo de la pestaña Ajustes: lo que el formulario edita (`ProjectDraft`, solo texto y listas), cómo sale de un proyecto,
@@ -114,7 +114,7 @@ export interface ProjectDraft {
   trackerRef: string
   /** La cuenta del tracker (`trackerAccount`); la fija el selector junto con el proyecto. */
   trackerAccount: string | null
-  repos: { repoId: string; labels: string[] }[]
+  repos: { repoId: RepoId; labels: string[] }[]
   status: StatusCategory[]
   labels: string[]
   excludeLabels: string[]
@@ -264,7 +264,7 @@ export function patchOf(draft: ProjectDraft, base: ProjectDraft, project: Clanke
   const patch: ProjectPatch = {}
   if (project.tracker !== "local" && draft.trackerRef !== base.trackerRef) patch.trackerRef = draft.trackerRef
   if (project.tracker !== "local" && draft.trackerAccount !== null && draft.trackerAccount !== base.trackerAccount) patch.trackerAccount = draft.trackerAccount
-  if (!sameValue(draft.repos, base.repos)) patch.repos = draft.repos.map((r) => ({ repoId: r.repoId as ClankerProject["repos"][number]["repoId"], labels: r.labels }))
+  if (!sameValue(draft.repos, base.repos)) patch.repos = draft.repos.map((r) => ({ repoId: r.repoId, labels: r.labels }))
   if (!sameValue([draft.status, draft.labels, draft.excludeLabels], [base.status, base.labels, base.excludeLabels])) {
     patch.queueFilter = {
       ...(draft.status.length && { status: draft.status }),
