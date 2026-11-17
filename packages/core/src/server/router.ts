@@ -72,8 +72,8 @@ export interface RouterDeps {
   scheduler: Pick<Scheduler, "skipIssue" | "boostIssue" | "tick">;
   /** `system.lanes` y `system.setLanes`. */
   lanes: LaneSettings;
-  /** `system.breakers`. */
-  breakers: Pick<Breakers, "list">;
+  /** `system.breakers` y `system.retryBreaker`. */
+  breakers: Pick<Breakers, "list" | "retry">;
   flows: Flows;
   /** `prs.get` y lo que leen las acciones sobre un PR: el mismo que usan los waits del core. */
   prs: Prs;
@@ -152,6 +152,7 @@ export function createRouter(deps: RouterDeps) {
       })),
       lanes: os.system.lanes.handler(() => deps.lanes.usage()),
       breakers: os.system.breakers.handler(() => deps.breakers.list()),
+      retryBreaker: os.system.retryBreaker.handler(async ({ input }) => (await deps.breakers.retry(input.scope)) ?? null),
       setLanes: os.system.setLanes.handler(({ input, context }) => {
         deps.lanes.set(input, context.origin);
         void deps.scheduler.tick();

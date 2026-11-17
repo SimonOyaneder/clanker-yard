@@ -141,6 +141,66 @@ describe("backoff y cierre", () => {
   });
 });
 
+describe("reintentar a mano", () => {
+  test("prueba ya sin esperar al backoff y, si la causa se fue, cierra el breaker y su alerta", async () => {
+    const b = breakers();
+    b.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "No responde: Postgres." });
+
+    await expect(b.retry(repoScope("repo_a"))).resolves.toBeUndefined();
+
+    expect(probes.map((p) => p.scope)).toEqual(["repo:repo_a"]);
+    expect(b.openReason(repoScope("repo_a"))).toBeUndefined();
+    expect(events("breaker.closed")).toHaveLength(1);
+    expect(alerts()).toMatchObject([{ status: "superseded" }]);
+  });
+
+  test("si sigue fallando devuelve el breaker con el motivo nuevo y reprograma el próximo reintento desde ahora", async () => {
+    failing.add(repoScope("repo_a"));
+    const b = breakers();
+    b.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "No responde: Postgres." });
+    await vi.advanceTimersByTimeAsync(MIN / 2);
+
+    const retried = await b.retry(repoScope("repo_a"));
+
+    expect(retried).toMatchObject({ scope: "repo:repo_a", label: "repo:repo_a", probes: 1, reason: "sigue caído", nextProbeAt: Date.now() + 5 * MIN });
+    // La prueba programada al minuto ya no corre: la siguiente es a los 5 minutos del reintento.
+    await vi.advanceTimersByTimeAsync(5 * MIN - 1);
+    expect(probes).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(probes).toHaveLength(2);
+  });
+
+  test("con una prueba en curso espera esa en vez de lanzar otra", async () => {
+    let release!: () => void;
+    const created = createBreakers({
+      store,
+      runtimes: ["fake"],
+      probe: (scope) => {
+        probes.push({ scope, at: Date.now() });
+        return new Promise((resolve) => (release = () => resolve(undefined)));
+      },
+    });
+    created.start();
+    open.push(created);
+    created.trip({ scope: repoScope("repo_a"), cause: "environment", reason: "caído" });
+    await vi.advanceTimersByTimeAsync(MIN);
+
+    const retried = created.retry(repoScope("repo_a"));
+    release();
+
+    await expect(retried).resolves.toBeUndefined();
+    expect(probes).toHaveLength(1);
+  });
+
+  test("un ámbito que no está abierto no se prueba", async () => {
+    const b = breakers();
+
+    await expect(b.retry(repoScope("repo_a"))).resolves.toBeUndefined();
+
+    expect(probes).toEqual([]);
+  });
+});
+
 describe("eventos de conexión y cuota", () => {
   const emit = <T extends "connection.changed" | "sync.rate_limited">(type: T, payload: PayloadOf<T>) =>
     store.tx((tx) => tx.emit<T>({ type, origin: "core", payload }));

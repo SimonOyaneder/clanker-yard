@@ -98,6 +98,12 @@ const system = {
     .output(Lanes),
   /** Los circuit breakers abiertos ahora, el más antiguo primero: qué está en pausa, por qué y cuándo se vuelve a probar. */
   breakers: base.output(z.array(Breaker)),
+  /**
+   * Prueba ya el breaker de `scope`, sin esperar al próximo reintento: si la causa se fue lo cierra y lo pausado
+   * sigue. Devuelve el breaker si sigue abierto (con el motivo de esta prueba y su próximo reintento) o `null` si
+   * se cerró o ya no estaba abierto.
+   */
+  retryBreaker: base.input(z.object({ scope: z.string().min(1) })).output(Breaker.nullable()),
 };
 
 const events = {

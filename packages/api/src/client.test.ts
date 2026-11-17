@@ -38,6 +38,7 @@ const router = os.router({
     lanes: os.system.lanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
     setLanes: os.system.setLanes.handler(() => ({ dev: { active: 0, capacity: 4 }, maintenance: { active: 0, capacity: 2 } })),
     breakers: os.system.breakers.handler(() => []),
+    retryBreaker: os.system.retryBreaker.handler(() => null),
     shutdown: os.system.shutdown.handler(() => {}),
   },
   connections: {
