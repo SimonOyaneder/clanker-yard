@@ -35,6 +35,7 @@ describe("exportar e importar la configuración de un proyecto", () => {
       statusMapping: { Blocked: "in_review" },
       defaultProfileId: "barato",
       parallel: 3,
+      stackMode: "local",
       flowParams: { reviewRounds: 2 },
     }, origin);
     const exported = a.configs.export(a.project.id);
@@ -51,6 +52,7 @@ describe("exportar e importar la configuración de un proyecto", () => {
       statusMapping: { Blocked: "in_review" },
       defaultProfileId: "barato",
       parallel: 3,
+      stackMode: "local",
       flowParams: { reviewRounds: 2 },
       // No viaja la identidad del proyecto: ni su proyecto del tracker ni su cuenta.
       slug: "p",
@@ -75,6 +77,17 @@ describe("exportar e importar la configuración de un proyecto", () => {
     expect(result.changes.map((c) => c.path).sort()).toEqual(["defaultProfileId", "parallel", "repos"]);
     expect(result.changes.find((c) => c.path === "repos")).toMatchObject({ before: [], after: [{ repo: "api", labels: ["be"] }] });
     expect(b.projects.get(b.project.id)).toMatchObject({ repos: [], parallel: 1, defaultProfileId: null });
+  });
+
+  test("un archivo sin stackMode no lo cambia", () => {
+    const b = machine({});
+    b.projects.update(b.project.id, { stackMode: "local" }, origin);
+    const config = { ...b.configs.export(b.project.id), stackMode: undefined, parallel: 2 };
+
+    const result = b.configs.import(b.project.id, JSON.parse(JSON.stringify(config)), origin, { dryRun: false });
+
+    expect(result.changes.map((c) => c.path)).toEqual(["parallel"]);
+    expect(b.projects.get(b.project.id)).toMatchObject({ stackMode: "local", parallel: 2 });
   });
 
   test("lo omitido no frena el resto, y si ningún repo se encuentra la lista de repos no se toca", () => {

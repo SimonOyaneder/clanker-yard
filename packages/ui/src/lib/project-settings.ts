@@ -1,4 +1,4 @@
-import type { ClankerProject, Conventions, DefRecord, ProjectPatch, RepoId, StackOn, StatusCategory } from "@clanker/api"
+import type { ClankerProject, Conventions, DefRecord, ProjectPatch, RepoId, StackMode, StackOn, StatusCategory } from "@clanker/api"
 import { FlowDef } from "@clanker/api"
 
 // El modelo de la pestaña Ajustes: lo que el formulario edita (`ProjectDraft`, solo texto y listas), cómo sale de un proyecto,
@@ -20,6 +20,11 @@ export const STACK_ON_OPTIONS: { value: StackOn; label: string; hint: string }[]
   { value: "ready", label: "Lista", hint: "Cuando el flujo del bloqueante terminó bien." },
   { value: "ci_green", label: "CI verde", hint: "Cuando su PR está abierto, en draft o no, y el CI pasó aunque falte el LGTM." },
   { value: "any_open", label: "PR abierto", hint: "Apenas el bloqueante tiene un PR abierto." },
+]
+
+export const STACK_MODE_OPTIONS: { value: StackMode; label: string; hint: string }[] = [
+  { value: "remote", label: "GitHub", hint: "Cada PR del stack se abre en GitHub apenas está listo." },
+  { value: "local", label: "Local", hint: "Solo la base del stack abre PR en GitHub; el resto se publica cuando se mergea su base." },
 ]
 
 /** Los valores que acepta `rebaseNonDraft`: la política del flujo que rebasea un PR en conflicto. */
@@ -125,6 +130,7 @@ export interface ProjectDraft {
   params: Record<string, string>
   conventions: ConventionsDraft
   stackOn: StackOn
+  stackMode: StackMode
   /** Cuántas corridas del proyecto a la vez; el core exige un entero de 1 en adelante. */
   parallel: string
   /** Vacío es sin tope. */
@@ -156,6 +162,7 @@ export function draftOf(project: ClankerProject, managed: readonly string[]): Pr
       omitSections: [...(c.pr?.omitSections ?? [])],
     },
     stackOn: project.stackOn,
+    stackMode: project.stackMode,
     parallel: String(project.parallel),
     maxCostUsd: project.maxCostUsd === null ? "" : String(project.maxCostUsd),
   }
@@ -290,6 +297,7 @@ export function patchOf(draft: ProjectDraft, base: ProjectDraft, project: Clanke
   }
   if (!sameValue(draft.conventions, base.conventions)) patch.conventions = conventionsOf(draft.conventions, project.conventions)
   if (draft.stackOn !== base.stackOn) patch.stackOn = draft.stackOn
+  if (draft.stackMode !== base.stackMode) patch.stackMode = draft.stackMode
   if (draft.parallel.trim() !== base.parallel) patch.parallel = Number(draft.parallel)
   if (draft.maxCostUsd !== base.maxCostUsd) patch.maxCostUsd = draft.maxCostUsd.trim() === "" ? null : Number(draft.maxCostUsd)
   return patch
@@ -319,6 +327,7 @@ export function changedSections(patch: ProjectPatch): string[] {
     ["flowParams", "parámetros del flujo"],
     ["conventions", "convenciones"],
     ["stackOn", "apilado"],
+    ["stackMode", "PRs apilados"],
     ["parallel", "corridas a la vez"],
     ["maxCostUsd", "tope de gasto"],
   ]

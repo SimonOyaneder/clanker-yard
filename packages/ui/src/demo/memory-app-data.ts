@@ -38,6 +38,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       conventions: {},
       parallel: 1,
       stackOn: "ci_green",
+      stackMode: "remote",
       statusMapping: {},
       status: "active",
       flowParams: {},
@@ -57,6 +58,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       conventions: {},
       parallel: 2,
       stackOn: "ci_green",
+      stackMode: "remote",
       statusMapping: {},
       status: "paused",
       flowParams: {},
@@ -461,6 +463,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
         conventions: input.conventions ?? {},
         parallel: input.parallel ?? defaults.parallel,
         stackOn: input.stackOn ?? "ci_green",
+        stackMode: input.stackMode ?? "remote",
         statusMapping: input.statusMapping ?? {},
         status: "active",
         flowParams: input.flowParams ?? {},
@@ -823,8 +826,8 @@ export function createMemoryAppData(now = Date.now()): AppData {
     exportProjectConfig: async (projectId) => {
       const project = projectOf(projectId)
       if (!project) throw new Error(`No existe el proyecto ${projectId}`)
-      const { name, tracker, trackerRef, trackerAccount, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, statusMapping, flowParams, maxCostUsd, repos } = project
-      return { clankerProjectConfig: 1, name, tracker, trackerRef, trackerAccount, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, statusMapping, flowParams, maxCostUsd, repos: repos.flatMap(({ repoId, labels }) => repoRows.filter((r) => r.repo.id === repoId).map((r) => ({ name: r.repo.name, remote: r.repo.remote, labels }))) }
+      const { name, tracker, trackerRef, trackerAccount, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, stackMode, statusMapping, flowParams, maxCostUsd, repos } = project
+      return { clankerProjectConfig: 1, name, tracker, trackerRef, trackerAccount, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, stackMode, statusMapping, flowParams, maxCostUsd, repos: repos.flatMap(({ repoId, labels }) => repoRows.filter((r) => r.repo.id === repoId).map((r) => ({ name: r.repo.name, remote: r.repo.remote, labels }))) }
     },
     importProjectConfig: async ({ projectId, config, dryRun }) => {
       const project = projectOf(projectId)
@@ -835,8 +838,8 @@ export function createMemoryAppData(now = Date.now()): AppData {
         if (!dryRun) throw new Error(`No se importó la configuración:\n${errors.map((e) => `  ${e.path || "(raíz)"}: ${e.message}`).join("\n")}`)
         return { applied: false, errors, unmapped: [], changes: [] }
       }
-      const { repos, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, statusMapping, flowParams, maxCostUsd } = parsed.data
-      const settings = { defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, statusMapping, flowParams, maxCostUsd }
+      const { repos, defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, stackMode, statusMapping, flowParams, maxCostUsd } = parsed.data
+      const settings = { defaultFlowId, defaultProfileId, queueFilter, conventions, parallel, stackOn, stackMode: stackMode ?? project.stackMode, statusMapping, flowParams, maxCostUsd }
       const unmapped: DefIssue[] = []
       const mapped = repos.flatMap(({ remote, name, labels }, i) => {
         const row = repoRows.find((r) => (remote === null ? r.repo.name === name : r.repo.remote === remote))

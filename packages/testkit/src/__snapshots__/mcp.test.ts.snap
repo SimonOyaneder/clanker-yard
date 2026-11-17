@@ -416,6 +416,13 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
           },
           "type": "array",
         },
+        "stackMode": {
+          "enum": [
+            "local",
+            "remote",
+          ],
+          "type": "string",
+        },
         "stackOn": {
           "enum": [
             "ready",

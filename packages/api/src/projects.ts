@@ -28,6 +28,13 @@ export const StackOn = z.enum(["ready", "ci_green", "any_open"]);
 export type StackOn = z.infer<typeof StackOn>;
 
 /**
+ * Dónde se abren los PRs apilados del proyecto: `remote` los abre en GitHub apenas están listos; `local` solo abre el
+ * de la base del stack y deja el resto en la máquina hasta que se mergea su base.
+ */
+export const StackMode = z.enum(["local", "remote"]);
+export type StackMode = z.infer<typeof StackMode>;
+
+/**
  * Los estados del tracker (`rawStatus`, por nombre) a los que el proyecto les cambia la categoría. Un estado que
  * no nombra sigue el mapeo por defecto del adapter. Hoy lo aplica el adapter de Linear.
  */
@@ -69,6 +76,8 @@ export const ClankerProject = z.object({
   parallel: z.int().positive(),
   /** Cuándo una issue se apila sobre el PR de su bloqueante. */
   stackOn: StackOn,
+  /** Si los PRs apilados se abren en GitHub o quedan locales hasta que se mergea su base. */
+  stackMode: StackMode,
   /** Categorías que el proyecto ajusta a mano sobre las del adapter. */
   statusMapping: StatusMapping,
   status: ProjectStatus,
@@ -101,6 +110,7 @@ export const NewProject = z
     /** Sin valor rige el default de proyectos nuevos de Ajustes (`ProjectDefaults`). */
     parallel: z.int().positive().optional(),
     stackOn: StackOn.default("ci_green"),
+    stackMode: StackMode.default("remote"),
     statusMapping: StatusMapping.default({}),
     flowParams: z.record(z.string(), z.unknown()).default({}),
     /** Sin valor rige el default de Ajustes; `null` es sin tope. */
@@ -148,6 +158,7 @@ const patchShape = {
   conventions: Conventions.optional(),
   parallel: z.int().positive().optional(),
   stackOn: StackOn.optional(),
+  stackMode: StackMode.optional(),
   /** Reemplaza el mapeo entero; cambiarlo hace que la próxima sincronización relea todas las issues del proyecto. */
   statusMapping: StatusMapping.optional(),
   status: ProjectStatus.optional(),
@@ -203,6 +214,8 @@ export const ProjectConfig = z.strictObject({
   conventions: Conventions.default({}),
   parallel: z.int().positive().default(1),
   stackOn: StackOn.default("ci_green"),
+  /** Sin valor, importar no lo cambia. */
+  stackMode: StackMode.optional(),
   statusMapping: StatusMapping.default({}),
   flowParams: z.record(z.string(), z.unknown()).default({}),
   maxCostUsd: MaxCostUsd.default(null),
