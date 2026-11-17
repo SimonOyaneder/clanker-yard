@@ -226,6 +226,17 @@ async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, r
   const client = deps.connections.githubClient(remote.account);
   const open = new Set<string>();
   for (const branch of watched) {
+    // Un padre local (stacks locales) sigue vivo aunque GitHub tenga un PR viejo y cerrado de esa branch (uno que se pasó
+    // a local): no hay que preguntarle a GitHub.
+    const local = store.db
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, branch), eq(pullRequests.state, "local")))
+      .get();
+    if (local) {
+      open.add(branch);
+      continue;
+    }
     const { data } = await client.request("GET /repos/{owner}/{repo}/pulls", { owner, repo: name, head: `${owner}:${branch}`, state: "all" });
     const pulls = z.array(z.object({ state: z.enum(["open", "closed"]) })).parse(data);
     // Sin ningún PR no hay cómo saber que se mergeó: se deja como estaba.

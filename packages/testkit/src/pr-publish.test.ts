@@ -409,6 +409,20 @@ describe("pr.publish local", () => {
 
   const localPull = () => store.db.$client.prepare("SELECT * FROM pull_requests WHERE head_ref = ?").get(lease.branch);
 
+  test("un padre que se pasó a local (su PR viejo quedó cerrado en GitHub) sigue siendo la base: no se recalcula sin él", async () => {
+    // Así lo deja pasar un PR apilado de GitHub a local: su PR se cierra y su branch remota se borra, pero la fila sigue `local`.
+    repo.git("push", "origin", "cla-52");
+    github.openPr({ head: "cla-52" }).close();
+    repo.git("push", "origin", "--delete", "cla-52");
+    const parentCommit = repo.git("rev-parse", "cla-52");
+
+    const result = await publish.run(args(), durableCtx(undefined, runId));
+
+    expect(result).toMatchObject({ outcome: "local", output: { base: "cla-52" } });
+    expect(repo.git("-C", lease.path, "merge-base", "--is-ancestor", parentCommit, "HEAD")).toBe("");
+    expect(store.events.since(0, { types: ["decision.opened"] })).toEqual([]);
+  });
+
   test.each(["open", "local"])("guarda sobre un padre %s sin push ni PR, con título y cuerpo limpios, claim y evento", async (state) => {
     if (state === "open") publishParent();
     const push = vi.spyOn(workspaces, "push");
