@@ -1,10 +1,11 @@
-import type { CachedIssue, ClankerProject, Decision, DecisionId, DecisionKind } from "@clanker/api"
+import type { Breaker, CachedIssue, ClankerProject, Decision, DecisionId, DecisionKind } from "@clanker/api"
 import { Copy, Inbox as InboxIcon } from "lucide-react"
 import { useEffect, useEffectEvent, useMemo } from "react"
 import { useAppData } from "@/app-data"
 import { Ago, Pill } from "@/components/common"
 import { type DecisionScope, KindIcon } from "@/components/inbox/decision-parts"
 import { DecisionItem } from "@/components/inbox/decision-item"
+import { RETRY_BREAKERS_KEYS } from "@/components/project/breaker-strip"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -45,6 +46,9 @@ export function InboxView({ inbox, decisions, projects, onSelect, onResolve }: P
     project: projects.find((p) => p.id === d.projectId),
     issue: d.subject?.type === "issue" ? issues.get(d.subject.id) : undefined,
   })
+  // Las alertas que deja un breaker se pueden reintentar mientras siga abierto.
+  const breakers = useLiveQuery("inbox-breakers", () => appData.breakers())
+  const breakerOf = (d: Decision): Breaker | undefined => (d.kind === "alert" && d.status === "pending" ? breakers.data?.find((b) => b.decisionId === d.id) : undefined)
   const openRunOf = (d: Decision) => {
     const slug = projects.find((p) => p.id === d.projectId)?.slug
     return slug && d.runId ? () => actions.openRun(slug, d.runId!) : null
@@ -138,7 +142,7 @@ export function InboxView({ inbox, decisions, projects, onSelect, onResolve }: P
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
           <ul aria-label={tab === "pending" ? "Decisiones pendientes" : "Decisiones resueltas"} data-inbox-list className="min-h-0 divide-y overflow-y-auto border-r">
             {items.map((d) => (
-              <Row key={d.id} decision={d} scope={scopeOf(d)} selected={d.id === current?.id} onSelect={() => onSelect(d.id)} onResolve={(option) => onResolve(d, option)} onOpenRun={openRunOf(d)} onRespond={() => {
+              <Row key={d.id} decision={d} scope={scopeOf(d)} selected={d.id === current?.id} onSelect={() => onSelect(d.id)} onResolve={(option) => onResolve(d, option)} onOpenRun={openRunOf(d)} breaker={breakerOf(d)} onRespond={() => {
                   onSelect(d.id)
                   inbox.setResponding(true, d.id)
                 }} />
@@ -155,6 +159,7 @@ export function InboxView({ inbox, decisions, projects, onSelect, onResolve }: P
                 onResolve={(option) => onResolve(current, option)}
                 onOpenRun={openRunOf(current)}
                 onGoConnections={actions.goConnections}
+                breaker={breakerOf(current)}
               />
             ) : null}
           </section>
@@ -172,6 +177,7 @@ function Row({
   onResolve,
   onOpenRun,
   onRespond,
+  breaker,
 }: {
   decision: Decision
   scope: DecisionScope
@@ -180,7 +186,9 @@ function Row({
   onResolve: (option: string) => void
   onOpenRun: (() => void) | null
   onRespond: () => void
+  breaker?: Breaker
 }) {
+  const actions = useAppActions()
   const pending = decision.status === "pending"
   const answer = pending ? null : resolutionText(decision)
   return (
@@ -226,7 +234,13 @@ function Row({
               <ContextMenuShortcut>R</ContextMenuShortcut>
             </ContextMenuItem>
           ) : null}
-          {pending && (optionsOf(decision).length > 0 || takesText(decision)) ? <ContextMenuSeparator /> : null}
+          {breaker ? (
+            <ContextMenuItem onSelect={() => void actions.retryBreakers(null, breaker.scope)}>
+              Reintentar ahora
+              <ContextMenuShortcut>{RETRY_BREAKERS_KEYS}</ContextMenuShortcut>
+            </ContextMenuItem>
+          ) : null}
+          {pending && (optionsOf(decision).length > 0 || takesText(decision) || breaker) ? <ContextMenuSeparator /> : null}
           {onOpenRun ? (
             <ContextMenuItem onSelect={onOpenRun}>
               Abrir corrida

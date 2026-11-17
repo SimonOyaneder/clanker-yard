@@ -1,5 +1,5 @@
 import type { CachedIssue, ClankerProject, Decision, QueueEntry, Run, RunId } from "@clanker/api"
-import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, Upload, X, Eye, Rows2, Columns2, ChevronLeft, ChevronRight, GitCommitHorizontal } from "lucide-react"
+import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, RotateCw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, Upload, X, Eye, Rows2, Columns2, ChevronLeft, ChevronRight, GitCommitHorizontal } from "lucide-react"
 import { LOCAL_PR_KEYS, type LocalPrControls } from "@/components/prs/local-pr-view"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs/prs"
@@ -340,6 +340,10 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
           <CommandItem value="cambiar capacidad de carriles" onSelect={() => setLanesPage(true)}>
             <Gauge /> Cambiar capacidad de carriles
             <CommandShortcut>›</CommandShortcut>
+          </CommandItem>
+          <CommandItem value="reintentar ahora lo que está en pausa breakers" onSelect={run(() => void actions.retryBreakers(current ?? null))}>
+            <RotateCw /> {current ? "Reintentar ahora lo que pausa a este proyecto" : "Reintentar ahora lo que está en pausa"}
+            <CommandShortcut>⇧⌘E</CommandShortcut>
           </CommandItem>
         </CommandGroup>
 
