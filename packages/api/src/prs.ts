@@ -118,6 +118,8 @@ export const PrState = z.object({
     failing: z.array(z.string()),
     /** Los de `failing` que el pack declara flaky conocidos (`ciRules.knownFlaky`). */
     flaky: z.array(z.string()),
+    /** Por check de `failing`, lo que dice de su falla (descripción o título y resumen) y dónde verla. */
+    details: z.record(z.string(), z.object({ description: z.string().optional(), url: z.string().optional() })).optional(),
   }),
   threads: z.object({
     /** Todos los threads sin resolver, de quien sean (humanos, bots, council, la cuenta conectada): los "hilos sin resolver" que muestra la vista de PRs. */

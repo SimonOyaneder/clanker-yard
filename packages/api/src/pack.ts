@@ -88,6 +88,14 @@ const CiRules = z.strictObject({
   okStates: z.array(CheckState).optional(),
   /** Checks que fallan sin culpa del cambio: el estado del PR los marca antes de que un agente los triagee. */
   knownFlaky: z.array(z.string().min(1)).optional(),
+  /**
+   * Cómo traer el detalle de un check rojo (los tests que fallaron) para el triage: la primera regla cuyo `match`
+   * (una regex) calza con la descripción o la URL del check corre `command` en la máquina, con `$1`..`$9` de los
+   * grupos del match. P. ej. CircleCI deja en la descripción `circleci run get <id> --failure-report`.
+   */
+  failureReport: z
+    .array(z.strictObject({ match: z.string().min(1), command: z.string().min(1) }))
+    .optional(),
 });
 
 /** Condiciones que sabe evaluar el core. `offer` y `auto` pueden apoyarse en la lista anterior (`ready`, `offer`). */

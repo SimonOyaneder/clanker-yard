@@ -153,12 +153,27 @@ function isLgtm(review: RawReview, lgtm: NonNullable<ResolvedPack["reviewBot"]>[
 
 type CheckState = "SUCCESS" | "SKIPPED" | "NEUTRAL" | "FAILURE" | "ERROR" | "PENDING";
 
-function checkOf(context: RawContext): { name: string; state: CheckState; required: boolean } {
+interface Check {
+  name: string;
+  state: CheckState;
+  required: boolean;
+  detail: CiFailureDetail;
+}
+
+type CiFailureDetail = NonNullable<PrState["ci"]["details"]>[string];
+
+/** Lo que el check dice de su falla, sin los campos vacíos. */
+function detailOf(description: string | null | undefined, url: string | null | undefined): CiFailureDetail {
+  return { ...(description?.trim() && { description: description.trim() }), ...(url && { url }) };
+}
+
+function checkOf(context: RawContext): Check {
   if (context.__typename === "StatusContext") {
     return {
       name: context.context,
       state: context.state === "EXPECTED" ? "PENDING" : context.state,
       required: context.isRequired,
+      detail: detailOf(context.description, context.targetUrl),
     };
   }
   const { conclusion } = context;
@@ -169,7 +184,8 @@ function checkOf(context: RawContext): { name: string; state: CheckState; requir
       : conclusion === "SUCCESS" || conclusion === "NEUTRAL" || conclusion === "SKIPPED"
         ? conclusion
         : "FAILURE";
-  return { name: context.name, state, required: context.isRequired };
+  const description = [context.title, context.summary].filter((t): t is string => Boolean(t?.trim())).join("\n");
+  return { name: context.name, state, required: context.isRequired, detail: detailOf(description, context.detailsUrl) };
 }
 
 /**
@@ -183,10 +199,18 @@ function ciOf(node: PrNode, { ciRules }: ResolvedPack): PrState["ci"] {
   const ok = new Set<string>(ciRules?.okStates ?? DEFAULT_OK_STATES);
 
   const notOk = counted.filter((c) => !ok.has(c.state));
-  const failing = notOk.filter((c) => c.state !== "PENDING").map((c) => c.name);
+  const red = notOk.filter((c) => c.state !== "PENDING");
+  const failing = red.map((c) => c.name);
   const state = counted.length === 0 ? "none" : failing.length > 0 ? "red" : notOk.length > 0 ? "pending" : "green";
   const flaky = new Set(ciRules?.knownFlaky);
-  return { state, sha: node.head.oid, failing, flaky: failing.filter((name) => flaky.has(name)) };
+  const details = Object.fromEntries(red.filter((c) => Object.keys(c.detail).length > 0).map((c) => [c.name, c.detail]));
+  return {
+    state,
+    sha: node.head.oid,
+    failing,
+    flaky: failing.filter((name) => flaky.has(name)),
+    ...(Object.keys(details).length > 0 && { details }),
+  };
 }
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

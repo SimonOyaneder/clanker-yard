@@ -166,6 +166,7 @@ Por cada ítem del brief, lee el código del worktree en \`path:line\` y sigue s
 - \`other_pr\`: corresponde a otro PR del trabajo. \`prRef\` lo nombra y \`reply\` dice qué hay que cambiar allá.
 - \`flaky\`: una falla de CI conocida como inestable (el core ya marca las conocidas; confírmalo o descártalo).
 - \`foreign\`: una falla de CI que el cambio no causó.
+- \`unknown\`: una falla de CI cuya causa no puedes saber con lo que tienes. \`reply\` dice qué faltó.
 
 \`reply\` es una frase con la causa concreta, sin saludo ni disculpa y sin prefijo: el core agrega el suyo. Ejemplo: "naa, amount siempre llega validado desde el servicio de creación así que no puede ser nil".
 
@@ -177,7 +178,7 @@ export const TRIAGE_BOT = `Modo bot: los ítems son comentarios del bot de revie
 
 export const TRIAGE_COVERAGE = `Modo coverage: los ítems son líneas sin cubrir (\`kind: "coverage"\`) que reportó el chequeo de cobertura. Outcome \`fix\` si algún ítem es \`valid\`; si no, \`reply\`.`;
 
-export const TRIAGE_CI = `Modo ci: los ítems son checks fallidos (\`kind: "ci"\`) con su extracto de falla. Por cada uno decide si lo causó el cambio (\`valid\`, con el arreglo) o no (\`flaky\` o \`foreign\`). Un ítem con \`flaky: true\` ya está declarado flaky conocido: dalo por \`flaky\` salvo que el extracto muestre que el cambio lo causa. Outcome \`fix\` si algún ítem es \`valid\`; si no, \`foreign\`.`;
+export const TRIAGE_CI = `Modo ci: los ítems son checks fallidos (\`kind: "ci"\`) con su extracto de falla. Por cada uno decide si lo causó el cambio (\`valid\`, con el arreglo) o no (\`flaky\` o \`foreign\`). Un ítem con \`flaky: true\` ya está declarado flaky conocido: dalo por \`flaky\` salvo que el extracto muestre que el cambio lo causa. Decide con evidencia: el extracto, y el código del worktree que nombra (un test que falla en un archivo que el cambio tocó, o que usa algo que el cambio cambió, es \`valid\`). Si no hay extracto o no alcanza para saberlo, no adivines: ese ítem es \`unknown\`. Outcome \`fix\` si algún ítem es \`valid\`; si no, \`unsure\` si alguno es \`unknown\`; si no, \`foreign\`.`;
 
 export const PLAN_CHECK_PROMPT = `Validas el plan de un dev antes de que programe: lo único que requiere juicio entre el plan y el código. Solo lees.
 

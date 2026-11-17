@@ -152,7 +152,7 @@ const triage = Role.parse({
       instructions: prompts.TRIAGE_CI,
       brief: TriageBrief,
       report: TriageReport,
-      outcomes: ["fix", "foreign"],
+      outcomes: ["fix", "foreign", "unsure"],
       session: "new",
       learnings: true,
     }),

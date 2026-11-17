@@ -211,7 +211,7 @@ describe("validación", () => {
     const { trigger, lane, nodes } = templates.council!;
     expect([trigger, lane]).toEqual([{ type: "pr.comment" }, "maintenance"]);
     const actions = Object.values(nodes).flatMap((node) => (node.type === "action" ? [node.action] : []));
-    expect(actions).toEqual(["workspace.attach", "council.threads", "recipe.check", "pr.pushFixups", "pr.reply"]);
+    expect(actions).toEqual(["workspace.attach", "council.threads", "recipe.check", "pr.pushFixups", "pr.reply", "ci.failureReport"]);
   });
 
   test("params con 3 rondas por defecto y maxSteps 200", () => {
@@ -342,7 +342,7 @@ describe("pr-feedback con el runtime fake", () => {
 
     expect(run).toMatchObject({ status: "done", outcome: "done" });
     const [feedback] = flows.listRuns().filter((r) => r.parentRunId === runId);
-    expect(topLevel(flows.getRun(feedback!.id))).toEqual(["bot-req", "bot-wait", "ci-wait", "ci-triage"]);
+    expect(topLevel(flows.getRun(feedback!.id))).toEqual(["bot-req", "bot-wait", "ci-wait", "ci-report", "ci-triage"]);
     expect(notes(store, feedback!.id)).toEqual(["CI rojo ajeno o flaky"]);
   });
 });
@@ -374,7 +374,7 @@ describe("pr-feedback con los waits reales sobre el GitHub simulado", () => {
 
     expect(run).toMatchObject({ status: "done", outcome: "done" });
     const [feedback] = flows.listRuns().filter((r) => r.parentRunId === runId);
-    expect(topLevel(flows.getRun(feedback!.id))).toEqual(["bot-req", "bot-wait", "ci-wait", "ci-triage"]);
+    expect(topLevel(flows.getRun(feedback!.id))).toEqual(["bot-req", "bot-wait", "ci-wait", "ci-report", "ci-triage"]);
     expect(notes(store, feedback!.id)).toEqual(["CI rojo ajeno o flaky"]);
   });
 });
