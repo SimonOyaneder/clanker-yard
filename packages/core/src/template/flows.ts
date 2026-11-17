@@ -214,7 +214,7 @@ export const PR_FEEDBACK: FlowDef = {
       type: "agent",
       role: "committer",
       mode: "route",
-      brief: { hunks: "$fixups.unrouted" },
+      brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits" },
       on: { ok: "fixups" },
     },
     "reply-fixed": {
@@ -290,7 +290,7 @@ export const PR_FEEDBACK: FlowDef = {
       type: "agent",
       role: "committer",
       mode: "route",
-      brief: { hunks: "$ci-bots-fixups.unrouted" },
+      brief: { hunks: "$ci-bots-fixups.unrouted", commits: "$ci-bots-fixups.commits" },
       on: { ok: "ci-bots-fixups" },
     },
     "ci-bots-reply-fixed": {
@@ -709,7 +709,7 @@ export const COUNCIL: FlowDef = {
       type: "agent",
       role: "committer",
       mode: "route",
-      brief: { hunks: "$fixups.unrouted" },
+      brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits" },
       on: { ok: "fixups" },
     },
     reply: {

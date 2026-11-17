@@ -140,7 +140,7 @@ async function commitAndPush(content: string, message: string) {
   await workspaces.push(args().ws);
 }
 
-type Route = { commits: { message: string; hunks: string[] }[] };
+type Route = { commits: { message: string; hunks: string[]; into?: string }[] };
 
 function args(overrides: { items?: { id: string; path?: string; line?: number }[]; route?: Route } = {}) {
   const { workspaceId, path, branch, baseSha, fencingToken } = lease;
@@ -217,8 +217,17 @@ describe("pr.pushFixups", () => {
 
     const result = await pushFixups.run(args(), durableCtx());
 
-    // h1 y h2 son los de c.txt (van a sus fixups); h3 es el archivo nuevo.
-    expect(result).toEqual({ outcome: "route", output: { unrouted: ["h3"] } });
+    // h1 y h2 son los de c.txt (van a sus fixups); h3 es el archivo nuevo. Los commits del PR son sus destinos posibles.
+    expect(result).toEqual({
+      outcome: "route",
+      output: {
+        unrouted: ["h3"],
+        commits: [
+          { sha: shaOf("feat: top"), subject: "feat: top" },
+          { sha: shaOf("feat: bottom"), subject: "feat: bottom" },
+        ],
+      },
+    });
     expect(local("rev-parse", "HEAD")).toBe(head);
     expect(remoteSha()).toBe(head);
   });
@@ -234,6 +243,41 @@ describe("pr.pushFixups", () => {
     expect(inCommit(shaOf("feat: add nuevo"))).toContain("+algo nuevo");
     expect(remoteSha()).toBe(local("rev-parse", "HEAD"));
     expect(result).toMatchObject({ outcome: "ok", output: { byItem: { nuevo: shaOf("feat: add nuevo") } } });
+  });
+
+  test("con into, un hunk sin dueño se suma al commit del PR que nombra y queda dentro de él tras el autosquash", async () => {
+    write("nuevo.txt", "algo nuevo\n");
+    const route = { commits: [{ message: "", hunks: ["h1"], into: shaOf("feat: top").slice(0, 9) }] };
+
+    const result = await pushFixups.run(args({ route, items: [{ id: "nuevo", path: "nuevo.txt" }] }), durableCtx());
+
+    expect(subjects("HEAD")).toEqual(["feat: top", "feat: bottom"]);
+    expect(inCommit(shaOf("feat: top"))).toContain("+algo nuevo");
+    expect(remoteSha()).toBe(local("rev-parse", "HEAD"));
+    expect(result).toMatchObject({ outcome: "ok", output: { byItem: { nuevo: shaOf("feat: top") } } });
+  });
+
+  test("un commit nuevo que repite el título de uno del PR, o un into que no nombra uno, vuelve a route con el motivo", async () => {
+    write("nuevo.txt", "algo nuevo\n");
+    write("otro.txt", "otro\n");
+    const head = local("rev-parse", "HEAD");
+    const route = {
+      commits: [
+        { message: "feat: top", hunks: ["h1"] },
+        { message: "", hunks: ["h2"], into: "0000000" },
+      ],
+    };
+
+    const result = await pushFixups.run(args({ route }), durableCtx());
+
+    expect(result).toMatchObject({
+      outcome: "route",
+      output: {
+        unrouted: ["h1", "h2"],
+        failures: expect.stringMatching(/repite el título de un commit del PR[\s\S]*0000000 no es el sha de un único commit del PR/),
+      },
+    });
+    expect(local("rev-parse", "HEAD")).toBe(head);
   });
 
   test("un reporte que no cubre los hunks sin destino vuelve a route con el motivo", async () => {
@@ -254,7 +298,7 @@ describe("pr.pushFixups", () => {
 
     const result = await pushFixups.run(args(), durableCtx());
 
-    expect(result).toEqual({ outcome: "route", output: { unrouted: ["h1"] } });
+    expect(result).toMatchObject({ outcome: "route", output: { unrouted: ["h1"] } });
   });
 
   test("con council los fixup! quedan en el remoto, sin autosquash y sin force push", async () => {
@@ -330,7 +374,7 @@ describe("pr.pushFixups", () => {
 
     const result = await pushFixups.run(args(), durableCtx());
 
-    expect(result).toEqual({ outcome: "route", output: { unrouted: ["h1"] } });
+    expect(result).toMatchObject({ outcome: "route", output: { unrouted: ["h1"] } });
     expect(local("rev-parse", "HEAD")).toBe(head);
   });
 
