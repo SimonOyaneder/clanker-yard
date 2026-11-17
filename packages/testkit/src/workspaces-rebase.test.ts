@@ -280,17 +280,32 @@ describe("workspaces.rebase", () => {
     expect(wt(lease, "status", "--porcelain")).toBe("");
   });
 
-  test("las precondiciones: sin remote_sha al día, árbol sucio, rebase en curso o council lanzan sin tocar nada", async () => {
+  test("con cambios sin commitear los guarda en refs/clanker/uncommitted/<branch>, limpia el árbol y rebasea", async () => {
+    pushBranch("cla-1", [{ "a.txt": "a1\na2\nmine\n" }]);
+    const lease = await attach("cla-1");
+    const moved = await advance("main", { "b.txt": "b-main\n" });
+    writeFileSync(join(lease.path, "a.txt"), "a1\na2\nsin commitear\n");
+    mkdirSync(join(lease.path, ".tool"), { recursive: true });
+    writeFileSync(join(lease.path, ".tool", "hooks.json"), "{}\n");
+
+    const result = await workspaces.rebase(lease, { council: false });
+
+    expect(result).toMatchObject({ outcome: "clean", baseSha: moved });
+    expect(wt(lease, "status", "--porcelain")).toBe("");
+    expect(read(lease, "a.txt")).toBe("a1\na2\nmine\n");
+    const kept = "refs/clanker/uncommitted/cla-1";
+    expect(wt(lease, "show", `${kept}:a.txt`)).toBe("a1\na2\nsin commitear");
+    expect(wt(lease, "show", `${kept}:.tool/hooks.json`)).toBe("{}");
+    expect(wt(lease, "rev-parse", `${kept}^`)).toBe(origin("refs/heads/cla-1"));
+  });
+
+  test("las precondiciones: sin remote_sha al día, rebase en curso o council lanzan sin tocar nada", async () => {
     pushBranch("cla-1", [{ "a.txt": "a1\na2\nmine\n" }]);
     const lease = await attach("cla-1");
     await advance("main", { "b.txt": "b-main\n" });
     const before = head(lease);
 
     await expect(workspaces.rebase(lease, { council: true })).rejects.toThrow(/council/);
-
-    writeFileSync(join(lease.path, "dirty.txt"), "x\n");
-    await expect(workspaces.rebase(lease, { council: false })).rejects.toThrow(/sin commitear/);
-    rmSync(join(lease.path, "dirty.txt"));
 
     wt(lease, "commit", "--quiet", "--allow-empty", "--message", "wip: local");
     await expect(workspaces.rebase(lease, { council: false })).rejects.toThrow(RebaseError);
