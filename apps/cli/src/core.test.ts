@@ -94,6 +94,31 @@ describe("el binario clanker", () => {
     expect(isPidAlive(readCoreJson(home)!.pid)).toBe(true);
   }, 30_000);
 
+  test("mcp sigue andando si el core se reinicia con otro puerto y token, y avisa que relean las tools", async () => {
+    const home = tempHome();
+    const env = Object.fromEntries(
+      Object.entries({ ...process.env, CLANKER_HOME: home, CLANKER_CORE_ENTRY: coreEntry }).filter((e): e is [string, string] => e[1] !== undefined),
+    );
+    const client = new McpClient({ name: "test", version: "0.0.0" });
+    const changed: string[] = [];
+    client.setNotificationHandler("notifications/tools/list_changed", () => void changed.push("tools"));
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: [cliBundle, "mcp"], env }));
+    await client.listTools();
+    const before = readCoreJson(home)!;
+
+    process.kill(before.pid, "SIGTERM");
+    await vi.waitFor(() => expect(isPidAlive(before.pid)).toBe(false), { timeout: 10_000 });
+    const result = await client.callTool({ name: "list", arguments: { kind: "flow" } });
+    await vi.waitFor(() => expect(changed).toEqual(["tools"]), { timeout: 5_000 });
+    await client.close();
+
+    const after = readCoreJson(home)!;
+    expect(after.pid).not.toBe(before.pid);
+    expect(after.token).not.toBe(before.token);
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toEqual(expect.arrayContaining([expect.objectContaining({ slug: "techlead-clasico" })]));
+  }, 60_000);
+
   test("sin core y sin el bundle del core explica cómo construirlo y sale con 1", async () => {
     const env = { ...process.env, CLANKER_HOME: tempHome(), CLANKER_CORE_ENTRY: join(buildDir, "no-existe.js") };
 

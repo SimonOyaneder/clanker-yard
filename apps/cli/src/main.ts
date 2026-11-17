@@ -11,8 +11,9 @@ const connection = () => (core ??= connectCore());
 
 runCli(process.argv.slice(2), {
   client: async () => (await connection()).client,
+  // Sin memoizar: el puente MCP lo vuelve a pedir cuando el core se reinicia con otro puerto y token.
   mcpEndpoint: async () => {
-    const { info } = await connection();
+    const { info } = await connectCore();
     return { url: `http://127.0.0.1:${info.port}/mcp`, token: info.token };
   },
   write: (line) => console.log(line),

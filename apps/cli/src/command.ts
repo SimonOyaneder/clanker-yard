@@ -6,7 +6,7 @@ import type { Client } from "@clanker/api";
 export interface CliContext {
   /** El cliente del core. Lo levanta si no corre, así que un comando lo pide después de validar sus argumentos. */
   client(): Promise<Client>;
-  /** Dónde está el MCP del core (`/mcp`) y el token que pide. Lo levanta si no corre. */
+  /** Dónde está el MCP del core (`/mcp`) y el token que pide. Lo levanta si no corre, y cada llamada lo vuelve a buscar: puerto y token cambian en cada arranque. */
   mcpEndpoint(): Promise<{ url: string; token: string }>;
   /** Una línea de salida. */
   write(line: string): void;
