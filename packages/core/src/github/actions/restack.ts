@@ -1,5 +1,5 @@
 import { PrRef, type RepoId } from "@clanker/api";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
 import { openDecision } from "../../decisions/decisions";
@@ -12,7 +12,8 @@ import { emitOnce } from "../marks";
 import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
 import type { GitHubClient } from "../client";
 import type { Prs } from "../prs";
-import { githubPulls, type GithubPrRow } from "../pr-rows";
+import type { PrRow } from "../pr-cache";
+import { githubPulls } from "../pr-rows";
 import type { RepoConfig } from "../../repos/repos";
 
 // El restack de la cadena (`docs/design.html#d-ops`, restack y restackRewritten): `stack.restack` al mergear un
@@ -34,8 +35,14 @@ const RestackRewrittenArgs = z.object({ pr: PrRef, from: z.string().min(1), to: 
 /** Un PR en draft que se pusheó: con su branch y su base, un flujo toma de ahí su worktree (`workspace.attach`). */
 export type ChangedDraft = { pr: PrRef; branch: string; base: string };
 
-/** Qué pasó con un hijo (o nieto) del PR mergeado. `base` es la branch sobre la que quedó. */
-export type ChildReport = { pr: PrRef; branch: string } & (
+/** Un PR local (sin GitHub) que el restack dejó sobre la branch por defecto: ya se puede publicar (`pr.promote`). */
+export type Promotable = { prId: string; branch: string; base: string };
+
+/**
+ * Qué pasó con un hijo (o nieto) del PR mergeado. `base` es la branch sobre la que quedó. `prId` es su fila de
+ * `pull_requests`; `pr` solo existe si el hijo ya está en GitHub (un PR `local` no tiene número).
+ */
+export type ChildReport = { prId: string; pr?: PrRef; branch: string } & (
   | { status: "restacked"; previousHead: string; head: string; commits: number; draft: boolean; base: string }
   | { status: "uptodate" }
   | { status: "conflict"; files: string[]; failures: string }
@@ -78,12 +85,14 @@ const MERGEABLE_WAIT_MS = 10_000;
  *   intacta, y un evento `pr.conflict` para el flujo de rebase) o
  *   `skipped` con su razón (council, merge de otra branch, lease rechazado, branch adelantada, sin
  *   commits propios). Sus propios hijos no se tocan: su base no se movió.
+ * - Un hijo `local` (stacks locales) se restackea solo en la máquina: sin `prs.get`, sin push y sin tocar su PR en
+ *   GitHub (no tiene); los que quedan sobre la branch por defecto salen en `promotable`, listos para `pr.promote`.
  * - Al final relee `mergeable` de todos los PRs abiertos del repo: GitHub lo calcula aparte, y es lo
  *   que Watch verá.
  *
  * Outcomes: `ok` y `conflict` (algún hijo quedó para el flujo de rebase). Output: `merge`, `children`
  * (en orden de recorrido), `changedDrafts` (los PRs en draft que se pushearon, cada uno como `{ pr, branch, base }`: piden /review otra
- * vez) y `mergeable`. Un PR que no está en `pull_requests` o no tiene hijos da `ok` sin nada.
+ * vez), `promotable` (`{ prId, branch, base }` de cada PR local que quedó sobre la branch por defecto) y `mergeable`. Un PR que no está en `pull_requests` o no tiene hijos da `ok` sin nada.
  */
 export function stackRestackAction(deps: StackRestackDeps): ActionDef<typeof RestackArgs> {
   return {
@@ -160,7 +169,7 @@ export function stackRestackRewrittenAction(deps: StackRestackDeps): ActionDef<t
 
 type Found = NonNullable<ReturnType<typeof rowOf>>;
 
-const NOTHING = { children: [], changedDrafts: [], mergeable: [] };
+const NOTHING = { children: [], changedDrafts: [], promotable: [], mergeable: [] };
 
 /**
  * Restackea a los hijos abiertos de `found.row` (y a los suyos) desde `start`. `mergedBranch` es la branch del
@@ -173,21 +182,25 @@ async function restackChain(
   { row: parentRow, repoId, remote }: Found,
   first: Start,
   mergedBranch?: string,
-): Promise<{ outcome: "ok" | "conflict"; output: { children: ChildReport[]; changedDrafts: ChangedDraft[]; mergeable: { number: number; mergeable: boolean | null }[] } }> {
+): Promise<{ outcome: "ok" | "conflict"; output: { children: ChildReport[]; changedDrafts: ChangedDraft[]; promotable: Promotable[]; mergeable: { number: number; mergeable: boolean | null }[] } }> {
   const { store, workspaces, prs } = deps;
   const pause = deps.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const client = deps.connections.githubClient(remote.account);
   const [owner = "", name = ""] = remote.repo.split("/");
   const pull = (number: number) => ({ owner, repo: name, pull_number: number });
   const children: ChildReport[] = [];
+  const promotable: Promotable[] = [];
+  const { defaultBranch } = deps.repoConfig(repoId);
 
-  async function restackChildren(parent: GithubPrRow, start: Start, merged: string | undefined): Promise<void> {
+  async function restackChildren(parent: PrRow, start: Start, merged: string | undefined): Promise<void> {
     for (const child of childrenOf(store, parent.id)) {
-      const stage = await ctx.once(`restack:${child.number}`, () => restackChild(child, start, merged));
+      // Por el id de la fila: un PR local no tiene número.
+      const stage = await ctx.once(`restack:${child.id}`, () => restackChild(child, start, merged));
       const { report } = stage;
       if (report.status === "restacked" || report.status === "uptodate") {
         const head = report.status === "restacked" ? report.head : undefined;
-        await ctx.once(`retarget:${child.number}`, () => retarget(child, parent, stage.base, head, merged));
+        await ctx.once(`retarget:${child.id}`, () => retarget(child, parent, stage.base, head, merged));
+        if (child.state === "local" && stage.base === defaultBranch) promotable.push({ prId: child.id, branch: child.headRef, base: stage.base });
       }
       children.push(report);
       if (stage.next) await restackChildren(child, stage.next, undefined);
@@ -202,18 +215,25 @@ async function restackChain(
     conflict?: { from: string; onto: string };
   }
 
-  async function restackChild(child: GithubPrRow, start: Start, merged: string | undefined): Promise<{ report: ChildReport; next?: Start; base: string }> {
-    const childRef: PrRef = { account: remote.account, repo: remote.repo, number: child.number };
-    const base = { pr: childRef, branch: child.headRef };
+  /**
+   * Un hijo `local` vive solo en la máquina: sin `prs.get` (no hay council ni estado remoto) y con `acquire` en vez de
+   * `attach` (que exige la branch en el remoto). `workspaces.restack` mueve una branch sin publicar sin pushear.
+   */
+  async function restackChild(child: PrRow, start: Start, merged: string | undefined): Promise<{ report: ChildReport; next?: Start; base: string }> {
+    const local = child.state === "local";
+    const childRef: PrRef | undefined = child.number === null ? undefined : { account: remote.account, repo: remote.repo, number: child.number };
+    const base = { prId: child.id, ...(childRef && { pr: childRef }), branch: child.headRef };
     const skipped = (reason: string) => ({ report: { ...base, status: "skipped" as const, reason }, base: start.base });
 
-    const state = await prs.get(childRef);
-    if (state.threads.councilEver) return skipped("tiene threads [clanker-council]: un restack reescribiría su historia y nunca se fuerza.");
-    if (state.state === "merged" || state.state === "closed") return skipped(`el PR ya está ${state.state === "merged" ? "mergeado" : "cerrado"}.`);
+    const state = local || !childRef ? undefined : await prs.get(childRef);
+    if (state?.threads.councilEver) return skipped("tiene threads [clanker-council]: un restack reescribiría su historia y nunca se fuerza.");
+    if (state?.state === "merged" || state?.state === "closed") return skipped(`el PR ya está ${state.state === "merged" ? "mergeado" : "cerrado"}.`);
+    const headSha = state?.headSha ?? child.headSha;
 
     let lease;
     try {
-      lease = await workspaces.attach({ repo: repoId, branch: child.headRef, base: start.base, runId: ctx.runId });
+      const request = { repo: repoId, branch: child.headRef, base: start.base, runId: ctx.runId };
+      lease = local ? await workspaces.acquire(request) : await workspaces.attach(request);
     } catch (error) {
       if (error instanceof AttachError) return skipped(error.message);
       throw error;
@@ -223,7 +243,7 @@ async function restackChain(
       switch (result.outcome) {
         case "restacked":
           return {
-            report: { ...base, status: "restacked", previousHead: result.previousHead, head: result.head, commits: result.commits, draft: state.state === "draft", base: toBase },
+            report: { ...base, status: "restacked", previousHead: result.previousHead, head: result.head, commits: result.commits, draft: state?.state === "draft", base: toBase },
             next: { from: result.previousHead, onto: result.head, base: child.headRef },
             base: toBase,
           };
@@ -232,7 +252,7 @@ async function restackChain(
         case "conflict":
         case "base-conflict": {
           const files = result.outcome === "conflict" ? result.conflicts : result.files;
-          if (conflict) {
+          if (conflict && !local) {
             // La misma clave que usa Watch (el sha de la punta): si ya vio el conflicto, el flujo de rebase ya salió.
             store.tx((tx) =>
               emitOnce(
@@ -240,9 +260,9 @@ async function restackChain(
                 child,
                 {
                   type: "pr.conflict",
-                  keys: [state.headSha],
+                  keys: [headSha],
                   runId: ctx.runId,
-                  payload: () => ({ repo: remote.repo, number: child.number, sha: state.headSha, base: toBase, ...conflict, files }),
+                  payload: () => ({ repo: remote.repo, number: child.number, sha: headSha, base: toBase, ...conflict, files }),
                 },
                 Date.now(),
               ),
@@ -252,8 +272,10 @@ async function restackChain(
               // Hay que resolverlo a mano: es una alerta de la Bandeja, no una nota (las notas no llegan a la Bandeja).
               openDecision(tx, {
                 kind: "alert",
-                title: `Base combinada en conflicto en ${remote.repo}#${child.number}`,
-                body: `No se pudo recalcular la base combinada de ${child.headRef} tras mergearse ${merged}: conflicto en ${files.join(", ")}. El PR quedó como estaba; el flujo de rebase por conflicto no sabe rehacer una base combinada, así que hay que resolverlo a mano.`,
+                title: conflict ? `PR local en conflicto: ${child.headRef}` : `Base combinada en conflicto en ${child.number === null ? child.headRef : `${remote.repo}#${child.number}`}`,
+                body: conflict
+                  ? `No se pudo restackear el PR local ${child.headRef} sobre ${toBase}: conflicto en ${files.join(", ")}. La branch quedó como estaba; hay que resolverlo a mano.`
+                  : `No se pudo recalcular la base combinada de ${child.headRef} tras mergearse ${merged}: conflicto en ${files.join(", ")}. El PR quedó como estaba; el flujo de rebase por conflicto no sabe rehacer una base combinada, así que hay que resolverlo a mano.`,
                 runId: ctx.runId,
                 subject: { type: "pr", id: child.id },
               }),
@@ -282,7 +304,7 @@ async function restackChain(
    * La base combinada de la issue solo vale si el PR salió de ella. Una fila vieja (la issue se relanzó a mano sobre
    * otra base y el PR cuelga de un solo padre) se retira y el PR se restackea como cualquier PR apilado.
    */
-  async function restackAttempt(lease: WorkspaceRef, child: GithubPrRow, start: Start, merged: string | undefined): Promise<Attempt> {
+  async function restackAttempt(lease: WorkspaceRef, child: PrRow, start: Start, merged: string | undefined): Promise<Attempt> {
     const combined = combinedBaseOf(child);
     if (!combined) return restackPlain(lease, start);
     try {
@@ -294,7 +316,7 @@ async function restackChain(
     const others = store.db
       .select({ id: pullRequests.id })
       .from(pullRequests)
-      .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.issueId, combined.issueId), eq(pullRequests.state, "open"), ne(pullRequests.id, child.id)))
+      .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.issueId, combined.issueId), inArray(pullRequests.state, ["open", "local"]), ne(pullRequests.id, child.id)))
       .all();
     if (others.length === 0) await workspaces.dissolveBase(repoId, combined.branch);
     return restackPlain(lease, start);
@@ -317,7 +339,7 @@ async function restackChain(
       store.db
         .select({ headRef: pullRequests.headRef })
         .from(pullRequests)
-        .where(and(eq(pullRequests.repoId, repoId), inArray(pullRequests.headRef, combined.parents.map((parent) => parent.branch)), eq(pullRequests.state, "open")))
+        .where(and(eq(pullRequests.repoId, repoId), inArray(pullRequests.headRef, combined.parents.map((parent) => parent.branch)), inArray(pullRequests.state, ["open", "local"])))
         .all()
         .map((row) => row.headRef),
     );
@@ -327,7 +349,7 @@ async function restackChain(
   }
 
   /** La base combinada vigente de la issue del hijo, si su PR se abrió sobre una. */
-  function combinedBaseOf(child: GithubPrRow): CombinedBase | undefined {
+  function combinedBaseOf(child: PrRow): CombinedBase | undefined {
     if (child.issueId === null) return undefined;
     return store.db
       .select()
@@ -339,15 +361,17 @@ async function restackChain(
   /**
    * Lo que queda tras el push de un hijo. Si colgaba del PR mergeado (`merged`: su branch): la base del PR en
    * GitHub, si GitHub no la movió, y el registro local, que ya no lo cuelga de él. Un hijo cuyo cuerpo
-   * nombra la base vieja deja una nota. Sin `merged` solo se anota la punta nueva.
+   * nombra la base vieja deja una nota. Sin `merged` solo se anota la punta nueva. Un hijo local no está en GitHub:
+   * solo cambia su fila.
    */
-  async function retarget(child: GithubPrRow, parent: GithubPrRow, base: string, head: string | undefined, merged: string | undefined): Promise<null> {
+  async function retarget(child: PrRow, parent: PrRow, base: string, head: string | undefined, merged: string | undefined): Promise<null> {
+    const number = child.state === "local" ? null : child.number;
     const stale =
-      merged !== undefined
+      merged !== undefined && number !== null
         ? await (async () => {
-            const current = Pull.parse((await client.request("GET /repos/{owner}/{repo}/pulls/{pull_number}", pull(child.number))).data);
-            if (current.base.ref !== base) await client.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { ...pull(child.number), base });
-            return mentionsBase(current.body, merged, parent.number);
+            const current = Pull.parse((await client.request("GET /repos/{owner}/{repo}/pulls/{pull_number}", pull(number))).data);
+            if (current.base.ref !== base) await client.request("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { ...pull(number), base });
+            return parent.number !== null && mentionsBase(current.body, merged, parent.number);
           })()
         : false;
     store.tx((tx) => {
@@ -357,7 +381,7 @@ async function restackChain(
       if (stale) {
         openDecision(tx, {
           kind: "review_note",
-          title: `Descripción obsoleta en ${remote.repo}#${child.number}`,
+          title: `Descripción obsoleta en ${remote.repo}#${number}`,
           body: `El cuerpo del PR nombra ${merged} (#${parent.number}), que ya se mergeó: ahora el PR va sobre ${base}. Actualiza la descripción.`,
           runId: ctx.runId,
           subject: { type: "pr", id: child.id },
@@ -370,9 +394,9 @@ async function restackChain(
   await restackChildren(parentRow, first, mergedBranch);
   const mergeable = await ctx.once("mergeable", () => readMergeable(client, { owner, repo: name }, pause));
   const changedDrafts = children.flatMap((child) =>
-    child.status === "restacked" && child.draft ? [{ pr: child.pr, branch: child.branch, base: child.base }] : [],
+    child.status === "restacked" && child.draft && child.pr ? [{ pr: child.pr, branch: child.branch, base: child.base }] : [],
   );
-  return { outcome: children.some((child) => child.status === "conflict") ? "conflict" : "ok", output: { children, changedDrafts, mergeable } };
+  return { outcome: children.some((child) => child.status === "conflict") ? "conflict" : "ok", output: { children, changedDrafts, promotable, mergeable } };
 }
 
 /** `workspaces.fetch` del repo de `found`; un token rechazado lanza (hay que reconectar la cuenta). */
@@ -391,10 +415,15 @@ function rowOf(deps: StackRestackDeps, pr: PrRef) {
   return undefined;
 }
 
-/** Los PRs abiertos que cuelgan de `parentId`, en orden de número. */
-function childrenOf(store: Store, parentId: string): GithubPrRow[] {
+/** Los PRs abiertos o locales que cuelgan de `parentId`, en orden de número (los locales, sin número, primero y por id). */
+function childrenOf(store: Store, parentId: string): PrRow[] {
   const children = store.db.select({ id: prParents.childId }).from(prParents).where(eq(prParents.parentId, parentId));
-  return githubPulls(store.db, and(eq(pullRequests.state, "open"), inArray(pullRequests.id, children)));
+  return store.db
+    .select()
+    .from(pullRequests)
+    .where(and(inArray(pullRequests.state, ["open", "local"]), inArray(pullRequests.id, children)))
+    .orderBy(asc(pullRequests.number), asc(pullRequests.id))
+    .all();
 }
 
 /**

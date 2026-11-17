@@ -446,6 +446,88 @@ describe("stack.restack", () => {
   });
 });
 
+/**
+ * Un PR local (stacks locales): `branch` sale de `base` con un commit que escribe `files`, sin push ni PR en GitHub.
+ * Su fila queda `local` colgando del PR de `base`. Devuelve su id.
+ */
+async function localPr(branch: string, base: string, files: Record<string, string>): Promise<string> {
+  const lease = await workspaces.acquire({ repo: "repo_r1", branch, base, runId: newId("run") });
+  for (const [path, content] of Object.entries(files)) writeFileSync(join(lease.path, path), content);
+  repo.git("-C", lease.path, "add", "--all");
+  repo.git("-C", lease.path, "commit", "--quiet", "--message", `feat: ${branch}`);
+  const head = repo.git("-C", lease.path, "rev-parse", "HEAD");
+  workspaces.release(lease);
+  const id = newId("pr");
+  store.db.$client
+    .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned, title, body) VALUES (?, 'repo_r1', NULL, NULL, ?, ?, ?, 'local', 1, 1, ?, '')")
+    .run(id, branch, base, head, `[${branch}] cambio`);
+  const parent = sql<{ id: string }>(`SELECT id FROM pull_requests WHERE head_ref = '${base}'`)[0]!;
+  store.db.$client.prepare("INSERT INTO pr_parents (child_id, parent_id) VALUES (?, ?)").run(id, parent.id);
+  return id;
+}
+
+describe("stack.restack con PRs locales", () => {
+  test("cadena remoto → local → local: B queda sobre main y es promovible, C sobre B, sin push ni request por ellos", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const c = await localPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
+    const squash = squashOnMain("cla-1");
+    github.pr(1).merge({ sha: squash });
+    const requests = github.requests.length;
+
+    const result = await run(1);
+
+    expect(result.outcome).toBe("ok");
+    const output = result.output as Output & { promotable: unknown[]; children: { prId: string; pr?: unknown; status: string }[] };
+    expect(output.children).toMatchObject([
+      { prId: b, branch: "cla-2", status: "restacked" },
+      { prId: c, branch: "cla-3", status: "restacked" },
+    ]);
+    expect(output.children.every((child) => child.pr === undefined)).toBe(true);
+    expect(output.promotable).toEqual([{ prId: b, branch: "cla-2", base: "main" }]);
+    expect(output.changedDrafts).toEqual([]);
+    // Nada de B ni C llegó al remoto ni se escribió en GitHub.
+    expect(() => remoteSha("cla-2")).toThrow();
+    expect(() => remoteSha("cla-3")).toThrow();
+    expect(github.requests.slice(requests).filter((r) => r.method === "PATCH" || (r.method === "POST" && r.path !== "/graphql"))).toEqual([]);
+    expect(repo.git("merge-base", "--is-ancestor", squash, "cla-2")).toBe("");
+    expect(repo.git("merge-base", "--is-ancestor", repo.git("rev-parse", "cla-2"), "cla-3")).toBe("");
+    expect(sql(`SELECT id, base_ref, state, head_sha FROM pull_requests WHERE state = 'local' ORDER BY head_ref`)).toEqual([
+      { id: b, base_ref: "main", state: "local", head_sha: repo.git("rev-parse", "cla-2") },
+      { id: c, base_ref: "cla-2", state: "local", head_sha: repo.git("rev-parse", "cla-3") },
+    ]);
+    expect(sql("SELECT child_id, parent_id FROM pr_parents")).toEqual([{ child_id: c, parent_id: b }]);
+  });
+
+  test("un reintento con las etapas guardadas no repite el restack de un hijo local", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    github.pr(1).merge({ sha: squashOnMain("cla-1") });
+    const shared = ctx();
+    await restack.run(restack.args.parse({ pr: ref(1) }), shared);
+    const head = repo.git("rev-parse", "cla-2");
+
+    const again = await restack.run(restack.args.parse({ pr: ref(1) }), shared);
+
+    expect(repo.git("rev-parse", "cla-2")).toBe(head);
+    expect((again.output as Output).children).toMatchObject([{ branch: "cla-2", status: "restacked" }]);
+  });
+
+  test("un hijo local en conflicto queda como estaba y no se pushea", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    await localPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
+    const before = repo.git("rev-parse", "cla-2");
+    github.pr(1).merge({ sha: squashOnMain("cla-1", { "a.txt": "a1\nparent\nmain\n" }) });
+
+    const result = await run(1);
+
+    expect(result.outcome).toBe("conflict");
+    expect((result.output as Output).children).toMatchObject([{ branch: "cla-2", status: "conflict", files: ["a.txt"] }]);
+    expect(repo.git("rev-parse", "cla-2")).toBe(before);
+    expect(() => remoteSha("cla-2")).toThrow();
+  });
+});
+
 describe("stack.restackRewritten", () => {
   test("padre reescrito: el hijo queda sobre la nueva punta con el mismo patch-id y sigue colgando de él", async () => {
     await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
