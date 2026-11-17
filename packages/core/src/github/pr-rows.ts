@@ -58,7 +58,7 @@ export function openOwnedPrsOfIssues(db: Db, issueIds: readonly IssueId[]): PrRo
   return db
     .select()
     .from(pullRequests)
-    .where(and(eq(pullRequests.owned, true), eq(pullRequests.state, "open"), inArray(pullRequests.issueId, [...issueIds])))
+    .where(and(eq(pullRequests.owned, true), inArray(pullRequests.state, ["open", "local"]), inArray(pullRequests.issueId, [...issueIds])))
     .all();
 }
 

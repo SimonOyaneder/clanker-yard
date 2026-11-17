@@ -2,7 +2,7 @@ import { NewProject, type PrRef, type PrState, type ProjectId, type IssueId, typ
 import { trackersByKind } from "../tracker/trackers";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createDefs } from "../defs/defs";
+import { createDefs, type Defs } from "../defs/defs";
 import { createProjects, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { newId } from "../store/conventions";
 import { openStore, type Store } from "../store/store";
@@ -12,12 +12,14 @@ import type { Tracker } from "../tracker/tracker";
 import { createRepos, type Repos } from "../repos/repos";
 import { createProjectQueue, QueueUnavailableError } from "./project-queue";
 import { seedPr } from "../testing/pull-requests";
+import { runs } from "../store/schema";
 
 let store: Store;
 let local: LocalTracker;
 let issues: Issues;
 let projects: Projects;
 let repos: Repos;
+let defs: Defs;
 let reads: PrRef[];
 let readPr: (ref: PrRef) => Promise<PrState>;
 
@@ -25,7 +27,7 @@ beforeEach(() => {
   store = openStore({ path: ":memory:" });
   local = createLocalTracker({ store });
   issues = createIssues({ store, local });
-  const defs = createDefs({ store });
+  defs = createDefs({ store });
   defs.register("flow", z.unknown());
   defs.register("profile", z.unknown());
   projects = createProjects({ store, defs });
@@ -193,13 +195,64 @@ describe("la cola de un proyecto", () => {
       expect(entry).toMatchObject({ state: "blocked", reason: expect.stringContaining("no tiene PR abierto") });
     });
 
-    test("un PR local del bloqueante todavía no es base ni se lee en GitHub", async () => {
-      const { project, repoA, parentId } = await blockedPair("any_open");
+    test("ci_green incluye el PR local con su branch, sin leer CI, y espera su corrida done", async () => {
+      const { project, repoA, parentId } = await blockedPair("ci_green");
       seedPr(store, { repoId: repoA, number: null, state: "local", headRef: "cla-1-padre", issueId: parentId, title: "feat: padre" });
 
       const [entry] = await queueOf().of(project.id);
 
+      expect(entry).toMatchObject({ state: "blocked", reason: expect.stringContaining("el PR local app@cla-1-padre todavía no tiene una corrida terminada done") });
+      expect(reads).toEqual([]);
+    });
+
+    test("un PR local que no abrió el sistema no cuenta para la cola", async () => {
+      const { project, repoA, parentId } = await blockedPair("ci_green");
+      seedPr(store, { repoId: repoA, number: null, state: "local", headRef: "cla-1-padre", issueId: parentId, title: "feat: padre", owned: false });
+
+      const [entry] = await queueOf().of(project.id);
+
       expect(entry).toMatchObject({ state: "blocked", reason: expect.stringContaining("no tiene PR abierto") });
+      expect(reads).toEqual([]);
+    });
+
+    test.each(["ready", "ci_green", "any_open"] as const)("%s apila sobre un PR local de otro proyecto cuya corrida terminó done", async (stackOn) => {
+      const repoId = repos.add({ name: "app", path: "/tmp/app", remote: "acme/app" });
+      const project = createProject(stackOn, [repoId]);
+      const other = projects.create(NewProject.parse({ slug: "otro", name: "Otro", tracker: "local", repos: [{ repoId }] }), "cli");
+      const parent = await local.createIssue(other.id, { title: "padre", status: "in_progress" });
+      const child = await local.createIssue(project.id, { title: "hijo" });
+      await local.relate(parent.ref, "blocks", child.ref);
+      await sync(other.id);
+      await sync(project.id);
+      const parentId = issues.list({ projectId: other.id })[0]!.id;
+      const flow = defs.save({ kind: "flow", slug: "dev", scope: "user", body: {}, source: "cli" });
+      store.db.insert(runs).values({
+        id: newId("run"),
+        projectId: other.id,
+        subjectType: "issue",
+        subjectId: parentId,
+        flowDefId: flow.id,
+        flowVersion: flow.version,
+        roles: {},
+        lane: "dev",
+        status: "done",
+        outcome: "done",
+        writes: true,
+        params: { repo: repoId },
+        rounds: {},
+        startedAt: 1,
+        endedAt: 2,
+      }).run();
+      seedPr(store, { repoId, number: null, state: "local", headRef: "cla-1-padre", issueId: parentId, title: "feat: padre" });
+
+      const entries = await queueOf().of(project.id);
+
+      expect(entries).toMatchObject([{
+        issue: { title: "hijo" },
+        state: "ready",
+        base: { kind: "stacked", parent: { key: "app@cla-1-padre", branch: "cla-1-padre" } },
+        dependsOn: [],
+      }]);
       expect(reads).toEqual([]);
     });
 

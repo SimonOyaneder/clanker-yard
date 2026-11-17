@@ -134,6 +134,45 @@ describe("el Scheduler del core", () => {
     expect(store.db.$client.prepare("SELECT status FROM combined_bases WHERE branch = ?").all(branch)).toEqual([{ status: "active" }]);
   });
 
+  test("una issue bloqueada por un PR local sale de su branch con stackOn ci_green", async () => {
+    repo.cleanup();
+    repo = tempGitRepo({
+      branches: { "cla-1-padre": [{ message: "feat: padre", files: { "padre.txt": "padre\n" } }] },
+    });
+    const client = await boot();
+    const project = await toyProject(client);
+    const parent = await client.issues.createLocal({ projectId: project.id, title: "Padre" });
+    await until(async () => {
+      expect(await client.runs.list({ projectId: project.id })).toMatchObject([{ subject: { id: parent.id }, status: "done", outcome: "done" }]);
+    });
+    await client.projects.update({ id: project.id, status: "paused" });
+    const repoId = createRepos({ store }).list()[0]!.id;
+    seedPr(store, {
+      repoId,
+      number: null,
+      state: "local",
+      headRef: "cla-1-padre",
+      headSha: repo.git("rev-parse", "cla-1-padre"),
+      issueId: parent.id,
+      title: "feat: padre",
+    });
+    const child = await client.issues.createLocal({ projectId: project.id, title: "Hijo" });
+    await createLocalTracker({ store }).relate(parent.ref, "blocks", child.ref);
+
+    await client.projects.update({ id: project.id, status: "active", repos: [{ repoId, labels: [] }] });
+
+    await until(async () => {
+      const runs = await client.runs.list({ projectId: project.id });
+      expect(runs.find((run) => run.subject.id === child.id)).toMatchObject({
+        status: "done",
+        outcome: "done",
+        params: { base: "cla-1-padre" },
+      });
+    });
+    const { branch } = store.db.$client.prepare("SELECT branch FROM workspaces WHERE base_ref = ?").get("cla-1-padre") as { branch: string };
+    expect(repo.git("merge-base", "--is-ancestor", "cla-1-padre", branch)).toBe("");
+  });
+
   test("al arrancar lanza lo que ya estaba en la cola", async () => {
     let client = await boot();
     const project = await toyProject(client);

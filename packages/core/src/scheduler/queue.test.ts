@@ -54,6 +54,7 @@ const run = (n: number, status: QueueRun["status"], outcome: string | null = nul
 const pr = (n: number, extra: Partial<QueuePrFact> = {}): QueuePrFact => ({
   issueId: issueId(n),
   repoId: REPO,
+  local: false,
   key: `app#${100 + n}`,
   headRef: `cla-${n}`,
   baseRef: "main",
@@ -327,6 +328,35 @@ describe("tabla de bloqueantes", () => {
       });
       expect(withStackOn("ready", { prs: [pr(2)], runs: [run(2, "done", "blocked")] }).state).toBe("blocked");
     });
+
+    test.each(["ready", "ci_green", "any_open"] as const)("un PR local con stackOn %s pide que el flujo termine done, sin CI", (stackOn) => {
+      const prs = [pr(2, { local: true, key: "app@cla-2", ci: "not_green" })];
+
+      expect(withStackOn(stackOn, { prs, runs: [run(2, "done", "done")] })).toMatchObject({
+        state: "ready",
+        base: { kind: "stacked", parent: { key: "app@cla-2", branch: "cla-2" } },
+        dependsOn: [],
+      });
+      expect(withStackOn(stackOn, { prs, runs: [run(2, "running")] })).toMatchObject({
+        state: "waiting",
+        reason: "espera a CLA-2: el PR local app@cla-2 todavía no tiene una corrida terminada done",
+      });
+      expect(withStackOn(stackOn, { prs, runs: [run(2, "done", "blocked")] })).toMatchObject({
+        state: "blocked",
+        reason: expect.stringContaining("el PR local app@cla-2 todavía no tiene una corrida terminada done"),
+      });
+    });
+  });
+
+  test("un PR local de otro repo impone espera aunque el bloqueante también tenga PRs utilizables", () => {
+    const local = pr(2, { local: true, repoId: "repo_b", key: "api@cla-2", ci: "not_green" });
+
+    for (const prs of [[local], [pr(2), local], [pr(2, { repoId: "repo_c", key: "other#8" }), local]]) {
+      const entry = only(queue(blocked(), { prs, runs: [run(2, "done", "done")] }));
+
+      expect(entry).toMatchObject({ state: "waiting", reason: "espera a CLA-2: su PR es local, se publica cuando se mergee su base" });
+      expect(entry).not.toHaveProperty("dependsOn");
+    }
   });
 
   describe("dos o más PRs en ramas distintas", () => {
@@ -345,6 +375,19 @@ describe("tabla de bloqueantes", () => {
         state: "ready",
         base: { kind: "combined", parents: [{ key: "app#102", branch: "cla-2" }, { key: "app#103", branch: "cla-3" }] },
         reason: "base combinada de app#102 y app#103",
+      });
+    });
+
+    test("un padre local y uno remoto en cadenas distintas forman una base combinada", () => {
+      const entry = only(queue(two, {
+        prs: [pr(2, { local: true, key: "app@cla-2", ci: "not_green" }), pr(3)],
+        runs: [run(2, "done", "done")],
+      }));
+
+      expect(entry).toMatchObject({
+        state: "ready",
+        base: { kind: "combined", parents: [{ key: "app@cla-2", branch: "cla-2" }, { key: "app#103", branch: "cla-3" }] },
+        dependsOn: [],
       });
     });
 
@@ -437,6 +480,18 @@ describe("repo de la issue", () => {
       dependsOn: ["front#7"],
       reason: "en back, lista sobre la branch por defecto, depende de front#7",
     });
+  });
+
+  test("si el PR del primer repo sigue local, la cadena espera sin depender de una referencia local", () => {
+    const issues = [issue(1, { labels: ["frontend", "backend"], status: "in_progress" })];
+
+    const entry = only(chained(issues, {
+      runs: [runIn(1, FRONT, "done", "done")],
+      prs: [{ ...prIn(1, FRONT, "front@cla-1"), local: true }],
+    }));
+
+    expect(entry).toMatchObject({ state: "waiting", reason: "espera a front: su PR es local, se publica cuando se mergee su base" });
+    expect(entry).not.toHaveProperty("dependsOn");
   });
 
   test("con el PR del primero ya mergeado la segunda corre sin depender de nadie", () => {
