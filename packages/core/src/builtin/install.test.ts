@@ -9,6 +9,7 @@ import { createDefs, type Defs } from "../defs/defs";
 import { createFlows } from "../flows/flows";
 import { openStore, type Store } from "../store/store";
 import { JUGUETE_TEMPLATE } from "../testing/juguete";
+import { roles } from "../template/roles";
 import { installBuiltins } from "./install";
 
 let store: Store | undefined;
@@ -100,6 +101,24 @@ test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-
   expect(defs.resolve("role", "committer")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("profile", "eco")).toMatchObject({ scope: "builtin" });
   expect(store!.events.since(0, { types: ["def.versioned"] })).toHaveLength(versions);
+});
+
+test("un rol viejo de un pack no tumba la instalación: el flujo que no valida queda en los errores y valida al actualizar el rol", () => {
+  const { defs, flows } = setup();
+  // Un pack guardó un triage de antes de que el modo ci tuviera el outcome `unsure`.
+  const stale = structuredClone(roles.triage!);
+  stale.modes.ci!.outcomes = stale.modes.ci!.outcomes.filter((o) => o !== "unsure");
+  defs.save({ kind: "role", slug: "triage", scope: "pack", body: stale, source: "pack" });
+
+  const errors = installBuiltins({ defs, flows });
+
+  expect(errors.map((e) => e.message).join("\n")).toMatch(/"pr-feedback" es inválido[\s\S]*unsure/);
+  // Los roles sí quedan instalados; los flujos que no validaron conservan su versión anterior (aquí no había ninguna).
+  expect(defs.resolve("role", "committer")).toMatchObject({ scope: "builtin" });
+
+  defs.save({ kind: "role", slug: "triage", scope: "pack", body: roles.triage!, source: "pack" });
+  expect(installBuiltins({ defs, flows })).toEqual([]);
+  expect(defs.resolve("flow", "pr-feedback")).toMatchObject({ scope: "builtin" });
 });
 
 test.each([

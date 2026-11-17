@@ -295,6 +295,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   installBuiltins({ defs, flows, extra: opts.builtins });
   // Los flujos de un pack citan acciones y waits, así que se cargan con todo registrado. Un pack roto no tumba el arranque.
   for (const error of (await packs.reload()).errors) reporter.report("packs.load", error);
+  // Un flujo de fábrica puede no validar contra el rol que un pack guardó antes (uno viejo): con los packs ya
+  // recargados se reintenta, y lo que siga sin validar queda como error, sin tumbar el arranque.
+  for (const error of installBuiltins({ defs, flows, extra: opts.builtins })) reporter.report("builtins.install", error);
 
   // Antes de aceptar trabajo, en este orden: sin procesos de un core anterior que sigan escribiendo,
   // con los worktrees de las corridas vivas todavía suyos, y recién entonces los pasos se reabren.

@@ -31,8 +31,13 @@ const TEMPLATES: BuiltinTemplate[] = [
  * Deja las plantillas que trae el core como defs de scope `builtin`. Se llama en cada arranque:
  * guardar el mismo contenido no suma versiones. Los roles y los perfiles van antes que los flujos, porque
  * `flows.save` valida que existan, y las acciones y waits que citan ya deben estar registrados.
+ *
+ * Un flujo que no valida no tumba el arranque: queda en los errores que devuelve y conserva su versión anterior. Pasa
+ * cuando un pack reemplaza un rol con una versión vieja (sin un outcome que el flujo nuevo usa); el core lo vuelve a
+ * intentar después de recargar los packs.
  */
-export function installBuiltins({ defs, flows, extra = [] }: { defs: Defs; flows: Flows; extra?: readonly BuiltinTemplate[] }): void {
+export function installBuiltins({ defs, flows, extra = [] }: { defs: Defs; flows: Flows; extra?: readonly BuiltinTemplate[] }): Error[] {
+  const errors: Error[] = [];
   const source = "builtin";
   const archived = (kind: DefKind, slug: string) =>
     defs.list(kind, { includeArchived: true }).some((d) => d.scope === "builtin" && d.slug === slug && d.archivedAt !== null);
@@ -47,6 +52,13 @@ export function installBuiltins({ defs, flows, extra = [] }: { defs: Defs; flows
     if (out) continue;
     for (const [slug, body] of Object.entries(template.roles)) defs.save({ kind: "role", slug, scope: "builtin", body, source });
     for (const [slug, body] of Object.entries(template.profiles)) defs.save({ kind: "profile", slug, scope: "builtin", body, source });
-    for (const flow of template.flows) flows.save(flow, { scope: "builtin", source });
+    for (const flow of template.flows) {
+      try {
+        flows.save(flow, { scope: "builtin", source });
+      } catch (error) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
   }
+  return errors;
 }
