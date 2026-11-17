@@ -122,7 +122,7 @@ const CONTEXT = `__typename
   ... on StatusContext { context state isRequired(pullRequestNumber: $number) }`;
 const ACTOR = "__typename login avatarUrl";
 
-const PR_QUERY = `
+export const PR_QUERY = `
 query PrDetail($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     name
@@ -148,11 +148,11 @@ query PrDetail($owner: String!, $name: String!, $number: Int!) {
 }`;
 
 // Las páginas que siguen se piden por el id del PR: el resto de la query no se repite.
-const MORE_THREADS = `
+export const MORE_THREADS = `
 query PrThreads($id: ID!, $after: String!) {
   node(id: $id) { ... on PullRequest { reviewThreads(first: ${PAGE_SIZE}, after: $after) { ${PAGE_INFO} nodes { ${THREAD} } } } }
 }`;
-const MORE_CONTEXTS = `
+export const MORE_CONTEXTS = `
 query PrContexts($id: ID!, $number: Int!, $after: String!) {
   node(id: $id) {
     ... on PullRequest {
@@ -251,7 +251,7 @@ export async function fetchPr(client: GitHubClient, repo: { owner: string; name:
 /** Los commits de la branch por defecto que mira `fetchDefaultBranchChecks`. */
 const DEFAULT_BRANCH_COMMITS = 20;
 
-const DEFAULT_BRANCH_CHECKS = `
+export const DEFAULT_BRANCH_CHECKS = `
 query DefaultBranchChecks($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef {

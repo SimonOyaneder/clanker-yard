@@ -107,7 +107,7 @@ async function requestBot(target: Target, ctx: ActionCtx, write: ReturnType<type
   });
 }
 
-const RESOLVE_THREAD = `mutation ResolveThread($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id isResolved } } }`;
+export const RESOLVE_THREAD = `mutation ResolveThread($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id isResolved } } }`;
 
 type ThreadOwner = "council" | "resolvable" | "automation" | "human";
 
