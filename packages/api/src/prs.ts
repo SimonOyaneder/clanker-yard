@@ -181,6 +181,7 @@ export type PrSignal = z.infer<typeof PrSignal>;
 export const CachedPr = z.object({
   /** El id del PR en el core: el `subject.id` de las corridas que lo toman como sujeto. */
   id: z.string(),
+  repo: z.string(),
   /** `null` en un PR local: todavía no existe en GitHub. */
   ref: PrRef.nullable(),
   /** Un PR apilado que vive solo en la máquina hasta que su base se mergea; `null` en uno de GitHub. */

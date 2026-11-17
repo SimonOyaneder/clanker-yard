@@ -67,6 +67,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
     const id = `pr_${String(nextId++).padStart(26, "0")}`
     return {
       id,
+      repo: `acme/${repo}`,
       ref: { account: "alex", repo: `acme/${repo}`, number },
       local: null,
       owned,
