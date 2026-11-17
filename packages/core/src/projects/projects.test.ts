@@ -52,7 +52,7 @@ describe("create", () => {
       conventions: {},
       parallel: 1,
       stackOn: "ci_green",
-      stackMode: "remote",
+      stackMode: "local",
       statusMapping: {},
       status: "active",
       flowParams: {},

@@ -110,7 +110,7 @@ export const NewProject = z
     /** Sin valor rige el default de proyectos nuevos de Ajustes (`ProjectDefaults`). */
     parallel: z.int().positive().optional(),
     stackOn: StackOn.default("ci_green"),
-    stackMode: StackMode.default("remote"),
+    stackMode: StackMode.default("local"),
     statusMapping: StatusMapping.default({}),
     flowParams: z.record(z.string(), z.unknown()).default({}),
     /** Sin valor rige el default de Ajustes; `null` es sin tope. */
