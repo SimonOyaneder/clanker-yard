@@ -165,12 +165,67 @@ describe("workspaces.attach", () => {
     const first = await attach("cla-1");
     wt(first, "commit", "--quiet", "--allow-empty", "--message", "wip: local");
     workspaces.release(first);
-    await expect(attach("cla-1")).rejects.toThrow(/tiene commits que el remoto no/);
+    await expect(attach("cla-1")).rejects.toThrow(/tiene commits que el remoto .* no tiene/);
     expect(row(first).holder).toBeNull();
 
     await advance("cla-1", { "b.txt": "b2\n" });
-    await expect(attach("cla-1")).rejects.toThrow(/divergieron/);
+    await expect(attach("cla-1")).rejects.toThrow(/el remoto de cla-1 avanzó .* y la local .* tiene 1 commits sin pushear/);
     expect(row(first).holder).toBeNull();
+  });
+
+  describe("cuando otro reescribió la branch en el remoto", () => {
+    /** Otro rehace el último commit de `branch` con otro contenido y fuerza el push, como un rebase a mano. */
+    async function rewrite(branch: string, files: Record<string, string>) {
+      const sha = elsewhere((git, dir) => {
+        git("checkout", "--quiet", branch);
+        put(dir, files);
+        git("add", "--all");
+        git("commit", "--quiet", "--amend", "--message", "feat: reescrito");
+        git("push", "--quiet", "--force", "origin", branch);
+        return git("rev-parse", "HEAD");
+      });
+      await workspaces.fetch("repo_r1");
+      return sha;
+    }
+
+    test("si la local es lo último que pusheamos, adopta la punta del remoto", async () => {
+      pushBranch("cla-1", [{ "a.txt": "a1\nmine\na3\n" }]);
+      const first = await attach("cla-1");
+      workspaces.release(first);
+      const rewritten = await rewrite("cla-1", { "a.txt": "a1\notro\na3\n" });
+
+      const lease = await attach("cla-1");
+
+      expect(lease).toMatchObject({ fastForwarded: true, remoteRewritten: true });
+      expect(head(lease)).toBe(rewritten);
+      expect(row(lease)).toMatchObject({ remoteSha: rewritten, headSha: rewritten });
+      expect(read(lease, "a.txt")).toBe("a1\notro\na3\n");
+    });
+
+    test("si la local tiene commits sin pushear, falla sin tocarla y suelta el lease", async () => {
+      pushBranch("cla-1", [{ "a.txt": "a1\nmine\na3\n" }]);
+      const first = await attach("cla-1");
+      wt(first, "commit", "--quiet", "--allow-empty", "--message", "wip: local");
+      const local = head(first);
+      workspaces.release(first);
+      await rewrite("cla-1", { "a.txt": "a1\notro\na3\n" });
+
+      await expect(attach("cla-1")).rejects.toThrow(/alguien reescribió cla-1 en el remoto .* y la local .* tiene 1 commits sin pushear/);
+      expect(head(first)).toBe(local);
+      expect(row(first).holder).toBeNull();
+    });
+
+    test("si la local tiene cambios sin commitear, falla sin tocarlos", async () => {
+      pushBranch("cla-1", [{ "a.txt": "a1\nmine\na3\n" }]);
+      const first = await attach("cla-1");
+      writeFileSync(join(first.path, "b.txt"), "a medias\n");
+      workspaces.release(first);
+      await rewrite("cla-1", { "a.txt": "a1\notro\na3\n" });
+
+      await expect(attach("cla-1")).rejects.toThrow(/sin commitear/);
+      expect(read(first, "b.txt")).toBe("a medias\n");
+      expect(row(first).holder).toBeNull();
+    });
   });
 
   test("aborta el rebase detenido que dejó una corrida que terminó con el conflicto a medias", async () => {
@@ -399,15 +454,29 @@ describe("workspaces.rebase", () => {
       expect(subjects(child, `${movedParent}..HEAD`)).toEqual(["feat: child 1"]);
     });
 
-    test("si la punta del padre ya no es ancestro del hijo, lanza en lugar de rebasear mal", async () => {
+    test("si el padre se reescribió por fuera, from es la base sobre la que se apiló el hijo", async () => {
+      const squash = stack();
+      await attach("parent");
+      const child = await attach("child", "parent");
+      const squashed = await squash();
+      // Como si el padre se hubiera reescrito: lo último que pusheamos de él no está en la historia del hijo.
+      store.db.$client.prepare("UPDATE workspaces SET remote_sha = ? WHERE branch = 'parent'").run(squashed);
+
+      const result = await workspaces.rebase(child, { council: false, base: "main" });
+
+      expect(result).toMatchObject({ outcome: "clean", baseSha: squashed });
+      expect(subjects(child, `${squashed}..HEAD`)).toEqual(["feat: child 1"]);
+    });
+
+    test("si ni la punta del padre ni la base del hijo están en su historia, lanza en lugar de rebasear mal", async () => {
       stack();
       await attach("parent");
       const child = await attach("child", "parent");
-      // Como si el padre se hubiera reescrito: lo último que pusheamos de él no está en la historia del hijo.
       const elsewhereSha = await advance("main", { "b.txt": "b-main\n" });
       store.db.$client.prepare("UPDATE workspaces SET remote_sha = ? WHERE branch = 'parent'").run(elsewhereSha);
+      store.db.$client.prepare("UPDATE workspaces SET base_sha = ? WHERE branch = 'child'").run(elsewhereSha);
 
-      await expect(workspaces.rebase(child, { council: false, base: "main" })).rejects.toThrow(/no es ancestro/);
+      await expect(workspaces.rebase(child, { council: false, base: "main" })).rejects.toThrow(/ya no está apilada/);
       expect(head(child)).toBe(origin("refs/heads/child"));
     });
   });

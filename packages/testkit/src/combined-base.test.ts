@@ -419,6 +419,31 @@ describe("stack.restack con una base combinada", () => {
     expect(sql(`SELECT * FROM events WHERE type = 'pr.conflict'`)).toEqual([]);
   });
 
+  test("si otro rearmó la base y rehízo el PR por fuera, sale del último merge hacia la base que trae su historia", async () => {
+    const { branch, child } = await combinedPr();
+    // Alguien rearma la base a mano (merges de otra persona: commits distintos de los registrados) y rehace `cla-3` encima.
+    const rebuilt = elsewhere((g) => {
+      const other = ["-c", "user.name=Otra Persona", "-c", "user.email=otra@example.com"];
+      g("checkout", "--quiet", "-b", "rebuild", "origin/main");
+      g(...other, "merge", "--quiet", "--no-ff", "origin/cla-1", "--message", `Merge branch 'cla-1' into ${branch}`);
+      g(...other, "merge", "--quiet", "--no-ff", "origin/cla-2", "--message", `Merge branch 'cla-2' into ${branch}`);
+      const base = g("rev-parse", "HEAD");
+      g(...other, "cherry-pick", "origin/cla-3");
+      g("push", "--quiet", "--force", "origin", "HEAD:cla-3");
+      return base;
+    });
+    expect(rebuilt).not.toBe(row(branch)!.head_sha);
+    const squash = squashOnMain("cla-1");
+    github.pr(1).merge({ sha: squash });
+
+    const result = await run(1);
+
+    expect(result.outcome).toBe("ok");
+    expect(result.output).toMatchObject({ children: [{ pr: { number: child }, branch: "cla-3", status: "restacked", commits: 1, base: "cla-2" }] });
+    const after = row(branch)!.head_sha!;
+    expect(remoteLog(`${after}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${after}`);
+  });
+
   test("una fila vieja de la issue no frena el restack de un PR relanzado a mano sobre un solo padre: se retira y se restackea normal", async () => {
     const { issue, branch, parents } = await twoParents();
     // La corrida anterior de la issue dejó su base combinada activa; la relanzaron a mano apilada sobre `cla-1`.

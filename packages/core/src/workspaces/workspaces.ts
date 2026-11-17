@@ -99,10 +99,12 @@ export interface Workspaces {
    * Retoma el PR ya publicado de `branch`: trae el remoto, toma el lease (creando el worktree desde la
    * branch remota si no existe) y avanza la branch local a la punta de `origin/<branch>` con un
    * fast-forward, que pasa a ser el `remote_sha`. Un rebase detenido que dejó otra corrida se aborta antes.
-   * Lanza `AttachError` si la branch no está en el remoto o
-   * la local tiene commits que el remoto no (adelantada o divergida): sin lease en ese caso.
+   * Si otro reescribió la branch en el remoto (rebase o force push) y la local es lo último que pusheamos, sin
+   * cambios sin commitear, se adopta la punta del remoto (`remoteRewritten`). Lanza `AttachError` si la branch
+   * no está en el remoto, si la local tiene commits que el remoto no o si el remoto se reescribió y adoptarlo
+   * perdería trabajo de la local: sin lease en ese caso.
    */
-  attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean }>;
+  attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean; remoteRewritten: boolean }>;
   /**
    * Al bootear, antes de que Flows reabra los pasos: los worktrees de corridas vivas siguen suyos
    * (lease renovado, mismo token, latido de nuevo), los de corridas ya terminadas se sueltan y los que
@@ -911,7 +913,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     }
   }
 
-  async function attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean }> {
+  async function attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean; remoteRewritten: boolean }> {
     const cfg = repoConfig(request.repo);
     const branch = request.branch.replace(/^refs\/heads\//, "");
     if (cfg.remote && (await fetchRepo(request.repo)) === "unauthorized") {
@@ -927,15 +929,19 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       await abortLeftoverRebase(lease.path);
       const head = await gitIn(lease, "rev-parse", "HEAD");
       const fastForwarded = head !== remoteTip;
+      let remoteRewritten = false;
       if (fastForwarded) {
-        if (!(await isAncestor(lease.path, head, remoteTip))) {
-          const ahead = await isAncestor(lease.path, remoteTip, head);
+        if (await isAncestor(lease.path, head, remoteTip)) {
+          await gitIn(lease, "merge", "--ff-only", "--no-autostash", remoteTip);
+        } else if (await isAncestor(lease.path, remoteTip, head)) {
           throw new AttachError(
-            `${branch} local (${head.slice(0, 9)}) ${ahead ? "tiene commits que el remoto no" : "y el remoto"} ` +
-              `(${remoteTip.slice(0, 9)}) ${ahead ? "tiene" : "divergieron"}: no se puede avanzar con un fast-forward.`,
+            `${branch} local (${head.slice(0, 9)}) tiene commits que el remoto (${remoteTip.slice(0, 9)}) no tiene: ` +
+              "no se puede avanzar con un fast-forward.",
           );
+        } else {
+          await adoptRewrittenRemote(lease, branch, head, remoteTip);
+          remoteRewritten = true;
         }
-        await gitIn(lease, "merge", "--ff-only", "--no-autostash", remoteTip);
       }
       const saved = store.tx(({ db }) =>
         db
@@ -946,11 +952,34 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
           .get(),
       );
       if (!saved) throw new StaleLeaseError(`El lease de ${branch} se perdió mientras se retomaba: otra corrida tomó el workspace.`);
-      return { ...lease, fastForwarded };
+      return { ...lease, fastForwarded, remoteRewritten };
     } catch (error) {
       release(lease);
       throw error;
     }
+  }
+
+  /**
+   * La branch del remoto se reescribió por fuera (un rebase o un force push de otro) y ya no sale de la local.
+   * Si la local es justo lo último que pusheamos y el árbol está limpio, aquí no hay nada que el remoto no
+   * tenga: se adopta su punta. Si no, adoptarla perdería trabajo y lanza `AttachError` con lo que se perdería.
+   */
+  async function adoptRewrittenRemote(lease: WorkspaceLease, branch: string, head: string, remoteTip: string): Promise<void> {
+    const pushed = rowOf(lease).remoteSha;
+    const moved = `(${pushed?.slice(0, 9) ?? "?"} -> ${remoteTip.slice(0, 9)})`;
+    const rewritten =
+      pushed && (await isAncestor(lease.path, pushed, remoteTip)) ? `el remoto de ${branch} avanzó ${moved}` : `alguien reescribió ${branch} en el remoto ${moved}`;
+    if (head !== pushed) {
+      const unpushed = pushed && (await isAncestor(lease.path, pushed, head)) ? await gitIn(lease, "rev-list", "--count", `${pushed}..${head}`) : undefined;
+      throw new AttachError(
+        `${rewritten} y la local (${head.slice(0, 9)}) tiene ${unpushed ? `${unpushed} commits sin pushear` : "commits que nunca se pushearon"}: ` +
+          "adoptar el remoto los perdería. Junta las dos versiones a mano o descarta la local.",
+      );
+    }
+    if ((await gitIn(lease, "status", "--porcelain")) !== "") {
+      throw new AttachError(`${rewritten} y la local tiene cambios sin commitear: adoptar el remoto los perdería.`);
+    }
+    await gitIn(lease, "reset", "--hard", remoteTip);
   }
 
   async function rebase(lease: WorkspaceRef, { council, base, continue: resume = false }: RebaseOptions): Promise<RebaseResult> {
@@ -1077,18 +1106,20 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const parent = parents.find((p) => p.state !== "archived") ?? parents.at(-1);
     const from =
       parent?.remoteSha ?? (await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE}/${row.baseRef}`]));
+    if (from && (await isAncestor(path, from, "HEAD"))) return from;
+    // La base se reescribió por fuera después de que la branch salió de ella (o ya no queda rastro de su punta):
+    // la branch sigue saliendo del commit de la base sobre el que se apiló la última vez.
+    if (row.baseSha && (await isAncestor(path, row.baseSha, "HEAD"))) return row.baseSha;
     if (!from) {
       throw new RebaseError(
         `${row.branch} cambió de base (${row.baseRef} -> ${target}) y no se sabe cuál fue la última punta de ${row.baseRef}: ` +
-          "no hay un workspace suyo con push ni queda origin/" + row.baseRef + ".",
+          "no hay un workspace suyo con push ni queda origin/" + row.baseRef + ", y la base registrada tampoco está en su historia.",
       );
     }
-    if (!(await isAncestor(path, from, "HEAD"))) {
-      throw new RebaseError(
-        `La última punta de ${row.baseRef} (${from.slice(0, 9)}) no es ancestro de ${row.branch}: ya no está apilada sobre ella.`,
-      );
-    }
-    return from;
+    throw new RebaseError(
+      `Ni la última punta de ${row.baseRef} (${from.slice(0, 9)}) ni la base registrada de ${row.branch}` +
+        `${row.baseSha ? ` (${row.baseSha.slice(0, 9)})` : ""} están en su historia: ya no está apilada sobre ellas.`,
+    );
   }
 
   function release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void {
@@ -1272,15 +1303,21 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const plan = tips.length === 0 ? { status: "ok" as const, head: defaultSha } : await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity: await identityOf(row.repoId) });
     // El PR sale de esta base si su historia trae la última punta registrada o, si un corte llegó entre el push y el registro, la que ya se recalculó.
     const head = await gitIn(lease, "rev-parse", "HEAD");
+    let from = combined.headSha;
     if (!(await isAncestor(lease.path, combined.headSha, head)) && (plan.status === "conflict" || !(await isAncestor(lease.path, plan.head, head)))) {
-      throw new StaleCombinedBaseError(`La última punta de la base combinada ${branch} (${combined.headSha.slice(0, 9)}) no está en la historia de ${row.branch}: el PR no salió de ella.`);
+      // Otro rearmó la base por fuera (un rebase a mano del PR): el último merge hacia `branch` en su historia es de donde sale.
+      const rebuilt = await lastMergeInto(lease, branch);
+      if (rebuilt === undefined) {
+        throw new StaleCombinedBaseError(`La última punta de la base combinada ${branch} (${combined.headSha.slice(0, 9)}) no está en la historia de ${row.branch}: el PR no salió de ella.`);
+      }
+      from = rebuilt;
     }
     if (plan.status === "conflict") {
       store.tx(({ db }) => db.update(combinedBases).set({ status: "conflict" }).where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, branch))).run());
       return { outcome: "base-conflict", parent: plan.parent.key, merged: plan.merged, files: plan.conflicts, failures: plan.failures };
     }
 
-    const result = await restack(lease, { council, onto: plan.head, from: combined.headSha, base: tips.length === 0 ? cfg.defaultBranch : branch });
+    const result = await restack(lease, { council, onto: plan.head, from, base: tips.length === 0 ? cfg.defaultBranch : branch });
     if (result.outcome !== "restacked" && result.outcome !== "uptodate") return result;
     if (tips.length === 0) {
       await dissolveBase(row.repoId, branch);
@@ -1291,6 +1328,13 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       );
     }
     return result;
+  }
+
+  /** El último merge `Merge branch '…' into <branch>` (el mensaje de `planCombinedBase`) por la primera línea de `HEAD`. */
+  async function lastMergeInto(lease: WorkspaceRef, branch: string): Promise<string | undefined> {
+    const pattern = `^Merge branch '.+' into ${branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`;
+    const sha = await gitIn(lease, "log", "--first-parent", "--merges", "-1", "--format=%H", "--extended-regexp", `--grep=${pattern}`, "HEAD");
+    return sha === "" ? undefined : sha;
   }
 
   async function reread(runId: RunId): Promise<void> {
@@ -1416,8 +1460,9 @@ export function workspaceAcquireAction(workspaces: Workspaces) {
 
 /**
  * La acción `workspace.attach` (`docs/design.html#d-flows`, carril maintenance): retoma el PR ya publicado
- * de `branch` con `workspaces.attach`. El output es un `$ws` más `fastForwarded`. Lo que `attach` no puede
- * hacer (no está en el remoto, adelantada o divergida) es `PermanentActionError`.
+ * de `branch` con `workspaces.attach`. El output es un `$ws` más `fastForwarded` y `remoteRewritten`. Lo que
+ * `attach` no puede hacer (no está en el remoto, adelantada, o reescrita en el remoto con trabajo local que se
+ * perdería) es `PermanentActionError`.
  */
 export function workspaceAttachAction(workspaces: Workspaces): ActionDef<typeof WorkspaceAcquireArgs> {
   return {
@@ -1427,11 +1472,11 @@ export function workspaceAttachAction(workspaces: Workspaces): ActionDef<typeof 
     effects: "local",
     async run(args, ctx: ActionCtx) {
       try {
-        const { workspaceId, path, branch, baseRef, baseSha, fencingToken, fastForwarded } = await workspaces.attach({
+        const { workspaceId, path, branch, baseRef, baseSha, fencingToken, fastForwarded, remoteRewritten } = await workspaces.attach({
           ...args,
           runId: ctx.runId,
         });
-        return { outcome: "ok", output: { workspaceId, path, branch, baseRef, baseSha, fencingToken, fastForwarded } };
+        return { outcome: "ok", output: { workspaceId, path, branch, baseRef, baseSha, fencingToken, fastForwarded, remoteRewritten } };
       } catch (error) {
         if (error instanceof AttachError || error instanceof BranchNotAllowedError) {
           throw new PermanentActionError(error.message, { cause: error });

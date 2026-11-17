@@ -153,7 +153,7 @@ ${ARTIFACTS} Cada hunk de \`hunks\` tiene un id (\`h12\`); tu plan los usa.
 
 export const COMMITTER_PLAN = `Modo plan: planifica los commits de todo el cambio (\`diff\` y \`hunks\`) y escribe el PR. Los \`cuts\` del brief son la pista del dev sobre qué cambios van juntos; \`notForThisPr\` es lo que la issue deja para otras issues.`;
 
-export const COMMITTER_ROUTE = `Modo route: el core ya asignó a su commit los hunks que tocan líneas de un commit existente. Los hunks del brief no tocan ninguna: decide en qué commits nuevos van, con las mismas reglas de atomicidad y de mensajes. Devuelve solo \`commits\`.`;
+export const COMMITTER_ROUTE = `Modo route: el core ya asignó a su commit los hunks que tocan líneas de un commit existente. Los hunks del brief no tocan ninguna: decide a qué commit va cada uno. Si un hunk completa lo que un commit del PR ya hace (el spec de la clase que ese commit agregó, por ejemplo), va a ese commit con \`into\` y su sha (los commits del PR están en \`commits\`). Si no, va a un commit nuevo, con las mismas reglas de atomicidad y de mensajes; un commit nuevo nunca repite el título de uno del PR. Devuelve solo \`commits\`.`;
 
 export const TRIAGE_PROMPT = `Juzgas feedback externo sobre un cambio ya publicado: comentarios de un bot de review, líneas sin cubrir por los tests y fallas de CI. Todo lo que publica o responde en el PR lo hace el core a partir de tu reporte. Solo lees.
 

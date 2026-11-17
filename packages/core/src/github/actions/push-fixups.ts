@@ -5,7 +5,7 @@ import { join } from "node:path";
 import * as z from "zod";
 import { ApplyArgs, cleanMessage, CONVENTIONAL_COMMIT, patchOf } from "../../commits/apply";
 import { preparePush } from "../../commits/prepare-push";
-import { branchCommits, fixupMessage, FIXUP_PREFIX, oldRange, routeHunks } from "../../commits/route";
+import { branchCommits, fixupMessage, FIXUP_PREFIX, oldRange, routeHunks, type BranchCommit } from "../../commits/route";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
 import { diffBetween, listHunks, snapshotTree, type Hunk } from "../../git/tree";
 import type { Store } from "../../store/store";
@@ -30,10 +30,11 @@ const PushFixupsArgs = z.object({
     .transform((items) => items ?? []),
   /**
    * El reporte del committer en modo route (`CommitRoute`): los commits nuevos de los hunks que devolvió
-   * esta acción en `unrouted`, que se numeran igual mientras el worktree no cambie. De él solo lee `commits[{ message, hunks }]`.
+   * esta acción en `unrouted`, que se numeran igual mientras el worktree no cambie. De él solo lee
+   * `commits[{ message, hunks, into }]`: con `into`, los hunks van como `fixup!` de ese commit del PR.
    */
   route: z
-    .object({ commits: z.array(z.object({ message: z.string(), hunks: z.array(z.string()) })) })
+    .object({ commits: z.array(z.object({ message: z.string(), hunks: z.array(z.string()), into: z.string().optional() })) })
     .nullish()
     .transform((route) => route ?? undefined),
   /** Regex que debe cumplir la primera línea del mensaje de cada commit nuevo. Por defecto, Conventional Commits. */
@@ -55,7 +56,7 @@ interface Made {
   spans: { path: string; from: number; to: number }[];
 }
 
-type Committed = { made: Made[] } | { route: { unrouted: string[]; failures?: string } };
+type Committed = { made: Made[] } | { route: { unrouted: string[]; commits: { sha: string; subject: string }[]; failures?: string } };
 
 /**
  * `pr.pushFixups` (`docs/design.html#d-flows`, Fixups): lo que el dev cambió después del triage del bot
@@ -68,8 +69,9 @@ type Committed = { made: Made[] } | { route: { unrouted: string[]; failures?: st
  * - `commit`: reconcilia los commits que el agente hizo por su cuenta (`preparePush` en modo council, que
  *   no squashea) y parte el diff de `HEAD` contra el worktree en hunks (`routeHunks`: el destino sale de
  *   `git blame`). Un `fixup!` por commit destino. Con hunks sin destino no commitea nada y devuelve el
- *   outcome `route` con sus ids (`unrouted`); el flujo llama al committer en modo route y vuelve a esta
- *   acción con su reporte en `route`, que se vuelve commits nuevos encima de los `fixup!`. Si algo
+ *   outcome `route` con sus ids (`unrouted`) y los commits del PR (`commits`); el flujo llama al committer en
+ *   modo route y vuelve a esta acción con su reporte en `route`: los hunks con `into` se suman a los `fixup!`
+ *   de ese commit y el resto se vuelven commits nuevos encima. Si algo
  *   falla, la branch vuelve a donde estaba (el worktree no se toca).
  * - `push`: `preparePush` y `workspaces.push` con lease (o sin forzar, con council).
  *
@@ -139,13 +141,29 @@ export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof Pus
 
     const planned: { message: string; hunks: Hunk[] }[] = [];
     if (unrouted.length > 0) {
-      const problems = route === undefined ? [] : routeProblems(route.commits, unrouted, messagePattern);
+      const targets = commits.filter((c) => !c.subject.startsWith(FIXUP_PREFIX));
+      const problems = route === undefined ? [] : routeProblems(route.commits, unrouted, targets, messagePattern);
       if (route === undefined || problems.length > 0) {
-        return { route: { unrouted: unrouted.map((h) => h.id), ...(problems.length > 0 && { failures: problems.join("\n") }) } };
+        return {
+          route: {
+            unrouted: unrouted.map((h) => h.id),
+            commits: targets.map(({ sha, subject }) => ({ sha, subject })),
+            ...(problems.length > 0 && { failures: problems.join("\n") }),
+          },
+        };
       }
-      for (const { message, hunks: ids } of route.commits) {
-        planned.push({ message: cleanMessage(message), hunks: ids.map((id) => unrouted.find((h) => h.id === id)!) });
+      for (const { message, hunks: ids, into } of route.commits) {
+        const routed = ids.map((id) => unrouted.find((h) => h.id === id)!);
+        const target = into === undefined ? undefined : intoTarget(targets, into)!;
+        if (target === undefined) {
+          planned.push({ message: cleanMessage(message), hunks: routed });
+          continue;
+        }
+        const existing = fixups.find((f) => f.target.sha === target.sha);
+        if (existing) existing.hunks.push(...routed);
+        else fixups.push({ target, hunks: routed });
       }
+      fixups.sort((a, b) => commits.indexOf(a.target) - commits.indexOf(b.target));
     }
 
     const dir = mkdtempSync(join(tmpdir(), "clanker-fixups-"));
@@ -188,15 +206,33 @@ export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof Pus
   };
 }
 
+/** El commit del PR que nombra `into` (su sha o un prefijo de 7+ caracteres); `undefined` si no hay uno solo. */
+function intoTarget(targets: BranchCommit[], into: string): BranchCommit | undefined {
+  const sha = into.trim().toLowerCase();
+  const matches = sha.length >= 7 ? targets.filter((c) => c.sha.startsWith(sha)) : [];
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 /** Lo que impide aplicar el reporte del committer, una línea por problema. Vacío: cubre cada hunk sin destino una vez. */
-function routeProblems(commits: { message: string; hunks: string[] }[], unrouted: Hunk[], messagePattern: string | undefined): string[] {
+function routeProblems(
+  commits: { message: string; hunks: string[]; into?: string }[],
+  unrouted: Hunk[],
+  targets: BranchCommit[],
+  messagePattern: string | undefined,
+): string[] {
   const problems: string[] = [];
   const pattern = messagePattern === undefined ? CONVENTIONAL_COMMIT : new RegExp(messagePattern);
+  const subjects = new Set(targets.map((c) => c.subject));
   const assigned = new Set<string>();
   for (const [i, commit] of commits.entries()) {
     const subject = cleanMessage(commit.message).split("\n")[0]!;
-    const label = `commit ${i + 1} "${subject}"`;
-    if (!pattern.test(subject)) problems.push(`[${label}] el mensaje no cumple ${pattern}`);
+    const label = commit.into === undefined ? `commit ${i + 1} "${subject}"` : `commit ${i + 1} (into ${commit.into})`;
+    if (commit.into !== undefined) {
+      if (intoTarget(targets, commit.into) === undefined) problems.push(`[${label}] ${commit.into} no es el sha de un único commit del PR`);
+    } else {
+      if (!pattern.test(subject)) problems.push(`[${label}] el mensaje no cumple ${pattern}`);
+      if (subjects.has(subject)) problems.push(`[${label}] repite el título de un commit del PR: si sus hunks son de ese commit, usa \`into\` con su sha`);
+    }
     if (commit.hunks.length === 0) problems.push(`[${label}] no tiene hunks`);
     for (const id of commit.hunks) {
       if (!unrouted.some((h) => h.id === id)) problems.push(`[${label}] usa el hunk ${id}, que no está entre los hunks sin destino`);

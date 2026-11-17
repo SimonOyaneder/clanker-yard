@@ -112,11 +112,24 @@ export const CommitPlan = z.object({
 });
 export type CommitPlan = z.infer<typeof CommitPlan>;
 
-/** Extensión del diseño: el modo `route` decide los commits nuevos de hunks sin commit al que atarse. */
-export const RouteBrief = z.object({ hunks: z.array(z.string()).describe("Ids de hunks.json.") });
+/** Extensión del diseño: el modo `route` decide a qué commit van los hunks sin commit al que atarse. */
+export const RouteBrief = z.object({
+  hunks: z.array(z.string()).describe("Ids de hunks.json."),
+  commits: z
+    .array(z.object({ sha: z.string(), subject: z.string() }))
+    .optional()
+    .describe("Los commits del PR, del más viejo al más nuevo: los destinos posibles de `into`."),
+});
 export type RouteBrief = z.infer<typeof RouteBrief>;
 
-export const CommitRoute = z.object({ commits: z.array(PlannedCommit) });
+const RoutedCommit = PlannedCommit.extend({
+  into: z
+    .string()
+    .optional()
+    .describe("Sha de un commit del PR al que estos hunks se suman (quedan dentro de él al publicar) y `message` no se usa. Sin esto, es un commit nuevo."),
+});
+
+export const CommitRoute = z.object({ commits: z.array(RoutedCommit) });
 export type CommitRoute = z.infer<typeof CommitRoute>;
 
 export const TriageBrief = z.object({

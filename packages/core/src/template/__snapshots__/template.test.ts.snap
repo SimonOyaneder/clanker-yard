@@ -89,6 +89,10 @@ exports[`esquemas de reporte > snapshot 1`] = `
                 },
                 "type": "array",
               },
+              "into": {
+                "description": "Sha de un commit del PR al que estos hunks se suman (quedan dentro de él al publicar) y \`message\` no se usa. Sin esto, es un commit nuevo.",
+                "type": "string",
+              },
               "message": {
                 "type": "string",
               },
