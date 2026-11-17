@@ -214,6 +214,8 @@ export const ProjectConfig = z.strictObject({
   conventions: Conventions.default({}),
   parallel: z.int().positive().default(1),
   stackOn: StackOn.default("ci_green"),
+  /** Sin valor, importar no lo cambia. */
+  stackMode: StackMode.optional(),
   statusMapping: StatusMapping.default({}),
   flowParams: z.record(z.string(), z.unknown()).default({}),
   maxCostUsd: MaxCostUsd.default(null),
