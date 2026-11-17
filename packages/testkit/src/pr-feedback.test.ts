@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   councilThreadsAction,
+  prBotThreadsAction,
   createConnections,
   createDefs,
   createFileSecrets,
@@ -74,7 +75,7 @@ async function setup({ pack = PACK, draft = true }: { pack?: object | null; draf
   const deps = { connections, packs, pause: (ms: number) => (pauses.push(ms), Promise.resolve()) };
   const pr = sim.openPr({ head: "feat", draft });
   const ref = { account: ACCOUNT, repo: REPO, number: pr.number };
-  return { sim, pr, ref, pauses, councilThreads: councilThreadsAction(deps), comment: prCommentAction(deps), reply: prReplyAction(deps), resolve: prResolveThreadAction(deps), requestBot: reviewRequestBotAction(deps) };
+  return { sim, pr, ref, pauses, botThreads: prBotThreadsAction(deps), councilThreads: councilThreadsAction(deps), comment: prCommentAction(deps), reply: prReplyAction(deps), resolve: prResolveThreadAction(deps), requestBot: reviewRequestBotAction(deps) };
 }
 
 /** Un paso del motor: la `key` es la misma en todos los reintentos de una visita, y `once` recuerda las etapas hechas. */
@@ -389,6 +390,34 @@ describe("pr.resolveThread", () => {
     const result = await resolve.run(resolve.args.parse({ pr: ref, thread: "999999" }), ctx());
 
     expect(result.outcome).toBe("refused");
+  });
+});
+
+describe("pr.botThreads", () => {
+  test("da los threads abiertos de los bots resolubles que no son el de review, con su texto sin marcas HTML", async () => {
+    const { pr, ref, botThreads } = await setup();
+    const coverage = pr.thread("coverage-bot", "<sub>reported by reviewdog</sub><br>Not covered lines: 17\n<!-- __reviewdog__:abc -->", { path: "b.txt", line: 1 });
+    pr.botFindings(["Falta validar el monto"]);
+    pr.thread("ana", "un humano pide algo");
+
+    const result = await botThreads.run(botThreads.args.parse({ pr: ref }), ctx());
+
+    expect(result).toEqual({
+      outcome: "ok",
+      output: { items: [{ id: String(coverage.commentId), kind: "bot", path: "b.txt", line: 1, text: "reported by reviewdog\nNot covered lines: 17" }] },
+    });
+  });
+
+  test("no cuenta lo resuelto ni lo respondido con [clanker]; sin bots resolubles aparte del de review es none", async () => {
+    const { pr, ref, botThreads } = await setup();
+    pr.thread("coverage-bot", "ya resuelto", { resolved: true });
+    const answered = pr.thread("coverage-bot", "ya respondido");
+    pr.reply(answered.id, ACCOUNT, "[clanker] no aplica");
+    expect(await botThreads.run(botThreads.args.parse({ pr: ref }), ctx())).toEqual({ outcome: "none" });
+
+    const onlyReviewBot = await setup({ pack: { ...PACK, reviewBot: { ...PACK.reviewBot, resolvableAuthors: [BOT] } } });
+    onlyReviewBot.pr.thread("coverage-bot", "Cobertura baja");
+    expect(await onlyReviewBot.botThreads.run(onlyReviewBot.botThreads.args.parse({ pr: onlyReviewBot.ref }), ctx())).toEqual({ outcome: "none" });
   });
 });
 

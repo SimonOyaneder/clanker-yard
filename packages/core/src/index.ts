@@ -229,7 +229,7 @@ export type { RebasePrDeps } from "./github/actions/rebase-pr";
 export { stackRestackAction, stackRestackRewrittenAction } from "./github/actions/restack";
 export type { ChildReport, StackRestackDeps } from "./github/actions/restack";
 export type { PrPushFixupsDeps } from "./github/actions/push-fixups";
-export { councilThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/actions/pr-feedback";
+export { councilThreadsAction, prBotThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/actions/pr-feedback";
 export type { PrFeedbackDeps } from "./github/actions/pr-feedback";
 export { preparePush } from "./commits/prepare-push";
 export type { PreparePushOptions, PreparePushResult } from "./commits/prepare-push";

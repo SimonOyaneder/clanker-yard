@@ -315,6 +315,47 @@ export function councilThreadsAction(deps: PrFeedbackDeps): ActionDef<typeof Cou
   };
 }
 
+const BotThreadsArgs = z.object({ pr: PrRef });
+
+/** El texto de un comentario de bot sin sus marcas HTML (`<!-- ... -->`) ni etiquetas. */
+const plainText = (body: string) =>
+  body
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+
+/**
+ * `pr.botThreads`: los threads abiertos de los bots que el pack deja resolver y que no son su bot de review
+ * (`reviewBot.resolvableAuthors` menos `reviewBot.logins`, p. ej. un bot de lint o de cobertura que comenta desde
+ * el CI), sin resolver y sin una respuesta con el prefijo de comentarios. Los del bot de review los trae
+ * `pr.botReview`. Output del `ok`: `items` con la forma de los de `pr.botReview` (`id` es el del primer comentario,
+ * `path` y `line` para que `pr.pushFixups` ate cada uno a su commit). `none` si no hay ninguno, si el pack no
+ * declara esos bots o si el PR ya no está abierto.
+ */
+export function prBotThreadsAction(deps: PrFeedbackDeps): ActionDef<typeof BotThreadsArgs> {
+  return {
+    name: "pr.botThreads",
+    args: BotThreadsArgs,
+    outcomes: ["ok", "none"],
+    effects: "local",
+    run: (args) =>
+      onPr(deps, args.pr, async ({ client, owner, name, number, pack }): Promise<ActionResult> => {
+        const reviewLogins = new Set(pack.reviewBot?.logins ?? []);
+        const bots = new Set((pack.reviewBot?.resolvableAuthors ?? []).filter((login) => !reviewLogins.has(login)));
+        if (bots.size === 0) return { outcome: "none" };
+        const node = await fetchPr(client, { owner, name }, number);
+        const items = (node.state === "OPEN" ? node.reviewThreads : []).flatMap((thread) => {
+          const first = thread.comments.nodes[0];
+          if (!first?.author || !bots.has(first.author.login)) return [];
+          if (thread.isResolved || answered(thread, pack.conventions.commentPrefix)) return [];
+          return [{ id: first.fullDatabaseId, kind: "bot" as const, ...(first.path && { path: first.path }), ...(first.line != null && { line: first.line }), text: plainText(first.body) }];
+        });
+        return items.length === 0 ? { outcome: "none" } : { outcome: "ok", output: { items } };
+      }),
+  };
+}
+
 const RequestBotArgs = z.object({ pr: PrRef });
 
 /**

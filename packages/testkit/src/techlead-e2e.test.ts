@@ -128,6 +128,7 @@ describe("pr-feedback con el core real", () => {
       ["triage", "fix"],
       ["reply", "ok"],
       ["ci-wait", "ok"],
+      ["ci-bots", "none"],
     ]);
     const notes = store.events.since(0, { types: ["decision.opened"], runId: feedback.id }).map((e) => (e.payload as { title: string }).title);
     expect(notes).toEqual(["Sin LGTM tras las rondas externas"]);
