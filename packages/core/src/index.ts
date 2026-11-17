@@ -45,6 +45,7 @@ export { EnvironmentError, PermanentActionError } from "./flows/catalog";
 export { repoScope } from "./breakers/breakers";
 
 export type { RunView } from "./flows/engine";
+export { OUTPUT_INLINE_MAX_BYTES } from "./flows/run-reads";
 export { createConnections } from "./connections/connections";
 export type { ClaudeOptions, Connections } from "./connections/connections";
 

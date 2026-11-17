@@ -11,6 +11,7 @@ import {
   createPacks,
   newId,
   openStore,
+  OUTPUT_INLINE_MAX_BYTES,
   prCommentAction,
   prReplyAction,
   prResolveThreadAction,
@@ -411,6 +412,25 @@ describe("ci.failureReport", () => {
     expect(item?.text).toContain("rspec ./spec/a_spec.rb:3");
     expect(item?.text).toContain("solo el final");
     expect(item?.text).not.toContain("inicio");
+  });
+
+  test("los reportes largos se recortan entre todos para que la lista quepa en el brief del triage (caso BA-9227)", async () => {
+    const { ref, deps } = await setup({ pack: { ...PACK, ciRules: RULES } });
+    // Un log real: muchas líneas cortas (cada salto pesa 2 bytes en el JSON) y algo que no es ASCII.
+    const log = (name: string) => `${"0.3 seconds average ./spec/ñandú_spec.rb:4\n".repeat(800)}Failed examples:\nrspec ./spec/${name}_spec.rb:173`;
+    const report = ciFailureReportAction({ ...deps, runReport: (command) => Promise.resolve(log(command.includes("'aaa'") ? "a" : "b")) });
+
+    const result = await report.run(
+      report.args.parse({ pr: ref, failures: [failure("circleci run get aaa --failure-report"), { ...failure("circleci run get bbb --failure-report"), id: "ci:lint" }] }),
+      ctx(),
+    );
+
+    const items = (result.output as { items: { id: string; text: string }[] }).items;
+    expect(Buffer.byteLength(JSON.stringify(result.output))).toBeLessThanOrEqual(OUTPUT_INLINE_MAX_BYTES);
+    expect(items.map((i) => i.id)).toEqual(["ci:tests", "ci:lint"]);
+    expect(items[0]?.text).toContain("rspec ./spec/a_spec.rb:173");
+    expect(items[1]?.text).toContain("rspec ./spec/b_spec.rb:173");
+    expect(items[0]?.text).toContain("solo el final");
   });
 
   test("sin regla que calce el ítem sigue igual, y si el comando falla queda con una nota", async () => {
