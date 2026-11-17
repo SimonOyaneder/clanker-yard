@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CachedIssue, IssueId, Origin, PrRef, PrRepublish, RepoId, RepublishInput, RepublishProgress, RunId } from "@clanker/api";
+import { LIVE_RUN_STATUSES, type CachedIssue, type IssueId, type Origin, type PrRef, type PrRepublish, type RepoId, type RepublishInput, type RepublishProgress, type RunId } from "@clanker/api";
 import { and, eq, inArray, or } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../connections/connections";
@@ -51,7 +51,6 @@ export interface PrRepublisher {
 }
 
 /** Estados en que una corrida sigue usando su issue y su branch (`runs_active_flow_subject`). */
-const LIVE = ["queued", "running", "waiting", "parked", "paused"] as const;
 /** Las corridas que siguen avanzando solas: una `parked` espera a una persona y para el lote ya terminó. */
 const MOVING = ["queued", "running", "waiting", "paused"] as const;
 /** La línea que `republish-pr` agrega al cuerpo del PR nuevo. */
@@ -281,7 +280,7 @@ function liveRun(store: Store, row: PrRow): RunId | undefined {
   return store.db
     .select({ id: runs.id })
     .from(runs)
-    .where(and(inArray(runs.status, LIVE), or(and(eq(runs.subjectType, "issue"), eq(runs.subjectId, row.issueId ?? "")), eq(runs.claimedPrId, row.id))))
+    .where(and(inArray(runs.status, LIVE_RUN_STATUSES), or(and(eq(runs.subjectType, "issue"), eq(runs.subjectId, row.issueId ?? "")), eq(runs.claimedPrId, row.id))))
     .get()?.id;
 }
 

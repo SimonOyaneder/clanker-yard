@@ -244,6 +244,10 @@ export function createLocalTracker(
       return { changed: changed.map(toRef), cursor: String(latestRev(db)) };
     },
 
+    async currentCursor() {
+      return String(latestRev(db));
+    },
+
     async createIssue(project, input) {
       const fields = NewLocalIssue.parse(input);
       if (project === "")

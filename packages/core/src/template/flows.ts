@@ -2,7 +2,8 @@ import type { FlowDef, Node } from "@clanker/api";
 
 // Las plantillas de flujo de "equipo clanker-loop" (`docs/design.html#d-flows`, "Plantillas incluidas"). Son
 // datos que usan los roles de esta plantilla; el core no las nombra. Las acciones y waits que citan los
-// registran sus módulos (Workspaces, CodeHost), así que `installBuiltins` las guardará cuando existan todas.
+// registran sus módulos (Workspaces, CodeHost); `installBuiltins` las guarda en cada arranque, después de que esos módulos
+// registraron todo lo que citan.
 //
 // Desvío del diseño: `workspace.acquire` recibe `branch` (`$run.params.branch`, que pone el core) en lugar de `issue`.
 

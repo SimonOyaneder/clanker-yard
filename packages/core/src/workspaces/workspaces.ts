@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { IssueId, RepoId, type RunId } from "@clanker/api";
+import { IssueId, LIVE_RUN_STATUSES, RepoId, type RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
 import { githubUnauthorized } from "../breakers/breakers";
@@ -1147,7 +1147,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       store.db
         .select({ id: runs.id })
         .from(runs)
-        .where(inArray(runs.status, ["queued", "running", "waiting", "parked", "paused"]))
+        .where(inArray(runs.status, LIVE_RUN_STATUSES))
         .all()
         .map((r) => r.id),
     );

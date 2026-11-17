@@ -106,7 +106,7 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
       const ran = new Set(devRuns.map((run) => run.issueId));
       const chainIds = all.map((issue) => issue.id).filter((id) => ran.has(id) && !blockerIds.has(id));
       const [me, prs, chainPrs] = await Promise.all([viewer, prFacts([...blockerIds], project.stackOn === "ci_green"), prFacts(chainIds, false)]);
-      const skipped = new Set<string>(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
+      const skipped = new Set(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
       const boosted = new Map(store.db.select().from(issueBoosts).all().map((row) => [row.issueId, row.createdAt]));
       const repoNames = new Map(project.repos.map(({ repoId }) => [repoId, repos.get(repoId)?.name ?? repoId]));
       const repoChoices = chosenRepos(store, repos, project);

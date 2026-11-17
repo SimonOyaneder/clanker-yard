@@ -64,8 +64,8 @@ export function createStepBriefs({ store, workspaces, briefs, artifacts, issues,
       mode: request.mode,
       issue,
       since: lastSnapshot(request),
-      learnings: learnings.forBrief({ projectId: request.projectId, repoId: held.repoId as RepoId, role: request.role }),
-      proposedLearnings: request.proposesLearnings ? learnings.pendingFor({ projectId: request.projectId, repoId: held.repoId as RepoId }) : undefined,
+      learnings: learnings.forBrief({ projectId: request.projectId, repoId: held.repoId, role: request.role }),
+      proposedLearnings: request.proposesLearnings ? learnings.pendingFor({ projectId: request.projectId, repoId: held.repoId }) : undefined,
       payload: request.payload,
     });
     const role = `snapshot/${request.nodeId}/${request.visit}/${request.run.attempt}`;

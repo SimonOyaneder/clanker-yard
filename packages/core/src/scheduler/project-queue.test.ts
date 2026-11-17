@@ -48,6 +48,7 @@ const strictTracker = (): Tracker => ({
   setStatus: () => Promise.reject(new Error("la cola no cambia estados")),
   comment: () => Promise.reject(new Error("la cola no comenta")),
   changesSince: () => Promise.reject(new Error("la cola no sincroniza")),
+  currentCursor: () => Promise.reject(new Error("la cola no sincroniza")),
 });
 
 const queueOf = () => createProjectQueue({ store, projects, issues, repos, trackers: trackersByKind({ local: strictTracker() }), prs: { get: (ref) => (reads.push(ref), readPr(ref)) } });

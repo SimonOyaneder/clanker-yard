@@ -1,4 +1,4 @@
-import { BreakerCause, DecisionId, type RepoId } from "@clanker/api";
+import { BreakerCause, DecisionId, RepoId } from "@clanker/api";
 import { CLAUDE_RUNTIME_ID } from "../agents/claude/models";
 import { closeDecision, openDecision } from "../decisions/decisions";
 import { EnvironmentError } from "../flows/catalog";
@@ -16,6 +16,12 @@ export const GITHUB_SCOPE = "github";
 /** El prefijo del ámbito de un repo: `repo:<id>`. */
 export const REPO_SCOPE_PREFIX = "repo:";
 export const repoScope = (repoId: RepoId): string => `${REPO_SCOPE_PREFIX}${repoId}`;
+/** El repo de un ámbito `repo:<id>`, si lo es y el id es válido. */
+export function repoOfScope(scope: string): RepoId | undefined {
+  if (!scope.startsWith(REPO_SCOPE_PREFIX)) return undefined;
+  const parsed = RepoId.safeParse(scope.slice(REPO_SCOPE_PREFIX.length));
+  return parsed.success ? parsed.data : undefined;
+}
 export const runtimeScope = (runtime: string): string => `runtime:${runtime}`;
 
 /**

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type DecisionId, type PrRef } from "@clanker/api";
+import { type DecisionId, type PrRef, type RepoId } from "@clanker/api";
 import {
   approveOption,
   BUTTON_OPTION,
@@ -52,7 +52,7 @@ let cache: PrCache;
 let watch: Watch;
 let flows: Flows;
 let reactions: MergeReactions;
-let repoId: string;
+let repoId: RepoId;
 let setMergeStrategy: (override: "on" | "off" | null) => void;
 let clock: number;
 

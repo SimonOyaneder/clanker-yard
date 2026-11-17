@@ -552,7 +552,7 @@ export function createConnections(
       if (provider === "claude") {
         throw new ConnectionError("Claude se conecta con testClaude (suscripción) o setClaudeApiKey (API key).");
       }
-      return save({ provider, account, scopes, secret: token, expiresAt, ...(provider === "github" ? { auth: "pat" as const } : {}) }, origin);
+      return save({ provider, account, scopes, secret: token, expiresAt, auth: "pat" }, origin);
     },
 
     async setPat(token, origin) {

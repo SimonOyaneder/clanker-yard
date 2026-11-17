@@ -36,6 +36,12 @@ export interface Tracker {
   changesSince(
     cursor?: string,
   ): Promise<{ changed: IssueRef[]; cursor: string }>;
+  /**
+   * El cursor de `changesSince` para "desde ahora", sin traer issues: lo que cambie después sale en la próxima
+   * llamada. Es lo que `Issues.sync` pide antes de listar un proyecto por primera vez; `changesSince()` sin cursor
+   * daría el mismo cursor, pero trayendo todas las issues del tracker.
+   */
+  currentCursor(): Promise<string>;
 }
 
 export class IssueNotFoundError extends Error {

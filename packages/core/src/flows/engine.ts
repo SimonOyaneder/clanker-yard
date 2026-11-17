@@ -1,5 +1,7 @@
 import {
   FlowDef,
+  isLiveRun,
+  LIVE_RUN_STATUSES,
   Profile,
   Role,
   type AgentRuntimeId,
@@ -109,8 +111,6 @@ const ENVIRONMENT_BACKOFF_MS = 60_000;
 const DEFAULT_ACTION_RETRY: RetryPolicy = { max: 3, backoffSec: [10, 60, 300] };
 const DEFAULT_AGENT_RETRY: RetryPolicy = { max: 1, backoffSec: [10] };
 
-/** Los estados en que una corrida sigue viva: los mismos del índice parcial de `runs`. */
-const LIVE_RUN_STATUSES = ["queued", "running", "waiting", "parked", "paused"] as const;
 /** Una corrida pausada no despacha pasos nuevos, pero sus waits y sus hijas siguen cerrándose: lo que pasó mientras tanto no se pierde. */
 const ADVANCING_RUN_STATUSES = ["running", "paused"] as const;
 
@@ -1096,7 +1096,7 @@ export function createEngine(deps: EngineDeps): Engine {
       job.parallel?.role === "join"
         ? branchOutputs(run.id, job.parallel.parent, job.flow)
         : resolveRefs(
-            node.type === "agent" ? node.brief : node.type === "action" || node.type === "wait" ? node.args : node.type === "gate" ? node.question : null,
+            node.type === "agent" ? node.brief : node.type === "action" || node.type === "wait" ? node.args : node.question,
             resolve,
           );
     const inputHash = artifacts.put(JSON.stringify(input), "brief", { mime: "application/json" });
@@ -2248,7 +2248,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const step = tx.db.select().from(stepRuns).where(eq(stepRuns.id, stepId)).get();
       const run = step && tx.db.select().from(runs).where(eq(runs.id, step.runId)).get();
       if (!step || !run) throw new StepNotFoundError(stepId);
-      if (run.status === "queued" || !LIVE_RUN_STATUSES.includes(run.status as (typeof LIVE_RUN_STATUSES)[number])) {
+      if (run.status === "queued" || !isLiveRun(run.status)) {
         throw new RunCommandError(`La corrida ${run.id} está ${run.status}: solo se comanda un paso de una corrida viva.`);
       }
       let job: Job;

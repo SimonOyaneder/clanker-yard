@@ -107,7 +107,7 @@ export function createIssues(
       let cursor: string;
       if (saved == null) {
         // El cursor se pide antes de listar: lo que cambie mientras se lista entra en el próximo sync.
-        cursor = (await tracker.changesSince()).cursor;
+        cursor = await tracker.currentCursor();
         fetched = await tracker.listIssues(project, {});
       } else {
         const changes = await tracker.changesSince(saved);

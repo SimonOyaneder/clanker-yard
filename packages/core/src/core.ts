@@ -11,7 +11,7 @@ import { installBuiltins, type BuiltinTemplate } from "./builtin/install";
 import { commitsApplyAction } from "./commits/apply";
 import type { Connections } from "./connections/connections";
 import { CLAUDE_RUNTIME_ID } from "./agents/claude/models";
-import { createBreakers, runtimeScope } from "./breakers/breakers";
+import { createBreakers, repoOfScope, runtimeScope } from "./breakers/breakers";
 import { environmentProbe } from "./breakers/probes";
 import { createDecisions } from "./decisions/decisions";
 import { createLearnings } from "./learnings/learnings";
@@ -198,7 +198,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     runtimes: runtimes.all.map((r) => r.id),
     probe: environmentProbe({ connections: opts.connections, repos, runtimes: runtimes.all }),
     ...(opts.breakerBackoffMs && { backoffMs: opts.breakerBackoffMs }),
-    label: (scope) => (scope.startsWith("repo:") ? `repo ${repos.get(scope.slice("repo:".length))?.name ?? scope}` : scope),
+    label: (scope) => {
+      const repoId = repoOfScope(scope);
+      return repoId ? `repo ${repos.get(repoId)?.name ?? scope}` : scope;
+    },
   });
   // Antes de despachar nada: un breaker que dejó un corte sigue pausando lo suyo.
   breakers.start();

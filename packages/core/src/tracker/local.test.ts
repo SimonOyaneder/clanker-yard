@@ -299,6 +299,14 @@ describe("changesSince", () => {
 
   test("una base vacía devuelve el cursor de partida", async () => {
     expect(await tracker.changesSince()).toEqual({ changed: [], cursor: "0" });
+    expect(await tracker.currentCursor()).toBe("0");
+  });
+
+  test("currentCursor es el cursor de changesSince() sin traer las issues", async () => {
+    await create("a");
+    await create("b");
+
+    expect(await tracker.currentCursor()).toBe((await tracker.changesSince()).cursor);
   });
 
   test("un cursor que no es de este tracker es un error accionable", async () => {

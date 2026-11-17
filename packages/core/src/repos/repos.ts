@@ -48,7 +48,7 @@ export interface Repos {
    * remoto de GitHub salen de él. Lanza `NotAGitRepoError` si no lo es e `InvalidRepoError` si ya está registrado.
    */
   register(path: string, name?: string): Promise<Repo>;
-  get(id: string): Repo | undefined;
+  get(id: RepoId): Repo | undefined;
   /**
    * Los registrados, por nombre, con el estado de su receta (`invalid` si la carpeta ya no existe) y cómo
    * terminó su última prueba (el último `recipe.test_finished` de cada uno).
@@ -61,13 +61,13 @@ export interface Repos {
   /** Los repos de git de `folder` con el estado de su receta, registrados o no. */
   detect(folder: string): Promise<DetectedRepo[]>;
   /** La configuración que Workspaces necesita de un repo. Lanza si el id no existe. */
-  config(id: string): RepoConfig;
+  config(id: RepoId): RepoConfig;
   /**
    * Fija si la estrategia de merge del pack aplica a este repo (`on`, `off`) o vuelve a detectarlo (`null`:
    * `appliesWhen` del pack). Vale desde la próxima lectura de cada PR del repo. Lanza `RepoNotFoundError` si
    * el id no existe.
    */
-  setMergeStrategy(id: string, override: Repo["mergeStrategy"]): void;
+  setMergeStrategy(id: RepoId, override: Repo["mergeStrategy"]): void;
 }
 
 export interface ReposOptions {
@@ -90,10 +90,7 @@ export function createRepos(store: Store, { remote: remoteOf }: ReposOptions = {
       const id = self.add({ ...info, name: name ?? info.name });
       return self.get(id)!;
     },
-    get(id) {
-      const repoId = RepoId.safeParse(id);
-      return repoId.success ? store.db.select().from(repos).where(eq(repos.id, repoId.data)).get() : undefined;
-    },
+    get: (id) => store.db.select().from(repos).where(eq(repos.id, id)).get(),
     list: () => store.db.select().from(repos).orderBy(asc(repos.name), asc(repos.id)).all(),
     byRemote: (remote) =>
       store.db.select().from(repos).where(eq(repos.remote, remote)).orderBy(asc(repos.name), asc(repos.id)).get(),

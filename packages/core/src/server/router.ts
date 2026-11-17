@@ -136,6 +136,7 @@ export function createRouter(deps: RouterDeps) {
         apiMajor: API_MAJOR,
         schemaVersion,
         bootId: deps.bootId,
+        // Las que están trabajando o por trabajar, sin las que esperan a una persona (`parked`, `paused`).
         activeRuns: flows.listRuns({ status: ["queued", "running", "waiting"] }).length,
         uiKey: context.uiKey === true,
       })),
