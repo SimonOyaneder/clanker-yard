@@ -913,6 +913,21 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     };
   }
 
+  /**
+   * Antes de reescribir una branch ya pusheada: lo que haya sin commitear (también archivos nuevos que no ignora
+   * `.gitignore`) se guarda como un commit sobre `HEAD` en `refs/clanker/uncommitted/<branch>` (el último pisa al
+   * anterior) y el worktree queda limpio. Lo pusheado es lo que cuenta: esos cambios son restos de otra herramienta
+   * o de una corrida cortada, y frenar el rebase por ellos dejaba el PR en conflicto.
+   */
+  async function setAsideUncommitted(lease: WorkspaceRef, branch: string, doing: string): Promise<void> {
+    if ((await gitIn(lease, "status", "--porcelain")) === "") return;
+    const tree = await snapshotTree(lease.path);
+    const kept = await gitIn(lease, "commit-tree", tree, "-p", "HEAD", "-m", `clanker: cambios sin commitear de ${branch} antes de ${doing}`);
+    await gitIn(lease, "update-ref", `refs/clanker/uncommitted/${branch}`, kept);
+    await gitIn(lease, "reset", "--quiet", "--hard", "HEAD");
+    await gitIn(lease, "clean", "--quiet", "-d", "--force");
+  }
+
   /** El respaldo de un `syncBase` cortado tras el reset: un commit sobre la base vieja. */
   async function isResumable(lease: WorkspaceRef, backupRef: string, from: string): Promise<boolean> {
     const parent = await tryGit(lease.path, ["rev-parse", "--verify", "--quiet", `${backupRef}^`]);
@@ -1038,9 +1053,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
             "rebasearlo pisaría o perdería commits. Retoma la branch con attach.",
         );
       }
-      if ((await inWorktree("status", "--porcelain")) !== "") {
-        throw new RebaseError(`${row.branch} tiene cambios sin commitear: un rebase con el árbol sucio perdería trabajo.`);
-      }
+      await setAsideUncommitted(lease, row.branch, "rebasear");
       const from = await rebaseFrom(row, cfg, target, lease.path);
       step = await startRebase(inWorktree, { onto, ...(from !== undefined && { from }) });
     }
@@ -1078,9 +1091,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
           "rehacerlo pisaría o perdería commits. Retoma la branch con attach.",
       );
     }
-    if ((await inWorktree("status", "--porcelain")) !== "") {
-      throw new RebaseError(`${row.branch} tiene cambios sin commitear: un restack con el árbol sucio perdería trabajo.`);
-    }
+    await setAsideUncommitted(lease, row.branch, "restackear");
     for (const [name, sha] of [["onto", onto], ["from", from]] as const) {
       if ((await tryGit(lease.path, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`])) === undefined) {
         throw new RebaseError(`El commit ${name} ${sha.slice(0, 9)} no existe en el repo de ${row.branch}: falta un fetch.`);

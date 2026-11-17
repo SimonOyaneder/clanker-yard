@@ -231,7 +231,7 @@ describe("rebase por conflicto de un PR abierto", () => {
 
   test("una precondición que no se cumple es PermanentActionError: no se reintenta", async () => {
     const ws = await attach();
-    writeFileSync(join(ws.path, "sucio.txt"), "x\n");
+    local(ws, "commit", "--quiet", "--allow-empty", "--message", "wip: sin pushear");
 
     await expect(rebase(ws)).rejects.toThrow(PermanentActionError);
   });
