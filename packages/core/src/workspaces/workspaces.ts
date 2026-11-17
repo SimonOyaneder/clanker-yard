@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { IssueId, LIVE_RUN_STATUSES, RepoId, type RunId } from "@clanker/api";
@@ -42,8 +43,9 @@ export interface WorkspacesOptions {
   /** Donde se registran los comandos de `exec`, para matar los que deje un crash. */
   procs?: Procs;
   /**
-   * Los comandos de `setup.worktree` de la receta que hay en `dir` (el worktree recién creado). Sin
-   * esto no se corre ninguno. Un error al leer la receta falla el `acquire`.
+   * Los comandos de `setup.worktree` de la receta que hay en `dir`. Corren al crear el worktree y, en uno que
+   * ya existía, cuando cambian respecto de los que corrieron la última vez (la receta llegó o se editó después
+   * de crearlo). Sin esto no se corre ninguno. Un error al leer la receta falla el `acquire`.
    */
   worktreeSetup?: (dir: string) => readonly string[];
   leaseTtlMs?: number;
@@ -254,6 +256,10 @@ export class StaleLeaseError extends Error {}
 
 /** `setup.worktree` falló: el worktree se borró, el próximo `acquire` lo crea de nuevo. */
 export class WorktreeSetupError extends Error {}
+
+/** El archivo, en la carpeta de git de cada worktree, con el hash de los comandos de `setup.worktree` que corrieron ahí. */
+const SETUP_MARK = "clanker-setup";
+const setupHash = (commands: readonly string[]) => createHash("sha256").update(JSON.stringify(commands)).digest("hex");
 
 /** La branch no se puede usar como workspace; el mensaje dice por qué. */
 export class BranchNotAllowedError extends Error {}
@@ -531,6 +537,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         baseSha = row.baseSha ?? (await resolveBase(cfg, row.baseRef));
         // Un corte durante `setup.worktree` deja la fila en `creating` con la carpeta ya creada.
         if (row.state === "creating") await setupWorktree(cfg, row, false, runId, lost);
+        else await refreshSetup(row, runId, lost);
       } else {
         ({ baseSha, remoteSha } = await withRepoLock(repo, () => createWorktree(cfg, row, claim.isNew)));
         // Fuera del lock del repo: un `bundle install` largo no debe frenar el fetch ni los worktrees de otras corridas.
@@ -629,19 +636,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   ): Promise<void> {
     if (!worktreeSetup) return;
     try {
-      for (const command of worktreeSetup(row.path)) {
-        const { exitCode, extract } = await execLogged({
-          cwd: row.path,
-          command,
-          env: {},
-          logPath: join(logDir, "runs", runId, "setup.worktree.log"),
-          signal,
-          onSpawn: procs && ((child) => procs.track(child, { kind: "recipe" })),
-        });
-        if (exitCode !== 0) {
-          throw new WorktreeSetupError(`setup.worktree falló en ${row.path}: ${command} (exit ${exitCode})\n${extract}`);
-        }
-      }
+      await runSetup(row.path, worktreeSetup(row.path), runId, signal);
     } catch (error) {
       await withRepoLock(row.repoId, async () => {
         await tryGit(cfg.path, ["worktree", "remove", "--force", "--force", row.path]);
@@ -649,6 +644,38 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       });
       throw error;
     }
+  }
+
+  /**
+   * En un worktree que ya existía, corre `setup.worktree` si sus comandos no son los que corrieron la última vez:
+   * la receta llegó a la branch (o cambió) después de crearlo. Si falla, el worktree queda como estaba, con su
+   * trabajo: el próximo `acquire` lo vuelve a intentar.
+   */
+  async function refreshSetup(row: typeof workspaces.$inferSelect, runId: RunId, signal: AbortSignal): Promise<void> {
+    if (!worktreeSetup) return;
+    const commands = worktreeSetup(row.path);
+    const mark = join(await git(row.path, ["rev-parse", "--absolute-git-dir"]), SETUP_MARK);
+    const ran = existsSync(mark) ? readFileSync(mark, "utf8") : setupHash([]);
+    if (ran === setupHash(commands)) return;
+    await runSetup(row.path, commands, runId, signal);
+  }
+
+  /** Corre `commands` en el worktree y, si todos pasan, deja la marca de lo que corrió en su carpeta de git. */
+  async function runSetup(path: string, commands: readonly string[], runId: RunId, signal: AbortSignal): Promise<void> {
+    for (const command of commands) {
+      const { exitCode, extract } = await execLogged({
+        cwd: path,
+        command,
+        env: {},
+        logPath: join(logDir, "runs", runId, "setup.worktree.log"),
+        signal,
+        onSpawn: procs && ((child) => procs.track(child, { kind: "recipe" })),
+      });
+      if (exitCode !== 0) {
+        throw new WorktreeSetupError(`setup.worktree falló en ${path}: ${command} (exit ${exitCode})\n${extract}`);
+      }
+    }
+    writeFileSync(join(await git(path, ["rev-parse", "--absolute-git-dir"]), SETUP_MARK), setupHash(commands));
   }
 
   /**

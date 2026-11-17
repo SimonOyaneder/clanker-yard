@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -244,7 +244,7 @@ describe("setup.worktree", () => {
 
   test("corre al crear el worktree, dentro de él, y no al volver a tomar uno que ya existe", async () => {
     const id = repo("r1");
-    const dirs = withSetup(["echo instalado > installed.txt", "pwd -P > where.txt"]);
+    withSetup(["echo instalado >> installed.txt", "pwd -P > where.txt"]);
 
     const lease = await acquire(id, "cla-1");
 
@@ -252,7 +252,42 @@ describe("setup.worktree", () => {
     expect(readFileSync(join(lease.path, "where.txt"), "utf8").trim()).toBe(realpathSync(lease.path));
     workspaces.release(lease);
     await acquire(id, "cla-1", runB);
-    expect(dirs).toEqual([lease.path]);
+    expect(readFileSync(join(lease.path, "installed.txt"), "utf8")).toBe("instalado\n");
+  });
+
+  test("en un worktree que ya existía corre cuando la receta llega o cambia, y no cuando sigue igual", async () => {
+    const id = repo("r1");
+    withSetup([]);
+    const lease = await acquire(id, "cla-1");
+    workspaces.release(lease);
+
+    // La receta llega a la branch después de crear el worktree.
+    withSetup(["echo uno >> installed.txt"]);
+    workspaces.release(await acquire(id, "cla-1", runB));
+    expect(readFileSync(join(lease.path, "installed.txt"), "utf8")).toBe("uno\n");
+
+    workspaces.release(await acquire(id, "cla-1"));
+    expect(readFileSync(join(lease.path, "installed.txt"), "utf8")).toBe("uno\n");
+
+    withSetup(["echo dos >> installed.txt"]);
+    await acquire(id, "cla-1", runB);
+    expect(readFileSync(join(lease.path, "installed.txt"), "utf8")).toBe("uno\ndos\n");
+  });
+
+  test("si falla en un worktree que ya existía, no lo borra y el siguiente acquire lo reintenta", async () => {
+    const id = repo("r1");
+    withSetup([]);
+    const lease = await acquire(id, "cla-1");
+    writeFileSync(join(lease.path, "trabajo.txt"), "a medias\n");
+    workspaces.release(lease);
+
+    withSetup(["echo 'sin red' >&2; exit 7"]);
+    await expect(acquire(id, "cla-1", runB)).rejects.toThrow(WorktreeSetupError);
+    expect(readFileSync(join(lease.path, "trabajo.txt"), "utf8")).toBe("a medias\n");
+
+    withSetup(["echo ok > installed.txt"]);
+    await acquire(id, "cla-1", runB);
+    expect(readFileSync(join(lease.path, "installed.txt"), "utf8")).toBe("ok\n");
   });
 
   test("si falla, el worktree y la branch se borran y el siguiente acquire lo intenta de cero", async () => {
