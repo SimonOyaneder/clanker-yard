@@ -31,8 +31,7 @@ test("el grafo muestra los PRs del core con riesgo alto, en cola, la cola caída
   await sidebar(page).getByRole("button", { name: /Stacks de PR/ }).click();
   await expect(page.getByRole("heading", { name: "Stacks de PR" })).toBeVisible();
 
-  // Los 9 PRs que el escenario siembra, cada uno una tarjeta del grafo.
-  await expect(page.locator(".react-flow__node")).toHaveCount(9, { timeout: 30_000 });
+  await expect(page.locator(".react-flow__node")).toHaveCount(11, { timeout: 30_000 });
   const card = (title: string) => page.getByRole("link", { name: new RegExp(title) });
   await expect(card("Renombrar Payments::Ledger").getByText("Riesgo alto")).toBeVisible();
   await expect(card("Arreglar el scroll").getByText("En cola")).toBeVisible();
@@ -43,8 +42,25 @@ test("el grafo muestra los PRs del core con riesgo alto, en cola, la cola caída
   await expect(card("Cerrar la conciliación").getByText("Base combinada")).toBeVisible();
   // Las señales salen del pack: sin el riesgo (que es de un label) en la tarjeta del stack se ve el de cada nivel.
   await expect(card("Agregar checks de boundaries").getByText("Riesgo bajo")).toBeVisible();
+  const local = page.getByRole("group", { name: "engine-rules-docs Documentar las reglas de boundaries" });
+  await expect(local.getByText("Local", { exact: true })).toBeVisible();
+  await expect(local.getByText("engine-rules-docs")).toBeVisible();
+  await expect(local.getByRole("link")).toHaveCount(0);
 
   await snapBoth(page, "stacks-grafo");
+});
+
+test("el local explica cuándo se publica y actualizar solo relee los remotos", async ({ window: page }) => {
+  const local = page.getByRole("group", { name: "engine-rules-docs Documentar las reglas de boundaries" });
+  await local.getByText("Local", { exact: true }).hover();
+  await expect(page.getByRole("tooltip").first()).toHaveText("Vive solo en tu máquina. Se publica en GitHub cuando se mergee engine-rules.");
+  await snapBoth(page, "stacks-local");
+  await page.mouse.move(0, 0);
+  const previousRead = await page.locator("header time").getAttribute("datetime");
+  await page.getByRole("button", { name: "Actualizar", exact: true }).click();
+  await expect(page.locator("header time")).not.toHaveAttribute("datetime", previousRead!);
+  await expect(page.getByText(/No pude actualizar/)).toHaveCount(0);
+  await expect(local.getByText("Local", { exact: true })).toBeVisible();
 });
 
 test("la base combinada explica en su tooltip de quién sale", async ({ window: page }) => {
@@ -60,12 +76,34 @@ test("la base combinada explica en su tooltip de quién sale", async ({ window: 
 test("la lista agrupa los stacks y la señal del pack filtra por nivel", async ({ window: page }) => {
   await page.getByRole("tab", { name: "Lista" }).click();
   await expect(row(page, "Lint de imports entre engines")).toBeVisible();
+  await expect(row(page, "Documentar las reglas").getByText("Local", { exact: true })).toBeVisible();
   await snapBoth(page, "stacks-lista");
 
   await page.getByRole("group", { name: "Señales" }).getByRole("button", { name: /Riesgo alto/ }).click();
   await expect(row(page, "Renombrar Payments::Ledger")).toBeVisible();
   await expect(row(page, "Arreglar el scroll")).toBeHidden();
   await page.getByRole("group", { name: "Señales" }).getByRole("button", { name: /Riesgo alto/ }).click();
+});
+
+test("el menú y la paleta de un local conservan ver corrida pero no acciones de GitHub", async ({ window: page }) => {
+  const local = row(page, "Documentar las reglas de boundaries");
+  await openMenu(local);
+  await expect(page.getByRole("menuitem", { name: "Copiar branch" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Ver corrida/ })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /GitHub|Mergear|hold|review del bot|Rebasear|Copiar link/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /Buscar/ }).first().click();
+  await page.getByPlaceholder("Busca un proyecto, una corrida o una acción…").fill("engine-rules-docs");
+  await expect(page.getByText("Documentar las reglas de boundaries", { exact: true }).last()).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await openMenu(local);
+  await page.getByRole("menuitem", { name: /Ver corrida/ }).click();
+  await expect(page.getByRole("heading", { name: "Saluda al mundo", exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: /Grafo del flujo juguete/ })).toBeVisible();
+
+  await sidebar(page).getByRole("button", { name: /Stacks de PR/ }).click();
+  await page.getByRole("tab", { name: "Lista" }).click();
 });
 
 test("marcar y quitar hold desde el menú contextual lo escribe en el core", async ({ window: page }) => {

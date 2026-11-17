@@ -164,4 +164,13 @@ export async function seedPrs({
   for (const [index] of specs.entries()) await client.prs.refresh(ref(index + 1));
   // El hold es del usuario: se marca por la API, como lo haría la app.
   await client.prs.setHold({ ref: ref(specs.findIndex((s) => s.head === "radix-tooltips") + 1), hold: true });
+  const local = seedPr(store, {
+    repoId, number: null, state: "local", headRef: "engine-rules-docs", baseRef: "engine-rules",
+    title: "Documentar las reglas de boundaries", parents: [ids.get("engine-rules")!],
+    issueId: origin.issueId, runId: origin.runId,
+  });
+  seedPr(store, {
+    repoId, number: null, state: "local", headRef: "engine-rules-rollout", baseRef: "engine-rules-docs",
+    title: "Preparar el despliegue de las reglas", parents: [local],
+  });
 }
