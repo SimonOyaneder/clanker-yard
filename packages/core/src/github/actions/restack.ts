@@ -1,5 +1,5 @@
 import { PrRef, type RepoId } from "@clanker/api";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
 import { openDecision } from "../../decisions/decisions";
@@ -12,6 +12,7 @@ import { emitOnce } from "../marks";
 import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
 import type { GitHubClient } from "../client";
 import type { Prs } from "../prs";
+import { githubPulls, type GithubPrRow } from "../pr-rows";
 import type { RepoConfig } from "../../repos/repos";
 
 // El restack de la cadena (`docs/design.html#d-ops`, restack y restackRewritten): `stack.restack` al mergear un
@@ -41,7 +42,6 @@ export type ChildReport = { pr: PrRef; branch: string } & (
   | { status: "skipped"; reason: string }
 );
 
-type PrRow = typeof pullRequests.$inferSelect;
 type CombinedBase = typeof combinedBases.$inferSelect;
 
 /** Lo que se parte de un padre para restackear a sus hijos: la última punta de su branch, la base nueva (o el sha de su punta) y su nombre. */
@@ -181,7 +181,7 @@ async function restackChain(
   const pull = (number: number) => ({ owner, repo: name, pull_number: number });
   const children: ChildReport[] = [];
 
-  async function restackChildren(parent: PrRow, start: Start, merged: string | undefined): Promise<void> {
+  async function restackChildren(parent: GithubPrRow, start: Start, merged: string | undefined): Promise<void> {
     for (const child of childrenOf(store, parent.id)) {
       const stage = await ctx.once(`restack:${child.number}`, () => restackChild(child, start, merged));
       const { report } = stage;
@@ -202,7 +202,7 @@ async function restackChain(
     conflict?: { from: string; onto: string };
   }
 
-  async function restackChild(child: PrRow, start: Start, merged: string | undefined): Promise<{ report: ChildReport; next?: Start; base: string }> {
+  async function restackChild(child: GithubPrRow, start: Start, merged: string | undefined): Promise<{ report: ChildReport; next?: Start; base: string }> {
     const childRef: PrRef = { account: remote.account, repo: remote.repo, number: child.number };
     const base = { pr: childRef, branch: child.headRef };
     const skipped = (reason: string) => ({ report: { ...base, status: "skipped" as const, reason }, base: start.base });
@@ -282,7 +282,7 @@ async function restackChain(
    * La base combinada de la issue solo vale si el PR salió de ella. Una fila vieja (la issue se relanzó a mano sobre
    * otra base y el PR cuelga de un solo padre) se retira y el PR se restackea como cualquier PR apilado.
    */
-  async function restackAttempt(lease: WorkspaceRef, child: PrRow, start: Start, merged: string | undefined): Promise<Attempt> {
+  async function restackAttempt(lease: WorkspaceRef, child: GithubPrRow, start: Start, merged: string | undefined): Promise<Attempt> {
     const combined = combinedBaseOf(child);
     if (!combined) return restackPlain(lease, start);
     try {
@@ -327,7 +327,7 @@ async function restackChain(
   }
 
   /** La base combinada vigente de la issue del hijo, si su PR se abrió sobre una. */
-  function combinedBaseOf(child: PrRow): CombinedBase | undefined {
+  function combinedBaseOf(child: GithubPrRow): CombinedBase | undefined {
     if (child.issueId === null) return undefined;
     return store.db
       .select()
@@ -341,7 +341,7 @@ async function restackChain(
    * GitHub, si GitHub no la movió, y el registro local, que ya no lo cuelga de él. Un hijo cuyo cuerpo
    * nombra la base vieja deja una nota. Sin `merged` solo se anota la punta nueva.
    */
-  async function retarget(child: PrRow, parent: PrRow, base: string, head: string | undefined, merged: string | undefined): Promise<null> {
+  async function retarget(child: GithubPrRow, parent: GithubPrRow, base: string, head: string | undefined, merged: string | undefined): Promise<null> {
     const stale =
       merged !== undefined
         ? await (async () => {
@@ -384,7 +384,7 @@ async function fetchOrThrow(deps: StackRestackDeps, { repoId, remote }: Found, r
 
 /** La fila de `pull_requests` de `pr` (el repo se reconoce por su `owner/repo` de GitHub) con su repo y remoto. */
 function rowOf(deps: StackRestackDeps, pr: PrRef) {
-  for (const row of deps.store.db.select().from(pullRequests).where(eq(pullRequests.number, pr.number)).all()) {
+  for (const row of githubPulls(deps.store.db, eq(pullRequests.number, pr.number))) {
     const { remote } = deps.repoConfig(row.repoId);
     if (remote?.repo === pr.repo) return { row, repoId: row.repoId, remote };
   }
@@ -392,15 +392,9 @@ function rowOf(deps: StackRestackDeps, pr: PrRef) {
 }
 
 /** Los PRs abiertos que cuelgan de `parentId`, en orden de número. */
-function childrenOf(store: Store, parentId: string): PrRow[] {
-  return store.db
-    .select({ child: pullRequests })
-    .from(prParents)
-    .innerJoin(pullRequests, eq(prParents.childId, pullRequests.id))
-    .where(and(eq(prParents.parentId, parentId), eq(pullRequests.state, "open")))
-    .orderBy(asc(pullRequests.number))
-    .all()
-    .map((row) => row.child);
+function childrenOf(store: Store, parentId: string): GithubPrRow[] {
+  const children = store.db.select({ id: prParents.childId }).from(prParents).where(eq(prParents.parentId, parentId));
+  return githubPulls(store.db, and(eq(pullRequests.state, "open"), inArray(pullRequests.id, children)));
 }
 
 /**

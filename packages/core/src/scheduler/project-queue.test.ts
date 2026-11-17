@@ -193,6 +193,16 @@ describe("la cola de un proyecto", () => {
       expect(entry).toMatchObject({ state: "blocked", reason: expect.stringContaining("no tiene PR abierto") });
     });
 
+    test("un PR local del bloqueante todavía no es base ni se lee en GitHub", async () => {
+      const { project, repoA, parentId } = await blockedPair("any_open");
+      seedPr(store, { repoId: repoA, number: null, state: "local", headRef: "cla-1-padre", issueId: parentId, title: "feat: padre" });
+
+      const [entry] = await queueOf().of(project.id);
+
+      expect(entry).toMatchObject({ state: "blocked", reason: expect.stringContaining("no tiene PR abierto") });
+      expect(reads).toEqual([]);
+    });
+
     test("si GitHub no se puede leer, la cola lo dice en el motivo en vez de fallar", async () => {
       const { project, repoA, parentId } = await blockedPair("ci_green");
       openPr(parentId, repoA, 12, "cla-1-padre");

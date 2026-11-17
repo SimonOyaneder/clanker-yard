@@ -14,6 +14,7 @@ import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import type { Repos } from "../repos/repos";
 import type { Prs } from "./prs";
+import { githubPulls, type GithubPrRow } from "./pr-rows";
 import { messageOf } from "../errors/format";
 
 export interface PrRepublisherDeps {
@@ -69,7 +70,7 @@ const Pull = z.object({
 type PrRow = typeof pullRequests.$inferSelect;
 
 /** Un PR del sistema abierto por una corrida sobre una issue: los únicos que se republican. */
-type IssuePrRow = PrRow & { issueId: IssueId };
+type IssuePrRow = GithubPrRow & { issueId: IssueId };
 
 /** Un PR del lote: espera a su padre, corre su flujo o ya tiene su resultado final. */
 interface Entry {
@@ -120,11 +121,7 @@ export function createPrRepublisher(deps: PrRepublisherDeps): PrRepublisher {
   return {
     async republish(input, by) {
       const { projectId, prs: numbers = [], draftOnly = false } = input;
-      const rows = store.db
-        .select()
-        .from(pullRequests)
-        .where(and(eq(pullRequests.state, "open"), eq(pullRequests.owned, true)))
-        .all()
+      const rows = githubPulls(store.db, and(eq(pullRequests.state, "open"), eq(pullRequests.owned, true)))
         .filter((row): row is IssuePrRow => row.issueId !== null && (!draftOnly || row.isDraft) && (numbers.length === 0 || numbers.includes(row.number)));
       const entries: Entry[] = [];
       for (const row of inStackOrder(store, rows)) {
@@ -170,7 +167,7 @@ export function createPrRepublisher(deps: PrRepublisherDeps): PrRepublisher {
 
   function interim(e: Entry): PrRepublish {
     if (e.runId === undefined) return { ...resultOf(e), status: "pending" };
-    const fresh = store.db.select({ number: pullRequests.number }).from(pullRequests).where(and(eq(pullRequests.runId, e.runId), eq(pullRequests.owned, true))).get();
+    const fresh = githubPulls(store.db, and(eq(pullRequests.runId, e.runId), eq(pullRequests.owned, true)))[0];
     return { ...resultOf(e), status: "running", branch: e.branch, base: e.base, ...(fresh && { newNumber: fresh.number }) };
   }
 
@@ -247,7 +244,7 @@ export function createPrRepublisher(deps: PrRepublisherDeps): PrRepublisher {
     const runId = e.runId!;
     const run = flows.getRun(runId);
     if ((MOVING as readonly string[]).includes(run.status)) return;
-    const fresh = store.db.select().from(pullRequests).where(and(eq(pullRequests.runId, runId), eq(pullRequests.owned, true))).get();
+    const fresh = githubPulls(store.db, and(eq(pullRequests.runId, runId), eq(pullRequests.owned, true)))[0];
     const ended = run.status === "parked" ? `la corrida ${runId} quedó estacionada: mira la Bandeja` : run.outcome === "done" ? undefined : `la corrida ${runId} terminó ${run.outcome ?? run.status}`;
     const where = { branch: e.branch, base: e.base };
     if (!fresh) {
@@ -291,7 +288,7 @@ function parentsOf(store: Store, row: PrRow): PrRow[] {
 }
 
 /** Los padres antes que los hijos; entre los que no se relacionan, por número. */
-function inStackOrder<R extends PrRow>(store: Store, rows: R[]): R[] {
+function inStackOrder<R extends GithubPrRow>(store: Store, rows: R[]): R[] {
   const byId = new Map(rows.map((row) => [row.id, row]));
   const ordered: R[] = [];
   const seen = new Set<string>();

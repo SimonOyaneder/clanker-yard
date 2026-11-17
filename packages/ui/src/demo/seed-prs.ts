@@ -68,6 +68,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
     return {
       id,
       ref: { account: "alex", repo: `acme/${repo}`, number },
+      local: null,
       owned,
       issueId,
       runId,

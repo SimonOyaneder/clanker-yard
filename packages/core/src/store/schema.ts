@@ -877,13 +877,15 @@ export const learnings = sqliteTable(
   ],
 );
 
-export const PR_STATES = ["open", "closed", "merged"] as const;
+export const PR_STATES = ["open", "closed", "merged", "local"] as const;
 
 /**
  * Un PR de GitHub que el core conoce (`docs/design.html#d-data`). Lo abre `pr.publish` (`owned`) o lo
  * descubre Watch en la búsqueda de tus PRs; Watch lo mantiene al día. `owned` es 1 si lo abrió el
  * sistema: solo esos se restackean, rebasean o responden. `repo_id` e `issue_id` no tienen FK, como
- * `runs.subject_id`. `state` es el de GitHub y `is_draft` va aparte. `detail` es el último `PrState`
+ * `runs.subject_id`. `state` es el de GitHub y `is_draft` va aparte, salvo `local`: un PR apilado que vive
+ * solo en la máquina hasta que su base se mergea, sin `number` ni `node_id` y con su `title` y `body`; al
+ * publicarse conserva su `id`, así que lo que apunta a él sigue valiendo. `detail` es el último `PrState`
  * que se leyó (JSON, lo que sirve `prs.list`) y `detail_at` cuándo; `head_changed_at` es cuándo se vio
  * moverse el head (un PR con push reciente es "caliente" para el polling).
  */
@@ -892,8 +894,8 @@ export const pullRequests = sqliteTable(
   {
     id: text().primaryKey(),
     repoId: text("repo_id").$type<RepoId>().notNull(),
-    number: integer().notNull(),
-    nodeId: text("node_id").notNull(),
+    number: integer(),
+    nodeId: text("node_id"),
     headRef: text("head_ref").notNull(),
     baseRef: text("base_ref").notNull(),
     headSha: text("head_sha").notNull(),
@@ -907,8 +909,15 @@ export const pullRequests = sqliteTable(
     headChangedAt: integer("head_changed_at"),
     /** "No mergear nunca este PR": lo marca el usuario y apaga `merge.offer` y `merge.auto` del `PrState`. */
     hold: integer({ mode: "boolean" }).notNull().default(false),
+    title: text(),
+    body: text(),
   },
-  (t) => [uniqueIndex("pull_requests_repo_number").on(t.repoId, t.number)],
+  (t) => [
+    uniqueIndex("pull_requests_repo_number").on(t.repoId, t.number),
+    uniqueIndex("pull_requests_repo_branch_local").on(t.repoId, t.headRef).where(sql`${t.state} = 'local'`),
+    check("pull_requests_number_iff_not_local", sql`(${t.state} = 'local') = (${t.number} IS NULL) AND (${t.state} = 'local') = (${t.nodeId} IS NULL)`),
+    check("pull_requests_local_title", sql`${t.state} != 'local' OR ${t.title} IS NOT NULL`),
+  ],
 );
 
 /**

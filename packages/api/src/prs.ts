@@ -181,7 +181,10 @@ export type PrSignal = z.infer<typeof PrSignal>;
 export const CachedPr = z.object({
   /** El id del PR en el core: el `subject.id` de las corridas que lo toman como sujeto. */
   id: z.string(),
-  ref: PrRef,
+  /** `null` en un PR local: todavía no existe en GitHub. */
+  ref: PrRef.nullable(),
+  /** Un PR apilado que vive solo en la máquina hasta que su base se mergea; `null` en uno de GitHub. */
+  local: z.object({ branch: z.string(), base: z.string(), title: z.string() }).nullable(),
   /** Lo abrió el sistema (`pr.publish`); los demás los descubrió la búsqueda de tus PRs. */
   owned: z.boolean(),
   /** El sujeto de la corrida que lo abrió. */
@@ -207,8 +210,8 @@ export const PrFilter = z.object({
   /** `owner/repo` */
   repo: z.string().optional(),
   owned: z.boolean().optional(),
-  /** El estado de GitHub del PR (`draft` cuenta como `open`). */
-  state: z.enum(["open", "closed", "merged"]).optional(),
+  /** El estado de GitHub del PR (`draft` cuenta como `open`), o `local` para los que aún no se publican. */
+  state: z.enum(["open", "closed", "merged", "local"]).optional(),
 });
 export type PrFilter = z.infer<typeof PrFilter>;
 

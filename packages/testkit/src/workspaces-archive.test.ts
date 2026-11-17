@@ -25,6 +25,7 @@ import {
   type WorkspaceLease,
   type Workspaces,
 } from "@clanker/core";
+import { seedPr } from "@clanker/core/testing";
 import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
@@ -172,6 +173,14 @@ describe("archivar", () => {
     await wake();
     sim.openPr({ head: "one" });
     await wake();
+
+    expect(await workspaces.cleanup()).toMatchObject({ archived: 0 });
+    expect(row("one")?.state).toBe("idle");
+  });
+
+  test("un PR local mantiene vivo su worktree", async () => {
+    workspaces.release(await workspaces.acquire({ repo: repoId(), branch: "one", base: "main", runId: run }));
+    seedPr(store, { repoId: repoId(), number: null, state: "local", headRef: "one", title: "feat: one" });
 
     expect(await workspaces.cleanup()).toMatchObject({ archived: 0 });
     expect(row("one")?.state).toBe("idle");

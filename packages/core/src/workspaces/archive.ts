@@ -43,8 +43,8 @@ export interface ArchiveDeps {
 export function createArchive({ store, repoConfig, now, withRepoLock }: ArchiveDeps) {
   const pullsOf = (db: Store["db"], { repoId, branch }: Row) => prsOfBranch(db, repoId, branch);
 
-  /** Un PR abierto manda: si hay uno, el worktree sigue vivo aunque otro PR de la misma branch se haya cerrado. */
-  const hasOpenPull = (pulls: { state: string }[]) => pulls.some((p) => p.state === "open");
+  /** Un PR abierto (o local, que aún no se publica) manda: si hay uno, el worktree sigue vivo aunque otro PR de la misma branch se haya cerrado. */
+  const hasOpenPull = (pulls: { state: string }[]) => pulls.some((p) => p.state === "open" || p.state === "local");
 
   /** `idle` <-> `archived` según el estado de los PRs de su branch. Una sola transacción: nadie lo toma a la mitad. */
   function reconcile(): Pick<CleanupResult, "archived" | "reopened"> {

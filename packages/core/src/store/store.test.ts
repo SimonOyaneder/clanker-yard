@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import type { RunId } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, test, vi } from "vitest";
 import { microsToUsd, newId, usdToMicros } from "./conventions";
@@ -274,6 +275,38 @@ describe("migraciones", () => {
       /versión de schema 2.*solo conoce hasta la 1.*Actualiza/,
     );
     expect(readdirSync(dir)).not.toContain("backups");
+  });
+
+  test("recrear pull_requests para los PRs locales conserva las filas que apuntan a ella", () => {
+    const sources = fileURLToPath(new URL("../../migrations", import.meta.url));
+    const before = mkdtempSync(join(dir, "migrations-"));
+    for (const name of readdirSync(sources).filter((n) => n < "20261117150713_pull_requests_local")) {
+      cpSync(join(sources, name), join(before, name), { recursive: true });
+    }
+    const path = join(dir, "clanker.db");
+    const old = openStore({ path, migrationsFolder: before });
+    old.db.$client.exec(`
+      INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft) VALUES
+        ('pr_1', 'repo_1', 1, 'PR_1', 'one', 'main', 'a', 'open', 0),
+        ('pr_2', 'repo_1', 2, 'PR_2', 'two', 'one', 'b', 'open', 0);
+      INSERT INTO watch_marks (pr_id, kind, key, created_at) VALUES ('pr_1', 'head', 'a', 1);
+      INSERT INTO pr_parents (child_id, parent_id) VALUES ('pr_2', 'pr_1');
+      INSERT INTO merge_offers (decision_id, pr_id, head_sha) VALUES ('dec_1', 'pr_1', 'a');
+    `);
+    old.close();
+
+    const store = openStore({ path });
+    open.push(store);
+    const sqlite = store.db.$client;
+
+    expect(sqlite.prepare("SELECT pr_id, kind, key FROM watch_marks").all()).toEqual([{ pr_id: "pr_1", kind: "head", key: "a" }]);
+    expect(sqlite.prepare("SELECT child_id, parent_id FROM pr_parents").all()).toEqual([{ child_id: "pr_2", parent_id: "pr_1" }]);
+    expect(sqlite.prepare("SELECT decision_id, pr_id FROM merge_offers").all()).toEqual([{ decision_id: "dec_1", pr_id: "pr_1" }]);
+    expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    sqlite.exec("INSERT INTO pull_requests (id, repo_id, head_ref, base_ref, head_sha, state, is_draft, title) VALUES ('pr_3', 'repo_1', 'three', 'two', 'c', 'local', 0, 'feat: tres')");
+    expect(() => sqlite.exec("INSERT INTO pull_requests (id, repo_id, head_ref, base_ref, head_sha, state, is_draft) VALUES ('pr_4', 'repo_1', 'four', 'main', 'd', 'open', 0)")).toThrow(/CHECK constraint/);
+    expect(() => sqlite.exec("INSERT INTO pull_requests (id, repo_id, head_ref, base_ref, head_sha, state, is_draft, title) VALUES ('pr_5', 'repo_1', 'three', 'main', 'e', 'local', 0, 'otra')")).toThrow(/UNIQUE constraint/);
+    expect(() => sqlite.exec("INSERT INTO pull_requests (id, repo_id, head_ref, base_ref, head_sha, state, is_draft) VALUES ('pr_6', 'repo_1', 'six', 'main', 'f', 'local', 0)")).toThrow(/CHECK constraint/);
   });
 
   test("las migraciones empaquetadas crean el schema actual", () => {

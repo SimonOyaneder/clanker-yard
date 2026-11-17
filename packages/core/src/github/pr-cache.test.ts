@@ -6,6 +6,7 @@ import { createRepos, type Repos } from "../repos/repos";
 import { createPrCache, type PrCache, type PrCacheDeps, type RestPull } from "./pr-cache";
 import { prNode } from "../testing/github/pr-fixtures";
 import { buildPrState } from "./pr-state";
+import { seedPr } from "../testing/pull-requests";
 
 const ACCOUNT = "octocat";
 const NOW = 1_000_000;
@@ -120,16 +121,25 @@ describe("list", () => {
     cache.saveRest(local, pull({ number: 2 }), NOW);
     await cache.refresh(ref(7));
 
-    expect(cache.list().map((p) => [p.ref.repo, p.ref.number])).toEqual([
+    expect(cache.list().map((p) => [p.ref?.repo, p.ref?.number])).toEqual([
       ["acme/api", 7],
       ["acme/api", 8],
       ["acme/otro", 1],
     ]);
-    expect(cache.list({ repo: "acme/otro" }).map((p) => p.ref.number)).toEqual([1]);
-    expect(cache.list({ state: "merged" }).map((p) => p.ref.number)).toEqual([8]);
+    expect(cache.list({ repo: "acme/otro" }).map((p) => p.ref?.number)).toEqual([1]);
+    expect(cache.list({ state: "merged" }).map((p) => p.ref?.number)).toEqual([8]);
     expect(cache.list({ owned: true })).toEqual([]);
     expect(cache.list({ repo: "acme/api" })[0]).toMatchObject({ ref: ref(7), owned: false, state, readAt: NOW });
     expect(cache.list({ repo: "acme/api" })[1]).toMatchObject({ state: null, readAt: null });
+  });
+
+  test("un PR local sale sin ref, con su branch, base y título, y Watch no lo vigila", () => {
+    cache.saveRest(repoId, pull(), NOW);
+    const id = seedPr(store, { repoId, number: null, state: "local", headRef: "feat/y", baseRef: "feat/x", title: "feat: y", body: "cuerpo" });
+
+    expect(cache.list({ state: "local" })).toEqual([expect.objectContaining({ id, ref: null, local: { branch: "feat/y", base: "feat/x", title: "feat: y" }, state: null })]);
+    expect(cache.list({ state: "open" })).toEqual([expect.objectContaining({ ref: ref(7), local: null })]);
+    expect(cache.open().map((row) => row.number)).toEqual([7]);
   });
 });
 
