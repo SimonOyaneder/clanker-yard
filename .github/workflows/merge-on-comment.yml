@@ -1,0 +1,27 @@
+name: Merge por comentario
+
+# Clanker Yard comenta `/merge` en un PR suyo apenas queda sin conflicto sobre main (estrategia de merge del pack
+# `simonoyaneder`). Este workflow lo marca listo y lo mergea con squash. Va con el GITHUB_TOKEN, y GitHub no lanza
+# workflows por eventos de ese token: el `ready_for_review` que provoca no dispara la CI.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: ${{ github.event.issue.pull_request && github.event.comment.body == '/merge' && github.event.comment.user.login == github.repository_owner }}
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$(gh pr view "$PR" --repo "$REPO" --json isDraft -q .isDraft)" = true ]; then
+            gh pr ready "$PR" --repo "$REPO"
+          fi
+          gh pr merge "$PR" --repo "$REPO" --squash --delete-branch
