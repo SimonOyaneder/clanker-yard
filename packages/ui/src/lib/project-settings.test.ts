@@ -85,6 +85,8 @@ test("sin cambios no hay patch; cada sección cambiada produce solo su campo", (
   expect(patchOf({ ...b, trackerRef: "c43b8e70-91d2-4e0c-a6f5-3b1e8d2f6c03" }, b, p, specs)).toEqual({ trackerRef: "c43b8e70-91d2-4e0c-a6f5-3b1e8d2f6c03" })
   expect(patchOf({ ...b, trackerRef: "otro" }, b, project({ tracker: "local" }), specs)).toEqual({})
   expect(patchOf({ ...b, stackOn: "ready", maxCostUsd: "2.5" }, b, p, specs)).toEqual({ stackOn: "ready", maxCostUsd: 2.5 })
+  expect(patchOf({ ...b, stackMode: "local" }, b, p, specs)).toEqual({ stackMode: "local" })
+  expect(changedSections({ stackMode: "local" })).toEqual(["PRs apilados"])
   expect(patchOf({ ...b, maxCostUsd: "" }, { ...b, maxCostUsd: "3" }, project({ maxCostUsd: 3 }), specs)).toEqual({ maxCostUsd: null })
 })
 

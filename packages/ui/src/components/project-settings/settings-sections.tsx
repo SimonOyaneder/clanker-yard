@@ -26,6 +26,7 @@ import {
   paramLabel,
   type ParamSpec,
   type FieldProblems,
+  STACK_MODE_OPTIONS,
   STACK_ON_OPTIONS,
   STATUS_CATEGORIES,
 } from "@/lib/project-settings"
@@ -436,11 +437,12 @@ export function FlowSection({
 
 export function LimitsSection({ draft, update, problems }: SectionProps) {
   const option = STACK_ON_OPTIONS.find((o) => o.value === draft.stackOn)
+  const mode = STACK_MODE_OPTIONS.find((o) => o.value === draft.stackMode)
   return (
     <Section
       id="limits"
       title="Apilado y gasto"
-      description="Cuándo una issue bloqueada se apila sobre el PR de su bloqueante, cuántas corridas del proyecto van a la vez y cuánto puede gastar cada corrida."
+      description="Cuándo una issue bloqueada se apila sobre el PR de su bloqueante, dónde se abren los PRs apilados, cuántas corridas del proyecto van a la vez y cuánto puede gastar cada corrida."
     >
       <div className="grid gap-4 @xl:grid-cols-2 @3xl:grid-cols-3">
         <Field id="stack-on" label="Apilar sobre el PR del bloqueante cuando" hint={option?.hint}>
@@ -450,6 +452,20 @@ export function LimitsSection({ draft, update, problems }: SectionProps) {
             </SelectTrigger>
             <SelectContent>
               {STACK_ON_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field id="stack-mode" label="Abrir los PRs apilados en" hint={mode?.hint}>
+          <Select value={draft.stackMode} onValueChange={(v) => update({ stackMode: v as ProjectDraft["stackMode"] })}>
+            <SelectTrigger id="stack-mode" size="sm" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STACK_MODE_OPTIONS.map((o) => (
                 <SelectItem key={o.value} value={o.value}>
                   {o.label}
                 </SelectItem>
