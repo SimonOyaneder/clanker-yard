@@ -44,7 +44,16 @@ export interface LinearTrackerOptions {
    * `in_review`.
    */
   statusMapping?: (project: string) => StatusMapping | undefined;
+  /** La espera entre relecturas de `claim` y `setStatus`; los tests la reemplazan. */
+  pause?: (ms: number) => Promise<void>;
 }
+
+/**
+ * Las esperas antes de cada relectura tras escribir: Linear puede tardar unos segundos en mostrar un cambio que sí
+ * aplicó (BA-9227 se leyó en "Todo" y 4 s después estaba en "In Progress"), y un claim que se da por perdido deja la
+ * issue fuera de la cola sin corrida.
+ */
+const REREAD_DELAYS_MS = [0, 1000, 2000, 4000];
 
 const ISSUE_FIELDS = `
   id identifier url title description priority estimate branchName updatedAt
@@ -181,6 +190,7 @@ export function createLinearTracker({
   endpoint = LINEAR_ENDPOINTS.graphql,
   fetch,
   statusMapping,
+  pause = (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
 }: LinearTrackerOptions): LinearTracker {
   const gql: LinearGraphql = createLinearGraphql({ endpoint, fetch, token: () => connections.token("linear", accountName()) });
 
@@ -216,6 +226,17 @@ export function createLinearTracker({
       throw error;
     }
     return { issue: toIssue(raw), teamId: raw.team.id };
+  }
+
+  /** Relee la issue tras escribir hasta que `applied` la acepta o se acaban las esperas; devuelve la última lectura. */
+  async function rereadUntil(ref: IssueRef, applied: (issue: Issue) => boolean): Promise<Issue> {
+    let last: Issue | undefined;
+    for (const ms of REREAD_DELAYS_MS) {
+      if (ms > 0) await pause(ms);
+      last = (await readIssue(ref)).issue;
+      if (applied(last)) return last;
+    }
+    return last!;
   }
 
   function toIssue(raw: RawIssue): Issue {
@@ -364,7 +385,7 @@ export function createLinearTracker({
       await update(ref, { assigneeId: me.id, stateId: target.id });
 
       // Linear puede aceptar el cambio y no aplicarlo (ENG-9084): solo vale lo que se relee.
-      const { issue: after } = await readIssue(ref);
+      const after = await rereadUntil(ref, (i) => i.assignee?.id === me.id && i.status === "in_progress");
       const problems = [
         ...(after.assignee?.id === me.id ? [] : [`sigue asignada a ${after.assignee?.name ?? "nadie"}`]),
         ...(after.status === "in_progress" ? [] : [`sigue en "${after.rawStatus}"`]),
@@ -378,7 +399,7 @@ export function createLinearTracker({
       const { issue, teamId } = await readIssue(ref);
       const target = await stateFor(issue, teamId, status);
       await update(ref, { stateId: target.id });
-      const { issue: after } = await readIssue(ref);
+      const after = await rereadUntil(ref, (i) => i.status === status);
       if (after.status !== status) {
         throw new LinearApiError(`Linear ignoró el cambio de ${ref.key} a "${status}": sigue en "${after.rawStatus}".`);
       }

@@ -19,6 +19,7 @@ import { messageOf } from "../errors/format";
 import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import type { LaneSettings } from "./lanes";
 import type { ProjectQueue } from "./project-queue";
+import type { RebaseStaleRoots } from "./stale-roots";
 import { BadRequestError } from "../errors/domain";
 
 /** El tick periódico del diseño (`docs/design.html#d-ops`, "Scheduler: la cola"), además de los eventos que lo disparan. */
@@ -62,6 +63,11 @@ export interface SchedulerDeps {
   queue: ProjectQueue;
   /** Arma (y disuelve) la base combinada de una issue con varios padres antes de lanzar su corrida. */
   workspaces: Pick<Workspaces, "combineBase" | "dissolveBase">;
+  /**
+   * Con los padres de una base combinada en conflicto, pide rebasear las raíces de sus cadenas que quedaron atrás
+   * de la branch por defecto (`createStaleRoots`). Sin él la issue solo espera a que se mergee un padre.
+   */
+  rebaseStaleRoots?: RebaseStaleRoots;
   lanes: LaneSettings;
   /**
    * Los runtimes que usan los agentes del perfil de un proyecto (`ProfileRole.runtime`): el breaker de cualquiera de
@@ -221,8 +227,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /**
    * Los params de la corrida para la base de la cola. Una base combinada se arma aquí, antes de lanzar: la corrida
-   * sale de su branch sintética. Si los padres chocan la issue no se lanza (`held` con el motivo) y, la primera vez,
-   * queda una nota no bloqueante; espera a que se mergee un padre. Una base que ya no es combinada disuelve la que
+   * sale de su branch sintética. Si los padres chocan la issue no se lanza (`held` con el motivo): si alguna cadena
+   * de sus padres quedó atrás de la branch por defecto pide rebasearla (`rebaseStaleRoots`) y se vuelve a intentar
+   * cuando el restack llegue a los padres; si no, la primera vez queda una nota no bloqueante y espera a que se
+   * mergee un padre. Una base que ya no es combinada disuelve la que
    * hubiera quedado de un intento anterior.
    */
   async function baseParams(
@@ -241,6 +249,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const combined = await deps.workspaces.combineBase({ repo, issueId: issue.id, branch, parents: base.parents });
     if (combined.outcome === "combined") return { params: { base: combined.branch } };
     const clash = `${combined.parent} choca con la branch por defecto${combined.merged.length > 0 ? ` y ${combined.merged.join(", ")}` : ""} en ${combined.files.join(", ")}`;
+    const rebasing = (await deps.rebaseStaleRoots?.(repo, base.parents.map((p) => p.branch))) ?? [];
+    if (rebasing.length > 0) {
+      return { held: `los padres de su base combinada (${parents}) chocan, ${clash}: pedí rebasear ${rebasing.join(" y ")} sobre la branch por defecto` };
+    }
     if (combined.changed) {
       store.tx((tx) =>
         openDecision(tx, {

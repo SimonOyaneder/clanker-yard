@@ -4,6 +4,7 @@ import * as z from "zod";
 import { cleanMessage } from "../../commits/apply";
 import type { Connections } from "../../connections/connections";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
+import { OUTPUT_INLINE_MAX_BYTES } from "../../flows/run-reads";
 import type { Packs } from "../../packs/packs";
 import type { GitHubClient } from "../client";
 import { fetchPr, PrNotFoundError, type PrNode, type RawThread } from "../pr-query";
@@ -359,7 +360,11 @@ export function prBotThreadsAction(deps: PrFeedbackDeps): ActionDef<typeof BotTh
   };
 }
 
-/** Lo que se le pasa al triage de un reporte de falla: el final, donde quedan los tests que fallaron y su error. */
+/**
+ * Lo que se le pasa al triage de un reporte de falla: el final, donde quedan los tests que fallaron y su error. Es
+ * el tope de un ítem; entre todos además caben en `OUTPUT_INLINE_MAX_BYTES`, porque el motor cambia un valor más
+ * grande por una referencia y el payload del triage pide la lista de ítems (BA-9227: un reporte de 27 KB lo trabó).
+ */
 export const FAILURE_REPORT_MAX_CHARS = 30_000;
 const REPORT_TIMEOUT_MS = 180_000;
 
@@ -372,6 +377,29 @@ function runReportCommand(command: string, signal: AbortSignal): Promise<string>
       else resolve(output);
     });
   });
+}
+
+type ReportEntry<T extends { text: string }> = { item: T; report?: { command: string; output: string } };
+
+/**
+ * Los ítems con el final de cada reporte, lo más largo que quepa: parte de `FAILURE_REPORT_MAX_CHARS` por ítem y
+ * baja el tope hasta que el JSON de la lista entra en `OUTPUT_INLINE_MAX_BYTES` (los saltos de línea y lo que no es
+ * ASCII pesan más en el JSON que en caracteres). Si ni sin detalle caben, van sin detalle.
+ */
+function fitReports<T extends { text: string }>(entries: ReportEntry<T>[]): T[] {
+  const build = (max: number) =>
+    entries.map(({ item, report }) => {
+      if (!report) return item;
+      const cut = report.output.length > max;
+      const tail = cut ? report.output.slice(-max) : report.output;
+      return { ...item, text: `${item.text}\n\nDetalle de la falla (\`${report.command}\`${cut ? ", solo el final" : ""}):\n${tail}` };
+    });
+  const fits = (items: T[]) => Buffer.byteLength(JSON.stringify({ items })) <= OUTPUT_INLINE_MAX_BYTES;
+  for (let max = FAILURE_REPORT_MAX_CHARS; max >= 500; max = Math.floor(max * 0.8)) {
+    const items = build(max);
+    if (fits(items)) return items;
+  }
+  return build(0);
 }
 
 /** Un grupo del match va entre comillas simples: la descripción de un check la escribe un servicio externo. */
@@ -389,8 +417,8 @@ const FailureReportArgs = z.object({
 /**
  * `ci.failureReport`: completa cada check rojo de `pr.ci` con el detalle de su falla para el triage. La primera regla de
  * `ciRules.failureReport` del pack cuya regex calza con la descripción o la URL del check corre su comando (con
- * `$1`..`$9` de los grupos, entre comillas) y el final de lo que imprime (`FAILURE_REPORT_MAX_CHARS`) se suma al texto
- * del ítem. Sin regla que calce, o si el comando falla, el ítem sigue con lo que ya traía y una nota. Output del `ok`:
+ * `$1`..`$9` de los grupos, entre comillas) y el final de lo que imprime se suma al texto del ítem, recortado para que
+ * la lista quepa en el brief (`fitReports`). Sin regla que calce, o si el comando falla, el ítem sigue con lo que ya traía y una nota. Output del `ok`:
  * `items`, los mismos ítems completados.
  */
 export function ciFailureReportAction(deps: PrFeedbackDeps): ActionDef<typeof FailureReportArgs> {
@@ -403,26 +431,23 @@ export function ciFailureReportAction(deps: PrFeedbackDeps): ActionDef<typeof Fa
     run: (args, ctx) =>
       onPr(deps, args.pr, async ({ pack }): Promise<ActionResult> => {
         const rules = pack.ciRules?.failureReport ?? [];
-        const items = [];
+        const entries: { item: (typeof args.failures)[number]; report?: { command: string; output: string } }[] = [];
         for (const item of args.failures) {
           const source = [item.description, item.url].filter(Boolean).join("\n");
           const rule = rules.map((r) => ({ r, m: source && new RegExp(r.match).exec(source) })).find((x) => x.m);
           if (!rule?.m) {
-            items.push(item);
+            entries.push({ item });
             continue;
           }
           const groups = rule.m;
           const command = rule.r.command.replace(/\$([1-9])/g, (_all, n: string) => shellQuote(groups[Number(n)] ?? ""));
           try {
-            const output = (await run(command, ctx.signal)).trim();
-            const cut = output.length > FAILURE_REPORT_MAX_CHARS;
-            const tail = cut ? output.slice(-FAILURE_REPORT_MAX_CHARS) : output;
-            items.push({ ...item, text: `${item.text}\n\nDetalle de la falla (\`${command}\`${cut ? ", solo el final" : ""}):\n${tail}` });
+            entries.push({ item, report: { command, output: (await run(command, ctx.signal)).trim() } });
           } catch (error) {
-            items.push({ ...item, text: `${item.text}\n\nNo se pudo traer el detalle con \`${command}\`: ${error instanceof Error ? error.message : String(error)}` });
+            entries.push({ item: { ...item, text: `${item.text}\n\nNo se pudo traer el detalle con \`${command}\`: ${error instanceof Error ? error.message : String(error)}` } });
           }
         }
-        return { outcome: "ok", output: { items } };
+        return { outcome: "ok", output: { items: fitReports(entries) } };
       }),
   };
 }

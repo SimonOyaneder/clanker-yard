@@ -52,6 +52,7 @@ import { createRunStarter } from "./projects/start-run";
 import { createLaneSettings } from "./scheduler/lanes";
 import { createProjectQueue } from "./scheduler/project-queue";
 import { createScheduler } from "./scheduler/scheduler";
+import { createStaleRoots } from "./scheduler/stale-roots";
 import { createRecipes, readRecipe, type ScriptedRecipe } from "./recipe/recipe";
 import { createRecipeTester } from "./recipe/recipe-test";
 import { createSlots } from "./slots/slots";
@@ -331,6 +332,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     runs,
     queue: createProjectQueue({ store, projects, issues, repos, trackers, prs }),
     workspaces,
+    rebaseStaleRoots: createStaleRoots({ store, repos }),
     lanes,
     runtimesOf: (project) => profileRuntimes(defs, runtimes, project.defaultProfileId),
     breakers,

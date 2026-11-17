@@ -33,6 +33,7 @@ interface Options {
   dependsOn?: string[];
   /** Lo que arma las bases combinadas; sin él, ninguna issue de estos tests tiene una. */
   workspaces?: Pick<Workspaces, "combineBase" | "dissolveBase">;
+  rebaseStaleRoots?: SchedulerDeps["rebaseStaleRoots"];
   /** Los runtimes del perfil de cada proyecto; por defecto solo `fake`. */
   runtimesOf?: SchedulerDeps["runtimesOf"];
 }
@@ -41,7 +42,7 @@ interface Options {
  * El Scheduler sobre el motor de flujos real, un tracker local y acciones que esperan a que el test las suelte.
  * Cada issue corre `dev`: `check` estaciona (gate) las issues de `parkFirst` y `work` espera a `release`.
  */
-function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn, workspaces, runtimesOf = () => ["fake"] }: Options = {}) {
+function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn, workspaces, rebaseStaleRoots, runtimesOf = () => ["fake"] }: Options = {}) {
   const h = createHarness({ persist: true, reopen, laneCapacity: () => lanes.capacity() });
   cleanups.push(h.cleanup);
   const lanes = createLaneSettings({ store: h.store });
@@ -103,6 +104,7 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
     runs: { start: (input, origin) => (starts.push(input), realRuns.start(input, origin)) },
     queue,
     workspaces: workspaces ?? { combineBase: () => Promise.reject(new Error("no se esperaba armar una base combinada")), dissolveBase: () => Promise.resolve() },
+    ...(rebaseStaleRoots && { rebaseStaleRoots }),
     lanes,
     runtimesOf,
     breakers,
@@ -444,8 +446,8 @@ describe("lanzar issues por carril", () => {
 
 describe("bases combinadas", () => {
   /** Una issue bloqueada por dos issues en curso con un PR abierto cada una, en ramas distintas del mismo repo. */
-  async function blockedByTwo(workspaces: Pick<Workspaces, "combineBase" | "dissolveBase">) {
-    const h = setup({ parallel: 2, workspaces });
+  async function blockedByTwo(workspaces: Pick<Workspaces, "combineBase" | "dissolveBase">, rebaseStaleRoots?: SchedulerDeps["rebaseStaleRoots"]) {
+    const h = setup({ parallel: 2, workspaces, ...(rebaseStaleRoots && { rebaseStaleRoots }) });
     const repoId = createRepos({ store: h.store }).add({ name: "app", path: "/tmp/app", remote: "acme/app" });
     h.projects.update(h.projectId, { repos: [{ repoId, labels: [] }], stackOn: "any_open" }, "cli");
     const [one, two] = [await h.local.createIssue(h.projectId, { title: "uno", status: "in_progress" }), await h.local.createIssue(h.projectId, { title: "dos", status: "in_progress" })];
@@ -498,6 +500,25 @@ describe("bases combinadas", () => {
     ]);
     expect(h.events("issue.skipped")).toHaveLength(1);
     expect(h.decisions.list({ kind: ["note"] })).toMatchObject([{ projectId: h.projectId, subject: { type: "issue", id: child.id }, status: "pending" }]);
+  });
+
+  test("padres que chocan por una cadena atrasada: pide rebasear su raíz, lo dice en el motivo y no deja nota", async () => {
+    const requests: [string, readonly string[]][] = [];
+    const combineBase = (): Promise<CombineResult> =>
+      Promise.resolve({ outcome: "base-conflict", parent: "app#11", merged: ["app#10"], files: ["a.txt"], failures: "Conflicto en a.txt.", changed: true });
+    const { h, repoId, child } = await blockedByTwo({ combineBase, dissolveBase: dissolve }, (repo, branches) => {
+      requests.push([repo, branches]);
+      return Promise.resolve(["app#9"]);
+    });
+
+    await h.scheduler.tick();
+
+    expect(requests).toEqual([[repoId, ["cla-1", "cla-2"]]]);
+    expect(h.status(child)).toBeUndefined();
+    expect(await h.scheduler.queue.of(h.projectId)).toMatchObject([
+      { issue: { id: child.id }, state: "waiting", reason: expect.stringContaining("pedí rebasear app#9 sobre la branch por defecto") },
+    ]);
+    expect(h.decisions.list({ kind: ["note"] })).toEqual([]);
   });
 
   test("si falta la branch de un padre, la issue queda esperando con el error y no se lanza", async () => {

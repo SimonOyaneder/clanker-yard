@@ -45,7 +45,7 @@ afterEach(async () => {
 });
 
 function tracker(options: Partial<LinearTrackerOptions> = {}): Tracker {
-  return createLinearTracker({ connections, endpoint: linear.endpoints.graphql, ...options });
+  return createLinearTracker({ connections, endpoint: linear.endpoints.graphql, pause: async () => {}, ...options });
 }
 
 const refOf = (issue: FakeIssue): IssueRef => ({
@@ -160,6 +160,21 @@ describe("estados", () => {
 
     await expect(tracker().setStatus(refOf(issue), "done")).rejects.toThrow(/Linear ignoró el cambio de CLA-1 a "done": sigue en "Todo"/);
   });
+
+  test("setStatus espera a que Linear muestre un cambio que aplicó tarde", async () => {
+    team = w.addTeam("CLA", states("clanker-yard"));
+    const issue = w.addIssue({ team, title: "x", project });
+    w.ignoreStateUpdates = true;
+    const waits: number[] = [];
+    const pause = async (ms: number) => {
+      waits.push(ms);
+      if (waits.length === 2) w.update(issue, { state: "Done" });
+    };
+
+    await tracker({ pause }).setStatus(refOf(issue), "done");
+
+    expect(waits).toEqual([1000, 2000]);
+  });
 });
 
 describe("claim", () => {
@@ -194,12 +209,25 @@ describe("claim", () => {
   test("un claim que Linear acepta y no aplica (caso ENG-9084) da error y dice qué quedó sin hacer", async () => {
     const issue = w.addIssue({ team, title: "x" });
     w.ignoreStateUpdates = true;
+    const waits: number[] = [];
 
-    const failed = tracker().claim(refOf(issue));
+    const failed = tracker({ pause: async (ms) => void waits.push(ms) }).claim(refOf(issue));
 
     await expect(failed).rejects.toThrow(new RegExp(`Linear ignoró el claim de ${issue.identifier}: sigue en "Todo"\\.`));
+    // Se rinde recién después de releer con todas las esperas.
+    expect(waits).toEqual([1000, 2000, 4000]);
     // La asignación sí quedó: el error es por el estado, y es lo que hay que mirar.
     expect(issue.assignee).toEqual(w.viewer);
+  });
+
+  test("un claim que Linear aplica tarde (caso BA-9227) no se da por perdido", async () => {
+    const issue = w.addIssue({ team, title: "x" });
+    w.ignoreStateUpdates = true;
+    const pause = async () => w.update(issue, { state: "In Progress" });
+
+    await tracker({ pause }).claim(refOf(issue));
+
+    expect(issue.state.name).toBe("In Progress");
   });
 
   test("una issue asignada a otra persona no se reclama y no se toca", async () => {
