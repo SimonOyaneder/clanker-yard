@@ -1,15 +1,16 @@
 import type { PrSignal, PrState, ReviewerState } from "@clanker/api"
 import { useState } from "react"
-import { Bot, Check, CheckCircle2, Circle, CircleAlert, CircleCheck, CircleDot, Clock, GitMerge, GitPullRequest, GitPullRequestDraft, Layers, MessageSquare, MessagesSquare, PauseCircle, TriangleAlert, X, XCircle } from "lucide-react"
+import { Bot, Check, CheckCircle2, Circle, CircleAlert, CircleCheck, CircleDot, Clock, GitBranch, GitMerge, GitPullRequest, GitPullRequestDraft, Layers, MessageSquare, MessagesSquare, PauseCircle, TriangleAlert, X, XCircle } from "lucide-react"
 import { tone } from "@/lib/format"
 import { mergeMark, type ReviewStatus, reviewTone } from "@/lib/prs/pr-status"
-import { isDraft, type OpenPr } from "@/lib/prs/prs"
+import { isDraft, type GithubPr, type OpenPr } from "@/lib/prs/prs"
 import { cn } from "@/lib/utils"
 import { Hint, Pill } from "../common"
 
 // Piezas compartidas entre la tarjeta del grafo y la fila de la lista.
 
 export function PrStateIcon({ pr, className }: { pr: OpenPr; className?: string }) {
+  if (pr.local) return <GitBranch aria-label="Branch local" className={cn("size-3.5 flex-none text-muted-foreground", className)} />
   const draft = isDraft(pr)
   const Icon = draft ? GitPullRequestDraft : GitPullRequest
   return (
@@ -77,7 +78,7 @@ export function Reviewer({ r, size = 18 }: { r: ReviewerState; size?: number }) 
   )
 }
 
-export function ReviewSignals({ pr }: { pr: OpenPr }) {
+export function ReviewSignals({ pr }: { pr: GithubPr }) {
   const { bot, threads, comments } = pr.state
   return (
     <span className="flex flex-wrap items-center gap-1">
@@ -150,18 +151,19 @@ export function SignalChip({ signal, level, className }: { signal: PrSignal; lev
 
 /** Todas las señales del pack del PR, cada una con su nivel. */
 export function Signals({ pr, className }: { pr: OpenPr; className?: string }) {
-  if (!pr.signals.length) return null
+  const { state } = pr
+  if (!state || !pr.signals.length) return null
   return (
     <>
       {pr.signals.map((signal) => (
-        <SignalChip key={signal.id} signal={signal} level={pr.state.signals[signal.id]} className={className} />
+        <SignalChip key={signal.id} signal={signal} level={state.signals[signal.id]} className={className} />
       ))}
     </>
   )
 }
 
 /** Los labels que no son una señal del pack: esos ya se ven como chip. */
-export function Labels({ pr, max = 3 }: { pr: OpenPr; max?: number }) {
+export function Labels({ pr, max = 3 }: { pr: GithubPr; max?: number }) {
   const matchers = pr.signals.map((s) => new RegExp(s.match, s.flags))
   const labels = pr.state.labels.filter((l) => !matchers.some((m) => m.test(l.name.trim())))
   if (!labels.length) return null
@@ -205,7 +207,7 @@ export function mergeRing(pr: OpenPr): string | null {
 }
 
 /** El estado de la estrategia de merge del pack (`PrState.merge` y `hold`): lo que falta va en el tooltip del review. */
-export function MergePill({ pr }: { pr: OpenPr }) {
+export function MergePill({ pr }: { pr: GithubPr }) {
   const { merge } = pr.state
   switch (mergeMark(pr)) {
     case "failed":
@@ -256,7 +258,7 @@ export function CombinedBaseChip({ parents }: { parents: readonly string[] }) {
   )
 }
 
-export function mergeHint(pr: OpenPr): string | undefined {
+export function mergeHint(pr: GithubPr): string | undefined {
   const { merge, hold } = pr.state
   if (merge.ready || hold || merge.queue || !merge.blockers.length) return undefined
   return `Para mergear falta: ${merge.blockers.join(", ")}`
@@ -270,7 +272,7 @@ const REVIEW_HINT: Record<ReviewStatus, string> = {
 }
 
 // Estado de review del PR, con lo que falta para mergear en el tooltip.
-export function ReviewPill({ pr, review }: { pr: OpenPr; review: ReviewStatus }) {
+export function ReviewPill({ pr, review }: { pr: GithubPr; review: ReviewStatus }) {
   const t = reviewTone[review]
   const blockers = mergeHint(pr)
   return (
@@ -278,4 +280,8 @@ export function ReviewPill({ pr, review }: { pr: OpenPr; review: ReviewStatus })
       {t.label}
     </Pill>
   )
+}
+
+export function LocalChip({ base }: { base: string }) {
+  return <Pill className={tone.neutral} hint={`Vive solo en tu máquina. Se publica en GitHub cuando se mergee ${base}.`}>Local</Pill>
 }

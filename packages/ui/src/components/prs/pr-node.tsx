@@ -3,10 +3,10 @@ import { Repeat2 } from "lucide-react"
 import { useHost } from "@/host"
 import { absolute, ago } from "@/lib/format"
 import { draftTone, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
-import { isDraft, type OpenPr, repoNameOf } from "@/lib/prs/prs"
+import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/lib/prs/prs"
 import { cn } from "@/lib/utils"
 import { Hint, Pill } from "../common"
-import { CiBadge, CombinedBaseChip, Labels, MergePill, mergeRing, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
+import { CiBadge, CombinedBaseChip, Labels, LocalChip, MergePill, mergeRing, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 import { PrContextMenu } from "./pr-menu"
 import { PrNotes } from "./pr-notes"
@@ -36,12 +36,13 @@ export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
   return (
     <PrContextMenu pr={pr}>
       <div
-        role="link"
+        role={pr.local ? "group" : "link"}
         tabIndex={0}
-        aria-label={`#${pr.ref.number} ${state.title}`}
+        aria-label={`${pr.ref ? `#${pr.ref.number}` : branchOf(pr)} ${titleOf(pr)}`}
         onFocus={() => commands.select(pr.id)}
+        onClick={() => commands.select(pr.id)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") host.openExternal(state.url)
+          if (e.key === "Enter" && state) host.openExternal(state.url)
         }}
         style={{ width: NODE_WIDTH, minHeight: NODE_HEIGHT - 12 }}
         className={cn(
@@ -57,9 +58,9 @@ export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <PrStateIcon pr={pr} />
           <span className="truncate">{repoNameOf(pr)}</span>
-          <span className="font-mono">#{pr.ref.number}</span>
+          {pr.ref ? <span className="font-mono">#{pr.ref.number}</span> : null}
           <span className="ml-auto flex items-center gap-1">
-            {isDraft(pr) ? (
+            {pr.local ? <LocalChip base={pr.local.base} /> : isDraft(pr) ? (
               <Pill className={draft.pill} hint="Draft: todavía no está listo para review">
                 {draft.label}
               </Pill>
@@ -68,35 +69,35 @@ export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
           </span>
         </div>
 
-        <h3 className="line-clamp-2 text-[13px] leading-snug font-medium">{state.title}</h3>
+        <h3 className="line-clamp-2 text-[13px] leading-snug font-medium">{titleOf(pr)}</h3>
 
         <div className="flex min-w-0 items-center gap-1 font-mono text-[10.5px] text-muted-foreground">
-          <span className="truncate rounded bg-muted px-1 py-px" title={state.baseRef}>
-            {state.baseRef}
+          <span className="truncate rounded bg-muted px-1 py-px" title={baseOf(pr)}>
+            {baseOf(pr)}
           </span>
           <span aria-hidden="true">←</span>
-          <span className="truncate rounded bg-muted px-1 py-px" title={state.headRef}>
-            {state.headRef}
+          <span className="truncate rounded bg-muted px-1 py-px" title={branchOf(pr)}>
+            {branchOf(pr)}
           </span>
         </div>
 
         <div className="flex min-h-5 flex-wrap items-center gap-2">
-          {ring ? <MergePill pr={pr} /> : review !== "none" ? <ReviewPill pr={pr} review={review} /> : null}
+          {!pr.local && (ring ? <MergePill pr={pr} /> : review !== "none" ? <ReviewPill pr={pr} review={review} /> : null)}
           {combined ? <CombinedBaseChip parents={combined} /> : null}
           <PrNotes pr={pr} />
-          {state.reviewers.length ? (
+          {state?.reviewers.length ? (
             <span className="flex items-center gap-1.5">
               {state.reviewers.map((r) => (
                 <Reviewer key={r.login} r={r} />
               ))}
             </span>
           ) : null}
-          <ReviewSignals pr={pr} />
+          {!pr.local ? <ReviewSignals pr={pr} /> : null}
         </div>
 
-        <Labels pr={pr} />
+        {!pr.local ? <Labels pr={pr} /> : null}
 
-        <div className="mt-auto flex items-center justify-between gap-2 border-t pt-2 text-[11px] text-muted-foreground tabular-nums">
+        {state ? <div className="mt-auto flex items-center justify-between gap-2 border-t pt-2 text-[11px] text-muted-foreground tabular-nums">
           <CiBadge ci={state.ci} />
           <span className="flex items-center gap-2">
             <span className="text-emerald-600 dark:text-emerald-400">+{state.additions}</span>
@@ -105,7 +106,7 @@ export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
               {ago(state.updatedAt)}
             </time>
           </span>
-        </div>
+        </div> : null}
 
         {pr.owned ? (
           <Hint label={pr.runId !== null ? "PR que abrió el sistema. Click para ver la corrida que lo abrió" : "PR que abrió el sistema"}>

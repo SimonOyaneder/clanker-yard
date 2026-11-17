@@ -176,6 +176,36 @@ export function buildOpenPrs(now: number): CachedPr[] {
     merge: { blockers: ["draft"] },
   })
 
+  const localBase = pr("ledger", 430, "Probar el nuevo índice de entradas en staging", "idx-entries-staging", {
+    state: "draft",
+    reviewDecision: "none",
+    ci: { state: "none", sha: "a".repeat(40), failing: [], flaky: [] },
+    additions: 12,
+    deletions: 0,
+    updated: 60 * 60 * 20,
+    merge: { blockers: ["draft"] },
+  })
+  const localMid: CachedPr = {
+    id: `pr_${String(nextId++).padStart(26, "0")}`,
+    repo: localBase.repo,
+    ref: null,
+    local: { branch: "idx-entries-metrics", base: "idx-entries-staging", title: "Medir el nuevo índice de entradas" },
+    owned: true,
+    issueId: null,
+    runId: null,
+    parents: [localBase.id],
+    signals: [RISK],
+    reviewBot: true,
+    state: null,
+    readAt: null,
+  }
+  const localTop: CachedPr = {
+    ...localMid,
+    id: `pr_${String(nextId++).padStart(26, "0")}`,
+    local: { branch: "idx-entries-rollout", base: "idx-entries-metrics", title: "Preparar el despliegue del índice de entradas" },
+    parents: [localMid.id],
+  }
+
   return [
     stackBase,
     stackMid,
@@ -213,15 +243,9 @@ export function buildOpenPrs(now: number): CachedPr[] {
       deletions: 12,
       updated: 60 * 60 * 5,
     }),
-    pr("ledger", 430, "Probar el nuevo índice de entradas en staging", "idx-entries-staging", {
-      state: "draft",
-      reviewDecision: "none",
-      ci: { state: "none", sha: "a".repeat(40), failing: [], flaky: [] },
-      additions: 12,
-      deletions: 0,
-      updated: 60 * 60 * 20,
-      merge: { blockers: ["draft"] },
-    }),
+    localBase,
+    localMid,
+    localTop,
     pr("dashboard", 981, "Migrar los tooltips a Radix", "ch-19-radix-tooltips", {
       hold: true,
       reviewers: [human("sofia", "approved")],

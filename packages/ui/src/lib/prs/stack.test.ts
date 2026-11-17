@@ -1,12 +1,12 @@
 import type { CachedPr } from "@clanker/api"
 import { expect, test } from "vitest"
 import { buildOpenPrs } from "@/demo/seed-prs"
-import { openPrsOf } from "./prs"
+import { keyOf as prKey, openPrsOf, type GithubPr, type LocalPr } from "./prs"
 import { buildStackForest, layoutStackGroups, listStackGroups } from "./stack"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 const seed = () => openPrsOf(buildOpenPrs(NOW))
-const keyOf = (forest: ReturnType<typeof buildStackForest>, id: string) => forest.byId.get(id)!.state.key
+const keyOf = (forest: ReturnType<typeof buildStackForest>, id: string) => prKey(forest.byId.get(id)!)
 
 test("un PR cuelga del que tiene su base como head, en el mismo repo", () => {
   const forest = buildStackForest(seed())
@@ -29,12 +29,35 @@ test("los stacks se listan del más grande al más chico, con el PR de la base p
   const groups = listStackGroups(buildStackForest(seed()))
 
   expect(groups[0]?.prIds).toHaveLength(4)
-  expect(groups.map((g) => g.prIds.length)).toEqual([4, 3, 1, 1, 1, 1, 1])
+  expect(groups.map((g) => g.prIds.length)).toEqual([4, 3, 3, 1, 1, 1, 1])
+})
+
+test("una cadena remoto → local → local conserva sus ids y el orden del stack", () => {
+  const forest = buildStackForest(seed())
+  const group = listStackGroups(forest).find((g) => keyOf(forest, g.rootId) === "ledger#430")!
+
+  expect(group.repoFullName).toBe("acme/ledger")
+  expect(group.prIds.map((id) => keyOf(forest, id))).toEqual(["ledger#430", "idx-entries-metrics", "idx-entries-rollout"])
+  expect(forest.edges.filter((e) => group.prIds.includes(e.childId))).toEqual([
+    { parentId: group.prIds[0], childId: group.prIds[1] },
+    { parentId: group.prIds[1], childId: group.prIds[2] },
+  ])
+})
+
+test("un local con padre no visible conserva su repo y no se asocia a una branch homónima de otro repo", () => {
+  const prs = seed()
+  const local = prs.find((p): p is LocalPr => p.local?.branch === "idx-entries-metrics")!
+  const other = prs.find((p): p is GithubPr => p.state?.key === "ledger#430")!
+  const forest = buildStackForest([local, { ...other, id: "pr_other", repo: "acme/otro", ref: { ...other.ref, repo: "acme/otro" } }])
+
+  expect(forest.edges).toEqual([])
+  expect(forest.roots).toEqual([local.id, "pr_other"])
+  expect(listStackGroups(forest).map((g) => g.repoFullName)).toEqual(["acme/ledger", "acme/otro"])
 })
 
 test("un padre que ya no está abierto no deja un PR colgando: queda como raíz de su stack", () => {
   const prs = seed()
-  const orphan = prs.find((p) => p.state.key === "ledger#424")!
+  const orphan = prs.find((p): p is GithubPr => p.state?.key === "ledger#424")!
   const withMissingParent: CachedPr[] = [{ ...orphan, state: { ...orphan.state, baseRef: "ya-mergeada" }, parents: ["pr_inexistente"] }]
   const forest = buildStackForest(openPrsOf(withMissingParent))
 

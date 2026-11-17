@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { openPrsOf } from "@/lib/prs/prs"
+import { openPrsOf, type GithubPr } from "@/lib/prs/prs"
 import { buildStackForest, listStackGroups } from "@/lib/prs/stack"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 
@@ -25,21 +25,21 @@ test("un proyecto pausado rechaza lanzar corridas diciendo cuál es", async () =
   await expect(data.startRun({ projectId: paused.id, issueId: issue!.id })).rejects.toThrow(/SOPORTE no está activo/)
 })
 
-test("los PRs de ejemplo arman un stack de 4, uno con una base combinada de dos padres, y el resto sueltos", async () => {
+test("los PRs de ejemplo arman un stack de 4, uno combinado y uno con dos locales", async () => {
   const prs = openPrsOf(await createMemoryAppData(NOW).openPrs())
 
   const forest = buildStackForest(prs)
   const groups = listStackGroups(forest)
-  expect(groups.map((g) => g.prIds.length)).toEqual([4, 3, 1, 1, 1, 1, 1])
+  expect(groups.map((g) => g.prIds.length)).toEqual([4, 3, 3, 1, 1, 1, 1])
   // El PR de la base combinada cuelga de los dos y dice cuáles son.
   const [combined] = forest.combined
-  expect(forest.byId.get(combined![0])?.state.key).toBe("payments-api#395")
+  expect(forest.byId.get(combined![0])?.state?.key).toBe("payments-api#395")
   expect(combined![1]).toEqual(["payments-api#391", "payments-api#388"])
 })
 
 test("marcar hold apaga la oferta de merge y quitarlo la devuelve; mergear un PR en hold se rechaza", async () => {
   const data = createMemoryAppData(NOW)
-  const ready = openPrsOf(await data.openPrs()).find((p) => p.state.key === "ledger#421")!
+  const ready = openPrsOf(await data.openPrs()).find((p): p is GithubPr => p.state?.key === "ledger#421")!
 
   await data.setPrHold({ ref: ready.ref, hold: true })
   const held = openPrsOf(await data.openPrs()).find((p) => p.id === ready.id)!
@@ -47,7 +47,7 @@ test("marcar hold apaga la oferta de merge y quitarlo la devuelve; mergear un PR
   await expect(data.mergePr(ready.ref)).rejects.toThrow(/no está listo/)
 
   await data.setPrHold({ ref: ready.ref, hold: false })
-  expect(openPrsOf(await data.openPrs()).find((p) => p.id === ready.id)!.state.merge.offer).toBe(true)
+  expect(openPrsOf(await data.openPrs()).find((p) => p.id === ready.id)!.state?.merge.offer).toBe(true)
 })
 
 test("las conexiones de ejemplo traen GitHub en regla, Linear vencida y Claude sin configurar", async () => {

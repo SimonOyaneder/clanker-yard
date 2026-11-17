@@ -4,7 +4,7 @@ import type { OpenPr } from "./prs"
 import { isDraft } from "./prs"
 
 export type { ReviewStatus }
-export const reviewStatus = (pr: OpenPr): ReviewStatus => reviewStatusOf(pr.state)
+export const reviewStatus = (pr: OpenPr): ReviewStatus => pr.state ? reviewStatusOf(pr.state) : "none"
 
 export const reviewTone: Record<ReviewStatus, { label: string; pill: string; ring: string; dot: string }> = {
   changes: { label: "Necesita acción", pill: tone.red, ring: "ring-red-500/60", dot: "bg-red-500" },
@@ -22,6 +22,7 @@ export const draftTone = { label: "Draft", pill: tone.neutral }
 export type MergeMark = "failed" | "queued" | "hold" | "ready"
 
 export function mergeMark({ state }: OpenPr): MergeMark | null {
+  if (!state) return null
   if (state.merge.queue === "failed") return "failed"
   if (state.merge.queue === "queued") return "queued"
   if (state.hold) return "hold"
