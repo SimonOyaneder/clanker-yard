@@ -2,7 +2,7 @@ import type { RunId, StepRunId } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { agentSessions, stepRuns } from "../store/schema";
-import { RunCommandError } from "./engine";
+import { RunCommandError } from "./engine-shared";
 import { StepNotFoundError } from "./step-detail";
 import { harness as createHarness, okReport, type AgentScript, WAIT } from "../testing/flows-harness";
 

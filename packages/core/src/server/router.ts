@@ -13,7 +13,7 @@ import type { Decisions } from "../decisions/decisions";
 import { LearningNotFoundError, type Learnings } from "../learnings/learnings";
 import type { Engine } from "../flows/engine";
 import type { Flows } from "../flows/flows";
-import { DecisionNotFoundError} from "../flows/engine";
+import { DecisionNotFoundError } from "../flows/engine-shared";
 import { createStepDetails} from "../flows/step-detail";
 import { type LegacyImporter } from "../import/legacy";
 import { createMetrics } from "../metrics/metrics";
