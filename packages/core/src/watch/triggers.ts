@@ -27,9 +27,9 @@ export interface TriggersDeps {
  * disparan flujos; los demás (los tuyos que el sistema no abrió) solo generan el evento.
  *
  * Params: un flujo recibe lo que declare entre `pr` (`PrRef`), `repo` (el id del repo registrado), `branch`
- * (la branch del PR), los campos del payload del evento (`sha`, `from`, `to`, `base`, `threadIds`, `files`...) y los
+ * (la branch del PR), `prId` (su fila; un PR `local` no tiene `pr`), los campos del payload del evento (`sha`, `from`, `to`, `base`, `threadIds`, `files`...) y los
  * `flowParams` del proyecto que abrió el PR (una política como `rebaseNonDraft`). El `filter` del trigger
- * pide que cada clave valga lo mismo en el payload. `start` es idempotente por (flujo, sujeto): un
+ * pide que cada clave valga lo mismo en el payload, que además lleva `local` (si el PR vive solo en la máquina). `start` es idempotente por (flujo, sujeto): un
  * evento nuevo con la corrida anterior todavía viva no abre otra. Un flujo que no arranca (falta un
  * param, un rol) deja un evento `error` y no frena a los demás. Devuelve cómo dejar de escuchar.
  */
@@ -37,21 +37,24 @@ export function startTriggers({ store, defs, projects, repos, flows, errors }: T
   function dispatch(event: Event): void {
     if (event.subject?.type !== "pr") return;
     const row = prById(store.db, event.subject.id);
-    const pr = row?.owned ? prRefOf(repos, row) : undefined;
-    if (!row || !pr) return;
+    if (!row?.owned) return;
+    // Un PR local (stacks locales) no está en GitHub: sus flujos reciben `prId` en vez de `pr`.
+    const local = row.state === "local";
+    const pr = local ? undefined : prRefOf(repos, row);
+    if (!pr && !local) return;
     // Con threads de council un rebase reescribiría su historia, y eso nunca se fuerza (`workspaces.rebase`).
     if (event.type === "pr.conflict" && row.detail?.threads.councilEver) return;
 
     const project = event.projectId ? projects.get(event.projectId) : undefined;
     // Lo que el evento da pisa a los `flowParams` del proyecto, que solo cambian defaults.
-    const available: Record<string, unknown> = { ...project?.flowParams, ...event.payload, pr, repo: row.repoId, branch: row.headRef };
+    const available: Record<string, unknown> = { ...project?.flowParams, ...event.payload, ...(pr && { pr }), prId: row.id, repo: row.repoId, branch: row.headRef };
     const profile = project?.defaultProfileId || undefined;
 
     for (const slug of new Set(defs.list("flow").map((def) => def.slug))) {
       // El flujo que gana para este repo; uno que ya no valida lo reporta quien lo lance.
       const def = defs.resolve("flow", slug, { repoId: row.repoId });
       const parsed = def && FlowDef.safeParse(def.body);
-      if (!parsed?.success || parsed.data.trigger.type !== event.type || !matches(parsed.data.trigger.filter, event.payload)) continue;
+      if (!parsed?.success || parsed.data.trigger.type !== event.type || !matches(parsed.data.trigger.filter, { local, ...event.payload })) continue;
       const declared = Object.keys(parsed.data.params ?? {});
       const params = Object.fromEntries(declared.flatMap((name) => (name in available ? [[name, available[name]]] : [])));
       const scope = `trigger ${slug}`;

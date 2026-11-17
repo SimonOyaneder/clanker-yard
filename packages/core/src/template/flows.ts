@@ -381,7 +381,7 @@ export const REBASE_CONFLICTO: FlowDef = {
   id: "rebase-conflicto",
   name: "Rebase por conflicto",
   internal: true,
-  trigger: { type: "pr.conflict" },
+  trigger: { type: "pr.conflict", filter: { local: false } },
   lane: "maintenance",
   params: {
     pr: "PrRef",
@@ -505,6 +505,117 @@ export const REBASE_CONFLICTO: FlowDef = {
       type: "flow",
       flow: "pr-feedback",
       params: { ws: "$ws", pr: "$run.params.pr", externalRounds: "$run.params.externalRounds" },
+      on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+    },
+    abort: {
+      type: "action",
+      action: "workspace.rebaseAbort",
+      args: { ws: "$ws" },
+      on: { ok: "@blocked" },
+    },
+  },
+};
+
+/**
+ * "Rebase por conflicto" de un PR local (stacks locales, `pr.conflict` con `local: true`): el restack no pudo dejarlo
+ * sobre su base nueva. Como `rebase-conflicto` pero en la máquina: `workspace.acquire` en vez de `attach` (la branch no
+ * está en el remoto), sin `pr.rebaseApproval` (un PR local se trata como un draft: un conflicto de comportamiento
+ * sigue con la resolución conservadora y una nota) y sin push: `pr.saveLocal` guarda la punta y la base en la fila.
+ * Si quedó sobre la branch por defecto se publica (`pr.promote` y `pr-feedback`); si no, sigue local.
+ */
+export const REBASE_CONFLICTO_LOCAL: FlowDef = {
+  schema: 1,
+  id: "rebase-conflicto-local",
+  name: "Rebase por conflicto de un PR local",
+  internal: true,
+  trigger: { type: "pr.conflict", filter: { local: true } },
+  lane: "maintenance",
+  params: {
+    prId: "string",
+    repo: "RepoRef",
+    branch: "string",
+    base: "string",
+    conflictRounds: { type: "number", default: 20 },
+    checkRounds: { type: "number", default: 2 },
+    externalRounds: { type: "number", default: 3 },
+  },
+  limits: { maxCostUsd: null, maxSteps: 200 },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.acquire",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "rebase" },
+    },
+    rebase: {
+      type: "action",
+      action: "workspace.rebase",
+      args: { ws: "$ws", base: "$run.params.base" },
+      on: {
+        clean: "checks",
+        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: REBASE_ROUNDS_EXHAUSTED },
+        error: { to: "@blocked", note: "El rebase del PR local falló sin conflicto: la branch quedó como estaba" },
+      },
+    },
+    resolve: {
+      type: "agent",
+      role: "dev",
+      mode: "conflict",
+      brief: { failures: "$prev.failures" },
+      on: {
+        resolved: "continue",
+        behavior: { to: "continue", note: "Resolver el conflicto exigía decidir comportamiento: se aplicó la resolución más conservadora, revísala" },
+      },
+    },
+    continue: {
+      type: "action",
+      action: "workspace.rebase",
+      args: { ws: "$ws", base: "$run.params.base", continue: true },
+      on: {
+        clean: "checks",
+        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: REBASE_ROUNDS_EXHAUSTED },
+        error: { to: "@blocked", note: "El rebase del PR local falló sin conflicto: la branch quedó como estaba" },
+      },
+    },
+    checks: {
+      type: "action",
+      action: "recipe.check",
+      args: { ws: "$ws", scope: "changed", afterRebase: true },
+      on: {
+        ok: "commit",
+        fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "commit", note: "Tests o lint siguen rojos tras el rebase" } },
+      },
+    },
+    fix: {
+      type: "agent",
+      role: "dev",
+      mode: "fix",
+      brief: { failures: "$prev.failures" },
+      on: { ok: "checks" },
+    },
+    commit: {
+      type: "action",
+      action: "workspace.commitAfterRebase",
+      args: { ws: "$ws" },
+      on: { ok: "save" },
+    },
+    save: {
+      type: "action",
+      action: "pr.saveLocal",
+      args: { ws: "$ws", prId: "$run.params.prId" },
+      on: { local: { to: "@done", note: "PR local: se publica cuando se mergee su base" }, promotable: "promote" },
+    },
+    promote: {
+      type: "action",
+      action: "pr.promote",
+      args: { ws: "$ws", prId: "$run.params.prId" },
+      on: { ok: "feedback" },
+    },
+    feedback: {
+      type: "flow",
+      flow: "pr-feedback",
+      params: { ws: "$ws", pr: "$promote.pr", externalRounds: "$run.params.externalRounds" },
       on: { done: "@done", blocked: "@blocked", failed: "@failed" },
     },
     abort: {
@@ -971,6 +1082,7 @@ export const flows: Record<string, FlowDef> = {
   "techlead-clasico": TECHLEAD_CLASICO,
   "pr-feedback": PR_FEEDBACK,
   "rebase-conflicto": REBASE_CONFLICTO,
+  "rebase-conflicto-local": REBASE_CONFLICTO_LOCAL,
   "restack-feedback": RESTACK_FEEDBACK,
   "promote-local": PROMOTE_LOCAL,
   restack: RESTACK,

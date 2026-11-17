@@ -252,7 +252,7 @@ async function restackChain(
         case "conflict":
         case "base-conflict": {
           const files = result.outcome === "conflict" ? result.conflicts : result.files;
-          if (conflict && !local) {
+          if (conflict) {
             // La misma clave que usa Watch (el sha de la punta): si ya vio el conflicto, el flujo de rebase ya salió.
             store.tx((tx) =>
               emitOnce(
@@ -262,7 +262,10 @@ async function restackChain(
                   type: "pr.conflict",
                   keys: [headSha],
                   runId: ctx.runId,
-                  payload: () => ({ repo: remote.repo, number: child.number, sha: headSha, base: toBase, ...conflict, files }),
+                  payload: () =>
+                    local
+                      ? { repo: remote.repo, prId: child.id, local: true, sha: headSha, base: toBase, ...conflict, files }
+                      : { repo: remote.repo, number: child.number, sha: headSha, base: toBase, ...conflict, files },
                 },
                 Date.now(),
               ),
@@ -272,10 +275,8 @@ async function restackChain(
               // Hay que resolverlo a mano: es una alerta de la Bandeja, no una nota (las notas no llegan a la Bandeja).
               openDecision(tx, {
                 kind: "alert",
-                title: conflict ? `PR local en conflicto: ${child.headRef}` : `Base combinada en conflicto en ${child.number === null ? child.headRef : `${remote.repo}#${child.number}`}`,
-                body: conflict
-                  ? `No se pudo restackear el PR local ${child.headRef} sobre ${toBase}: conflicto en ${files.join(", ")}. La branch quedó como estaba; hay que resolverlo a mano.`
-                  : `No se pudo recalcular la base combinada de ${child.headRef} tras mergearse ${merged}: conflicto en ${files.join(", ")}. El PR quedó como estaba; el flujo de rebase por conflicto no sabe rehacer una base combinada, así que hay que resolverlo a mano.`,
+                title: `Base combinada en conflicto en ${child.number === null ? child.headRef : `${remote.repo}#${child.number}`}`,
+                body: `No se pudo recalcular la base combinada de ${child.headRef} tras mergearse ${merged}: conflicto en ${files.join(", ")}. El PR quedó como estaba; el flujo de rebase por conflicto no sabe rehacer una base combinada, así que hay que resolverlo a mano.`,
                 runId: ctx.runId,
                 subject: { type: "pr", id: child.id },
               }),

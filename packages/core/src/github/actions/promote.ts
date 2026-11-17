@@ -1,9 +1,9 @@
 import type { PrRef, RepoId, RunId } from "@clanker/api";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
 import { PermanentActionError, type ActionDef } from "../../flows/catalog";
-import { pullRequests, runs } from "../../store/schema";
+import { prParents, pullRequests, runs, workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
 import type { RepoConfig } from "../../repos/repos";
 import { WorkspaceOutput, type Workspaces } from "../../workspaces/workspaces";
@@ -101,4 +101,44 @@ function record(store: Store, { prId, repoId, repo, pull, base, runId }: { prId:
       payload: { repo, number: pull.number, url: pull.html_url },
     });
   });
+}
+
+const SaveLocalArgs = z.object({ ws: WorkspaceOutput, prId: z.string().min(1) });
+
+/**
+ * `pr.saveLocal { ws, prId }` (stacks locales): un PR local que se rebaseó en la máquina (`rebase-conflicto-local`)
+ * guarda su punta y su base en la fila, sin push. Cuelga del PR (abierto o local) cuya branch es la base nueva, y de
+ * ninguno si quedó sobre la branch por defecto.
+ *
+ * Outcomes: `local` (sigue apilado) y `promotable` (quedó sobre la branch por defecto: ya se puede publicar). Output
+ * `{ prId, branch, base, head }`.
+ */
+export function prSaveLocalAction(deps: Pick<PrPromoteDeps, "store" | "workspaces" | "repoConfig">): ActionDef<typeof SaveLocalArgs> {
+  const { store, workspaces } = deps;
+  return {
+    name: "pr.saveLocal",
+    args: SaveLocalArgs,
+    outcomes: ["local", "promotable"],
+    effects: "local",
+    async run({ ws, prId }) {
+      const row = prById(store.db, prId);
+      if (!row || row.state !== "local") throw new PermanentActionError(`El PR ${prId} no es un PR local: no hay nada que guardar.`);
+      const workspace = store.db.select({ baseRef: workspacesTable.baseRef }).from(workspacesTable).where(eq(workspacesTable.id, ws.workspaceId)).get();
+      if (!workspace) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
+      const base = workspace.baseRef;
+      const head = await workspaces.git(ws, "rev-parse", "HEAD");
+      store.tx(({ db }) => {
+        db.update(pullRequests).set({ baseRef: base, headSha: head, headChangedAt: Date.now() }).where(eq(pullRequests.id, prId)).run();
+        db.delete(prParents).where(eq(prParents.childId, prId)).run();
+        const parents = db
+          .select({ id: pullRequests.id })
+          .from(pullRequests)
+          .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, base), inArray(pullRequests.state, ["open", "local"])))
+          .all();
+        for (const parent of parents) db.insert(prParents).values({ childId: prId, parentId: parent.id }).run();
+      });
+      const promotable = base === deps.repoConfig(row.repoId).defaultBranch;
+      return { outcome: promotable ? "promotable" : "local", output: { prId, branch: row.headRef, base, head } };
+    },
+  };
 }

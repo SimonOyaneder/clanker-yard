@@ -516,9 +516,9 @@ describe("stack.restack con PRs locales", () => {
     expect((again.output as Output).children).toMatchObject([{ branch: "cla-2", status: "restacked" }]);
   });
 
-  test("un hijo local en conflicto queda como estaba y no se pushea", async () => {
+  test("un hijo local en conflicto queda como estaba, no se pushea y anota pr.conflict con local para su flujo", async () => {
     await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
-    await localPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
+    const b = await localPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
     const before = repo.git("rev-parse", "cla-2");
     github.pr(1).merge({ sha: squashOnMain("cla-1", { "a.txt": "a1\nparent\nmain\n" }) });
 
@@ -528,6 +528,9 @@ describe("stack.restack con PRs locales", () => {
     expect((result.output as Output).children).toMatchObject([{ branch: "cla-2", status: "conflict", files: ["a.txt"] }]);
     expect(repo.git("rev-parse", "cla-2")).toBe(before);
     expect(() => remoteSha("cla-2")).toThrow();
+    expect(store.events.since(0, { types: ["pr.conflict"] })).toMatchObject([
+      { subject: { type: "pr", id: b }, payload: { prId: b, local: true, sha: before, base: "main", files: ["a.txt"] } },
+    ]);
   });
 });
 

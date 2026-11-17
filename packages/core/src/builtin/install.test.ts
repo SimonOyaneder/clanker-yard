@@ -78,7 +78,7 @@ function setup() {
 const builtin = (defs: Defs, kind: "role" | "flow", slug: string) =>
   defs.list(kind, { includeArchived: true }).find((d) => d.scope === "builtin" && d.slug === slug)!;
 
-test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-clasico, pr-feedback, rebase-conflicto, restack-feedback, promote-local, restack, restack-rewritten, council y republish-pr) y repetirlo no suma versiones", () => {
+test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-clasico, pr-feedback, rebase-conflicto, rebase-conflicto-local, restack-feedback, promote-local, restack, restack-rewritten, council y republish-pr) y repetirlo no suma versiones", () => {
   const { defs, flows } = setup();
 
   installBuiltins({ defs, flows });
@@ -90,6 +90,7 @@ test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-
   expect(defs.resolve("flow", "rebase-conflicto")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "restack-feedback")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "promote-local")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("flow", "rebase-conflicto-local")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "restack")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "restack-rewritten")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "council")).toMatchObject({ scope: "builtin" });
@@ -98,7 +99,7 @@ test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-
   expect(defs.resolve("flow", "techlead-clasico")?.body).toMatchObject({ name: "Techlead clásico", description: expect.any(String) });
   expect(defs.resolve("flow", "techlead-clasico")?.body).not.toHaveProperty("internal");
   const internal = defs.list("flow").filter((d) => (d.body as { internal?: boolean }).internal === true).map((d) => d.slug).sort();
-  expect(internal).toEqual(["council", "pr-feedback", "promote-local", "rebase-conflicto", "republish-pr", "restack", "restack-feedback", "restack-rewritten"]);
+  expect(internal).toEqual(["council", "pr-feedback", "promote-local", "rebase-conflicto", "rebase-conflicto-local", "republish-pr", "restack", "restack-feedback", "restack-rewritten"]);
   expect(defs.resolve("role", "committer")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("profile", "eco")).toMatchObject({ scope: "builtin" });
   expect(store!.events.since(0, { types: ["def.versioned"] })).toHaveLength(versions);
