@@ -38,7 +38,7 @@ import * as z from "zod";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
-import { startGitHubSim, type GitHubSim } from "./github-sim";
+import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 
 /** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
 const WAIT = { timeout: 10_000 };
@@ -60,6 +60,7 @@ let connections: Connections;
 let cache: PrCache;
 let watch: Watch;
 let defs: Defs;
+let packs: ReturnType<typeof createPacks>;
 let repos: ReturnType<typeof createRepos>;
 let flows: Flows;
 let askpass: ReturnType<typeof createAskpass>;
@@ -91,7 +92,7 @@ beforeEach(async () => {
   repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
   defs = createDefs({ store });
-  const packs = createPacks({ defs });
+  packs = createPacks({ defs });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
   writeFileSync(
@@ -496,6 +497,32 @@ describe("avisa a los flujos", () => {
   });
 });
 
+/** El pack del test con una estrategia de merge por comando a una cola (como bors): mergea cerrando el PR. */
+async function withMergeQueue() {
+  const packDir = join(dir, "pack-queue");
+  mkdirSync(packDir);
+  writeFileSync(
+    join(packDir, "pack.json"),
+    JSON.stringify({
+      id: "acme",
+      version: 2,
+      activate: { githubOrgs: ["octocat"] },
+      mergeStrategy: { type: "comment", command: "/merge", queueCheck: "bors", ready: ["notDraft"], offer: ["notDraft"], auto: ["offer"], onOffer: "gate", onAuto: "act" },
+    }),
+  );
+  await packs.load(packDir);
+}
+
+/** Lo que hace una cola como bors: pushea a `main` el squash de `branch` y cierra el PR, que GitHub nunca da por mergeado. */
+function queueMerge(pr: SimPr, branch: string): string {
+  origin.git("checkout", "main");
+  origin.git("merge", "--squash", branch);
+  origin.git("commit", "--message", `feat: ${branch} (#${pr.number})`);
+  origin.git("push", "origin", "main");
+  pr.close();
+  return origin.git("rev-parse", "HEAD");
+}
+
 const WATCH_EVENTS: EventType[] = ["pr.botReview", "pr.ci", "pr.conflict", "pr.comment", "pr.merged", "pr.base_rewritten", "pr.human", "pr.approvedWithComments"];
 const emitted = (...types: EventType[]) => store.events.since(0, { types: types.length > 0 ? types : WATCH_EVENTS });
 const emittedTypes = (...types: EventType[]) => emitted(...types).map((e) => e.type);
@@ -575,6 +602,27 @@ describe("eventos", () => {
     await wake(31 * SECOND);
     expect(emitted("pr.merged")).toHaveLength(1);
     expect(emitted("pr.merged")[0]).toMatchObject({ origin: "watch", subject: { type: "pr" }, payload: { repo: REPO, number: pr.number } });
+  });
+
+  test("una cola de merge que cierra el PR con su contenido ya en main (bors) cuenta como merge, y sin cola del pack no", async () => {
+    // Los dos PRs entran en la misma búsqueda de Watch.
+    const plain = sim.openPr({ head: "two" });
+    const pr = sim.openPr({ head: "one" });
+    await wake();
+    own(plain.number);
+    own(pr.number);
+
+    queueMerge(plain, "two");
+    await wake(31 * SECOND);
+    await wake(31 * SECOND);
+    expect(emitted("pr.merged")).toEqual([]);
+
+    await withMergeQueue();
+    const squash = queueMerge(pr, "one");
+    await wake(31 * SECOND);
+    await wake(31 * SECOND);
+
+    expect(emitted("pr.merged")).toMatchObject([{ origin: "watch", payload: { repo: REPO, number: pr.number, sha: squash, queue: true } }]);
   });
 
   test("aprobado con comentarios sale una vez por aprobación: perderla y volver a aprobar es otro hecho", async () => {

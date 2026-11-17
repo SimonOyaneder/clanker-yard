@@ -14,6 +14,7 @@ import type { GitHubClient } from "../client";
 import type { Prs } from "../prs";
 import type { PrRow } from "../pr-cache";
 import { githubPulls } from "../pr-rows";
+import { landedCommit } from "../landed";
 import type { RepoConfig } from "../../repos/repos";
 
 // El restack de la cadena (`docs/design.html#d-ops`, restack y restackRewritten): `stack.restack` al mergear un
@@ -70,6 +71,8 @@ const MERGEABLE_WAIT_MS = 10_000;
  * hijos (`pr_parents`) quedan sobre la base donde se mergeó, uno por uno y recursivo por sus propios
  * hijos, cada etapa con `ctx.once` para que un reintento retome donde quedó:
  *
+ * - Un PR que la cola de merge del pack (`merge.via: "comment"`, como bors) cerró sin mergear cuenta como mergeado en
+ *   el commit de la base que ya trae su contenido (`landedCommit`).
  * - El `merge_commit_sha` sale de la API (`prs.get`, no del log) y se verifica contra la branch con
  *   `merge-tree` (`merge.squash`: `same`, `differs` o `unknown`; un squash distinto no impide el restack
  *   porque lo que cuenta es lo que quedó en la base).
@@ -106,10 +109,18 @@ export function stackRestackAction(deps: StackRestackDeps): ActionDef<typeof Res
 
       const merged = await ctx.once("merged", async () => {
         const state = await deps.prs.get(pr);
-        if (state.state !== "merged" || state.mergeCommitSha === undefined) {
-          throw new PermanentActionError(`El PR #${pr.number} de ${pr.repo} no está mergeado (${state.state}): no hay nada que restackear.`);
+        if (state.state === "merged" && state.mergeCommitSha !== undefined) {
+          return { headRef: state.headRef, headSha: state.headSha, baseRef: state.baseRef, sha: state.mergeCommitSha };
         }
-        return { headRef: state.headRef, headSha: state.headSha, baseRef: state.baseRef, sha: state.mergeCommitSha };
+        // Una cola de merge (bors) lo cerró sin mergearlo: vale como merge en el commit de la base que trae su contenido.
+        // Solo donde el pack mergea con un comando a su cola (`merge.via: "comment"`).
+        if (state.state === "closed" && state.merge.via === "comment") {
+          await fetchOrThrow(deps, found, pr.repo, "restackear");
+          const { path, defaultBranch } = deps.repoConfig(found.repoId);
+          const landed = state.baseRef === defaultBranch ? await landedCommit(path, { headSha: state.headSha, defaultBranch }) : undefined;
+          if (landed) return { headRef: state.headRef, headSha: state.headSha, baseRef: state.baseRef, sha: landed };
+        }
+        throw new PermanentActionError(`El PR #${pr.number} de ${pr.repo} no está mergeado (${state.state}): no hay nada que restackear.`);
       });
       const squash = await ctx.once("verify", async () => {
         await fetchOrThrow(deps, found, pr.repo, "restackear");
