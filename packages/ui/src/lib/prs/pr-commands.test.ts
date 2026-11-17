@@ -1,17 +1,17 @@
 import { expect, test } from "vitest"
 import { buildOpenPrs } from "@/demo/seed-prs"
-import { mergeMark } from "./pr-status"
+import { mergeMark, reviewStatus } from "./pr-status"
 import { prCaps, whyNotMerge } from "./pr-commands"
-import { openPrsOf, type OpenPr } from "./prs"
+import { openPrsOf, type GithubPr, type LocalPr } from "./prs"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
-const find = (key: string): OpenPr => openPrsOf(buildOpenPrs(NOW)).find((p) => p.state.key === key)!
+const find = (key: string): GithubPr => openPrsOf(buildOpenPrs(NOW)).find((p): p is GithubPr => p.state?.key === key)!
 
 test("un PR listo con la estrategia del pack se mergea comentando, y con un repo sin estrategia, en GitHub", () => {
   const ready = find("ledger#421")
   expect(prCaps(ready).merge).toBe("comment")
 
-  const button: OpenPr = { ...ready, state: { ...ready.state, merge: { ...ready.state.merge, via: "button" } } }
+  const button: GithubPr = { ...ready, state: { ...ready.state, merge: { ...ready.state.merge, via: "button" } } }
   expect(prCaps(button).merge).toBe("button")
 })
 
@@ -30,10 +30,19 @@ test("rebasear solo se ofrece en PRs del sistema sin threads de council, y la co
   const owned = find("ledger#421")
   expect(prCaps(owned).rebase).toBe(true)
   expect(prCaps(find("dashboard#955")).rebase).toBe(false)
-  const council: OpenPr = { ...owned, state: { ...owned.state, threads: { ...owned.state.threads, councilEver: true } } }
+  const council: GithubPr = { ...owned, state: { ...owned.state, threads: { ...owned.state.threads, councilEver: true } } }
   expect(prCaps(council).rebase).toBe(false)
   expect(prCaps(owned).run).toBe(false)
   expect(prCaps({ ...owned, runId: "run_00000000000000000000000001" }).run).toBe(true)
+})
+
+test("un local no tiene acciones ni estados de GitHub, aunque su pack tenga un bot", () => {
+  const local = openPrsOf(buildOpenPrs(NOW)).find((p): p is LocalPr => p.local !== null)!
+
+  expect(prCaps(local)).toEqual({ merge: null, requestReview: false, rebase: false, hold: false, run: false })
+  expect(prCaps({ ...local, runId: "run_00000000000000000000000001" }).run).toBe(true)
+  expect(mergeMark(local)).toBeNull()
+  expect(reviewStatus(local)).toBe("none")
 })
 
 test("pedir review del bot depende de que el pack defina uno", () => {

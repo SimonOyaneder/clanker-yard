@@ -18,11 +18,11 @@ import { useHost } from "@/host"
 import { absolute, ago } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
 import { mergeMark, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
-import { isDraft, type OpenPr, repoNameOf } from "@/lib/prs/prs"
+import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/lib/prs/prs"
 import { buildStackForest, listStackGroups, type StackGroup } from "@/lib/prs/stack"
 import { cn } from "@/lib/utils"
 import { Ago, Hint, Pill } from "../common"
-import { CiBadge, CombinedBaseChip, MergePill, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
+import { CiBadge, CombinedBaseChip, LocalChip, MergePill, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 import { PR_KEYS, PrContextMenu } from "./pr-menu"
 import { PrNotes, PrNotesContext } from "./pr-notes"
@@ -37,9 +37,9 @@ const FILTERS: { key: Filter; label: string; match: (pr: OpenPr, stacked: Set<st
   { key: "stacked", label: "En stack", match: (p, s) => s.has(p.id) },
   { key: "solo", label: "Sueltos", match: (p, s) => !s.has(p.id) },
   { key: "draft", label: "Draft", match: (p) => isDraft(p) },
-  { key: "ready", label: "Listos para review", match: (p) => !isDraft(p) },
-  { key: "mergeable", label: "Listos para merge", match: (p) => p.state.merge.ready && !p.state.hold },
-  { key: "hold", label: "En hold", match: (p) => p.state.hold },
+  { key: "ready", label: "Listos para review", match: (p) => p.state !== null && !isDraft(p) },
+  { key: "mergeable", label: "Listos para merge", match: (p) => p.state !== null && p.state.merge.ready && !p.state.hold },
+  { key: "hold", label: "En hold", match: (p) => p.state?.hold === true },
   { key: "changes", label: "Necesita acción", match: (p) => reviewStatus(p) === "changes" },
   { key: "pending", label: "Esperando review", match: (p) => reviewStatus(p) === "pending" },
   { key: "approved", label: "Aprobados", match: (p) => reviewStatus(p) === "approved" },
@@ -59,6 +59,7 @@ interface SignalFilter {
 function signalFilters(prs: readonly OpenPr[]): SignalFilter[] {
   const found = new Map<string, SignalFilter>()
   for (const pr of prs) {
+    if (pr.local) continue
     for (const signal of pr.signals) {
       for (const [level, def] of Object.entries(signal.levels)) {
         const key = `${signal.id}:${level}`
@@ -115,15 +116,15 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
     writePref("prs.hiddenRepos", next)
   }
 
-  const repos = useMemo(() => [...new Set(prs.map((p) => p.ref.repo))].sort(), [prs])
-  const scoped = useMemo(() => prs.filter((p) => !hiddenRepos.includes(p.ref.repo)), [prs, hiddenRepos])
+  const repos = useMemo(() => [...new Set(prs.map((p) => p.repo))].sort(), [prs])
+  const scoped = useMemo(() => prs.filter((p) => !hiddenRepos.includes(p.repo)), [prs, hiddenRepos])
   const signals = useMemo(() => signalFilters(prs), [prs])
   const forest = useMemo(() => buildStackForest(scoped), [scoped])
   const groups = useMemo(() => listStackGroups(forest), [forest])
   const stacked = useMemo(() => new Set(groups.filter((g) => g.prIds.length > 1).flatMap((g) => g.prIds)), [groups])
 
   const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.key, scoped.filter((p) => f.match(p, stacked)).length])), [scoped, stacked])
-  const signalCounts = useMemo(() => Object.fromEntries(signals.map((s) => [s.key, scoped.filter((p) => p.state.signals[s.id] === s.level).length])), [scoped, signals])
+  const signalCounts = useMemo(() => Object.fromEntries(signals.map((s) => [s.key, scoped.filter((p) => p.state?.signals[s.id] === s.level).length])), [scoped, signals])
   const picked = signals.find((s) => s.key === signal)
   const readAt = useMemo(() => prs.reduce<number | null>((latest, p) => (p.readAt !== null && (latest === null || p.readAt > latest) ? p.readAt : latest), null), [prs])
 
@@ -134,8 +135,8 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
     const matches = new Set(
       scoped
         .filter((p) => matcher(p, stacked))
-        .filter((p) => !picked || p.state.signals[picked.id] === picked.level)
-        .filter((p) => !q || `#${p.ref.number} ${p.state.title} ${p.state.headRef} ${repoNameOf(p)} ${p.issueId === null ? "" : (issueKeys.get(p.issueId) ?? "")}`.toLowerCase().includes(q))
+        .filter((p) => !picked || p.state?.signals[picked.id] === picked.level)
+        .filter((p) => !q || `${p.id} ${p.ref ? `#${p.ref.number}` : ""} ${titleOf(p)} ${branchOf(p)} ${repoNameOf(p)} ${p.issueId === null ? "" : (issueKeys.get(p.issueId) ?? "")}`.toLowerCase().includes(q))
         .map((p) => p.id),
     )
     const vg = groups.filter((g) => g.prIds.some((id) => matches.has(id)))
@@ -156,10 +157,10 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
       if (isTypingTarget(e.target, ["[role='dialog']", "[role='alertdialog']", "[role='menu']"])) return
       const caps = commands.caps(selected)
       const key = e.key.toUpperCase()
-      if (key === PR_KEYS.merge && caps.merge) commands.merge(selected)
-      else if (key === PR_KEYS.requestReview && caps.requestReview) commands.requestReview(selected)
-      else if (key === PR_KEYS.rebase && caps.rebase) commands.rebase(selected)
-      else if (key === PR_KEYS.hold) commands.toggleHold(selected)
+      if (key === PR_KEYS.merge && caps.merge && !selected.local) commands.merge(selected)
+      else if (key === PR_KEYS.requestReview && caps.requestReview && !selected.local) commands.requestReview(selected)
+      else if (key === PR_KEYS.rebase && caps.rebase && !selected.local) commands.rebase(selected)
+      else if (key === PR_KEYS.hold && caps.hold && !selected.local) commands.toggleHold(selected)
       else if (key === PR_KEYS.run && caps.run) commands.openRun(selected)
       else return
       e.preventDefault()
@@ -385,14 +386,14 @@ function PrList({
         for (const rootId of g.rootIds) walk(rootId, 0)
         const root = byId.get(g.rootId)!
         return (
-          <Section key={g.rootId} title={repoNameOf(root)} sub={`stack de ${g.prIds.length} PRs sobre ${root.state.baseRef}`}>
+          <Section key={g.rootId} title={repoNameOf(root)} sub={`stack de ${g.prIds.length} PRs sobre ${baseOf(root)}`}>
             {rows.map(({ id, depth }) => row(byId.get(id)!, depth))}
           </Section>
         )
       })}
       {[...solosByRepo.entries()].map(([repo, list]) => (
         <Section key={`solos-${repo}`} title={repo} sub={list.length === 1 ? "1 PR suelto" : `${list.length} PRs sueltos`}>
-          {[...list].sort((a, b) => b.state.updatedAt.localeCompare(a.state.updatedAt)).map((pr) => row(pr, 0))}
+          {[...list].sort((a, b) => (b.state?.updatedAt ?? "").localeCompare(a.state?.updatedAt ?? "")).map((pr) => row(pr, 0))}
         </Section>
       ))}
     </div>
@@ -420,7 +421,10 @@ function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
       <PrContextMenu pr={pr}>
         <button
           type="button"
-          onClick={() => host.openExternal(state.url)}
+          onClick={() => {
+            commands.select(pr.id)
+            if (state) host.openExternal(state.url)
+          }}
           onFocus={() => commands.select(pr.id)}
           className={cn("flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none", selected && "bg-accent/40")}
         >
@@ -428,13 +432,14 @@ function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
             {depth ? <span className="ml-auto h-5 w-2.5 rounded-bl border-b border-l border-border" /> : null}
           </span>
           <PrStateIcon pr={pr} />
-          <span className="w-12 flex-none font-mono text-[11.5px] text-muted-foreground">#{pr.ref.number}</span>
+          {pr.ref ? <span className="w-12 flex-none font-mono text-[11.5px] text-muted-foreground">#{pr.ref.number}</span> : <LocalChip base={pr.local.base} />}
           {hasSignals ? (
             <span className="flex w-[112px] flex-none items-center justify-center">
               <Signals pr={pr} className="justify-center" />
             </span>
           ) : null}
-          <span className="min-w-0 flex-1 truncate">{state.title}</span>
+          <span className="min-w-0 flex-1 truncate">{titleOf(pr)}</span>
+          {pr.local ? <span className="truncate font-mono text-xs text-muted-foreground">{pr.local.branch}</span> : null}
           {pr.owned ? (
             <Pill className="bg-violet-500/10 text-violet-700 dark:text-violet-300" hint={issueKey ? `PR que abrió el sistema, de la issue ${issueKey}` : "PR que abrió el sistema"}>
               <Repeat2 className="size-3" /> {issueKey ?? "Del sistema"}
@@ -442,17 +447,21 @@ function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
           ) : null}
           {combined ? <CombinedBaseChip parents={combined} /> : null}
           <PrNotes pr={pr} />
-          {mark ? <MergePill pr={pr} /> : review !== "none" ? <ReviewPill pr={pr} review={review} /> : null}
-          <span className="flex flex-none items-center gap-1.5">
-            {state.reviewers.map((r) => (
-              <Reviewer key={r.login} r={r} size={16} />
-            ))}
-          </span>
-          <ReviewSignals pr={pr} />
-          <CiBadge ci={state.ci} compact />
-          <time dateTime={state.updatedAt} title={absolute(state.updatedAt)} className="w-20 flex-none text-right text-[11.5px] text-muted-foreground">
-            {ago(state.updatedAt)}
-          </time>
+          {!pr.local && (mark ? <MergePill pr={pr} /> : review !== "none" ? <ReviewPill pr={pr} review={review} /> : null)}
+          {!pr.local ? (
+            <>
+              <span className="flex flex-none items-center gap-1.5">
+                {pr.state.reviewers.map((r) => (
+                  <Reviewer key={r.login} r={r} size={16} />
+                ))}
+              </span>
+              <ReviewSignals pr={pr} />
+              <CiBadge ci={pr.state.ci} compact />
+              <time dateTime={pr.state.updatedAt} title={absolute(pr.state.updatedAt)} className="w-20 flex-none text-right text-[11.5px] text-muted-foreground">
+                {ago(pr.state.updatedAt)}
+              </time>
+            </>
+          ) : null}
         </button>
       </PrContextMenu>
     </li>

@@ -135,9 +135,11 @@ describe("list", () => {
 
   test("un PR local sale sin ref, con su branch, base y título, y Watch no lo vigila", () => {
     cache.saveRest(repoId, pull(), NOW);
-    const id = seedPr(store, { repoId, number: null, state: "local", headRef: "feat/y", baseRef: "feat/x", title: "feat: y", body: "cuerpo" });
+    const parent = seedPr(store, { repoId, number: 9, state: "merged", headRef: "feat/x" });
+    const id = seedPr(store, { repoId, number: null, state: "local", headRef: "feat/y", baseRef: "feat/x", title: "feat: y", body: "cuerpo", parents: [parent] });
 
-    expect(cache.list({ state: "local" })).toEqual([expect.objectContaining({ id, ref: null, local: { branch: "feat/y", base: "feat/x", title: "feat: y" }, state: null })]);
+    expect(cache.list({ state: "local" })).toEqual([expect.objectContaining({ id, repo: "acme/api", ref: null, local: { branch: "feat/y", base: "feat/x", title: "feat: y" }, state: null, parents: [parent] })]);
+    expect(cache.list({ state: "local", repo: "acme/otro" })).toEqual([]);
     expect(cache.list({ state: "open" })).toEqual([expect.objectContaining({ ref: ref(7), local: null })]);
     expect(cache.open().map((row) => row.number)).toEqual([7]);
   });

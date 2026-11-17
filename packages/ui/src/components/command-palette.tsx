@@ -2,7 +2,7 @@ import type { CachedIssue, ClankerProject, Decision, QueueEntry, Run, RunId } fr
 import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, X } from "lucide-react"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs/prs"
-import { repoNameOf } from "@/lib/prs/prs"
+import { branchOf, keyOf, repoNameOf, titleOf } from "@/lib/prs/prs"
 import { whyNotMerge } from "@/lib/prs/pr-commands"
 import { usePrCommands } from "@/components/prs/pr-commands"
 import { PR_KEYS } from "@/components/prs/pr-menu"
@@ -127,33 +127,37 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
         ) : null}
 
         {selectedPr && prCaps ? (
-          <CommandGroup heading={`Este PR · ${selectedPr.state.key}`}>
-            {prCaps.merge ? (
-              <CommandItem value="pr mergear según la estrategia" onSelect={run(() => prCommands.merge(selectedPr))}>
-                <GitMerge /> {prCaps.merge === "button" ? "Mergear en GitHub" : "Mergear…"}
-                <CommandShortcut>{PR_KEYS.merge}</CommandShortcut>
-              </CommandItem>
-            ) : (
-              <CommandItem value="pr mergear no disponible" disabled>
-                <GitMerge /> Mergear: {whyNotMerge(selectedPr)}
-              </CommandItem>
-            )}
-            {prCaps.requestReview ? (
-              <CommandItem value="pr pedir review del bot" onSelect={run(() => prCommands.requestReview(selectedPr))}>
-                <Bot /> Pedir review del bot
-                <CommandShortcut>{PR_KEYS.requestReview}</CommandShortcut>
-              </CommandItem>
+          <CommandGroup heading={`Este PR · ${keyOf(selectedPr)}`}>
+            {!selectedPr.local ? (
+              <>
+                {prCaps.merge ? (
+                  <CommandItem value="pr mergear según la estrategia" onSelect={run(() => prCommands.merge(selectedPr))}>
+                    <GitMerge /> {prCaps.merge === "button" ? "Mergear en GitHub" : "Mergear…"}
+                    <CommandShortcut>{PR_KEYS.merge}</CommandShortcut>
+                  </CommandItem>
+                ) : (
+                  <CommandItem value="pr mergear no disponible" disabled>
+                    <GitMerge /> Mergear: {whyNotMerge(selectedPr)}
+                  </CommandItem>
+                )}
+                {prCaps.requestReview ? (
+                  <CommandItem value="pr pedir review del bot" onSelect={run(() => prCommands.requestReview(selectedPr))}>
+                    <Bot /> Pedir review del bot
+                    <CommandShortcut>{PR_KEYS.requestReview}</CommandShortcut>
+                  </CommandItem>
+                ) : null}
+                {prCaps.rebase ? (
+                  <CommandItem value="pr rebasear" onSelect={run(() => prCommands.rebase(selectedPr))}>
+                    <GitPullRequestArrow /> Rebasear
+                    <CommandShortcut>{PR_KEYS.rebase}</CommandShortcut>
+                  </CommandItem>
+                ) : null}
+                <CommandItem value="pr hold no mergear nunca" onSelect={run(() => prCommands.toggleHold(selectedPr))}>
+                  <PauseCircle /> {selectedPr.state.hold ? "Quitar hold" : "Marcar hold (no mergear nunca)"}
+                  <CommandShortcut>{PR_KEYS.hold}</CommandShortcut>
+                </CommandItem>
+              </>
             ) : null}
-            {prCaps.rebase ? (
-              <CommandItem value="pr rebasear" onSelect={run(() => prCommands.rebase(selectedPr))}>
-                <GitPullRequestArrow /> Rebasear
-                <CommandShortcut>{PR_KEYS.rebase}</CommandShortcut>
-              </CommandItem>
-            ) : null}
-            <CommandItem value="pr hold no mergear nunca" onSelect={run(() => prCommands.toggleHold(selectedPr))}>
-              <PauseCircle /> {selectedPr.state.hold ? "Quitar hold" : "Marcar hold (no mergear nunca)"}
-              <CommandShortcut>{PR_KEYS.hold}</CommandShortcut>
-            </CommandItem>
             {prCaps.run ? (
               <CommandItem value="pr ver corrida" onSelect={run(() => prCommands.openRun(selectedPr))}>
                 <ScrollText /> Ver la corrida que lo abrió
@@ -395,12 +399,18 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <CommandSeparator />
             <CommandGroup heading="PRs abiertos">
               {prs.map((p) => (
-                <CommandItem key={p.id} value={`pr ${repoNameOf(p)} ${p.ref.number} ${p.state.title} ${p.state.headRef}`} onSelect={run(() => host.openExternal(p.state.url))}>
+                <CommandItem key={p.id} value={`pr ${p.id} ${repoNameOf(p)} ${keyOf(p)} ${titleOf(p)} ${branchOf(p)}`} onSelect={run(() => {
+                  if (p.state) host.openExternal(p.state.url)
+                  else {
+                    prCommands.select(p.id)
+                    actions.goModule("prs")
+                  }
+                })}>
                   <GitPullRequest />
                   <span className="w-[92px] flex-none truncate font-mono text-[11.5px] text-muted-foreground">
-                    {repoNameOf(p)}#{p.ref.number}
+                    {p.ref ? `${repoNameOf(p)}#${p.ref.number}` : p.local.branch}
                   </span>
-                  <span className="truncate">{p.state.title}</span>
+                  <span className="truncate">{titleOf(p)}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

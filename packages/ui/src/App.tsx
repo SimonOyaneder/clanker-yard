@@ -177,7 +177,7 @@ function Shell() {
   )
   const unreadPrs = (prsQuery.data?.length ?? 0) - openPrs.length
   const prsNeedingAction = openPrs.filter((p) => reviewStatus(p) === "changes").length
-  const prsReady = openPrs.filter((p) => p.state.merge.ready && !p.state.hold).length
+  const prsReady = openPrs.filter((p) => p.state?.merge.ready && !p.state.hold).length
   // La clave de la issue que originó cada PR del sistema: se pide de todos los proyectos, no del abierto.
   const issueKeysQuery = useLiveQuery(`pr-issue-keys:${projects.map((p) => p.id).join(",")}`, async () => {
     const lists = await Promise.all(projects.map((p) => appData.issues(p.id)))
@@ -255,7 +255,7 @@ function Shell() {
   const refresh = useCallback(() => {
     if (module === "prs") {
       // Relee cada PR de GitHub; los cambios llegan solos como `pr.changed`.
-      appData.refreshPrs(openPrs.map((p) => p.ref)).then(reloadPrs, (e: unknown) => {
+      appData.refreshPrs(openPrs.flatMap((p) => p.ref ? [p.ref] : [])).then(reloadPrs, (e: unknown) => {
         toast.error(messageOf(e))
         reloadPrs()
       })

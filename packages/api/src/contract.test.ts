@@ -1,8 +1,12 @@
 import { type ContractRouterClient, isContractProcedure } from "@orpc/contract";
 import { describe, expect, expectTypeOf, test } from "vitest";
-import { type Contract, type Event, contract } from "./index";
+import { API_MAJOR, type Contract, type Event, contract } from "./index";
 
 describe("contrato", () => {
+  test("CachedPr con repo exige reemplazar los cores de API 1", () => {
+    expect(API_MAJOR).toBeGreaterThan(1);
+  });
+
   test("exporta los routers system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, defs, metrics e imports con sus procedimientos", () => {
     expect(Object.keys(contract).sort()).toEqual([
       "artifacts",

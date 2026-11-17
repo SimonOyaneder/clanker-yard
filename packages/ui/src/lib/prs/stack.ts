@@ -1,5 +1,5 @@
 import { Graph, layout } from "@dagrejs/dagre"
-import type { OpenPr } from "./prs"
+import { baseOf, branchOf, keyOf, type OpenPr } from "./prs"
 
 // Un PR cuelga de otro si su base es la head del otro en el mismo repo, o si el core lo registró así (`parents`,
 // de `pr_parents`): ese camino cubre una base combinada, cuya rama sintética no es la head de ningún PR.
@@ -24,16 +24,19 @@ const headKey = (repo: string, branch: string) => `${repo}@${branch}`
 
 export function buildStackForest(prs: OpenPr[]): StackForest {
   const byId = new Map(prs.map((p) => [p.id, p]))
-  const byHead = new Map(prs.map((p) => [headKey(p.ref.repo, p.state.headRef), p]))
+  const byHead = new Map(prs.map((p) => [headKey(p.repo, branchOf(p)), p]))
   const edges: StackForest["edges"] = []
   const childrenOf = new Map<string, string[]>()
   const hasParent = new Set<string>()
   const combined = new Map<string, string[]>()
   for (const pr of prs) {
     const parents = new Set(pr.parents.filter((id) => byId.has(id) && id !== pr.id))
-    const byBase = byHead.get(headKey(pr.ref.repo, pr.state.baseRef))
+    const byBase = byHead.get(headKey(pr.repo, baseOf(pr)))
     if (byBase && byBase.id !== pr.id) parents.add(byBase.id)
-    if (pr.parents.length > 1) combined.set(pr.id, pr.parents.map((id) => byId.get(id)?.state.key ?? "un PR que ya no está abierto"))
+    if (pr.parents.length > 1) combined.set(pr.id, pr.parents.map((id) => {
+      const parent = byId.get(id)
+      return parent ? keyOf(parent) : "un PR que ya no está abierto"
+    }))
     for (const parentId of parents) {
       edges.push({ parentId, childId: pr.id })
       hasParent.add(pr.id)
@@ -76,7 +79,7 @@ export function listStackGroups(forest: StackForest): StackGroup[] {
       prIds.push(id)
       queue.push(...(forest.childrenOf.get(id) ?? []))
     }
-    groups.push({ rootId: rootIds[0]!, rootIds, repoFullName: root.ref.repo, prIds })
+    groups.push({ rootId: rootIds[0]!, rootIds, repoFullName: root.repo, prIds })
   }
   return groups.sort((a, b) => b.prIds.length - a.prIds.length)
 }

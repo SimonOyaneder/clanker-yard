@@ -1,14 +1,19 @@
 import type { CachedPr, PrRef, PrState } from "@clanker/api"
 
-/** Un PR abierto (o en draft) del caché del core del que Watch ya leyó su estado: lo único que la vista de PRs dibuja. */
-export type OpenPr = CachedPr & { ref: PrRef; state: PrState }
+export type GithubPr = CachedPr & { ref: PrRef; state: PrState; local: null }
+export type LocalPr = CachedPr & { ref: null; state: null; local: NonNullable<CachedPr["local"]> }
+export type OpenPr = GithubPr | LocalPr
 
-/** Los PRs que se pueden dibujar: con estado leído y todavía abiertos. */
 export function openPrsOf(prs: readonly CachedPr[]): OpenPr[] {
-  return prs.filter((p): p is OpenPr => p.ref !== null && p.state !== null && (p.state.state === "open" || p.state.state === "draft"))
+  return prs.filter((p): p is OpenPr => p.local !== null || (p.ref !== null && p.state !== null && (p.state.state === "open" || p.state.state === "draft")))
 }
 
-export const isDraft = (pr: OpenPr) => pr.state.state === "draft"
+export const isDraft = (pr: OpenPr) => pr.state?.state === "draft"
+
+export const titleOf = (pr: OpenPr) => pr.local ? pr.local.title : pr.state.title
+export const branchOf = (pr: OpenPr) => pr.local ? pr.local.branch : pr.state.headRef
+export const baseOf = (pr: OpenPr) => pr.local ? pr.local.base : pr.state.baseRef
+export const keyOf = (pr: OpenPr) => pr.local ? pr.local.branch : pr.state.key
 
 /** El nombre del repo sin su dueño: `ledger` de `acme/ledger`. */
-export const repoNameOf = (pr: Pick<OpenPr, "ref">) => pr.ref.repo.split("/")[1] ?? pr.ref.repo
+export const repoNameOf = (pr: Pick<CachedPr, "repo">) => pr.repo.split("/")[1] ?? pr.repo

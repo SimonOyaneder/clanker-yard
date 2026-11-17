@@ -6,7 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useHost } from "@/host"
 import { useToastedCommand } from "@/hooks/use-toasted-command"
 import { type PrCaps, prCaps } from "@/lib/prs/pr-commands"
-import type { OpenPr } from "@/lib/prs/prs"
+import type { GithubPr, OpenPr } from "@/lib/prs/prs"
 import { messageOf } from "@/lib/utils"
 
 // Lo que una persona le pide a un PR (`prs.*` del core): mergear según la estrategia del pack, pedir la review del
@@ -19,11 +19,11 @@ export interface PrCommands {
   select: (id: string | null) => void
   caps: (pr: OpenPr) => PrCaps
   /** Con la estrategia `comment` confirma antes; con `button` abre el PR en GitHub, donde se mergea. */
-  merge: (pr: OpenPr) => void
-  requestReview: (pr: OpenPr) => void
-  rebase: (pr: OpenPr) => void
+  merge: (pr: GithubPr) => void
+  requestReview: (pr: GithubPr) => void
+  rebase: (pr: GithubPr) => void
   /** Marca "no mergear nunca", o lo quita si ya estaba. */
-  toggleHold: (pr: OpenPr) => void
+  toggleHold: (pr: GithubPr) => void
   /** Va a la corrida que abrió el PR, en su proyecto. */
   openRun: (pr: OpenPr) => void
 }
@@ -48,7 +48,7 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, children }: Props
   const appData = useAppData()
   const host = useHost()
   const [selectedId, select] = useState<string | null>(null)
-  const [confirming, setConfirming] = useState<OpenPr | null>(null)
+  const [confirming, setConfirming] = useState<GithubPr | null>(null)
 
   const perform = useToastedCommand()
 

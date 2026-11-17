@@ -134,6 +134,7 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
         return [
           {
             id: row.id,
+            repo: remote.repo,
             ref: row.number === null ? null : { account: remote.account, repo: remote.repo, number: row.number },
             local: row.state === "local" ? { branch: row.headRef, base: row.baseRef, title: row.title! } : null,
             owned: row.owned,

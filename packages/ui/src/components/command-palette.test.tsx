@@ -12,6 +12,7 @@ import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { HostProvider, type Host } from "@/host"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
 import { createMemoryAppData } from "@/demo/memory-app-data"
+import { openPrsOf, type OpenPr } from "@/lib/prs/prs"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 
@@ -26,7 +27,7 @@ beforeAll(() => {
 })
 afterEach(cleanup)
 
-async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>["projectTab"]; settings?: SettingsControls; summary?: SummaryControls } = {}) {
+async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>["projectTab"]; settings?: SettingsControls; summary?: SummaryControls; prs?: OpenPr[] } = {}) {
   const data = createMemoryAppData(NOW)
   const [project] = await data.projects()
   const issues = await data.issues(project!.id)
@@ -35,13 +36,15 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
     { issue: a!, state: "ready", reason: "lista", base: { kind: "default" }, dependsOn: [] },
     { issue: b!, state: "blocked", skipped: true, reason: "saltada a mano" },
   ]
-  const actions = { setParallel: vi.fn(), setLanes: vi.fn(), boostIssue: vi.fn(), skipIssue: vi.fn() }
+  const actions = { setParallel: vi.fn(), setLanes: vi.fn(), boostIssue: vi.fn(), skipIssue: vi.fn(), goModule: vi.fn() }
+  const host = { openExternal: vi.fn() } as unknown as Host
+  const prs = extra.prs ?? []
   render(
     <AppDataProvider value={data}>
       <RunCommandsProvider>
-        <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
+        <HostProvider value={host}>
           <AppActionsContext.Provider value={actions as unknown as AppActions}>
-            <PrCommandsProvider prs={[]} projects={[project!]} onOpenRun={() => {}}>
+            <PrCommandsProvider prs={prs} projects={[project!]} onOpenRun={() => {}}>
             <CommandPalette
               open
               onOpenChange={() => {}}
@@ -50,8 +53,8 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
               runs={[]}
               issues={issues}
               queue={queue}
-              prs={[]}
-              prsActive={false}
+              prs={prs}
+              prsActive={prs.length > 0}
               learnings={null}
               pendingDecisions={[]}
               onUndoDecision={null}
@@ -69,8 +72,19 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
       </RunCommandsProvider>
     </AppDataProvider>,
   )
-  return { actions, data, project: project!, a: a!, b: b! }
+  return { actions, host, data, project: project!, a: a!, b: b! }
 }
+
+test("un local se busca por branch y título, abre Stacks y no ofrece acciones de GitHub", async () => {
+  const local = openPrsOf(await createMemoryAppData(NOW).openPrs()).find((p) => p.local !== null)!
+  const { actions, host } = await setup({ prs: [local] })
+
+  fireEvent.click(screen.getByText(local.local!.title))
+  expect(actions.goModule).toHaveBeenCalledWith("prs")
+  expect(host.openExternal).not.toHaveBeenCalled()
+  expect(screen.queryByText(/Mergear|Marcar hold|Pedir review del bot|Rebasear/)).toBeNull()
+  expect(screen.getByText(local.local!.branch)).toBeTruthy()
+})
 
 test("subir, sacar o devolver una issue de la cola están en ⌘K", async () => {
   const { actions, project, a, b } = await setup()

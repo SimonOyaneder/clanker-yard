@@ -1,5 +1,5 @@
 import { mergeBlocker, rebaseBlocker } from "@clanker/api"
-import type { OpenPr } from "./prs"
+import type { GithubPr, OpenPr } from "./prs"
 
 /** Qué acciones del core se le ofrecen a un PR: las mismas que el core acepta (`prs.*`), para no ofrecer lo que va a rechazar. */
 export interface PrCaps {
@@ -19,6 +19,7 @@ export interface PrCaps {
 }
 
 export function prCaps(pr: OpenPr): PrCaps {
+  if (pr.local) return { merge: null, requestReview: false, rebase: false, hold: false, run: pr.runId !== null }
   return {
     merge: mergeBlocker(pr.state) === undefined ? (pr.state.merge.via === "comment" ? "comment" : "button") : null,
     requestReview: pr.reviewBot,
@@ -29,7 +30,7 @@ export function prCaps(pr: OpenPr): PrCaps {
 }
 
 /** La razón por la que no se puede mergear (la misma con que el core lo rechazaría), para el tooltip del ítem apagado; `undefined` si se puede. */
-export function whyNotMerge(pr: OpenPr): string | undefined {
+export function whyNotMerge(pr: GithubPr): string | undefined {
   const why = mergeBlocker(pr.state)
   return why && why.charAt(0).toUpperCase() + why.slice(1)
 }

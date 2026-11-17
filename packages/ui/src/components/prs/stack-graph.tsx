@@ -100,7 +100,10 @@ function GraphInner({ prs, dimmed, issueKeys, layoutKey }: { prs: OpenPr[]; dimm
       elementsSelectable={false}
       // Sin un handler de click, xyflow les pone pointer-events: none a los nodos que no se
       // seleccionan ni arrastran: el click caía en el fondo y la tarjeta nunca abría el PR.
-      onNodeClick={(_e, n) => host.openExternal((n.data as PrNodeData).pr.state.url)}
+      onNodeClick={(_e, n) => {
+        const { state } = (n.data as PrNodeData).pr
+        if (state) host.openExternal(state.url)
+      }}
       proOptions={{ hideAttribution: true }}
       className="flow-canvas"
     >
