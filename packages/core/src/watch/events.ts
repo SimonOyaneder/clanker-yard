@@ -6,13 +6,22 @@ import type { Repos } from "../repos/repos";
 import type { Workspaces } from "../workspaces/workspaces";
 import { approvalEpoch, emitOnce, lastEvaluatedHead, markHead, recordMarks, type PrEventInput } from "../github/marks";
 import type { ErrorReporter } from "../errors/reporter";
-import { openPrsWithDetail, prRefOf } from "../github/pr-rows";
+import { closedPrsWithLiveChildren, openPrsWithDetail, prRefOf } from "../github/pr-rows";
+import { landedCommit } from "../github/landed";
 
 // Los eventos de Watch (`docs/design.html#d-ops`, "Watch: eventos y qué disparan"): de lo que cambió en un
 // PR salen los hechos nuevos, cada uno una sola vez por su clave en `watch_marks`.
 
 /** Varios pushes seguidos (fixups de council, restack de una cadena) dan un solo evento por sha final. */
 export const DEBOUNCE_MS = 20_000;
+
+/**
+ * Cuánto se sigue buscando en la base el commit de una cola de merge tras cerrarse un PR: la cola pushea a la base y
+ * cierra el PR casi a la vez, y Watch puede leer el cierre antes que el push.
+ */
+export const LANDED_GRACE_MS = 10 * 60_000;
+/** La marca de `watch_marks` de un PR cerrado cuya base ya se revisó (por su punta): no se vuelve a buscar. */
+const LANDED_CHECKED = "landed.checked";
 
 export interface PrEvents {
   /**
@@ -66,6 +75,14 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
     if (live && from !== undefined && row.headChangedAt !== null && at - row.headChangedAt < DEBOUNCE_MS) return; // `flush` vuelve a mirarlo.
 
     const facts = factsOf(state);
+    // Una cola de merge (bors) cierra el PR sin mergearlo: si su contenido ya está en la base, para el stack es un merge.
+    // Solo en un repo que el pack mergea con un comando a su cola (`merge.via: "comment"`): sin cola, un PR cerrado es eso.
+    let landedChecked = false;
+    if (state.state === "closed" && row.owned && state.merge.via === "comment") {
+      const landed = await landedOf(row, state);
+      if (landed) facts.push({ type: "pr.merged", keys: [state.key], payload: () => ({ sha: landed, headRef: state.headRef, baseRef: state.baseRef, queue: true }) });
+      landedChecked = landed !== undefined || at - Date.parse(state.updatedAt) > LANDED_GRACE_MS;
+    }
     if (live && from !== undefined && (await wasRewritten(row.repoId, from, state.headSha))) {
       facts.push({ type: "pr.base_rewritten", keys: [`${from}>${state.headSha}`], payload: () => ({ from, to: state.headSha }) });
     }
@@ -80,7 +97,15 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
         else emitOnce(tx, row, input, at);
       }
       markHead(tx, row.id, state.headSha, at);
+      if (landedChecked) recordMarks(tx, row.id, LANDED_CHECKED, [state.headSha], at);
     });
+  }
+
+  /** El commit de la base por defecto que trae lo del PR cerrado, si ya llegó. */
+  async function landedOf(row: PrRow, state: PrState): Promise<string | undefined> {
+    if ((await workspaces.fetch(row.repoId)) === "unauthorized") return undefined;
+    const { path, defaultBranch } = repos.config(row.repoId);
+    return landedCommit(path, { headSha: state.headSha, defaultBranch });
   }
 
   return {
@@ -95,6 +120,14 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
         const { detail } = row;
         const ref = prRefOf(repos, row);
         if (!detail || !ref || lastEvaluatedHead(store.db, row.id) === detail.headSha) continue;
+        enqueue(`events ${ref.repo}#${ref.number}`, () => evaluate(row, ref, detail, at));
+      }
+      // Los PRs del sistema que se cerraron con hijos vivos y nadie revisó si una cola los mergeó (por ejemplo, cerrados
+      // antes de que Watch supiera hacerlo): se revisan una vez.
+      for (const row of closedPrsWithLiveChildren(store.db, LANDED_CHECKED)) {
+        const ref = prRefOf(repos, row);
+        if (!row.detail || !ref || row.detail.merge.via !== "comment") continue;
+        const detail = row.detail;
         enqueue(`events ${ref.repo}#${ref.number}`, () => evaluate(row, ref, detail, at));
       }
       await queue;

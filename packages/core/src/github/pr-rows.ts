@@ -1,6 +1,6 @@
 import type { IssueId, PrRef, RepoId } from "@clanker/api";
 import { and, asc, eq, inArray, isNotNull, ne, type SQL } from "drizzle-orm";
-import { pullRequests } from "../store/schema";
+import { prParents, pullRequests, watchMarks } from "../store/schema";
 import type { Repos } from "../repos/repos";
 import type { Store } from "../store/store";
 import type { PrRow } from "./pr-cache";
@@ -80,4 +80,31 @@ export function prHold(db: Db, repoId: RepoId, number: number): boolean {
       .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, number)))
       .get()?.hold ?? false
   );
+}
+
+/**
+ * Los PRs del sistema cerrados (sin merge) con su detalle leído y algún hijo abierto o local, que todavía no tienen la
+ * marca `checked` en su punta: los que una cola de merge pudo haber mergeado sin que nadie lo revisara (Watch).
+ */
+export function closedPrsWithLiveChildren(db: Db, checked: string): PrRow[] {
+  return db
+    .select()
+    .from(pullRequests)
+    .where(and(eq(pullRequests.state, "closed"), eq(pullRequests.owned, true), isNotNull(pullRequests.detail)))
+    .all()
+    .filter((row) => {
+      const live = db
+        .select({ id: prParents.childId })
+        .from(prParents)
+        .innerJoin(pullRequests, eq(pullRequests.id, prParents.childId))
+        .where(and(eq(prParents.parentId, row.id), inArray(pullRequests.state, ["open", "local"])))
+        .get();
+      if (!live) return false;
+      const mark = db
+        .select({ id: watchMarks.id })
+        .from(watchMarks)
+        .where(and(eq(watchMarks.prId, row.id), inArray(watchMarks.kind, [checked, "pr.merged"])))
+        .get();
+      return !mark;
+    });
 }

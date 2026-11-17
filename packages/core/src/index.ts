@@ -123,6 +123,7 @@ export { NO_CI_GRACE_MS, prOfWaitKey, prWaits, signalPr } from "./github/pr-wait
 export { prPublishAction } from "./github/actions/publish";
 export { prPromoteAction, prSaveLocalAction } from "./github/actions/promote";
 export { createLocalPrDetails, type LocalPrDetails } from "./github/local-detail";
+export { landedCommit } from "./github/landed";
 
 export type { PrPublishDeps } from "./github/actions/publish";
 export { prPushFixupsAction } from "./github/actions/push-fixups";

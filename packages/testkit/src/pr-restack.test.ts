@@ -19,6 +19,7 @@ import {
   PermanentActionError,
   prPromoteAction,
   prPublishAction,
+  landedCommit,
   stackRestackAction,
   stackRestackRewrittenAction,
   type ActionCtx,
@@ -50,6 +51,7 @@ let restack: ReturnType<typeof stackRestackAction>;
 let restackRewritten: ReturnType<typeof stackRestackRewrittenAction>;
 let publish: ReturnType<typeof prPublishAction>;
 let promote: ReturnType<typeof prPromoteAction>;
+let packs: ReturnType<typeof createPacks>;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-restack-"));
@@ -73,7 +75,7 @@ beforeEach(async () => {
     remote: createGitRemote({ askpass, connections }),
   });
   const defs = createDefs({ store });
-  const packs = createPacks({ defs });
+  packs = createPacks({ defs });
   const packDir = join(dataDir, "pack");
   mkdirSync(packDir);
   writeFileSync(
@@ -541,6 +543,70 @@ describe("stack.restack con PRs locales", () => {
     expect(store.events.since(0, { types: ["pr.conflict"] })).toMatchObject([
       { subject: { type: "pr", id: b }, payload: { prId: b, local: true, sha: before, base: "main", files: ["a.txt"] } },
     ]);
+  });
+});
+
+describe("con una cola de merge que cierra el PR en vez de mergearlo (bors)", () => {
+  /** La estrategia de merge por comando del pack: la base se mergea con un comando a la cola, que cierra el PR. */
+  async function withMergeQueue() {
+    const packDir = join(dataDir, "pack-queue");
+    mkdirSync(packDir);
+    writeFileSync(
+      join(packDir, "pack.json"),
+      JSON.stringify({
+        id: "acme",
+        version: 2,
+        activate: { githubOrgs: ["octocat"] },
+        conventions: { councilPrefix: "[clanker-council] " },
+        mergeStrategy: { type: "comment", command: "/merge", queueCheck: "bors", ready: ["notDraft"], offer: ["notDraft"], auto: ["offer"], onOffer: "gate", onAuto: "act" },
+      }),
+    );
+    await packs.load(packDir);
+  }
+
+  test("la base cerrada con su squash ya en main cuenta como mergeada: los hijos locales se restackean sobre ese commit", async () => {
+    await withMergeQueue();
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const squash = squashOnMain("cla-1");
+    github.pr(1).close();
+
+    const result = await run(1);
+
+    expect(result.outcome).toBe("ok");
+    expect((result.output as Output).merge.sha).toBe(squash);
+    expect((result.output as Output & { promotable: unknown[] }).promotable).toEqual([{ prId: b, branch: "cla-2", base: "main" }]);
+    expect(repo.git("merge-base", "--is-ancestor", squash, "cla-2")).toBe("");
+  });
+
+  test("sin la estrategia de cola del pack, una base cerrada sigue siendo un PR cerrado", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    squashOnMain("cla-1");
+    github.pr(1).close();
+
+    await expect(run(1)).rejects.toThrow(PermanentActionError);
+  });
+
+  test("landedCommit da el primer commit de main que trae el PR, y nada antes de que llegue o si el PR no cambia nada", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
+    const head = remoteSha("cla-1");
+    repo.git("fetch", "--quiet", "origin");
+    expect(await landedCommit(repo.dir, { headSha: head, defaultBranch: "main" })).toBeUndefined();
+
+    const squash = squashOnMain("cla-1");
+    // Otro commit después: el primero que lo trae sigue siendo el squash.
+    elsewhere((git, dir) => {
+      git("checkout", "--quiet", "main");
+      write(dir, { "z.txt": "z\n" });
+      git("add", "--all");
+      git("commit", "--quiet", "--message", "chore: otro");
+      git("push", "--quiet", "origin", "main");
+    });
+    repo.git("fetch", "--quiet", "origin");
+
+    expect(await landedCommit(repo.dir, { headSha: head, defaultBranch: "main" })).toBe(squash);
+    expect(await landedCommit(repo.dir, { headSha: repo.git("rev-parse", "origin/main~2"), defaultBranch: "main" })).toBeUndefined();
   });
 });
 
