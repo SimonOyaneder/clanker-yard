@@ -31,5 +31,5 @@ export { createDevKit } from "./dev-tools";
 export type { DevKit } from "./dev-tools";
 export { seedLanes } from "./lanes-scenario";
 export { seedSummary, SUMMARY_PROJECT_SLUG } from "./summary-scenario";
-export { seedPrs, PR_BRANCHES } from "./prs-scenario";
+export { seedPrs, seedLocalPrBranches, PR_BRANCHES } from "./prs-scenario";
 export { seedLearnings } from "./learnings-scenario";

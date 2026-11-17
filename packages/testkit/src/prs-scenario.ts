@@ -1,6 +1,8 @@
 import type { Client, IssueId, RepoId, RunId } from "@clanker/api";
 import { type Store } from "@clanker/core";
-import type { CommitSpec } from "./git";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import type { CommitSpec, TempGitRepo } from "./git";
 import type { GitHubSim, SimPr } from "./github-sim";
 import { seedPr } from "@clanker/core/testing";
 
@@ -167,10 +169,48 @@ export async function seedPrs({
   const local = seedPr(store, {
     repoId, number: null, state: "local", headRef: "engine-rules-docs", baseRef: "engine-rules",
     title: "Documentar las reglas de boundaries", parents: [ids.get("engine-rules")!],
+    body: "## Qué cambia\n\n- Agrega `Boundaries::RulesService` con una regla por engine.\n- Documenta las reglas en `docs/boundaries.md`.\n\n## Cómo probarlo\n\n```\nbin/rails runner 'Boundaries::RulesService.new.rule_0(\"core\")'\n```\n",
     issueId: origin.issueId, runId: origin.runId,
   });
   seedPr(store, {
     repoId, number: null, state: "local", headRef: "engine-rules-rollout", baseRef: "engine-rules-docs",
     title: "Preparar el despliegue de las reglas", parents: [local],
   });
+}
+
+/** Un servicio Ruby de `n` métodos: largo para probar el scroll y con sintaxis para el color por lenguaje. */
+const rubyService = (n: number, extra = "") =>
+  [
+    "# frozen_string_literal: true",
+    "",
+    "module Boundaries",
+    "  # Reglas de qué engine puede llamar a cuál.",
+    "  class RulesService",
+    ...Array.from({ length: n }, (_, i) => [`    def rule_${i}(engine)`, `      return :allowed if engine == "core" # regla ${i}${extra}`, `      raise ArgumentError, "engine #{engine} no puede llamar a rule_${i}"`, "    end", ""]).flat(),
+    "  end",
+    "end",
+    "",
+  ].join("\n");
+
+/**
+ * Las branches de los dos PRs locales del escenario (`engine-rules-docs` sobre `engine-rules` y `engine-rules-rollout` sobre
+ * ella), que existen solo en el repo de la máquina, como las deja `pr.publish` en modo local: así la vista del PR local
+ * tiene commits y diff que mostrar. La primera tiene tres commits: un servicio Ruby largo, su doc y un cambio al servicio.
+ */
+export function seedLocalPrBranches(repo: TempGitRepo): void {
+  const commit = (files: Record<string, string>, message: string) => {
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(repo.dir, path)), { recursive: true });
+      writeFileSync(join(repo.dir, path), content);
+    }
+    repo.git("add", "--all");
+    repo.git("commit", "--quiet", "--message", message);
+  };
+  repo.git("checkout", "--quiet", "-b", "engine-rules-docs", "engine-rules");
+  commit({ "app/services/boundaries/rules_service.rb": rubyService(40) }, "feat(boundaries): servicio de reglas entre engines");
+  commit({ "docs/boundaries.md": "# Reglas de boundaries\n\n- Un engine solo llama a `core`.\n- Lo demás pasa por un puerto.\n" }, "docs(boundaries): documentar las reglas");
+  commit({ "app/services/boundaries/rules_service.rb": rubyService(40, " (revisada)") }, "refactor(boundaries): anotar las reglas revisadas\n\nCada regla dice que ya se revisó.");
+  repo.git("checkout", "--quiet", "-b", "engine-rules-rollout");
+  commit({ "config/rollout.yml": "boundaries:\n  enabled: true\n  engines:\n    - core\n    - payments\n" }, "chore(boundaries): rollout de las reglas");
+  repo.git("checkout", "--quiet", "main");
 }

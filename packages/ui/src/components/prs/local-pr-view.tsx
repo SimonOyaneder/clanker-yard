@@ -183,7 +183,7 @@ export function LocalPrView({ pr, onBack, onControls }: { pr: LocalPr; onBack: (
           <TabsContent value="commits" className="min-h-0 overflow-y-auto px-6 py-4">
             <Commits detail={detail} viewed={viewedCommits} onViewed={toggleCommit} onOpen={showCommit} />
           </TabsContent>
-          <TabsContent value="files" className="min-h-0 overflow-y-auto px-6 py-4">
+          <TabsContent value="files" className="flex min-h-0 flex-col">
             <Files
               pr={pr}
               detail={detail}
@@ -258,8 +258,9 @@ function Files({ pr, detail, commit, mode, onMode, onScope, viewed, onViewed, co
   const at = commit ? detail.commits.indexOf(commit) : -1
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="sticky top-0 z-10 -mx-6 flex flex-wrap items-center gap-2 border-b bg-background/95 px-6 pb-3 backdrop-blur">
+    <>
+      {/* La barra queda fija arriba y solo la lista de archivos hace scroll: el código nunca pasa por detrás de ella. */}
+      <div data-testid="local-pr-files-toolbar" className="flex flex-none flex-wrap items-center gap-2 border-b px-6 pt-4 pb-3">
         <Select value={sha ?? "all"} onValueChange={(v) => onScope(v)}>
           <SelectTrigger size="sm" className="w-[min(520px,60vw)]" aria-label="Qué commits ver">
             <SelectValue />
@@ -301,6 +302,8 @@ function Files({ pr, detail, commit, mode, onMode, onScope, viewed, onViewed, co
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
+      {/* En bloque, no flex: en una columna flex los archivos (con overflow-hidden) se encogerían en vez de hacer scroll. */}
+      <div data-testid="local-pr-files" className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-4">
       {commit?.body ? <p className="text-xs whitespace-pre-wrap text-muted-foreground">{commit.body}</p> : null}
       {source?.truncated ? (
         <p className="text-xs text-muted-foreground">El diff es muy grande y se muestra cortado: míralo completo con git diff {pr.local.base}...{pr.local.branch}.</p>
@@ -314,7 +317,8 @@ function Files({ pr, detail, commit, mode, onMode, onScope, viewed, onViewed, co
         const print = fileFingerprint(file)
         return <FileDiff key={`${sha ?? "all"}:${file.path}`} file={file} mode={mode} viewed={viewed.has(print)} onViewed={(on) => onViewed(print, on)} />
       })}
-    </div>
+      </div>
+    </>
   )
 }
 
@@ -424,7 +428,7 @@ function SplitCell({ line, side, language }: { line: DiffLine | undefined; side:
         {line ? (side === "old" ? line.old : line.new) : ""}
       </td>
       <td className={cn("select-none text-center align-top text-muted-foreground", tone)}>{sign(line)}</td>
-      <td className={cn("pr-3 break-all whitespace-pre-wrap", tone)}>{line ? <Code line={line} language={language} /> : null}</td>
+      <td className={cn("pr-3 break-words whitespace-pre-wrap", tone)}>{line ? <Code line={line} language={language} /> : null}</td>
     </>
   )
 }
