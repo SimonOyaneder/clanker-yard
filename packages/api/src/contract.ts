@@ -22,7 +22,7 @@ import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
 import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
-import { CachedPr, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
+import { CachedPr, LocalCommitDiff, LocalPrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync, RepoOverview } from "./repos";
@@ -378,6 +378,16 @@ const prs = {
    * `BAD_REQUEST` si el PR no existe o ya no es local. Devuelve la corrida, que aparece en el proyecto que lo abrió.
    */
   publishLocal: base.input(z.object({ id: z.string().min(1) })).output(z.object({ runId: RunId })),
+  /**
+   * Lo que se ve de un PR local sin GitHub: su título y descripción guardados, los commits sobre su base y el diff
+   * contra ella, leídos del repo. `NOT_FOUND` si el PR no existe; `BAD_REQUEST` si no es local o su branch ya no está.
+   */
+  localDetail: base.input(z.object({ id: z.string().min(1) })).output(LocalPrDetail),
+  /**
+   * El diff de un commit de un PR local contra su padre, para revisarlo commit por commit. `BAD_REQUEST` si el commit no
+   * es de los del PR (los de `localDetail`).
+   */
+  localCommitDiff: base.input(z.object({ id: z.string().min(1), sha: z.string().regex(/^[0-9a-f]{7,40}$/) })).output(LocalCommitDiff),
   /**
    * Rehace los PRs abiertos del sistema con la branch (`eng-1234-slug`), el autor y los commits de las reglas de hoy, en
    * orden de stack (los padres antes que los hijos): el mismo cambio, abierto como PR nuevo ("Reemplaza a #n") y el

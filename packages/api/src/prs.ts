@@ -278,3 +278,46 @@ export function rebaseBlocker({ state, threads }: Pick<PrState, "state" | "threa
   if (threads.councilEver) return "tiene threads de council: rebasear reescribiría su historia y eso nunca se fuerza";
   return undefined;
 }
+
+/** Un commit de un PR local, del más viejo al más nuevo. */
+export const LocalPrCommit = z.object({
+  sha: z.string(),
+  subject: z.string(),
+  /** El cuerpo del mensaje, sin el asunto. */
+  body: z.string(),
+  author: z.string(),
+  /** ISO 8601, la fecha de autor. */
+  date: z.string(),
+});
+export type LocalPrCommit = z.infer<typeof LocalPrCommit>;
+
+/** Un archivo que cambia el PR local, como lo cuenta `git diff --numstat` (binario: `null`). */
+export const LocalPrFile = z.object({ path: z.string(), additions: z.int().nullable(), deletions: z.int().nullable() });
+export type LocalPrFile = z.infer<typeof LocalPrFile>;
+
+/**
+ * `prs.localDetail`: lo que se ve de un PR local (stacks locales) sin GitHub, leído del repo en cada pedido. El diff es
+ * contra el punto donde la branch sale de su base (`git diff base...branch`, como GitHub), y `patch` se corta en
+ * `LOCAL_PR_PATCH_MAX` caracteres (`truncated`).
+ */
+export const LocalPrDetail = z.object({
+  id: z.string(),
+  repo: z.string(),
+  branch: z.string(),
+  base: z.string(),
+  title: z.string(),
+  body: z.string(),
+  head: z.string(),
+  commits: z.array(LocalPrCommit),
+  files: z.array(LocalPrFile),
+  patch: z.string(),
+  truncated: z.boolean(),
+});
+export type LocalPrDetail = z.infer<typeof LocalPrDetail>;
+
+/** `prs.localCommitDiff`: el diff de un solo commit de un PR local (contra su padre), para revisarlo commit por commit. */
+export const LocalCommitDiff = z.object({ sha: z.string(), files: z.array(LocalPrFile), patch: z.string(), truncated: z.boolean() });
+export type LocalCommitDiff = z.infer<typeof LocalCommitDiff>;
+
+/** Hasta dónde llega el `patch` de `prs.localDetail`: más que esto no se lee en pantalla y congela la vista. */
+export const LOCAL_PR_PATCH_MAX = 2_000_000;

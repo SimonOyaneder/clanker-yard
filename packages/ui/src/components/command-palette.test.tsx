@@ -44,7 +44,7 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
       <RunCommandsProvider>
         <HostProvider value={host}>
           <AppActionsContext.Provider value={actions as unknown as AppActions}>
-            <PrCommandsProvider prs={prs} projects={[project!]} onOpenRun={() => {}}>
+            <PrCommandsProvider prs={prs} projects={[project!]} onOpenRun={() => {}} onOpenLocal={() => {}}>
             <CommandPalette
               open
               onOpenChange={() => {}}

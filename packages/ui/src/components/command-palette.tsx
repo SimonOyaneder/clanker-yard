@@ -1,5 +1,6 @@
 import type { CachedIssue, ClankerProject, Decision, QueueEntry, Run, RunId } from "@clanker/api"
-import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, Upload, X } from "lucide-react"
+import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, Upload, X, Eye, Rows2, Columns2, ChevronLeft, ChevronRight, GitCommitHorizontal } from "lucide-react"
+import { LOCAL_PR_KEYS, type LocalPrControls } from "@/components/prs/local-pr-view"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs/prs"
 import { branchOf, keyOf, repoNameOf, titleOf } from "@/lib/prs/prs"
@@ -48,6 +49,8 @@ interface Props {
   prs: OpenPr[]
   /** Solo en Stacks de PR: las acciones del PR enfocado son acciones de la paleta. */
   prsActive: boolean
+  /** Solo con la vista de un PR local abierta: el modo del diff y moverse entre sus commits. */
+  localPr?: LocalPrControls | null
   /** Solo en Learnings: lo que se puede hacer con lo marcado o con el learning a la vista, y deshacer si hay algo que deshacer. */
   learnings: { view: LearningsView; onUndo: (() => void) | null } | null
   /** Las decisiones pendientes: ⏎ en una la abre en la bandeja. */
@@ -71,7 +74,7 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, prs, prsActive, learnings, pendingDecisions, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, prs, prsActive, localPr = null, learnings, pendingDecisions, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
   const prCommands = usePrCommands()
@@ -158,6 +161,12 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
                 </CommandItem>
               </>
             ) : null}
+            {selectedPr.local ? (
+              <CommandItem value="pr ver pr local descripción commits diff" onSelect={run(() => prCommands.viewLocal(selectedPr))}>
+                <Eye /> Ver PR local
+                <CommandShortcut>{PR_KEYS.viewLocal}</CommandShortcut>
+              </CommandItem>
+            ) : null}
             {selectedPr.local && prCaps.publishLocal ? (
               <CommandItem value="pr publicar ahora en github local" onSelect={run(() => prCommands.publishLocal(selectedPr))}>
                 <Upload /> Publicar ahora
@@ -168,6 +177,33 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
               <CommandItem value="pr ver corrida" onSelect={run(() => prCommands.openRun(selectedPr))}>
                 <ScrollText /> Ver la corrida que lo abrió
                 <CommandShortcut>{PR_KEYS.run}</CommandShortcut>
+              </CommandItem>
+            ) : null}
+          </CommandGroup>
+        ) : null}
+
+        {localPr ? (
+          <CommandGroup heading="Este PR local">
+            <CommandItem value="diff lado a lado unificado modo" onSelect={run(localPr.toggleMode)}>
+              {localPr.mode === "split" ? <Rows2 /> : <Columns2 />} {localPr.mode === "split" ? "Ver el diff unificado" : "Ver el diff lado a lado"}
+              <CommandShortcut>{LOCAL_PR_KEYS.mode}</CommandShortcut>
+            </CommandItem>
+            {localPr.prevCommit ? (
+              <CommandItem value="commit anterior revisar" onSelect={run(localPr.prevCommit)}>
+                <ChevronLeft /> Commit anterior
+                <CommandShortcut>{LOCAL_PR_KEYS.prev}</CommandShortcut>
+              </CommandItem>
+            ) : null}
+            {localPr.nextCommit ? (
+              <CommandItem value="commit siguiente revisar" onSelect={run(localPr.nextCommit)}>
+                <ChevronRight /> Commit siguiente
+                <CommandShortcut>{LOCAL_PR_KEYS.next}</CommandShortcut>
+              </CommandItem>
+            ) : null}
+            {localPr.allCommits ? (
+              <CommandItem value="ver todos los commits diff completo" onSelect={run(localPr.allCommits)}>
+                <GitCommitHorizontal /> Ver todos los commits
+                <CommandShortcut>{LOCAL_PR_KEYS.all}</CommandShortcut>
               </CommandItem>
             ) : null}
           </CommandGroup>

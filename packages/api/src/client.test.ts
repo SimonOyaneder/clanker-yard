@@ -159,6 +159,12 @@ const router = os.router({
     publishLocal: os.prs.publishLocal.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    localDetail: os.prs.localDetail.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    localCommitDiff: os.prs.localCommitDiff.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     republish: os.prs.republish.handler(() => ({ id: "rep_1", done: true, results: [] })),
     republishProgress: os.prs.republishProgress.handler(() => ({ id: "rep_1", done: true, results: [] })),
   },

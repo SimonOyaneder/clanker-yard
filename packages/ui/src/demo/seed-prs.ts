@@ -1,4 +1,4 @@
-import type { CachedPr, IssueId, PrSignal, PrState, ReviewerState } from "@clanker/api"
+import type { CachedPr, IssueId, LocalCommitDiff, LocalPrDetail, PrSignal, PrState, ReviewerState } from "@clanker/api"
 
 // Stacks de PR de ejemplo para desarrollar la UI sin core: lo que `prs.list` serviría con el caché de Watch ya
 // leído. Todo cuelga de `now`, así "hace 2 min" se ve igual cada vez que se abre y los tests no dependen del reloj.
@@ -257,4 +257,60 @@ export function buildOpenPrs(now: number): CachedPr[] {
       merge: { ready: true, blockers: [] },
     }),
   ]
+}
+
+/** El detalle de ejemplo de un PR local (`prs.localDetail`): descripción, dos commits y su diff. */
+export function seedLocalPrDetail(id: string, local: NonNullable<CachedPr["local"]>, now: number): LocalPrDetail {
+  const at = (hoursAgo: number) => new Date(now - hoursAgo * 3_600_000).toISOString()
+  return {
+    id,
+    repo: "acme/ledger",
+    branch: local.branch,
+    base: local.base,
+    title: local.title,
+    body: `## Qué cambia\n\n- ${local.title}.\n- Suma un test que cubre el caso sin entradas.\n\n## Cómo probarlo\n\nCorre los specs de entradas.`,
+    head: "9f2c4e1ab7d03c55e18f0b6a2d4c7e9f01b3a5c8",
+    commits: [
+      { sha: "4e1ab7d03c55e18f0b6a2d4c7e9f01b3a5c89f2c", subject: `feat(entries): ${local.title.toLowerCase()}`, body: "Lo usa el tablero de conciliación.", author: "Ana Pérez", date: at(5) },
+      { sha: "9f2c4e1ab7d03c55e18f0b6a2d4c7e9f01b3a5c8", subject: "test(entries): cubrir el caso sin entradas", body: "", author: "Ana Pérez", date: at(4) },
+    ],
+    files: [
+      { path: "app/models/entry_index.rb", additions: 3, deletions: 1 },
+      { path: "spec/models/entry_index_spec.rb", additions: 4, deletions: 0 },
+    ],
+    patch: [
+      "diff --git a/app/models/entry_index.rb b/app/models/entry_index.rb",
+      "index 1a2b3c4..5d6e7f8 100644",
+      "--- a/app/models/entry_index.rb",
+      "+++ b/app/models/entry_index.rb",
+      "@@ -12,4 +12,6 @@ class EntryIndex",
+      "   def refresh",
+      "-    rebuild",
+      "+    return if entries.none?",
+      "+",
+      "+    rebuild(concurrently: true)",
+      "   end",
+      " end",
+      "diff --git a/spec/models/entry_index_spec.rb b/spec/models/entry_index_spec.rb",
+      "new file mode 100644",
+      "index 0000000..9a8b7c6",
+      "--- /dev/null",
+      "+++ b/spec/models/entry_index_spec.rb",
+      "@@ -0,0 +1,4 @@",
+      "+describe EntryIndex do",
+      "+  it { expect(described_class.new.refresh).to be_nil }",
+      "+end",
+      "+",
+      "",
+    ].join("\n"),
+    truncated: false,
+  }
+}
+
+/** El diff de un commit del detalle de ejemplo: el primero cambia el modelo y el segundo agrega el spec. */
+export function seedLocalCommitDiff(detail: LocalPrDetail, sha: string): LocalCommitDiff {
+  const at = detail.commits.findIndex((c) => c.sha === sha)
+  if (at === -1) throw new Error(`El commit ${sha.slice(0, 9)} no es de ${detail.branch}.`)
+  const parts = detail.patch.split(/(?=^diff --git )/m)
+  return { sha, files: [detail.files[at]!], patch: parts[at] ?? "", truncated: false }
 }

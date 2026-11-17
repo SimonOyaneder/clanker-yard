@@ -6,7 +6,7 @@ import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanke
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, openDecision, openStore } from "@clanker/core";
 import { JUGUETE_FLOW, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core/testing";
 import { startCore } from "../src/start-core";
-import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedLearnings, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
+import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedLocalPrBranches, seedLearnings, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
 // y tres repos git temporales (sin receta, con una válida y con una inválida). Publica `core.json` en
@@ -51,6 +51,8 @@ const fixtures = fileURLToPath(new URL("../fixtures/runs/juguete-lento", import.
 const store = openStore({ path: join(home, "clanker.db") });
 const prsScenario = process.env.DEMO_SCENARIO === "prs";
 const repo = tempGitRepo({ remote: true, ...(prsScenario && { branches: PR_BRANCHES }) });
+// Los PRs locales del escenario viven solo en este repo: sus branches no se pushean.
+if (prsScenario) seedLocalPrBranches(repo);
 const withRecipe = tempGitRepo({
   commits: [
     {

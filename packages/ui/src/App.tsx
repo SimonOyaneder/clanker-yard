@@ -19,6 +19,7 @@ import { RunCommandsProvider, useRunCommands } from "@/components/run/run-comman
 import type { StepTab } from "@/components/run/step-panel"
 import { RunView, type RunTab } from "@/components/run/run-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
+import { type LocalPrControls, LocalPrView } from "@/components/prs/local-pr-view"
 import { PrsView } from "@/components/prs/prs-view"
 import { SetupChecklist } from "@/components/setup-checklist"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
@@ -47,7 +48,7 @@ import { useCoreState } from "@/lib/core-status"
 import { ACTIONABLE_KINDS, NOTE_KINDS, parksRun } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
 import { reviewStatus } from "@/lib/prs/pr-status"
-import { openPrsOf } from "@/lib/prs/prs"
+import { type LocalPr, openPrsOf } from "@/lib/prs/prs"
 import { runCaps } from "@/lib/project/run-commands"
 import { shapeOf } from "@/lib/run-graph"
 import { withPending } from "@/lib/learnings"
@@ -58,12 +59,17 @@ import { cn, messageOf } from "@/lib/utils"
 import { Hint } from "./components/common"
 import { PageLoadError } from "@/components/page-load-error"
 
-// Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`
-// y `tab` el `:tab` de `/p/:proyecto/:tab`.
-type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null; tab: ProjectTab }
+// Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`,
+// `tab` el `:tab` de `/p/:proyecto/:tab` y `prId` el PR local abierto en Stacks de PR.
+type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null; tab: ProjectTab; prId: string | null }
 
 const sameLoc = (a: Loc, b: Loc) =>
-  a.module === b.module && (a.module === "inbox" ? a.decision === b.decision : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId && a.tab === b.tab))
+  a.module === b.module &&
+  (a.module === "inbox"
+    ? a.decision === b.decision
+    : a.module === "prs"
+      ? a.prId === b.prId
+      : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId && a.tab === b.tab))
 
 
 const NO_REPOS: readonly Repo[] = []
@@ -112,6 +118,9 @@ function Shell() {
   const connectionsQuery = useLiveQuery("connections", () => appData.connections())
   const connections = useMemo(() => connectionsQuery.data ?? [], [connectionsQuery.data])
   const [decisionId, setDecisionId] = useState<DecisionId | null>(null)
+  const [prId, setPrId] = useState<string | null>(null)
+  // Lo que la vista del PR local abierta le deja hacer a la paleta (modo del diff, commit anterior o siguiente).
+  const [localPrControls, setLocalPrControls] = useState<LocalPrControls | null>(null)
   const decisionsQuery = useLiveQuery("decisions", () => appData.decisions({ kind: ACTIONABLE_KINDS }))
   const decisions = useMemo(() => decisionsQuery.data ?? [], [decisionsQuery.data])
   const resolver = useDecisionResolver(decisions, decisionsQuery.reload)
@@ -167,6 +176,8 @@ function Shell() {
     if (module === "prs") reloadPrs()
   }, [module, reloadPrs])
   const openPrs = useMemo(() => openPrsOf(prsQuery.data ?? []), [prsQuery.data])
+  // El PR local abierto; si se publicó o ya no está, la vista vuelve a los stacks.
+  const localPr = prId === null ? undefined : openPrs.find((p): p is LocalPr => p.id === prId && p.local !== null)
   // La configuración inicial, cuando ya llegó todo lo que la decide (antes, ni el pie ni la bienvenida la muestran a medias).
   const setup = useMemo(
     () =>
@@ -206,10 +217,11 @@ function Shell() {
       setRunId(l.runId)
       setDecisionId(l.decision)
       setTab(l.tab)
+      setPrId(l.prId)
     },
     [setModule],
   )
-  const { go, replace, goBack, goForward } = useNavHistory<Loc>({ module, slug, runId, decision: decisionId, tab }, apply, sameLoc)
+  const { go, replace, goBack, goForward } = useNavHistory<Loc>({ module, slug, runId, decision: decisionId, tab, prId }, apply, sameLoc)
 
   const selectProject = useCallback((s: string) => go({ module: "projects", slug: s, runId: null }), [go])
   const barSlugs = barProjects(projects).map((p) => p.slug)
@@ -217,6 +229,8 @@ function Shell() {
   const goConnections = useCallback(() => go({ module: "connections" }), [go])
   const goInbox = useCallback(() => go({ module: "inbox", decision: null }), [go])
   const goLearnings = useCallback(() => go({ module: "learnings" }), [go])
+  const openLocalPr = useCallback((id: string) => go({ module: "prs", prId: id }), [go])
+  const closeLocalPr = useCallback(() => go({ module: "prs", prId: null }), [go])
   const openDecision = useCallback((id: DecisionId) => go({ module: "inbox", decision: id }), [go])
   // J y K recorren la lista sin llenar el historial de atrás/adelante: reemplazan el lugar en vez de sumar uno.
   const selectDecision = useCallback((id: DecisionId) => replace({ module: "inbox", decision: id }), [replace])
@@ -267,7 +281,7 @@ function Shell() {
   const projectActions = useProjectActions(useCallback((s: string, id: RunId) => go({ module: "projects", slug: s, runId: id }), [go]))
   const actions = useMemo<AppActions>(
     () => ({
-      goModule: (to) => (to === "inbox" ? goInbox() : go({ module: to })),
+      goModule: (to) => (to === "inbox" ? goInbox() : go({ module: to, prId: null })),
       openPalette: () => setPaletteOpen(true),
       openShortcuts: () => setShortcutsOpen(true),
       toggleSidebar: () => setSidebarOpen(!sidebarOpen),
@@ -308,7 +322,7 @@ function Shell() {
       else if (action === "back") goBack()
       else if (action === "forward") goForward()
       else if (action === "shortcuts") setShortcutsOpen(true)
-      else if (action === "go-prs") go({ module: "prs" })
+      else if (action === "go-prs") go({ module: "prs", prId: null })
       else if (action === "go-inbox") goInbox()
       else if (action === "go-learnings") goLearnings()
     },
@@ -353,7 +367,7 @@ function Shell() {
 
   return (
     <AppActionsContext.Provider value={actions}>
-      <PrCommandsProvider prs={openPrs} projects={projects} onOpenRun={actions.openRun}>
+      <PrCommandsProvider prs={openPrs} projects={projects} onOpenRun={actions.openRun} onOpenLocal={openLocalPr}>
       <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} className="h-full min-h-0">
         <AppSidebar
           projects={projects}
@@ -392,7 +406,17 @@ function Shell() {
               ) : module === "learnings" ? (
                 <span className="truncate px-1.5 font-medium">Learnings</span>
               ) : module === "prs" ? (
-                <span className="truncate px-1.5 font-medium">Stacks de PR</span>
+                localPr ? (
+                  <>
+                    <button type="button" onClick={closeLocalPr} className="truncate rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                      Stacks de PR
+                    </button>
+                    <ChevronRight className="size-3.5 flex-none text-muted-foreground" />
+                    <span className="flex-none font-mono text-xs text-muted-foreground">{localPr.local.branch}</span>
+                  </>
+                ) : (
+                  <span className="truncate px-1.5 font-medium">Stacks de PR</span>
+                )
               ) : module === "connections" ? (
                 <span className="truncate px-1.5 font-medium">Conexiones</span>
               ) : module === "flows" ? (
@@ -439,7 +463,7 @@ function Shell() {
             </main>
           ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />
+              {localPr ? <LocalPrView pr={localPr} onBack={closeLocalPr} onControls={setLocalPrControls} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
             </main>
           ) : module === "flows" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
@@ -497,6 +521,7 @@ function Shell() {
         queue={module === "projects" && !runId ? (detail?.queue ?? []) : null}
         prs={openPrs}
         prsActive={module === "prs"}
+        localPr={module === "prs" && localPr ? localPrControls : null}
         learnings={module === "learnings" ? { view: learningsView, onUndo: triage.canUndo ? () => void triage.undo() : null } : null}
         pendingDecisions={inbox.pending}
         onUndoDecision={resolver.canUndo ? () => void undo() : null}
