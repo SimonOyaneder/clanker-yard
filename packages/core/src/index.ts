@@ -120,6 +120,7 @@ export type { Recipes } from "./recipe/recipe";
 export { commitsApplyAction } from "./commits/apply";
 export { NO_CI_GRACE_MS, prOfWaitKey, prWaits, signalPr } from "./github/pr-waits";
 export { prPublishAction } from "./github/actions/publish";
+export { prPromoteAction } from "./github/actions/promote";
 
 export type { PrPublishDeps } from "./github/actions/publish";
 export { prPushFixupsAction } from "./github/actions/push-fixups";

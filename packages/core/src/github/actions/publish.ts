@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IssueId, PrRef, RunId, RepoId } from "@clanker/api";
-import { RequestError } from "@octokit/request-error";
 import { and, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
 import { ApplyArgs, cleanMessage, commitsApplyAction } from "../../commits/apply";
@@ -21,9 +20,8 @@ import { type CombinedBaseParent, combinedBases, issues, prParents, projects, pu
 import type { Store, Tx } from "../../store/store";
 import type { RepoConfig } from "../../repos/repos";
 import { RebaseError, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
-import type { GitHubClient } from "../client";
 import { pushOrThrow } from "./push";
-import { messageOf } from "../../errors/format";
+import { assignOrNote, findOpenPull, openPull, type Pull } from "./pulls";
 
 const PublishArgs = ApplyArgs.extend({
   /** El reporte del committer: de él lee los commits (como `commits.apply`) y el título y cuerpo del PR. */
@@ -37,16 +35,6 @@ const PublishArgs = ApplyArgs.extend({
   forceRemote: z.boolean().optional(),
 });
 
-/** Lo que la acción lee de un PR de la API REST. */
-const Pull = z.object({
-  number: z.int().positive(),
-  node_id: z.string(),
-  html_url: z.string(),
-  state: z.enum(["open", "closed"]),
-  draft: z.boolean(),
-  head: z.object({ sha: z.string() }),
-});
-type Pull = z.infer<typeof Pull>;
 
 export interface PrPublishDeps {
   store: Store;
@@ -291,52 +279,6 @@ export function titleWithKey(title: string, key: string | undefined): string {
   if (!key) return title;
   const bare = title.replaceAll(`[${key}]`, " ").replace(/\s+/g, " ").trim();
   return bare ? `[${key}] ${bare}` : `[${key}]`;
-}
-
-/**
- * Asigna el PR a la cuenta con que se publicó. Un fallo (p. ej. sin permiso) no tumba la publicación: queda una nota
- * en la Bandeja. Un 401 sí lo relanza, para que el flujo del 401 de `pr.publish` marque la conexión revocada.
- */
-async function assignOrNote(store: Store, client: GitHubClient, runId: RunId, pr: { owner: string; repo: string; number: number; assignee: string }): Promise<void> {
-  try {
-    await client.request("POST /repos/{owner}/{repo}/issues/{issue_number}/assignees", {
-      owner: pr.owner,
-      repo: pr.repo,
-      issue_number: pr.number,
-      assignees: [pr.assignee],
-    });
-  } catch (error) {
-    if (error instanceof RequestError && error.status === 401) throw error;
-    const why = messageOf(error);
-    store.tx((tx) =>
-      openDecision(tx, {
-        kind: "note",
-        title: `${pr.owner}/${pr.repo}#${pr.number} quedó sin assignee`,
-        body: `No se pudo asignar el PR a ${pr.assignee}: ${why}. La publicación siguió; asígnalo a mano si hace falta.`,
-        runId,
-      }),
-    );
-  }
-}
-
-async function findOpenPull(client: GitHubClient, owner: string, repo: string, branch: string): Promise<Pull | undefined> {
-  const { data } = await client.request("GET /repos/{owner}/{repo}/pulls", {
-    owner,
-    repo,
-    head: `${owner}:${branch}`,
-    state: "open",
-  });
-  return z.array(Pull).parse(data)[0];
-}
-
-async function openPull(
-  client: GitHubClient,
-  owner: string,
-  repo: string,
-  pull: { title: string; body: string; head: string; base: string; draft: boolean },
-): Promise<Pull> {
-  const { data } = await client.request("POST /repos/{owner}/{repo}/pulls", { owner, repo, ...pull });
-  return Pull.parse(data);
 }
 
 /**
