@@ -122,7 +122,11 @@ export const TECHLEAD_CLASICO: FlowDef = {
       type: "action",
       action: "pr.publish",
       args: { ws: "$ws", plan: "$commit", draft: true, dependsOn: "$run.params.dependsOn" },
-      on: { ok: "feedback", replan: { to: "commit", maxRounds: 2, exhausted: "@failed" } },
+      on: {
+        ok: "feedback",
+        local: { to: "@done", note: "PR local: se publica cuando se mergee su base" },
+        replan: { to: "commit", maxRounds: 2, exhausted: "@failed" },
+      },
     },
     feedback: {
       type: "flow",
@@ -841,8 +845,14 @@ export const REPUBLISH_PR: FlowDef = {
         plan: { commits: "$commit.commits", pr: { title: "$run.params.title", body: "$run.params.body" } },
         draft: "$run.params.draft",
         expectTree: "$replay.tree",
+        forceRemote: true,
       },
-      on: { ok: "supersede", replan: { to: "commit", maxRounds: 2, exhausted: "discard" }, error: "discard" },
+      on: {
+        ok: "supersede",
+        local: "discard",
+        replan: { to: "commit", maxRounds: 2, exhausted: "discard" },
+        error: "discard",
+      },
     },
     discard: {
       type: "action",

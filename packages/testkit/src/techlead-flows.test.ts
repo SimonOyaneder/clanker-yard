@@ -250,6 +250,25 @@ describe("techlead-clasico con el runtime fake", () => {
     expect(pr.node().comments.map((c) => c.body.split("\n")[0])).toEqual(["/review"]);
   });
 
+  test("un PR local termina en done con una nota y sin feedback", async () => {
+    const { flows, store, stubs, pr } = await setup({
+      fixtures: fixtures("base", "reviews-ok"),
+      script: { "pr.publish": ["local"] },
+    });
+    saveTemplates(flows);
+
+    const { runId, run, nodes } = await runTechlead(flows, store, { base: "cla-0" });
+
+    expect(run).toMatchObject({ status: "done", outcome: "done" });
+    expect(nodes).toEqual(["ws", "plan", "plan-check", "implement", "checks", "reviews", "sync", "commit", "publish"]);
+    expect(run.steps.find((s) => s.nodeId === "publish")).toMatchObject({ status: "done", outcome: "local" });
+    expect(notes(store, runId)).toEqual(["PR local: se publica cuando se mergee su base"]);
+    expect(flows.listRuns().filter((r) => r.parentRunId === runId)).toEqual([]);
+    expect(stubs.calls["pr.botReview"]).toBeUndefined();
+    expect(stubs.calls["pr.ci"]).toBeUndefined();
+    expect(pr.node().comments).toEqual([]);
+  });
+
   test("dependsOn de los params llega a pr.publish y sin él va vacío", async () => {
     const { flows, store, stubs } = await setup({ fixtures: fixtures("base", "reviews-ok") });
     saveTemplates(flows);

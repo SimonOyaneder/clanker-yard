@@ -109,6 +109,18 @@ const flowNodes = [
 ];
 
 describe("calza con los flujos de la plantilla", () => {
+  test("un PR local termina techlead-clasico sin feedback y deja una nota", () => {
+    expect(clankerLoopTemplate.flows["techlead-clasico"]!.nodes.publish?.on?.local).toEqual({
+      to: "@done",
+      note: "PR local: se publica cuando se mergee su base",
+    });
+  });
+
+  test("republish-pr publica en remoto aunque el proyecto use stacks locales", () => {
+    const publish = clankerLoopTemplate.flows["republish-pr"]!.nodes.publish;
+    expect(publish).toMatchObject({ args: { forceRemote: true }, on: { ok: "supersede", local: "discard" } });
+  });
+
   test.each(flowNodes.map((n) => [`${n.role} ${n.mode}`, n] as const))("%s", (_name, node) => {
     const spec = roles[node.role]?.modes[node.mode];
     expect(spec, "el rol o el modo no existe").toBeDefined();

@@ -1,9 +1,14 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { IssueId, PrRef, RunId, RepoId } from "@clanker/api";
 import { RequestError } from "@octokit/request-error";
 import { and, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
 import { ApplyArgs, cleanMessage, commitsApplyAction } from "../../commits/apply";
 import { preparePush } from "../../commits/prepare-push";
+import { tryGit } from "../../git/git";
+import { snapshotTree } from "../../git/tree";
 import type { Connections } from "../../connections/connections";
 import { openDecision } from "../../decisions/decisions";
 import { githubUnauthorized } from "../../breakers/breakers";
@@ -12,8 +17,8 @@ import { claimPr } from "../../flows/subjects";
 import type { Packs } from "../../packs/packs";
 import type { Recipes } from "../../recipe/recipe";
 import { newId } from "../../store/conventions";
-import { type CombinedBaseParent, combinedBases, issues, prParents, pullRequests, runs, workspaces as workspacesTable } from "../../store/schema";
-import type { Store } from "../../store/store";
+import { type CombinedBaseParent, combinedBases, issues, prParents, projects, pullRequests, runs, workspaces as workspacesTable } from "../../store/schema";
+import type { Store, Tx } from "../../store/store";
 import type { RepoConfig } from "../../repos/repos";
 import { RebaseError, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
 import type { GitHubClient } from "../client";
@@ -29,6 +34,7 @@ const PublishArgs = ApplyArgs.extend({
   dependsOn: z.array(z.string().regex(/^[^\s#]+#\d+$/, "debe ser repo#n")).default([]),
   /** El árbol que los commits deben dejar (`pr.replay` lo calcula al rehacer un PR): otro y no se publica nada. */
   expectTree: z.string().optional(),
+  forceRemote: z.boolean().optional(),
 });
 
 /** Lo que la acción lee de un PR de la API REST. */
@@ -71,7 +77,9 @@ export interface PrPublishDeps {
  *
  * Outcomes: `ok` (output `pr`: la `PrRef`, más `url` y `head`) y `replan` (`failures` va de vuelta al
  * committer: el plan no se puede aplicar, no trae commits, un hook rechazó un commit o los commits
- * del agente no cuadran).
+ * del agente no cuadran). Con `stackMode: "local"` y base distinta de la branch por defecto, `local`
+ * devuelve `{ prId, branch, base, head }` sin push ni PR remoto; el autosquash se prepara en un worktree
+ * separado y su resultado se guarda antes de mover la branch, para poder retomar un corte.
  */
 export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishArgs> {
   const { store, workspaces, packs } = deps;
@@ -81,7 +89,7 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     const { ws, plan } = args;
     const row = store.db.select().from(workspacesTable).where(eq(workspacesTable.id, ws.workspaceId)).get();
     if (!row) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
-    const { remote } = deps.repoConfig(row.repoId);
+    const { remote, defaultBranch } = deps.repoConfig(row.repoId);
     if (!remote) throw new PermanentActionError(`El repo ${row.repoId} no tiene remoto configurado: no se puede publicar.`);
 
     const applied = await apply.run(args, ctx);
@@ -98,6 +106,54 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     // Un padre pudo mergearse mientras la corrida trabajaba: nadie recalcula una base que aún no tiene PR, así que se hace aquí.
     const settled = await ctx.once("base", () => settleBase(deps, ctx.runId, ws, row, tip));
 
+    const [owner = "", name = ""] = remote.repo.split("/");
+    const pack = packs.packFor({ githubOrg: owner });
+    const title = titleWithKey(cleanMessage(plan.pr.title).split("\n")[0]!.trim(), issueKey(store, ctx.runId));
+    const { baseRef, parents } = settled;
+    const body = prBody(cleanMessage(plan.pr.body), pack.conventions.pr?.omitSections ?? [], args.dependsOn, parents);
+    const run = store.db.select().from(runs).where(eq(runs.id, ctx.runId)).get();
+    const localMode = await ctx.once("mode", async () => {
+      const project = run?.projectId ? store.db.select({ stackMode: projects.stackMode }).from(projects).where(eq(projects.id, run.projectId)).get() : undefined;
+      return !args.forceRemote && project?.stackMode === "local" && baseRef !== defaultBranch;
+    });
+    if (localMode) {
+      const local = await ctx.once("local", async () => {
+        workspaces.validate(ws);
+        const existing = store.db.select().from(pullRequests)
+          .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, ws.branch), eq(pullRequests.state, "local"))).get();
+        if (existing) return { prId: existing.id, branch: existing.headRef, base: existing.baseRef, head: existing.headSha };
+
+        const prepared = await ctx.once("local:prepare", () => prepareLocal(workspaces, ws, settled.head, args.messagePattern));
+        if (prepared.outcome === "replan") return { replan: prepared.failures };
+        if (prepared.outcome === "squash-failed") throw new PermanentActionError(prepared.failures);
+        const current = await workspaces.git(ws, "rev-parse", "HEAD");
+        if ((current !== prepared.before && current !== prepared.head) || await snapshotTree(ws.path) !== prepared.tree) {
+          return { replan: `La branch ${ws.branch} cambió después de preparar el PR local: vuelve a planificar sus commits.` };
+        }
+        await workspaces.git(ws, "reset", "--quiet", "--mixed", prepared.head);
+        const prId = newId("pr");
+        store.tx((tx) => {
+          tx.db.insert(pullRequests).values({
+            id: prId, repoId: row.repoId, number: null, nodeId: null,
+            headRef: ws.branch, baseRef, headSha: prepared.head, state: "local", isDraft: args.draft,
+            title, body, owned: true, runId: ctx.runId,
+            issueId: run?.subjectType === "issue" ? (run.subjectId as IssueId) : null,
+            headChangedAt: Date.now(),
+          }).run();
+          claimAndLinkPull(tx, ctx.runId, prId, row.repoId, [baseRef, ...parents.map((p) => p.branch)]);
+          tx.emit({
+            type: "pr.saved_local", origin: "core", runId: ctx.runId,
+            ...(run?.projectId && { projectId: run.projectId }),
+            subject: { type: "pr", id: prId },
+            payload: { repo: remote.repo, branch: ws.branch, base: baseRef },
+          });
+        });
+        return { prId, branch: ws.branch, base: baseRef, head: prepared.head };
+      });
+      if ("replan" in local) return { outcome: "replan", output: { failures: local.replan } };
+      return { outcome: "local", output: local };
+    }
+
     const pushed = await ctx.once("push", async () => {
       const prepared = await preparePush(workspaces, ws, { knownSha: settled.head, base: workspaces.baseSha(ws), council: false, messagePattern: args.messagePattern });
       if (prepared.outcome === "replan") return { replan: prepared.failures };
@@ -106,12 +162,6 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
       return { head: prepared.head };
     });
     if ("replan" in pushed) return { outcome: "replan", output: { failures: pushed.replan } };
-
-    const [owner = "", name = ""] = remote.repo.split("/");
-    const pack = packs.packFor({ githubOrg: owner });
-    const title = titleWithKey(cleanMessage(plan.pr.title).split("\n")[0]!.trim(), issueKey(store, ctx.runId));
-    const { baseRef, parents } = settled;
-    const body = prBody(cleanMessage(plan.pr.body), pack.conventions.pr?.omitSections ?? [], args.dependsOn, parents);
 
     const pull = await ctx.once("pr", async () => {
       workspaces.validate(ws);
@@ -130,10 +180,28 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
   return {
     name: "pr.publish",
     args: PublishArgs,
-    outcomes: ["ok", "replan"],
+    outcomes: ["ok", "replan", "local"],
     effects: "remote",
     run: publish,
   };
+}
+
+async function prepareLocal(workspaces: Workspaces, ws: WorkspaceRef, knownSha: string, messagePattern: string | undefined) {
+  const options = { knownSha, base: workspaces.baseSha(ws), council: true, messagePattern };
+  const reconciled = await preparePush(workspaces, ws, options);
+  if (reconciled.outcome !== "ok") return reconciled;
+  const dir = mkdtempSync(join(tmpdir(), "clanker-local-"));
+  const verify = { ...ws, path: join(dir, "worktree") };
+  try {
+    await workspaces.git(ws, "worktree", "add", "--detach", verify.path, reconciled.head);
+    const prepared = await preparePush(workspaces, verify, { ...options, knownSha: reconciled.head, council: false });
+    if (prepared.outcome !== "ok") return prepared;
+    return { outcome: prepared.outcome, head: prepared.head, before: reconciled.head, tree: await workspaces.git(verify, "rev-parse", "HEAD^{tree}") };
+  } finally {
+    await tryGit(ws.path, ["worktree", "remove", "--force", verify.path]);
+    rmSync(dir, { recursive: true, force: true });
+    await tryGit(ws.path, ["worktree", "prune"]);
+  }
 }
 
 /** Con qué base y qué padres se abre el PR, y la punta de la branch (`head`, que cambia si hubo que rehacer la base). */
@@ -305,15 +373,7 @@ function recordPull(
       .returning({ id: pullRequests.id })
       .get();
     if (!saved) return;
-    // La corrida de la issue también es la dueña del PR: un council o un rebase sobre él espera a que ella termine o se estacione.
-    claimPr(tx, ctx.runId, saved.id);
-    // Su base es la branch de otro PR abierto del repo (o, con base combinada, de varios): cuelga de ellos hasta que se mergeen (`stack.restack`).
-    const parents = db
-      .select({ id: pullRequests.id })
-      .from(pullRequests)
-      .where(and(eq(pullRequests.repoId, repoId), inArray(pullRequests.headRef, [baseRef, ...parentBranches]), eq(pullRequests.state, "open")))
-      .all();
-    for (const parent of parents) db.insert(prParents).values({ childId: saved.id, parentId: parent.id }).run();
+    claimAndLinkPull(tx, ctx.runId, saved.id, repoId, [baseRef, ...parentBranches]);
     emit({
       type: "pr.opened",
       origin: "core",
@@ -323,6 +383,14 @@ function recordPull(
       payload: { repo, number: pull.number, url: pull.html_url },
     });
   });
+}
+
+function claimAndLinkPull(tx: Tx, runId: RunId, prId: string, repoId: RepoId, parentBranches: string[]): void {
+  claimPr(tx, runId, prId);
+  const parents = tx.db.select({ id: pullRequests.id }).from(pullRequests)
+    .where(and(eq(pullRequests.repoId, repoId), inArray(pullRequests.headRef, parentBranches), inArray(pullRequests.state, ["open", "local"])))
+    .all();
+  for (const parent of parents) tx.db.insert(prParents).values({ childId: prId, parentId: parent.id }).run();
 }
 
 /**

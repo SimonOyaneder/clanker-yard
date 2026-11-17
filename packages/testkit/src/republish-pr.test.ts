@@ -163,6 +163,27 @@ describe("prs.republish", () => {
     expect(grandchild.number).toBe(3);
   });
 
+  test("republicar un hijo en modo local publica en GitHub y reemplaza el PR viejo", async () => {
+    scenario = await start();
+    const parent = await seed(scenario, "parent");
+    const child = await seed(scenario, "child", { base: parent.branch });
+    await scenario.client.projects.update({ id: scenario.project.id, stackMode: "local" });
+    const oldTree = remoteTree(scenario, child.branch);
+
+    const results = await republishAll(scenario, { prs: [child.number] });
+
+    const branch = `${slug(child.key)}-cambio-child`;
+    expect(results).toEqual([expect.objectContaining({ number: child.number, status: "republished", newNumber: 3, branch, base: parent.branch })]);
+    expect(scenario.github.pulls().map((p) => [p.number, p.state])).toEqual([[parent.number, "open"], [child.number, "closed"], [3, "open"]]);
+    expect(remoteBranches(scenario)).toEqual(["main", parent.branch, branch].sort());
+    expect(scenario.store.db.$client.prepare("SELECT state, number, base_ref FROM pull_requests WHERE head_ref = ?").get(branch)).toEqual({
+      state: "open", number: 3, base_ref: parent.branch,
+    });
+    expect(remoteTree(scenario, branch)).toBe(oldTree);
+    expect(scenario.github.pr(child.number).node().comments.map((c) => c.body)).toContain("Reemplazado por #3");
+    expect(scenario.github.pr(3).node().comments.map((c) => c.body.split("\n")[0])).toContain("/review");
+  });
+
   test("republish lanza y vuelve: el hijo espera a que su padre publique y sale solo con progress, sin que ninguna llamada espere una corrida", async () => {
     scenario = await start();
     const parent = await seed(scenario, "parent");

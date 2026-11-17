@@ -30,7 +30,7 @@ const ACTIONS = {
   "workspace.discard": ["ok"],
   "workspace.syncBase": ["same", "rebased", "conflict"],
   "recipe.check": ["ok", "fail"],
-  "pr.publish": ["ok", "replan"],
+  "pr.publish": ["ok", "replan", "local"],
   "pr.pushFixups": ["ok", "route"],
   "workspace.attach": ["ok"],
   "workspace.rebase": ["clean", "conflict", "error"],

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { NewProject, type CachedIssue } from "@clanker/api";
+import { FlowDef, NewProject, type CachedIssue } from "@clanker/api";
 import {
   combinedBaseBranch,
   createArtifacts,
@@ -112,7 +112,16 @@ const newIssue = (title = "Con dos padres") => issues.createLocal({ projectId, t
 
 /** Un PR del sistema: `branch` sale de `base` con un commit que escribe `files`, publicado en draft (`beforePublish` corre justo antes). */
 async function openPr(branch: string, base: string, files: Record<string, string>, issue?: CachedIssue, beforePublish?: () => void): Promise<{ number: number; body: string }> {
-  const lease = await workspaces.acquire({ repo: "repo_r1", branch, base, runId: newId("run") });
+  const published = await publishPr(branch, base, files, beforePublish);
+  expect(published.outcome).toBe("ok");
+  const number = (published.output as { pr: { number: number } }).pr.number;
+  // Sin una corrida que lo abra (`recordPull` toma el sujeto de ella), la issue del PR se fija a mano.
+  if (issue) store.db.$client.prepare("UPDATE pull_requests SET issue_id = ? WHERE number = ?").run(issue.id, number);
+  return { number, body: github.pulls().find((p) => p.number === number)?.body ?? "" };
+}
+
+async function publishPr(branch: string, base: string, files: Record<string, string>, beforePublish?: () => void, actionCtx = ctx()) {
+  const lease = await workspaces.acquire({ repo: "repo_r1", branch, base, runId: actionCtx.runId });
   for (const [path, content] of Object.entries(files)) writeFileSync(join(lease.path, path), content);
   // Lo que pasa en GitHub mientras la corrida trabaja, antes de que publique.
   beforePublish?.();
@@ -122,14 +131,10 @@ async function openPr(branch: string, base: string, files: Record<string, string
       ws: { workspaceId, path, branch, baseSha, fencingToken },
       plan: { commits: [{ message: `feat: ${branch}`, hunks: ["h1"], tests: [] }], pr: { title: `[${branch}] cambio`, body: "Cambia cosas." } },
     }),
-    ctx(),
+    actionCtx,
   );
-  expect(published.outcome).toBe("ok");
   workspaces.release(lease);
-  const number = (published.output as { pr: { number: number } }).pr.number;
-  // Sin una corrida que lo abra (`recordPull` toma el sujeto de ella), la issue del PR se fija a mano.
-  if (issue) store.db.$client.prepare("UPDATE pull_requests SET issue_id = ? WHERE number = ?").run(issue.id, number);
-  return { number, body: github.pulls().find((p) => p.number === number)?.body ?? "" };
+  return published;
 }
 
 function elsewhere<T>(fn: (git: (...args: string[]) => string, dir: string) => T): T {
@@ -326,6 +331,110 @@ describe("pr.publish con un padre que se mergeó antes de publicar", () => {
     // La branch se publicó tal cual: con la historia del padre y su commit encima.
     expect(remoteLog(`main..cla-2`)).toBe("feat: cla-2\nfeat: cla-1");
     expect(sql(`SELECT kind, title FROM decisions`)).toEqual([{ kind: "note", title: expect.stringContaining("cla-2") }]);
+  });
+});
+
+describe("pr.publish con stackMode local y padres remotos", () => {
+  function localProjectCtx(issue: CachedIssue): ActionCtx {
+    const defs = createDefs({ store });
+    createProjects({ store, defs }).update(projectId, { stackMode: "local" }, "cli");
+    defs.register("flow", FlowDef);
+    const flow = defs.save({
+      kind: "flow", slug: "publish-local", scope: "user", source: "cli",
+      body: {
+        schema: 1, id: "publish-local", name: "Publicar local", trigger: { type: "manual" }, start: "publish",
+        nodes: { publish: { type: "action", action: "pr.publish", args: {}, on: { ok: "@done", local: "@done" } } },
+      },
+    });
+    const actionCtx = ctx();
+    store.db.$client.prepare(
+      `INSERT INTO runs (id, project_id, subject_type, subject_id, flow_def_id, flow_version, roles, lane, status, writes, params, rounds, started_at)
+       VALUES (?, ?, 'issue', ?, ?, ?, '{}', 'dev', 'running', 1, '{}', '{}', 0)`,
+    ).run(actionCtx.runId, projectId, issue.id, flow.id, flow.version);
+    return actionCtx;
+  }
+
+  test("con dos padres abiertos guarda el hijo local con todos sus padres, sin push ni POST pulls", async () => {
+    const { issue, branch, parents } = await twoParents();
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
+    const actionCtx = localProjectCtx(issue);
+    const push = vi.spyOn(workspaces, "push");
+    const requestsBefore = github.requests.length;
+
+    const result = await publishPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, undefined, actionCtx);
+
+    expect(result).toEqual({ outcome: "local", output: { prId: expect.any(String), branch: "cla-3", base: "cla-1", head: localRef("cla-3") } });
+    expect(sql(`SELECT state, number, node_id, base_ref, head_sha, issue_id, run_id FROM pull_requests WHERE head_ref = 'cla-3'`)).toEqual([
+      { state: "local", number: null, node_id: null, base_ref: "cla-1", head_sha: localRef("cla-3"), issue_id: issue.id, run_id: actionCtx.runId },
+    ]);
+    expect(sql(`SELECT parent.number AS parent FROM pr_parents JOIN pull_requests parent ON parent.id = parent_id ORDER BY parent.number`)).toEqual([{ parent: 1 }, { parent: 2 }]);
+    expect(push).not.toHaveBeenCalled();
+    expect(() => remoteSha("cla-3")).toThrow();
+    expect(github.requests.slice(requestsBefore).filter((r) => r.method === "POST" && r.path === `/repos/${REPO}/pulls`)).toEqual([]);
+    expect(sql(`SELECT remote_sha FROM workspaces WHERE branch = 'cla-3'`)).toEqual([{ remote_sha: null }]);
+  });
+
+  test("si se mergea un padre combinado antes de publicar, guarda el hijo local con el padre restante", async () => {
+    const { issue, branch, parents } = await twoParents();
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
+    const actionCtx = localProjectCtx(issue);
+    const push = vi.spyOn(workspaces, "push");
+    const requestsBefore = github.requests.length;
+
+    const result = await publishPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, () => {
+      github.pr(1).merge({ sha: squashOnMain("cla-1") });
+    }, actionCtx);
+
+    expect(result).toMatchObject({ outcome: "local", output: { branch: "cla-3", base: "cla-2", head: localRef("cla-3") } });
+    expect(parentsOf(branch)).toEqual(["cla-2"]);
+    expect(git("log", "--format=%s|%P", `${row(branch)!.head_sha}..cla-3`)).toBe(`feat: cla-3|${row(branch)!.head_sha}`);
+    expect(sql(`SELECT state, number, base_ref FROM pull_requests WHERE head_ref = 'cla-3'`)).toEqual([{ state: "local", number: null, base_ref: "cla-2" }]);
+    expect(sql(`SELECT parent.number AS parent FROM pr_parents JOIN pull_requests parent ON parent.id = parent_id`)).toEqual([{ parent: 2 }]);
+    expect(push).not.toHaveBeenCalled();
+    expect(() => remoteSha("cla-3")).toThrow();
+    expect(github.requests.slice(requestsBefore).filter((r) => r.method === "POST" && r.path === `/repos/${REPO}/pulls`)).toEqual([]);
+  });
+
+  test("si se mergean todos los padres combinados antes de publicar, publica remoto sobre main", async () => {
+    const { issue, branch, parents } = await twoParents();
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
+    const actionCtx = localProjectCtx(issue);
+    const push = vi.spyOn(workspaces, "push");
+    const requestsBefore = github.requests.length;
+
+    const result = await publishPr("cla-3", branch, { "c.txt": "c1\ntres\n" }, () => {
+      github.pr(1).merge({ sha: squashOnMain("cla-1") });
+      github.pr(2).merge({ sha: squashOnMain("cla-2") });
+    }, actionCtx);
+
+    expect(result).toMatchObject({ outcome: "ok", output: { pr: { number: 3 }, head: remoteSha("cla-3") } });
+    expect(github.pulls().find((p) => p.number === 3)?.base.ref).toBe("main");
+    expect(row(branch)?.status).toBe("dissolved");
+    expect(() => localRef(branch)).toThrow();
+    expect(remoteLog(`${remoteSha("main")}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${remoteSha("main")}`);
+    expect(sql(`SELECT state, number, base_ref FROM pull_requests WHERE head_ref = 'cla-3'`)).toEqual([{ state: "open", number: 3, base_ref: "main" }]);
+    expect(sql(`SELECT * FROM pr_parents`)).toEqual([]);
+    expect(push).toHaveBeenCalledOnce();
+    expect(github.requests.slice(requestsBefore).filter((r) => r.method === "POST" && r.path === `/repos/${REPO}/pulls`)).toHaveLength(1);
+  });
+
+  test("si se mergea el único padre apilado antes de publicar, publica remoto sobre main", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nuno\na3\n" });
+    const actionCtx = localProjectCtx(await newIssue("Con un padre"));
+    const push = vi.spyOn(workspaces, "push");
+    const requestsBefore = github.requests.length;
+
+    const result = await publishPr("cla-2", "cla-1", { "b.txt": "b1\ndos\n" }, () => {
+      github.pr(1).merge({ sha: squashOnMain("cla-1") });
+    }, actionCtx);
+
+    expect(result).toMatchObject({ outcome: "ok", output: { pr: { number: 2 }, head: remoteSha("cla-2") } });
+    expect(github.pulls().find((p) => p.number === 2)?.base.ref).toBe("main");
+    expect(remoteLog(`${remoteSha("main")}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${remoteSha("main")}`);
+    expect(sql(`SELECT state, number, base_ref FROM pull_requests WHERE head_ref = 'cla-2'`)).toEqual([{ state: "open", number: 2, base_ref: "main" }]);
+    expect(sql(`SELECT * FROM pr_parents`)).toEqual([]);
+    expect(push).toHaveBeenCalledOnce();
+    expect(github.requests.slice(requestsBefore).filter((r) => r.method === "POST" && r.path === `/repos/${REPO}/pulls`)).toHaveLength(1);
   });
 });
 

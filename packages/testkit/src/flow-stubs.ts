@@ -66,7 +66,15 @@ const SPECS: Record<string, StubSpec> = {
     effects: "local",
     outputs: { ok: { specsChanged: true }, fail: { failures: "1 test rojo" } },
   },
-  "pr.publish": { kind: "action", outcomes: ["ok", "replan"], effects: "remote", outputs: { ok: { pr: prRef } } },
+  "pr.publish": {
+    kind: "action",
+    outcomes: ["ok", "replan", "local"],
+    effects: "remote",
+    outputs: {
+      ok: { pr: prRef },
+      local: { prId: "pr_00000000000000000000000001", branch: "cla-1", base: "cla-0", head: "1".repeat(40) },
+    },
+  },
   "pr.botReview": {
     kind: "wait",
     outcomes: ["lgtm", "findings"],

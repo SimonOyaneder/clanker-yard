@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { FlowDef, type RunId } from "@clanker/api";
+import { FlowDef, NewProject, type RunId } from "@clanker/api";
 import {
   createAgents,
   createArtifacts,
@@ -12,6 +12,7 @@ import {
   createFlows,
   createGitRemote,
   createPacks,
+  createProjects,
   createRecipes,
   createSlots,
   createWorkspaces,
@@ -31,7 +32,7 @@ import {
   type Workspaces,
   createRuntimeRegistry,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
@@ -131,7 +132,7 @@ function write(path: string, content: string) {
   writeFileSync(full, content);
 }
 
-const remoteSha = () => repo.git("--git-dir", repo.remoteDir!, "rev-parse", `refs/heads/${BRANCH}`);
+const remoteSha = () => repo.git("--git-dir", repo.remoteDir!, "rev-parse", `refs/heads/${lease.branch}`);
 const commitsOnBranch = () => repo.git("-C", lease.path, "log", "--format=%s", `${lease.baseSha}..HEAD`).split("\n").filter(Boolean);
 const posts = () => github.requests.filter((r) => r.method === "POST" && r.path === `/repos/${REPO}/pulls`);
 
@@ -379,6 +380,218 @@ describe("un corte en cada etapa", () => {
   });
 });
 
+describe("pr.publish local", () => {
+  let runId: RunId;
+  let parentId: string;
+
+  beforeEach(async () => {
+    const project = createProjects({ store, defs }).create(NewProject.parse({ slug: "local", name: "Local", tracker: "local", stackMode: "local" }), "cli");
+    runId = issueRun("CLA-53");
+    store.db.$client.prepare("UPDATE runs SET project_id = ? WHERE id = ?").run(project.id, runId);
+    repo.git("checkout", "-b", "cla-52");
+    writeFileSync(join(repo.dir, "parent.txt"), "padre\n");
+    repo.git("add", ".");
+    repo.git("commit", "-m", "feat: parent");
+    parentId = seedPr(store, {
+      repoId: "repo_00000000000000000000000001", number: null, state: "local",
+      headRef: "cla-52", title: "feat: parent", headSha: repo.git("rev-parse", "HEAD"),
+    });
+    workspaces.release(lease);
+    lease = await workspaces.acquire({ repo: "repo_00000000000000000000000001", branch: `${BRANCH}-stacked`, base: "cla-52", runId });
+    write("feature.txt", "una feature\n");
+  });
+
+  function publishParent() {
+    repo.git("push", "origin", "cla-52");
+    github.openPr({ head: "cla-52" });
+    store.db.$client.prepare("UPDATE pull_requests SET state = 'open', number = 1, node_id = 'PR_1' WHERE id = ?").run(parentId);
+  }
+
+  const localPull = () => store.db.$client.prepare("SELECT * FROM pull_requests WHERE head_ref = ?").get(lease.branch);
+
+  test.each(["open", "local"])("guarda sobre un padre %s sin push ni PR, con título y cuerpo limpios, claim y evento", async (state) => {
+    if (state === "open") publishParent();
+    const push = vi.spyOn(workspaces, "push");
+    const dirty = plan({ pr: { title: "Add feature [CLA-53]\nCo-Authored-By: Claude <noreply@anthropic.com>", body: `${BODY}\nGenerated with Claude Code` } });
+
+    const result = await publish.run(args({ plan: dirty, draft: false, dependsOn: ["api#12"] }), durableCtx(undefined, runId));
+
+    const head = repo.git("-C", lease.path, "rev-parse", "HEAD");
+    const child = localPull();
+    expect(result).toEqual({ outcome: "local", output: { prId: child?.id, branch: lease.branch, base: "cla-52", head } });
+    expect(child).toMatchObject({
+      state: "local", number: null, node_id: null, title: "[CLA-53] Add feature",
+      body: ["Depende de api#12", "", "## Contexto", "", "Por qué se hace.", "", "## Tests", "", "- [x] Tests unitarios"].join("\n"),
+      head_sha: head, owned: 1, is_draft: 0, run_id: runId,
+      issue_id: store.db.$client.prepare("SELECT subject_id FROM runs WHERE id = ?").get(runId)?.subject_id,
+    });
+    expect(store.db.$client.prepare("SELECT * FROM pr_parents").all()).toEqual([{ child_id: child?.id, parent_id: parentId }]);
+    expect(store.db.$client.prepare("SELECT claimed_pr_id FROM runs WHERE id = ?").get(runId)).toEqual({ claimed_pr_id: child?.id });
+    expect(store.events.since(0, { types: ["pr.saved_local"] })).toMatchObject([{
+      runId, subject: { type: "pr", id: child?.id }, projectId: expect.any(String),
+      payload: { repo: REPO, branch: lease.branch, base: "cla-52" },
+    }]);
+    expect(openedEvents()).toEqual([]);
+    expect(push).not.toHaveBeenCalled();
+    expect(() => remoteSha()).toThrow();
+    expect(posts()).toEqual([]);
+    expect(commitsOnBranch()).toEqual(["feat: add feature"]);
+  });
+
+  test("sobre la branch por defecto publica en GitHub aunque el proyecto sea local", async () => {
+    workspaces.release(lease);
+    lease = await workspaces.acquire({ repo: "repo_00000000000000000000000001", branch: `${BRANCH}-default`, base: "main", runId });
+    write("feature.txt", "una feature\n");
+
+    const result = await publish.run(args(), durableCtx(undefined, runId));
+
+    expect(result).toMatchObject({ outcome: "ok", output: { head: remoteSha() } });
+    expect(localPull()).toMatchObject({ state: "open", base_ref: "main" });
+    expect(posts()).toHaveLength(1);
+    expect(store.events.since(0, { types: ["pr.saved_local"] })).toEqual([]);
+  });
+
+  test.each(["open", "local"])("en modo remote publica sobre el padre %s y guarda su vínculo", async (state) => {
+    if (state === "open") publishParent();
+    else repo.git("push", "origin", "cla-52");
+    store.db.$client.prepare("UPDATE projects SET stack_mode = 'remote'").run();
+
+    const result = await publish.run(args(), durableCtx(undefined, runId));
+
+    expect(result).toMatchObject({ outcome: "ok", output: { head: remoteSha() } });
+    expect(localPull()).toMatchObject({ state: "open", base_ref: "cla-52" });
+    expect(store.db.$client.prepare("SELECT * FROM pr_parents").all()).toEqual([{ child_id: localPull()?.id, parent_id: parentId }]);
+    expect(posts()).toHaveLength(1);
+  });
+
+  test.each(["local", "remote"])("un reintento conserva el modo %s aunque cambie la configuración del proyecto", async (mode) => {
+    publishParent();
+    store.db.$client.prepare("UPDATE projects SET stack_mode = ?").run(mode);
+    const stage = mode === "local" ? "local" : "pr";
+    const ctx = durableCtx(stage, runId);
+    const push = vi.spyOn(workspaces, "push");
+    await expect(publish.run(args(), ctx)).rejects.toThrow(`corte después de ${stage}`);
+    const savedLocal = localPull();
+    store.db.$client.prepare("UPDATE projects SET stack_mode = ?").run(mode === "local" ? "remote" : "local");
+
+    const result = await publish.run(args(), ctx);
+    const again = await publish.run(args(), ctx);
+
+    expect(again).toEqual(result);
+    expect(store.db.$client.prepare("SELECT * FROM pull_requests WHERE head_ref = ?").all(lease.branch)).toHaveLength(1);
+    expect(store.db.$client.prepare("SELECT * FROM pr_parents").all()).toEqual([{ child_id: localPull()?.id, parent_id: parentId }]);
+    if (mode === "local") {
+      expect(result).toMatchObject({ outcome: "local", output: { prId: savedLocal?.id } });
+      expect(localPull()).toEqual(savedLocal);
+      expect(store.events.since(0, { types: ["pr.saved_local"] })).toHaveLength(1);
+      expect(push).not.toHaveBeenCalled();
+      expect(() => remoteSha()).toThrow();
+      expect(posts()).toEqual([]);
+    } else {
+      expect(result).toMatchObject({ outcome: "ok", output: { head: remoteSha() } });
+      expect(localPull()).toMatchObject({ state: "open" });
+      expect(store.events.since(0, { types: ["pr.saved_local"] })).toEqual([]);
+      expect(push).toHaveBeenCalledTimes(1);
+      expect(posts()).toHaveLength(1);
+    }
+  });
+
+  test.each(["local:prepare", "reset", "local"])("un corte después de %s con autosquash no duplica la fila ni rechaza sus propios commits", async (stage) => {
+    write("z.txt", "fixup\n");
+    const input = publish.args.parse({
+      ...args(), messagePattern: "^(feat:|fixup! feat:)",
+      plan: plan({ commits: [
+        { message: "feat: add feature", hunks: ["h1"], tests: [] },
+        { message: "fixup! feat: add feature", hunks: ["h2"], tests: [] },
+      ] }),
+    });
+    const ctx = durableCtx(stage, runId);
+    if (stage === "reset") {
+      const git = workspaces.git;
+      let crash = true;
+      let prepared = false;
+      const once = ctx.once;
+      ctx.once = async (name, fn) => {
+        const result = await once(name, fn);
+        if (name === "local:prepare") prepared = true;
+        return result;
+      };
+      vi.spyOn(workspaces, "git").mockImplementation(async (ws, ...command) => {
+        const result = await git(ws, ...command);
+        if (crash && prepared && ws.path === lease.path && command[0] === "reset" && command[2] === "--mixed") {
+          crash = false;
+          throw new Error("corte después de reset");
+        }
+        return result;
+      });
+    }
+
+    await expect(publish.run(input, ctx)).rejects.toThrow(`corte después de ${stage}`);
+    expect(localPull() !== undefined).toBe(stage === "local");
+    const result = await publish.run(input, ctx);
+    const requests = github.requests.length;
+    const again = await publish.run(input, ctx);
+
+    expect(result).toMatchObject({ outcome: "local", output: { prId: localPull()?.id, head: repo.git("-C", lease.path, "rev-parse", "HEAD") } });
+    expect(again).toEqual(result);
+    expect(github.requests).toHaveLength(requests);
+    expect(commitsOnBranch()).toEqual(["feat: add feature"]);
+    expect(store.events.since(0, { types: ["pr.saved_local"] })).toHaveLength(1);
+    expect(store.db.$client.prepare("SELECT * FROM pr_parents").all()).toHaveLength(1);
+    expect(() => remoteSha()).toThrow();
+    expect(posts()).toEqual([]);
+  });
+
+  test.each(["bad message", "fixup! feat: missing"])("conserva el fallo de preparePush para %s", async (message) => {
+    const ctx = durableCtx(undefined, runId);
+    const once = ctx.once;
+    ctx.once = async (stage, fn) => {
+      if (stage === "local") {
+        write("z.txt", "otro commit\n");
+        repo.git("-C", lease.path, "add", ".");
+        repo.git("-C", lease.path, "commit", "-m", message);
+      }
+      return once(stage, fn);
+    };
+
+    const result = publish.run(args(), ctx);
+
+    if (message === "bad message") {
+      await expect(result).resolves.toMatchObject({ outcome: "replan", output: { failures: expect.stringContaining("el mensaje no cumple") } });
+    } else {
+      await expect(result).rejects.toThrow(PermanentActionError);
+    }
+    expect(localPull()).toBeUndefined();
+    expect(posts()).toEqual([]);
+    expect(() => remoteSha()).toThrow();
+  });
+
+  test.each(["reescritura", "cambio sin commit"])("un %s ajeno después de preparar no se acepta ni se pierde", async (change) => {
+    const ctx = durableCtx(undefined, runId);
+    const once = ctx.once;
+    let crash = true;
+    ctx.once = async (stage, fn) => {
+      const result = await once(stage, fn);
+      if (stage === "local:prepare" && crash) {
+        crash = false;
+        throw new Error("corte después de local:prepare");
+      }
+      return result;
+    };
+    await expect(publish.run(args(), ctx)).rejects.toThrow("corte después de local:prepare");
+    if (change === "reescritura") repo.git("-C", lease.path, "commit", "--amend", "-m", "feat: rewritten elsewhere");
+    else write("feature.txt", "cambio ajeno\n");
+    const foreign = repo.git("-C", lease.path, "rev-parse", "HEAD");
+
+    const result = await publish.run(args(), ctx);
+
+    expect(result).toMatchObject({ outcome: "replan", output: { failures: expect.stringContaining("después de preparar") } });
+    expect(repo.git("-C", lease.path, "rev-parse", "HEAD")).toBe(foreign);
+    if (change === "cambio sin commit") expect(repo.git("-C", lease.path, "diff")).toContain("cambio ajeno");
+    expect(localPull()).toBeUndefined();
+  });
+});
+
 describe("en un flujo", () => {
   let flows: Flows;
 
@@ -386,7 +599,7 @@ describe("en un flujo", () => {
     await flows.close();
   });
 
-  function flowWith(publishNode: object): Flows {
+  function flowWith(publishNode: object, base = "main"): Flows {
     const unused = {
       id: "fake" as const,
       capabilities: { costPerTurn: true },
@@ -426,7 +639,7 @@ describe("en un flujo", () => {
           ws: {
             type: "action",
             action: "workspace.acquire",
-            args: { repo: "repo_00000000000000000000000001", branch: "cla-53-flow", base: "main" },
+            args: { repo: "repo_00000000000000000000000001", branch: "cla-53-flow", base },
             on: { ok: "edit" },
           },
           edit: { type: "action", action: "test.edit", args: {}, on: { ok: "publish" } },
@@ -455,7 +668,7 @@ describe("en un flujo", () => {
       type: "action",
       action: "pr.publish",
       args: { ws: "$ws", plan: plan(), draft: true },
-      on: { ok: "@done", replan: "@failed" },
+      on: { ok: "@done", local: "@done", replan: "@failed" },
     });
 
     const runId = flows.start("publish-flow", { type: "issue", id: "CLA-53" }, {});
@@ -490,7 +703,7 @@ describe("en un flujo", () => {
       type: "action",
       action: "pr.publish",
       args: { ws: "$ws", plan: plan({ commits: [{ message: "feat: x", hunks: ["h9"], tests: [] }] }), draft: true },
-      on: { ok: "@done", replan: "@blocked" },
+      on: { ok: "@done", local: "@done", replan: "@blocked" },
     });
 
     const runId = flows.start("publish-flow", { type: "issue", id: "CLA-53" }, {});
@@ -499,5 +712,29 @@ describe("en un flujo", () => {
     expect(flows.getRun(runId)).toMatchObject({ status: "failed", outcome: "blocked" });
     expect(flows.getRun(runId).steps.find((s) => s.nodeId === "publish")).toMatchObject({ outcome: "replan" });
     expect(github.pulls()).toEqual([]);
+  });
+
+  test("el PR local queda enlazado a su padre y la corrida termina done sin publicar", async () => {
+    workspaces.release(lease);
+    const project = createProjects({ store, defs }).create(NewProject.parse({ slug: "local", name: "Local", tracker: "local", stackMode: "local" }), "cli");
+    repo.git("branch", "cla-52");
+    const parentId = seedPr(store, { repoId: "repo_00000000000000000000000001", number: null, state: "local", headRef: "cla-52", title: "Padre" });
+    const push = vi.spyOn(workspaces, "push");
+    flowWith({
+      type: "action", action: "pr.publish", args: { ws: "$ws", plan: plan() },
+      on: { local: "@done", ok: "@failed", replan: "@failed" },
+    }, "cla-52");
+
+    const runId = flows.start("publish-flow", { type: "issue", id: "CLA-53" }, {}, { projectId: project.id });
+    await finished(runId);
+
+    expect(flows.getRun(runId)).toMatchObject({ status: "done", outcome: "done" });
+    const child = store.db.$client.prepare("SELECT id, state FROM pull_requests WHERE head_ref = 'cla-53-flow'").get();
+    expect(child).toMatchObject({ state: "local" });
+    expect(store.db.$client.prepare("SELECT * FROM pr_parents").all()).toEqual([{ child_id: child?.id, parent_id: parentId }]);
+    expect(store.db.$client.prepare("SELECT claimed_pr_id FROM runs WHERE id = ?").get(runId)).toEqual({ claimed_pr_id: child?.id });
+    expect(push).not.toHaveBeenCalled();
+    expect(posts()).toEqual([]);
+    expect(() => repo.git("--git-dir", repo.remoteDir!, "rev-parse", "refs/heads/cla-53-flow")).toThrow();
   });
 });
