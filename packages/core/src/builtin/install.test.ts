@@ -47,6 +47,8 @@ const ACTIONS = {
   "stack.restackRewritten": ["ok", "conflict"],
   "pr.replay": ["ok"],
   "pr.supersede": ["draft", "ready"],
+  "pr.promote": ["ok"],
+  "pr.saveLocal": ["local", "promotable"],
 };
 const WAITS = { "pr.botReview": ["lgtm", "findings"], "pr.ci": ["ok", "fail"] };
 

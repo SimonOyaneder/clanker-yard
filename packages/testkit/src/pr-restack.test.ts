@@ -502,18 +502,28 @@ describe("stack.restack con PRs locales", () => {
     expect(sql("SELECT child_id, parent_id FROM pr_parents")).toEqual([{ child_id: c, parent_id: b }]);
   });
 
-  test("un reintento con las etapas guardadas no repite el restack de un hijo local", async () => {
+  test("un corte después del restack de un hijo local no lo repite al reintentar", async () => {
     await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
-    await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     github.pr(1).merge({ sha: squashOnMain("cla-1") });
     const shared = ctx();
-    await restack.run(restack.args.parse({ pr: ref(1) }), shared);
+    const once = shared.once;
+    let cut = true;
+    shared.once = async (stage, fn) => {
+      if (stage === `retarget:${b}` && cut) {
+        cut = false;
+        throw new Error("corte");
+      }
+      return once(stage, fn);
+    };
+    await expect(restack.run(restack.args.parse({ pr: ref(1) }), shared)).rejects.toThrow("corte");
     const head = repo.git("rev-parse", "cla-2");
 
     const again = await restack.run(restack.args.parse({ pr: ref(1) }), shared);
 
     expect(repo.git("rev-parse", "cla-2")).toBe(head);
     expect((again.output as Output).children).toMatchObject([{ branch: "cla-2", status: "restacked" }]);
+    expect(sql(`SELECT base_ref, head_sha FROM pull_requests WHERE id = '${b}'`)).toEqual([{ base_ref: "main", head_sha: head }]);
   });
 
   test("un hijo local en conflicto queda como estaba, no se pushea y anota pr.conflict con local para su flujo", async () => {

@@ -293,8 +293,8 @@ describe("update", () => {
   });
 
   test("stackMode se guarda y emite project.updated con ese campo", () => {
-    expect(projects.update(project.id, { stackMode: "local" }, "ui")).toEqual({ ...project, stackMode: "local" });
-    expect(projects.get(project.id)?.stackMode).toBe("local");
+    expect(projects.update(project.id, { stackMode: "remote" }, "ui")).toEqual({ ...project, stackMode: "remote" });
+    expect(projects.get(project.id)?.stackMode).toBe("remote");
     expect(events("project.updated")).toMatchObject([{ payload: { fields: ["stackMode"] } }]);
   });
 

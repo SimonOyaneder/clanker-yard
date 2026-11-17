@@ -779,7 +779,7 @@ describe("dispara flujos", () => {
       effects: "remote",
       run: (args) => {
         restacked.push(args);
-        return Promise.resolve({ outcome: "ok", output: { changedDrafts: [] } });
+        return Promise.resolve({ outcome: "ok", output: { changedDrafts: [], promotable: [] } });
       },
     });
     // Sin drafts cambiados no corre ninguna rama, pero el flujo que llaman tiene que existir.
@@ -789,6 +789,15 @@ describe("dispara flujos", () => {
       name: "restack-feedback",
       trigger: { type: "subflow" },
       params: { pr: "PrRef", repo: "RepoRef", branch: "string", base: "string", externalRounds: "number" },
+      start: "work",
+      nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
+    });
+    flows.save({
+      schema: 1,
+      id: "promote-local",
+      name: "promote-local",
+      trigger: { type: "subflow" },
+      params: { prId: "string", repo: "RepoRef", branch: "string", base: "string", externalRounds: "number" },
       start: "work",
       nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
     });
