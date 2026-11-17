@@ -108,7 +108,7 @@ export function createRouter(deps: RouterDeps) {
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
   const { prs, prCache } = deps;
-  const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache });
+  const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache, flows, projects });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
     if (!project) throw new ProjectNotFoundError(id);
@@ -272,6 +272,7 @@ export function createRouter(deps: RouterDeps) {
       merge: os.prs.merge.handler(({ input, context }) => prCommands.merge(input, context.origin)),
       requestReview: os.prs.requestReview.handler(({ input, context }) => prCommands.requestReview(input, context.origin)),
       rebase: os.prs.rebase.handler(({ input, context }) => prCommands.rebase(input, context.origin)),
+      publishLocal: os.prs.publishLocal.handler(({ input, context }) => ({ runId: prCommands.publishLocal(input.id, context.origin) })),
       republish: os.prs.republish.handler(({ input, context }) => deps.republisher.republish(input, context.origin)),
       republishProgress: os.prs.republishProgress.handler(({ input }) => deps.republisher.progress(input.id)),
     },

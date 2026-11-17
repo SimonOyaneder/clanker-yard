@@ -372,6 +372,13 @@ const prs = {
    */
   rebase: base.input(PrRef),
   /**
+   * Publica ya en GitHub un PR local (stacks locales) para pedir review temprano: arranca `promote-local` con la base
+   * que tiene hoy (la branch de su padre, así que sale apilado y sigue colgando de él). Publica con tu cuenta sin
+   * preguntar, así que solo lo pide una persona desde la app (`origin: "ui"`, `FORBIDDEN` desde el CLI o el MCP).
+   * `BAD_REQUEST` si el PR no existe o ya no es local. Devuelve la corrida, que aparece en el proyecto que lo abrió.
+   */
+  publishLocal: base.input(z.object({ id: z.string().min(1) })).output(z.object({ runId: RunId })),
+  /**
    * Rehace los PRs abiertos del sistema con la branch (`eng-1234-slug`), el autor y los commits de las reglas de hoy, en
    * orden de stack (los padres antes que los hijos): el mismo cambio, abierto como PR nuevo ("Reemplaza a #n") y el
    * viejo cerrado. No cambia la implementación: el árbol del PR nuevo es el del viejo o ese PR se aborta. Salta (y

@@ -6,7 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useHost } from "@/host"
 import { useToastedCommand } from "@/hooks/use-toasted-command"
 import { type PrCaps, prCaps } from "@/lib/prs/pr-commands"
-import type { GithubPr, OpenPr } from "@/lib/prs/prs"
+import { branchOf, type GithubPr, type LocalPr, type OpenPr } from "@/lib/prs/prs"
 import { messageOf } from "@/lib/utils"
 
 // Lo que una persona le pide a un PR (`prs.*` del core): mergear según la estrategia del pack, pedir la review del
@@ -26,6 +26,8 @@ export interface PrCommands {
   toggleHold: (pr: GithubPr) => void
   /** Va a la corrida que abrió el PR, en su proyecto. */
   openRun: (pr: OpenPr) => void
+  /** Publica ya en GitHub un PR local, para pedir review temprano. */
+  publishLocal: (pr: LocalPr) => void
 }
 
 const PrCommandsContext = createContext<PrCommands | null>(null)
@@ -60,6 +62,7 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, children }: Props
       merge: (pr) => (prCaps(pr).merge === "button" ? host.openExternal(pr.state.url) : setConfirming(pr)),
       requestReview: (pr) => void perform(() => appData.requestPrReview(pr.ref), `Le pedí review al bot en ${pr.state.key}`),
       rebase: (pr) => void perform(() => appData.rebasePr(pr.ref), `Rebase de ${pr.state.key} en marcha: corre en el carril de mantenimiento`),
+      publishLocal: (pr) => void perform(() => appData.publishLocalPr(pr.id), `Publicando ${branchOf(pr)} en GitHub: corre en el carril de mantenimiento`),
       toggleHold: (pr) =>
         void perform(
           () => appData.setPrHold({ ref: pr.ref, hold: !pr.state.hold }),

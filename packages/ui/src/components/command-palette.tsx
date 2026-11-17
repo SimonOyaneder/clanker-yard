@@ -1,5 +1,5 @@
 import type { CachedIssue, ClankerProject, Decision, QueueEntry, Run, RunId } from "@clanker/api"
-import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, X } from "lucide-react"
+import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, Upload, X } from "lucide-react"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs/prs"
 import { branchOf, keyOf, repoNameOf, titleOf } from "@/lib/prs/prs"
@@ -157,6 +157,12 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
                   <CommandShortcut>{PR_KEYS.hold}</CommandShortcut>
                 </CommandItem>
               </>
+            ) : null}
+            {selectedPr.local && prCaps.publishLocal ? (
+              <CommandItem value="pr publicar ahora en github local" onSelect={run(() => prCommands.publishLocal(selectedPr))}>
+                <Upload /> Publicar ahora
+                <CommandShortcut>{PR_KEYS.publishLocal}</CommandShortcut>
+              </CommandItem>
             ) : null}
             {prCaps.run ? (
               <CommandItem value="pr ver corrida" onSelect={run(() => prCommands.openRun(selectedPr))}>

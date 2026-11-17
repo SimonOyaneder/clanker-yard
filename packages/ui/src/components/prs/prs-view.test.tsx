@@ -148,6 +148,22 @@ test.each(["list", "graph"])("el modo %s muestra locales sin número, link ni ac
   expect(screen.queryByRole("menuitem", { name: /GitHub|Mergear|hold|review del bot|Rebasear|Copiar link/ })).toBeNull()
 })
 
+test("P y el menú contextual publican ya un PR local del sistema", async () => {
+  const { data, prs } = await setup()
+  const local = prs.find((p): p is LocalPr => p.local !== null && p.owned)!
+  const publish = vi.spyOn(data, "publishLocalPr")
+  const card = rowOf(local.local.title)
+
+  fireEvent.click(screen.getByText(local.local.title))
+  fireEvent.focus(within(card).getByRole("button"))
+  fireEvent.keyDown(card, { key: "p" })
+  await waitFor(() => expect(publish).toHaveBeenCalledWith(local.id))
+
+  fireEvent.contextMenu(screen.getByText(local.local.title))
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Publicar ahora/ }))
+  await waitFor(() => expect(publish).toHaveBeenCalledTimes(2))
+})
+
 test("buscar un local conserva su stack y los filtros de GitHub no lo cuentan como listo ni con señales", async () => {
   await setup()
   expect(screen.getByRole("button", { name: "Todos14" })).toBeTruthy()

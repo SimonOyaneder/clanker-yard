@@ -7,7 +7,7 @@ import { copy } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 
 /** Los atajos de las acciones de un PR, con el PR enfocado: la vista de PRs, el menú contextual y la paleta los comparten. */
-export const PR_KEYS = { merge: "M", requestReview: "B", rebase: "R", hold: "H", run: "V" } as const
+export const PR_KEYS = { merge: "M", requestReview: "B", rebase: "R", hold: "H", run: "V", publishLocal: "P" } as const
 
 /** El menú contextual de un PR (tarjeta del grafo y fila de la lista): lo que se puede abrir, pedirle al core y copiar. */
 export function PrContextMenu({ pr, children }: { pr: OpenPr; children: ReactNode }) {
@@ -20,6 +20,11 @@ export function PrContextMenu({ pr, children }: { pr: OpenPr; children: ReactNod
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-64">
         {!pr.local ? <ContextMenuItem onSelect={() => host.openExternal(pr.state.url)}>Abrir PR en GitHub</ContextMenuItem> : null}
+        {pr.local && caps.publishLocal ? (
+          <ContextMenuItem onSelect={() => commands.publishLocal(pr)}>
+            Publicar ahora <ContextMenuShortcut>{PR_KEYS.publishLocal}</ContextMenuShortcut>
+          </ContextMenuItem>
+        ) : null}
         {pr.runId !== null ? (
           <ContextMenuItem onSelect={() => commands.openRun(pr)}>
             Ver corrida <ContextMenuShortcut>{PR_KEYS.run}</ContextMenuShortcut>

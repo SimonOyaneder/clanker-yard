@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type PrRef, type RepoId } from "@clanker/api";
+import { type PrRef, type RepoId, type RunId } from "@clanker/api";
 import {
   createConnections,
   createDefs,
@@ -18,7 +18,7 @@ import {
   type PrCommands,
   type Store,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 import { seedPr } from "@clanker/core/testing";
@@ -38,6 +38,7 @@ let sim: GitHubSim;
 let cache: PrCache;
 let commands: PrCommands;
 let repoId: RepoId;
+const flows = { start: vi.fn(() => "run_00000000000000000000000001" as RunId) };
 
 const ref = (number: number): PrRef => ({ account: ACCOUNT, repo: REPO, number });
 
@@ -57,7 +58,7 @@ async function setup(pack: "example" | "none") {
   }
   const prs = createPrs({ connections, packs, merge: createMergeScope({ store, repos, connections }) });
   cache = createPrCache({ store, repos, packs, prs });
-  commands = createPrCommands({ store, repos, connections, packs, prs, cache });
+  commands = createPrCommands({ store, repos, connections, packs, prs, cache, flows, projects: { get: () => undefined } });
 }
 
 beforeEach(async () => {
@@ -226,5 +227,45 @@ describe("rebase", () => {
     const pr = sim.openPr({ head: "one" });
 
     await expect(commands.rebase(ref(pr.number), "ui")).rejects.toThrow(/registra el repo y espera a que Watch lo vea/);
+  });
+});
+
+describe("publishLocal", () => {
+  function localRow(owned = true) {
+    store.db.$client
+      .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned, title, body) VALUES ('pr_local', ?, NULL, NULL, 'two', 'one', 'abc', 'local', 1, ?, 'Dos', '')")
+      .run(repoId, owned ? 1 : 0);
+  }
+
+  test("desde la app arranca promote-local con la base que el PR tiene hoy", async () => {
+    await setup("none");
+    flows.start.mockClear();
+    localRow();
+
+    expect(commands.publishLocal("pr_local", "ui")).toBe("run_00000000000000000000000001");
+
+    expect(flows.start).toHaveBeenCalledWith(
+      "promote-local",
+      { type: "pr", id: "pr_local" },
+      { prId: "pr_local", repo: repoId, branch: "two", base: "one" },
+      expect.objectContaining({ repoId, by: "ui" }),
+    );
+  });
+
+  test.each(["cli", "mcp"] as const)("desde %s es FORBIDDEN: publica con la cuenta del usuario", async (by) => {
+    await setup("none");
+    flows.start.mockClear();
+    localRow();
+
+    expect(() => commands.publishLocal("pr_local", by)).toThrow("Publicar un PR local lo pide una persona desde la app");
+    expect(flows.start).not.toHaveBeenCalled();
+  });
+
+  test("un PR que ya no es local se rechaza", async () => {
+    await setup("none");
+    const pr = sim.openPr({ head: "one" });
+    known(pr, { owned: true });
+
+    expect(() => commands.publishLocal(`pr_${pr.number}`, "ui")).toThrow(PrCommandError);
   });
 });

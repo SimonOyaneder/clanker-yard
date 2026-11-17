@@ -724,6 +724,8 @@ export const PROMOTE_LOCAL: FlowDef = {
   name: "Publicar un PR local",
   internal: true,
   trigger: { type: "subflow" },
+  // Como subflujo hereda el carril de quien lo llama; `prs.publishLocal` lo arranca solo, en mantenimiento.
+  lane: "maintenance",
   params: {
     prId: "string",
     repo: "RepoRef",

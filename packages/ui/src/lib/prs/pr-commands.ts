@@ -16,16 +16,19 @@ export interface PrCaps {
   hold: boolean
   /** La corrida que lo abrió. */
   run: boolean
+  /** Es un PR local: se puede publicar ya en GitHub, apilado sobre su padre. */
+  publishLocal: boolean
 }
 
 export function prCaps(pr: OpenPr): PrCaps {
-  if (pr.local) return { merge: null, requestReview: false, rebase: false, hold: false, run: pr.runId !== null }
+  if (pr.local) return { merge: null, requestReview: false, rebase: false, hold: false, run: pr.runId !== null, publishLocal: pr.owned }
   return {
     merge: mergeBlocker(pr.state) === undefined ? (pr.state.merge.via === "comment" ? "comment" : "button") : null,
     requestReview: pr.reviewBot,
     rebase: rebaseBlocker(pr.state, pr.owned) === undefined,
     hold: true,
     run: pr.runId !== null,
+    publishLocal: false,
   }
 }
 
