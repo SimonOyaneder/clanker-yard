@@ -277,6 +277,19 @@ describe("CI con las reglas del pack", () => {
     expect(build(prNode({ head: { oid: HEAD_SHA, contexts: [statusContext("merge-queue", "PENDING")] } })).ci.state).toBe("none");
   });
 
+  test("de cada check rojo guarda lo que dice de su falla y dónde verla; de los verdes, nada", () => {
+    const contexts = [
+      { ...statusContext("ci/circleci: tests", "FAILURE"), description: "Job failed. To see why, run the CircleCI CLI: circleci run get abc-123 --failure-report", targetUrl: "https://ci.example/job/1" },
+      { ...checkRun("lint", "FAILURE"), title: "2 offenses", summary: "", detailsUrl: "https://ci.example/lint" },
+      { ...statusContext("build", "SUCCESS"), description: "ok", targetUrl: "https://ci.example/build" },
+    ];
+
+    expect(build(prNode({ head: { oid: HEAD_SHA, contexts } })).ci.details).toEqual({
+      "ci/circleci: tests": { description: "Job failed. To see why, run the CircleCI CLI: circleci run get abc-123 --failure-report", url: "https://ci.example/job/1" },
+      lint: { description: "2 offenses", url: "https://ci.example/lint" },
+    });
+  });
+
   test("knownFlaky del pack marca, entre los que fallan, los flaky conocidos", () => {
     const pack: ResolvedPack = { ...example, ciRules: { ...example.ciRules, knownFlaky: ["e2e", "visual"] } };
     const contexts = [checkRun("e2e", "FAILURE"), checkRun("unit", "FAILURE"), checkRun("visual", "SUCCESS")];

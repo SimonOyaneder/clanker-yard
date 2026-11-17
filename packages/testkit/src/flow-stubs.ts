@@ -40,6 +40,13 @@ const SPECS: Record<string, StubSpec> = {
       },
     },
   },
+  // Sin guion devuelve los ítems de `pr.ci` tal como llegaron (el stub no los completa).
+  "ci.failureReport": {
+    kind: "action",
+    outcomes: ["ok"],
+    effects: "local",
+    outputs: { ok: { items: [{ id: "ci:tests", kind: "ci", text: "El check tests falló en abc1234." }] } },
+  },
   // `none` primero: sin guion, un flujo no encuentra threads de los bots del CI y termina como antes.
   "pr.botThreads": {
     kind: "action",

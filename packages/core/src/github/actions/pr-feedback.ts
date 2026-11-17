@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { PrRef, type ResolvedPack } from "@clanker/api";
 import * as z from "zod";
 import { cleanMessage } from "../../commits/apply";
@@ -31,6 +32,8 @@ export interface PrFeedbackDeps {
   packs: Packs;
   /** Cómo se espera entre escrituras; los tests la reemplazan para no esperar. */
   pause?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Corre el comando de `ciRules.failureReport` y devuelve lo que imprimió; los tests lo reemplazan. */
+  runReport?: (command: string, signal: AbortSignal) => Promise<string>;
 }
 
 type Target = { client: GitHubClient; owner: string; name: string; number: number; pack: ResolvedPack };
@@ -352,6 +355,74 @@ export function prBotThreadsAction(deps: PrFeedbackDeps): ActionDef<typeof BotTh
           return [{ id: first.fullDatabaseId, kind: "bot" as const, ...(first.path && { path: first.path }), ...(first.line != null && { line: first.line }), text: plainText(first.body) }];
         });
         return items.length === 0 ? { outcome: "none" } : { outcome: "ok", output: { items } };
+      }),
+  };
+}
+
+/** Lo que se le pasa al triage de un reporte de falla: el final, donde quedan los tests que fallaron y su error. */
+export const FAILURE_REPORT_MAX_CHARS = 30_000;
+const REPORT_TIMEOUT_MS = 180_000;
+
+function runReportCommand(command: string, signal: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("/bin/sh", ["-c", command], { signal, timeout: REPORT_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+      const output = `${stdout}${stderr}`;
+      // Un reporte de fallas suele salir con exit distinto de 0 (el job falló): lo que importa es lo que imprimió.
+      if (error && output.trim() === "") reject(error);
+      else resolve(output);
+    });
+  });
+}
+
+/** Un grupo del match va entre comillas simples: la descripción de un check la escribe un servicio externo. */
+const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+
+const FailureReportArgs = z.object({
+  pr: PrRef,
+  /** Los ítems de `pr.ci` (`failures`); sin ellos no hay nada que completar. */
+  failures: z
+    .array(z.looseObject({ id: z.string(), text: z.string(), description: z.string().optional(), url: z.string().optional() }))
+    .nullish()
+    .transform((failures) => failures ?? []),
+});
+
+/**
+ * `ci.failureReport`: completa cada check rojo de `pr.ci` con el detalle de su falla para el triage. La primera regla de
+ * `ciRules.failureReport` del pack cuya regex calza con la descripción o la URL del check corre su comando (con
+ * `$1`..`$9` de los grupos, entre comillas) y el final de lo que imprime (`FAILURE_REPORT_MAX_CHARS`) se suma al texto
+ * del ítem. Sin regla que calce, o si el comando falla, el ítem sigue con lo que ya traía y una nota. Output del `ok`:
+ * `items`, los mismos ítems completados.
+ */
+export function ciFailureReportAction(deps: PrFeedbackDeps): ActionDef<typeof FailureReportArgs> {
+  const run = deps.runReport ?? runReportCommand;
+  return {
+    name: "ci.failureReport",
+    args: FailureReportArgs,
+    outcomes: ["ok"],
+    effects: "local",
+    run: (args, ctx) =>
+      onPr(deps, args.pr, async ({ pack }): Promise<ActionResult> => {
+        const rules = pack.ciRules?.failureReport ?? [];
+        const items = [];
+        for (const item of args.failures) {
+          const source = [item.description, item.url].filter(Boolean).join("\n");
+          const rule = rules.map((r) => ({ r, m: source && new RegExp(r.match).exec(source) })).find((x) => x.m);
+          if (!rule?.m) {
+            items.push(item);
+            continue;
+          }
+          const groups = rule.m;
+          const command = rule.r.command.replace(/\$([1-9])/g, (_all, n: string) => shellQuote(groups[Number(n)] ?? ""));
+          try {
+            const output = (await run(command, ctx.signal)).trim();
+            const cut = output.length > FAILURE_REPORT_MAX_CHARS;
+            const tail = cut ? output.slice(-FAILURE_REPORT_MAX_CHARS) : output;
+            items.push({ ...item, text: `${item.text}\n\nDetalle de la falla (\`${command}\`${cut ? ", solo el final" : ""}):\n${tail}` });
+          } catch (error) {
+            items.push({ ...item, text: `${item.text}\n\nNo se pudo traer el detalle con \`${command}\`: ${error instanceof Error ? error.message : String(error)}` });
+          }
+        }
+        return { outcome: "ok", output: { items } };
       }),
   };
 }

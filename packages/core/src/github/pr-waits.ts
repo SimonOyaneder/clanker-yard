@@ -89,6 +89,9 @@ interface TriageItem {
   text: string;
   /** Solo un check de CI que el pack declara flaky conocido. */
   flaky?: true;
+  /** Solo un check de CI: lo que dice de su falla y dónde verla (`ci.failureReport` lo usa para traer el detalle). */
+  description?: string;
+  url?: string;
 }
 
 /**
@@ -138,14 +141,16 @@ export function prWaits(prs: Pick<Prs, "get">, { headSeen, now = Date.now }: PrW
           return seen?.sha === ci.sha && now() - seen.at >= NO_CI_GRACE_MS ? { outcome: "ok", output: { sha: ci.sha } } : undefined;
         }
         if (ci.state !== "red") return undefined;
-        const failures = ci.failing.map(
-          (name): TriageItem => ({
+        const failures = ci.failing.map((name): TriageItem => {
+          const detail = ci.details?.[name] ?? {};
+          return {
             id: `ci:${name}`,
             kind: "ci",
-            text: `El check ${name} falló en ${ci.sha.slice(0, 7)}.`,
+            text: [`El check ${name} falló en ${ci.sha.slice(0, 7)}.`, detail.description, detail.url && `Detalle: ${detail.url}`].filter(Boolean).join("\n"),
             ...(ci.flaky.includes(name) && { flaky: true as const }),
-          }),
-        );
+            ...detail,
+          };
+        });
         return { outcome: "fail", output: { sha: ci.sha, failures } };
       },
     }),

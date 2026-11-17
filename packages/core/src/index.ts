@@ -129,6 +129,7 @@ export { workspaceCommitAfterRebaseAction, workspaceRebaseAbortAction } from "./
 export { stackRestackAction, stackRestackRewrittenAction } from "./github/actions/restack";
 
 export {
+  ciFailureReportAction,
   councilThreadsAction,
   prBotThreadsAction,
   prCommentAction,

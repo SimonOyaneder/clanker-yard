@@ -137,7 +137,7 @@ export const TriageReport = z.object({
   items: z.array(
     z.object({
       id: z.string(),
-      verdict: z.enum(["valid", "false_positive", "not_applicable", "other_pr", "flaky", "foreign"]),
+      verdict: z.enum(["valid", "false_positive", "not_applicable", "other_pr", "flaky", "foreign", "unknown"]),
       reply: z.string().optional().describe("La razón, en una frase, si el ítem no se arregla aquí."),
       fix: z.string().optional().describe("Solo un valid: el arreglo o el test concreto."),
       prRef: z.string().optional().describe("Solo other_pr: el PR al que corresponde."),

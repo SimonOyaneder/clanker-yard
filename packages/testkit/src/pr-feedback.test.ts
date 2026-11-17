@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ciFailureReportAction,
   councilThreadsAction,
   prBotThreadsAction,
   createConnections,
@@ -75,7 +76,7 @@ async function setup({ pack = PACK, draft = true }: { pack?: object | null; draf
   const deps = { connections, packs, pause: (ms: number) => (pauses.push(ms), Promise.resolve()) };
   const pr = sim.openPr({ head: "feat", draft });
   const ref = { account: ACCOUNT, repo: REPO, number: pr.number };
-  return { sim, pr, ref, pauses, botThreads: prBotThreadsAction(deps), councilThreads: councilThreadsAction(deps), comment: prCommentAction(deps), reply: prReplyAction(deps), resolve: prResolveThreadAction(deps), requestBot: reviewRequestBotAction(deps) };
+  return { sim, pr, ref, pauses, deps, botThreads: prBotThreadsAction(deps), councilThreads: councilThreadsAction(deps), comment: prCommentAction(deps), reply: prReplyAction(deps), resolve: prResolveThreadAction(deps), requestBot: reviewRequestBotAction(deps) };
 }
 
 /** Un paso del motor: la `key` es la misma en todos los reintentos de una visita, y `once` recuerda las etapas hechas. */
@@ -390,6 +391,37 @@ describe("pr.resolveThread", () => {
     const result = await resolve.run(resolve.args.parse({ pr: ref, thread: "999999" }), ctx());
 
     expect(result.outcome).toBe("refused");
+  });
+});
+
+describe("ci.failureReport", () => {
+  const RULES = { failureReport: [{ match: "circleci run get ([0-9a-f-]+)", command: "circleci run get $1 --failure-report" }] };
+  const failure = (description?: string) => ({ id: "ci:tests", kind: "ci", text: "El check tests falló en abc1234.", ...(description && { description }) });
+
+  test("con una regla del pack que calza corre su comando con el grupo entre comillas y suma el final del reporte", async () => {
+    const commands: string[] = [];
+    const { ref, deps } = await setup({ pack: { ...PACK, ciRules: RULES } });
+    const report = ciFailureReportAction({ ...deps, runReport: (command) => (commands.push(command), Promise.resolve(`inicio\n${"x".repeat(40_000)}\nrspec ./spec/a_spec.rb:3`)) });
+
+    const result = await report.run(report.args.parse({ pr: ref, failures: [failure("Job failed. run the CircleCI CLI: circleci run get 554de8da-4d40 --failure-report")] }), ctx());
+
+    expect(commands).toEqual(["circleci run get '554de8da-4d40' --failure-report"]);
+    const [item] = (result.output as { items: { id: string; text: string }[] }).items;
+    expect(item?.id).toBe("ci:tests");
+    expect(item?.text).toContain("rspec ./spec/a_spec.rb:3");
+    expect(item?.text).toContain("solo el final");
+    expect(item?.text).not.toContain("inicio");
+  });
+
+  test("sin regla que calce el ítem sigue igual, y si el comando falla queda con una nota", async () => {
+    const { ref, deps } = await setup({ pack: { ...PACK, ciRules: RULES } });
+    const report = ciFailureReportAction({ ...deps, runReport: () => Promise.reject(new Error("circleci: not logged in")) });
+
+    const result = await report.run(report.args.parse({ pr: ref, failures: [failure("Build failed"), failure("circleci run get abc --failure-report")] }), ctx());
+
+    const [plain, failed] = (result.output as { items: { text: string }[] }).items;
+    expect(plain?.text).toBe("El check tests falló en abc1234.");
+    expect(failed?.text).toContain("No se pudo traer el detalle con `circleci run get 'abc' --failure-report`: circleci: not logged in");
   });
 });
 

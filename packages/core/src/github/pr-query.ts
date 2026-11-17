@@ -65,12 +65,19 @@ export type RawContext =
         | "TIMED_OUT"
         | null;
       isRequired: boolean;
+      /** Lo que el check dice de cómo terminó (`output.title` y `output.summary`) y dónde verlo. */
+      title?: string | null;
+      summary?: string | null;
+      detailsUrl?: string | null;
     }
   | {
       __typename: "StatusContext";
       context: string;
       state: "ERROR" | "EXPECTED" | "FAILURE" | "PENDING" | "SUCCESS";
       isRequired: boolean;
+      /** La descripción del status (CircleCI dice ahí cómo ver la falla) y dónde verlo. */
+      description?: string | null;
+      targetUrl?: string | null;
     };
 
 /** Un PR con todo lo que `buildPrState` lee, ya con todas las páginas de threads y de checks. */
@@ -118,8 +125,8 @@ const PAGE_SIZE = 100;
 const PAGE_INFO = "pageInfo { hasNextPage endCursor }";
 const THREAD = `id isResolved comments(first: 20) { nodes { fullDatabaseId body path line createdAt author { __typename login } } }`;
 const CONTEXT = `__typename
-  ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
-  ... on StatusContext { context state isRequired(pullRequestNumber: $number) }`;
+  ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) title summary detailsUrl }
+  ... on StatusContext { context state isRequired(pullRequestNumber: $number) description targetUrl }`;
 const ACTOR = "__typename login avatarUrl";
 
 export const PR_QUERY = `

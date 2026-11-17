@@ -234,7 +234,14 @@ export const PR_FEEDBACK: FlowDef = {
       event: "pr.ci",
       args: { pr: "$run.params.pr" },
       timeoutSec: 5400,
-      on: { ok: "ci-bots", fail: "ci-triage", timeout: { to: "@done", note: "CI sigue corriendo" } },
+      on: { ok: "ci-bots", fail: "ci-report", timeout: { to: "@done", note: "CI sigue corriendo" } },
+    },
+    // El check rojo con el detalle de su falla (los tests que fallaron), si el pack sabe cómo traerlo.
+    "ci-report": {
+      type: "action",
+      action: "ci.failureReport",
+      args: { pr: "$run.params.pr", failures: "$ci-wait.failures" },
+      on: { ok: "ci-triage" },
     },
     // Con el CI verde, los threads que dejaron los otros bots que el pack deja resolver (lint, cobertura): pasan
     // por triage, se arreglan con fixups y se responden y resuelven, y el CI vuelve a correr sobre el push.
@@ -302,7 +309,7 @@ export const PR_FEEDBACK: FlowDef = {
       type: "agent",
       role: "triage",
       mode: "ci",
-      brief: { items: "$ci-wait.failures" },
+      brief: { items: "$ci-report.items" },
       on: {
         fix: {
           to: "fix",
@@ -311,7 +318,38 @@ export const PR_FEEDBACK: FlowDef = {
           exhausted: { to: "@done", note: "CI rojo por el cambio" },
         },
         foreign: { to: "@done", note: "CI rojo ajeno o flaky" },
+        unsure: "ci-unsure",
       },
+    },
+    // Sin evidencia el triage no adivina: una persona decide si el cambio lo causó.
+    "ci-unsure": {
+      type: "gate",
+      question:
+        "El CI quedó rojo y el triage no pudo saber si lo causó el cambio (su reporte dice qué le faltó). ¿Lo arregla el dev o lo dejo así?",
+      options: [
+        { id: "fix", label: "Que el dev lo arregle" },
+        { id: "leave", label: "Dejarlo así: lo reviso yo" },
+      ],
+      // Sin respuesta en un día queda como "lo reviso yo": el PR sigue en rojo con la nota.
+      timeoutSec: 86_400,
+      default: "leave",
+      on: {
+        fix: {
+          to: "ci-fix",
+          counter: "external",
+          maxRounds: "$run.params.externalRounds",
+          exhausted: { to: "@done", note: "CI rojo por el cambio" },
+        },
+        leave: { to: "@done", note: "CI rojo sin causa clara: lo revisa una persona" },
+      },
+    },
+    "ci-fix": {
+      type: "agent",
+      role: "dev",
+      mode: "fix",
+      resumeFrom: "implement",
+      brief: { input: "$ci-triage" },
+      on: { ok: "checks" },
     },
   },
 };
@@ -685,13 +723,20 @@ export const COUNCIL: FlowDef = {
       event: "pr.ci",
       args: { pr: "$run.params.pr" },
       timeoutSec: 5400,
-      on: { ok: "@done", fail: "ci-triage", timeout: { to: "@done", note: "CI sigue corriendo" } },
+      on: { ok: "@done", fail: "ci-report", timeout: { to: "@done", note: "CI sigue corriendo" } },
+    },
+    // El check rojo con el detalle de su falla (los tests que fallaron), si el pack sabe cómo traerlo.
+    "ci-report": {
+      type: "action",
+      action: "ci.failureReport",
+      args: { pr: "$run.params.pr", failures: "$ci-wait.failures" },
+      on: { ok: "ci-triage" },
     },
     "ci-triage": {
       type: "agent",
       role: "triage",
       mode: "ci",
-      brief: { items: "$ci-wait.failures" },
+      brief: { items: "$ci-report.items" },
       on: {
         fix: {
           to: "fix",
@@ -700,7 +745,38 @@ export const COUNCIL: FlowDef = {
           exhausted: { to: "@done", note: "CI rojo por el cambio" },
         },
         foreign: { to: "@done", note: "CI rojo ajeno o flaky" },
+        unsure: "ci-unsure",
       },
+    },
+    // Sin evidencia el triage no adivina: una persona decide si el cambio lo causó.
+    "ci-unsure": {
+      type: "gate",
+      question:
+        "El CI quedó rojo y el triage no pudo saber si lo causó el cambio (su reporte dice qué le faltó). ¿Lo arregla el dev o lo dejo así?",
+      options: [
+        { id: "fix", label: "Que el dev lo arregle" },
+        { id: "leave", label: "Dejarlo así: lo reviso yo" },
+      ],
+      // Sin respuesta en un día queda como "lo reviso yo": el PR sigue en rojo con la nota.
+      timeoutSec: 86_400,
+      default: "leave",
+      on: {
+        fix: {
+          to: "ci-fix",
+          counter: "external",
+          maxRounds: "$run.params.externalRounds",
+          exhausted: { to: "@done", note: "CI rojo por el cambio" },
+        },
+        leave: { to: "@done", note: "CI rojo sin causa clara: lo revisa una persona" },
+      },
+    },
+    "ci-fix": {
+      type: "agent",
+      role: "dev",
+      mode: "fix",
+      resumeFrom: "work",
+      brief: { input: "$ci-triage" },
+      on: { ok: "checks" },
     },
   },
 };

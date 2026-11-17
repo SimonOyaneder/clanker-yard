@@ -39,6 +39,7 @@ const ACTIONS = {
   "pr.rebaseApproval": ["proceed", "ask"],
   "council.threads": ["ok", "none"],
   "pr.botThreads": ["ok", "none"],
+  "ci.failureReport": ["ok"],
   "pr.reply": ["ok"],
   "review.requestBot": ["ok", "none"],
   "stack.restack": ["ok", "conflict"],
