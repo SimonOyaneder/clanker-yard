@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { BrowserWindow, dialog, ipcMain, Notification, shell } from "electron";
 import type { Theme } from "@clanker/ui";
+import { isE2E } from "./e2e";
 import { editorTarget, isTarget, isTheme, safeExternalUrl } from "./host-guards";
 
 const EDITORS = ["Zed", "Cursor", "Visual Studio Code"];
@@ -18,7 +19,8 @@ export function registerHostIpc(opts: HostIpcOptions): void {
 
   ipcMain.on("host:notify", (_e, n: unknown) => {
     const { title, body, target } = (n ?? {}) as { title?: unknown; body?: unknown; target?: unknown };
-    if (typeof title !== "string" || typeof body !== "string" || !Notification.isSupported()) return;
+    // En los E2E la ventana oculta nunca tiene el foco, así que la UI pediría una notificación por cada decisión.
+    if (isE2E || typeof title !== "string" || typeof body !== "string" || !Notification.isSupported()) return;
     const notification = new Notification({ title, body });
     live.add(notification);
     notification.on("close", () => live.delete(notification));

@@ -30,7 +30,8 @@ export const test = base.extend<object, { scenario: DemoScenario; home: string; 
       let app: ElectronApplication | undefined;
       try {
         core = await startDemoCore(home, scenario);
-        const env = { ...process.env, CLANKER_HOME: home, CORE_RUNTIME: "fake" } as Record<string, string>;
+        // `CLANKER_E2E` deja la ventana oculta y la app fuera del Dock: los E2E no le quitan el foco a nadie (`src/main/e2e.ts`).
+        const env = { ...process.env, CLANKER_HOME: home, CORE_RUNTIME: "fake", CLANKER_E2E: "1" } as Record<string, string>;
         delete env.ELECTRON_RUN_AS_NODE;
         app = await electron.launch({
           cwd: desktopDir,

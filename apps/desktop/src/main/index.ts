@@ -8,6 +8,7 @@ import { linkCli } from "./cli-link";
 import { coreEntry } from "./core-entry";
 import { CORE_SCHEME, createCoreProxy, windowCoreState } from "./core-proxy";
 import { createCoreSupervisor, type CoreSupervisor } from "./core-supervisor";
+import { isE2E } from "./e2e";
 import { registerHostIpc } from "./host-ipc";
 import { loginEnv } from "./login-env";
 import { buildMenu } from "./menu";
@@ -17,6 +18,9 @@ import { createMainWindow } from "./window";
 
 const devUrl = process.env.ELECTRON_RENDERER_URL;
 const dirs = clankerDirs();
+
+// En los E2E la app no entra al Dock ni a la barra de menú: macOS no la activa al lanzarla y no le quita el foco a nadie.
+if (isE2E && process.platform === "darwin") app.setActivationPolicy("accessory");
 
 // Abierta desde el Dock, la app hereda un PATH mínimo y ningún LANG: el core no encontraría `claude` ni `gh`.
 if (app.isPackaged) Object.assign(process.env, loginEnv(process.env));
@@ -145,7 +149,7 @@ void app.whenReady().then(() => {
 
   app.on("activate", () => {
     if (!BrowserWindow.getAllWindows().length) openMainWindow();
-    else mainWindow?.show();
+    else if (!isE2E) mainWindow?.show();
   });
 });
 
