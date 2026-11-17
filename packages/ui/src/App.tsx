@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, Decision, DecisionId, RunDetail, RunId, Repo, RunStatus } from "@clanker/api"
+import { LIVE_RUN_STATUSES, type CachedIssue, type Decision, type DecisionId, type RunDetail, type RunId, type Repo } from "@clanker/api"
 import { ChevronRight, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast, Toaster } from "sonner"
@@ -38,6 +38,8 @@ import { useLearningTriage } from "@/hooks/use-learning-triage"
 import { useLinearLogin } from "@/hooks/use-linear-login"
 import { useSummaryControls } from "@/hooks/use-summary-controls"
 import { LiveProvider, useLive, useLiveQuery } from "@/hooks/use-live"
+import { useProjectActions } from "@/hooks/use-project-actions"
+import { useProjectData } from "@/hooks/use-project-data"
 import { type Host, HostProvider, useHost } from "@/host"
 import { type AppActions, AppActionsContext, MODULES, type Module } from "@/lib/app-context"
 import { needsAttention } from "@/lib/connections"
@@ -50,7 +52,6 @@ import { runCaps } from "@/lib/project/run-commands"
 import { shapeOf } from "@/lib/run-graph"
 import { withPending } from "@/lib/learnings"
 import { readPref, writePref } from "@/lib/prefs"
-import { undoable } from "@/lib/undoable"
 import { barProjects } from "@/lib/projects"
 import { type SetupStep, type SetupStepId, setupSteps } from "@/lib/setup"
 import { cn, messageOf } from "@/lib/utils"
@@ -68,10 +69,6 @@ const sameLoc = (a: Loc, b: Loc) =>
 const NO_REPOS: readonly Repo[] = []
 const NO_ISSUE_KEYS: ReadonlyMap<string, string> = new Map()
 
-const LIVE_STATUSES: RunStatus[] = ["queued", "running", "waiting", "parked", "paused"]
-
-// Las acciones de `AppActions` no devuelven nada: el fallo ya salió en el toast.
-const reversible = async (...args: Parameters<typeof undoable>): Promise<void> => void (await undoable(...args))
 
 // La UI no sabe de dónde vienen los datos ni quién la aloja: `appData` y `host` se los da quien la monta.
 export function App({ appData, host }: { appData: AppData; host: Host }) {
@@ -109,7 +106,7 @@ function Shell() {
   const stale = !!core && core.status !== "live"
 
   const projectsQuery = useLiveQuery("projects", () => appData.projects())
-  const liveRunsQuery = useLiveQuery("live-runs", () => appData.runs({ status: LIVE_STATUSES }))
+  const liveRunsQuery = useLiveQuery("live-runs", () => appData.runs({ status: [...LIVE_RUN_STATUSES] }))
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
   const commands = useRunCommands()
   const connectionsQuery = useLiveQuery("connections", () => appData.connections())
@@ -159,23 +156,7 @@ function Shell() {
   const project = projects.find((p) => p.slug === slug) ?? barProjects(projects)[0] ?? projects[0] ?? null
   const summaryVisible = module === "projects" && !runId && tab === "summary" && !!project
   const summaryControls = useSummaryControls(summaryVisible)
-  const projectData = useLiveQuery(project ? `project:${project.id}` : "no-project", async () => {
-    if (!project) return null
-    const [runs, issues, queue, decisions, lanes, breakers, prs] = await Promise.all([
-      appData.runs({ projectId: project.id }),
-      appData.issues(project.id),
-      // Una cola que no se puede calcular (el tracker sin cuenta conectada) no esconde el resto de la operación.
-      appData.queue(project.id).then(
-        (entries) => ({ queue: entries }),
-        (e: unknown) => ({ queue: [], queueError: messageOf(e) }),
-      ),
-      appData.decisions({ projectId: project.id, status: ["pending"], kind: ACTIONABLE_KINDS }),
-      appData.lanes(),
-      appData.breakers(),
-      appData.openPrs(),
-    ])
-    return { runs, issues, ...queue, decisions, lanes, breakers, prs }
-  })
+  const projectData = useProjectData(project)
 
   // Los PRs vienen del caché del core (`prs.list`) y se releen con cada `pr.changed`: nada de polling en la UI.
   const prsQuery = useLiveQuery("prs", () => appData.openPrs())
@@ -283,6 +264,7 @@ function Shell() {
     }
   }, [module, reloadPrs, live, appData, openPrs])
 
+  const projectActions = useProjectActions(useCallback((s: string, id: RunId) => go({ module: "projects", slug: s, runId: id }), [go]))
   const actions = useMemo<AppActions>(
     () => ({
       goModule: (to) => (to === "inbox" ? goInbox() : go({ module: to })),
@@ -296,40 +278,7 @@ function Shell() {
       goConnections,
       connectLinear,
       testClaude: probeClaude,
-      startRun: async (p: ClankerProject, issue: CachedIssue) => {
-        try {
-          const started = await appData.startRun({ projectId: p.id, issueId: issue.id })
-          toast.success(`Corrida lanzada para ${issueKey(issue)}`, { action: { label: "Ver", onClick: () => go({ module: "projects", slug: p.slug, runId: started.id }) } })
-        } catch (e) {
-          toast.error(messageOf(e))
-        }
-      },
-      setParallel: (p, parallel) =>
-        reversible(
-          `${p.name}: ${parallel} ${parallel === 1 ? "corrida" : "corridas"} a la vez en dev`,
-          () => appData.updateProject({ id: p.id, parallel }),
-          () => appData.updateProject({ id: p.id, parallel: p.parallel }),
-        ),
-      setLanes: async (lane, capacity, from) => {
-        const apply = (n: number) => appData.setLanes({ [lane]: n }).then(live.refresh)
-        await reversible(
-          `${lane === "dev" ? "Carril dev" : "Carril mantenimiento"}: ${capacity} ${capacity === 1 ? "cupo" : "cupos"} en la máquina`,
-          () => apply(capacity),
-          () => apply(from),
-        )
-      },
-      skipIssue: (p, issue, skipped) =>
-        reversible(
-          skipped ? `No tomaré ${issueKey(issue)}` : `${issueKey(issue)} vuelve a la cola`,
-          () => appData.skipIssue({ id: p.id, issueId: issue.id, skipped }),
-          () => appData.skipIssue({ id: p.id, issueId: issue.id, skipped: !skipped }),
-        ),
-      boostIssue: (p, issue) =>
-        reversible(
-          `${issueKey(issue)} sube al principio de la cola`,
-          () => appData.boostIssue({ id: p.id, issueId: issue.id, boosted: true }),
-          () => appData.boostIssue({ id: p.id, issueId: issue.id, boosted: false }),
-        ),
+      ...projectActions,
       editQueueFilters: () => {
         setSettingsFocus("queue")
         go({ module: "projects", runId: null, tab: "settings" })
@@ -345,7 +294,7 @@ function Shell() {
       openExternal: host.openExternal,
       refresh,
     }),
-    [selectProject, go, goInbox, appData, host, live.refresh, refresh, goConnections, connectLinear, probeClaude, openDecision, setSidebarOpen, sidebarOpen],
+    [selectProject, go, goInbox, host, refresh, goConnections, connectLinear, probeClaude, openDecision, setSidebarOpen, sidebarOpen, projectActions],
   )
 
   useHostBridge({
