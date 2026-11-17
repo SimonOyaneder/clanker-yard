@@ -39,18 +39,19 @@ async function setup(override?: OpenPr[]) {
     rebasePr: vi.spyOn(data, "rebasePr"),
   } satisfies Partial<Record<keyof AppData, unknown>>
   const host = { openExternal: vi.fn() } as unknown as Host
+  const openLocal = vi.fn()
   render(
     <AppDataProvider value={data}>
       <HostProvider value={host}>
         <TooltipProvider>
-          <PrCommandsProvider prs={prs} projects={[]} onOpenRun={() => {}}>
+          <PrCommandsProvider prs={prs} projects={[]} onOpenRun={() => {}} onOpenLocal={openLocal}>
             <PrsView prs={prs} unread={0} issueKeys={new Map()} loaded error={null} registered={[]} onOpenConnections={() => {}} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>
       </HostProvider>
     </AppDataProvider>,
   )
-  return { data, host, spies, prs }
+  return { data, host, spies, prs, openLocal }
 }
 
 const rowOf = (title: string) => screen.getByText(title).closest("li")!
@@ -136,10 +137,9 @@ test.each(["list", "graph"])("el modo %s muestra locales sin número, link ni ac
   expect(within(card).getByText("idx-entries-metrics")).toBeTruthy()
   expect(within(card).queryByRole("link", { hidden: true })).toBeNull()
   expect(card.textContent).not.toMatch(/#|Sin checks|Sin riesgo|Listo para/)
-  fireEvent.click(screen.getByText(title))
   if (mode === "list") fireEvent.focus(within(card).getByRole("button"))
   else fireEvent.focus(card)
-  for (const key of ["m", "b", "r", "h", "Enter"]) fireEvent.keyDown(card, { key })
+  for (const key of ["m", "b", "r", "h"]) fireEvent.keyDown(card, { key })
   expect(host.openExternal).not.toHaveBeenCalled()
   for (const spy of Object.values(spies)) expect(spy).not.toHaveBeenCalled()
 
@@ -148,13 +148,26 @@ test.each(["list", "graph"])("el modo %s muestra locales sin número, link ni ac
   expect(screen.queryByRole("menuitem", { name: /GitHub|Mergear|hold|review del bot|Rebasear|Copiar link/ })).toBeNull()
 })
 
+test.each(["list", "graph"])("en el modo %s, el click, Enter y el menú contextual abren la vista del PR local", async (mode) => {
+  localStorage.setItem("clanker.prs.mode", JSON.stringify(mode))
+  const { prs, openLocal } = await setup()
+  const local = prs.find((p): p is LocalPr => p.local !== null)!
+  const card = mode === "list" ? rowOf(local.local.title) : screen.getByText(local.local.title).closest<HTMLDivElement>("[role='group']")!
+
+  if (mode === "list") fireEvent.click(screen.getByText(local.local.title))
+  else fireEvent.keyDown(card, { key: "Enter" })
+  fireEvent.contextMenu(screen.getByText(local.local.title))
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Ver PR local/ }))
+
+  expect(openLocal.mock.calls).toEqual([[local.id], [local.id]])
+})
+
 test("P y el menú contextual publican ya un PR local del sistema", async () => {
   const { data, prs } = await setup()
   const local = prs.find((p): p is LocalPr => p.local !== null && p.owned)!
   const publish = vi.spyOn(data, "publishLocalPr")
   const card = rowOf(local.local.title)
 
-  fireEvent.click(screen.getByText(local.local.title))
   fireEvent.focus(within(card).getByRole("button"))
   fireEvent.keyDown(card, { key: "p" })
   await waitFor(() => expect(publish).toHaveBeenCalledWith(local.id))
@@ -197,7 +210,7 @@ test("sin PRs abiertos el estado vacío dice qué esperar", async () => {
     <AppDataProvider value={createMemoryAppData(NOW)}>
       <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
         <TooltipProvider>
-          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}}>
+          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}} onOpenLocal={() => {}}>
             <PrsView prs={[]} unread={2} issueKeys={new Map()} loaded error={null} registered={[]} onOpenConnections={() => {}} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>
@@ -213,7 +226,7 @@ function renderEmpty(repos: Repo[], onOpenConnections = () => {}) {
     <AppDataProvider value={createMemoryAppData(NOW)}>
       <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
         <TooltipProvider>
-          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}}>
+          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}} onOpenLocal={() => {}}>
             <PrsView prs={[]} unread={0} issueKeys={new Map()} loaded error={null} registered={repos} onOpenConnections={onOpenConnections} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>

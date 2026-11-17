@@ -17,6 +17,7 @@ import { useColorMode } from "@/hooks/use-color-mode"
 import { useHost } from "@/host"
 import { buildStackForest, layoutStackGroups, listStackGroups } from "@/lib/prs/stack"
 import { NODE_HEIGHT, NODE_WIDTH, PrNode, type PrNodeData } from "./pr-node"
+import { usePrCommands } from "./pr-commands"
 
 const nodeTypes = { pr: PrNode }
 
@@ -73,6 +74,7 @@ function withMeasuredHeights(prev: ReadonlyMap<string, number>, changes: NodeCha
 
 function GraphInner({ prs, dimmed, issueKeys, layoutKey }: { prs: OpenPr[]; dimmed: Set<string>; issueKeys: ReadonlyMap<string, string>; layoutKey: string }) {
   const host = useHost()
+  const commands = usePrCommands()
   // Primero se dibuja con una altura estimada; cuando xyflow mide cada tarjeta, se vuelve a acomodar con la real.
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map())
   const { nodes, edges } = useMemo(() => layoutStacks(prs, dimmed, issueKeys, heights), [prs, dimmed, issueKeys, heights])
@@ -101,8 +103,9 @@ function GraphInner({ prs, dimmed, issueKeys, layoutKey }: { prs: OpenPr[]; dimm
       // Sin un handler de click, xyflow les pone pointer-events: none a los nodos que no se
       // seleccionan ni arrastran: el click caía en el fondo y la tarjeta nunca abría el PR.
       onNodeClick={(_e, n) => {
-        const { state } = (n.data as PrNodeData).pr
-        if (state) host.openExternal(state.url)
+        const { pr } = n.data as PrNodeData
+        if (pr.state) host.openExternal(pr.state.url)
+        else if (pr.local) commands.viewLocal(pr)
       }}
       proOptions={{ hideAttribution: true }}
       className="flow-canvas"

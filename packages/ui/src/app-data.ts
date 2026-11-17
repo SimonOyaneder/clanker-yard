@@ -32,6 +32,7 @@ import type {
   LearningPatch,
   NewLearning,
   LearningVerdict,
+  LocalPrDetail,
   ModelMetrics,
   NewProject,
   PackInfo,
@@ -128,6 +129,8 @@ export interface AppData {
   rebasePr(ref: PrRef): Promise<void>
   /** Publica ya en GitHub un PR local (por su id): sale apilado sobre su padre; la corrida aparece en el proyecto que lo abrió. */
   publishLocalPr(id: string): Promise<void>
+  /** Lo que se ve de un PR local sin GitHub (descripción, commits y diff contra su base), leído del repo. */
+  localPrDetail(id: string): Promise<LocalPrDetail>
   /** Las issues del caché del proyecto. */
   issues(projectId: ProjectId): Promise<CachedIssue[]>
   /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */

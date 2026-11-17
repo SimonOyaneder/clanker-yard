@@ -42,7 +42,11 @@ export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
         onFocus={() => commands.select(pr.id)}
         onClick={() => commands.select(pr.id)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && state) host.openExternal(state.url)
+          if (e.key !== "Enter") return
+          // xyflow también abre el nodo con Enter (`onNodeClick`): una sola vez.
+          e.stopPropagation()
+          if (state) host.openExternal(state.url)
+          else if (pr.local) commands.viewLocal(pr)
         }}
         style={{ width: NODE_WIDTH, minHeight: NODE_HEIGHT - 12 }}
         className={cn(

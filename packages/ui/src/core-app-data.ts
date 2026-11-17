@@ -93,6 +93,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     requestPrReview: async (ref) => void (await client.prs.requestReview(ref)),
     rebasePr: async (ref) => void (await client.prs.rebase(ref)),
     publishLocalPr: async (id) => void (await client.prs.publishLocal({ id })),
+    localPrDetail: (id) => client.prs.localDetail({ id }),
     issues: (projectId) => client.issues.list({ projectId }),
     queue: (projectId) => client.projects.queue({ id: projectId }),
     projectMetrics: async (projectId, range) => {

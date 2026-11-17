@@ -425,6 +425,7 @@ function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
           onClick={() => {
             commands.select(pr.id)
             if (state) host.openExternal(state.url)
+            else if (pr.local) commands.viewLocal(pr)
           }}
           onFocus={() => commands.select(pr.id)}
           className={cn("flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none", selected && "bg-accent/40")}

@@ -1,7 +1,7 @@
 import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type NewLearning, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_REBASE, SEED_TECHLEAD } from "@/demo/seed-flows"
-import { buildOpenPrs } from "@/demo/seed-prs"
+import { buildOpenPrs, seedLocalPrDetail } from "@/demo/seed-prs"
 import { aggregate, seedClosedRuns } from "@/demo/seed-metrics"
 import { seedStep, transcriptPage, type StepSeed } from "@/demo/seed-steps"
 
@@ -530,6 +530,11 @@ export function createMemoryAppData(now = Date.now()): AppData {
     rebasePr: async (ref) => void prOf(ref),
     publishLocalPr: async (id) => {
       if (!prs.some((p) => p.id === id && p.local)) throw new Error(`${id} no es un PR local`)
+    },
+    localPrDetail: async (id) => {
+      const local = prs.find((p) => p.id === id)?.local
+      if (!local) throw new Error(`${id} no es un PR local`)
+      return seedLocalPrDetail(id, local, now)
     },
     // Solo el primer proyecto tiene corridas cerradas de ejemplo; el otro trae su Resumen vacío.
     projectMetrics: async (projectId, range) =>
