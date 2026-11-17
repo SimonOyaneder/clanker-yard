@@ -8,10 +8,11 @@ import { PermanentActionError, type ActionCtx, type ActionDef } from "../../flow
 import { git, GitError, isAncestor, tryGit } from "../../git/git";
 import { combinedBases, prParents, pullRequests } from "../../store/schema";
 import type { Store } from "../../store/store";
-import { emitOnce } from "../../watch/marks";
-import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RepoConfig, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
+import { emitOnce } from "../marks";
+import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
 import type { GitHubClient } from "../client";
 import type { Prs } from "../prs";
+import type { RepoConfig } from "../../repos/repos";
 
 // El restack de la cadena (`docs/design.html#d-ops`, restack y restackRewritten): `stack.restack` al mergear un
 // padre y `stack.restackRewritten` cuando se reescribe su branch.

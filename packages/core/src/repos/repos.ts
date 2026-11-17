@@ -7,10 +7,30 @@ import { newId } from "../store/conventions";
 import { repos } from "../store/schema";
 import type { Store } from "../store/store";
 import { findRepos, inspectRepo } from "./inspect";
-import type { RepoConfig } from "../workspaces/workspaces";
 import { BadRequestError, NotFoundError } from "../errors/domain";
 
 /** El repo que se pidió no está registrado. */
+/** Lo que el core necesita de un repo registrado para tomar worktrees, pushear y abrir PRs (`Repos.config`). */
+export interface RepoConfig {
+  /** El checkout del usuario: de ahí cuelgan los worktrees y ahí se hace el fetch. */
+  path: string;
+  /** La branch por defecto nunca es de un workspace. */
+  defaultBranch: string;
+  /** Otras branches que ningún workspace puede usar. */
+  protectedBranches?: string[];
+  /** Raíz de los worktrees en lugar de `<dataDir>/worktrees`; relativa se resuelve contra `dataDir`. */
+  worktreeDir?: string;
+  /** Adónde y como quién se pushea; sin esto el repo no tiene `push` ni `fetch`. */
+  remote?: {
+    /** `https://github.com/<owner>/<repo>.git`: explícita, aunque `origin` sea SSH. */
+    url: string;
+    /** `owner/repo` en GitHub: donde `pr.publish` abre el PR. */
+    repo: string;
+    /** La cuenta de GitHub conectada cuyo token autentica. */
+    account: string;
+  };
+}
+
 export class RepoNotFoundError extends NotFoundError {
   constructor(id: string) {
     super(`No existe el repo ${id}: regístralo con repos.add.`);

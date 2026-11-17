@@ -7,6 +7,7 @@ import { prParents, pullRequests } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Repos } from "../repos/repos";
 import type { Prs } from "./prs";
+import { prRefOf } from "./pr-rows";
 
 /** Lo que Watch lee de un PR de la API REST (`GET /repos/{owner}/{repo}/pulls/{n}`). */
 export const RestPull = z.object({
@@ -126,14 +127,13 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
         parents.set(childId, [...(parents.get(childId) ?? []), parentId]);
       }
       return rows.flatMap((row) => {
-        const found = repos.get(row.repoId);
-        const remote = found && repos.config(row.repoId).remote;
-        if (!remote || (repo !== undefined && remote.repo !== repo)) return [];
-        const pack = packs.packFor({ githubOrg: remote.repo.split("/")[0]! });
+        const ref = prRefOf(repos, row);
+        if (!ref || (repo !== undefined && ref.repo !== repo)) return [];
+        const pack = packs.packFor({ githubOrg: ref.repo.split("/")[0]! });
         return [
           {
             id: row.id,
-            ref: { account: remote.account, repo: remote.repo, number: row.number },
+            ref,
             owned: row.owned,
             issueId: row.issueId,
             runId: row.runId,

@@ -17,12 +17,12 @@ test("un PR listo con la estrategia del pack se mergea comentando, y con un repo
 
 test("no se ofrece mergear un PR en cola, con la cola caída, en hold o con algo que falta, y el motivo se dice", () => {
   expect(prCaps(find("dashboard#977")).merge).toBeNull()
-  expect(whyNotMerge(find("dashboard#977"))).toBe("Ya está en cola")
+  expect(whyNotMerge(find("dashboard#977"))).toBe("Ya está en cola: el merge ya se pidió")
   expect(prCaps(find("payments-api#391")).merge).toBeNull()
   expect(whyNotMerge(find("payments-api#391"))).toMatch(/falló en la cola/)
   expect(prCaps(find("dashboard#981")).merge).toBeNull()
   expect(whyNotMerge(find("dashboard#981"))).toMatch(/hold/)
-  expect(whyNotMerge(find("ledger#424"))).toBe("Falta: pidieron cambios, 2 hilos de humanos sin resolver")
+  expect(whyNotMerge(find("ledger#424"))).toBe("No está listo para mergear: pidieron cambios, 2 hilos de humanos sin resolver")
   expect(whyNotMerge(find("ledger#421"))).toBeUndefined()
 })
 

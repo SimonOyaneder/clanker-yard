@@ -1,14 +1,14 @@
-import type { ClientOrigin, PrRef, PrState } from "@clanker/api";
+import { mergeBlocker, rebaseBlocker, type ClientOrigin, type PrRef, type PrState } from "@clanker/api";
 import { eq } from "drizzle-orm";
-import type { Packs } from "../../packs/packs";
-import { runs } from "../../store/schema";
-import type { Store } from "../../store/store";
-import type { Connections } from "../../connections/connections";
-import type { Repos } from "../../repos/repos";
+import type { Packs } from "../packs/packs";
+import { runs } from "../store/schema";
+import type { Store } from "../store/store";
+import type { Connections } from "../connections/connections";
+import type { Repos } from "../repos/repos";
 import { commentOnPr } from "./comment";
-import type { PrCache } from "../pr-cache";
-import type { Prs } from "../prs";
-import { BadRequestError, UiOnlyError } from "../../errors/domain";
+import type { PrCache } from "./pr-cache";
+import type { Prs } from "./prs";
+import { BadRequestError, UiOnlyError } from "../errors/domain";
 
 // Lo que una persona le pide al core sobre un PR desde la app (`prs.setHold`, `prs.merge`,
 // `prs.requestReview`, `prs.rebase`). Cada pedido relee el PR antes de actuar: lo que vale es lo que pasa
@@ -81,12 +81,8 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache 
       if (state.merge.via !== "comment" || !strategy) {
         throw new PrCommandError(`${label(ref)} se mergea con el botón de GitHub: la estrategia del pack no aplica a este repo.`);
       }
-      if (state.hold) throw new PrCommandError(`${label(ref)} tiene hold ("no mergear nunca"): quítalo antes de mergear.`);
-      if (state.merge.queue === "queued") throw new PrCommandError(`${label(ref)} ya está en cola: el merge ya se pidió.`);
-      if (state.merge.queue === "failed") {
-        throw new PrCommandError(`El merge de ${label(ref)} ya se pidió y falló en la cola: revisa por qué en GitHub antes de volver a pedirlo.`);
-      }
-      if (!state.merge.ready) throw new PrCommandError(`${label(ref)} no está listo para mergear: ${state.merge.blockers.join(", ") || "ya no está abierto"}.`);
+      const blocked = mergeBlocker(state);
+      if (blocked) throw new PrCommandError(`${label(ref)}: ${blocked}.`);
       await comment(ref, strategy.command, by);
       return cache.refresh(ref);
     },
@@ -101,10 +97,9 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache 
 
     async rebase(ref, by) {
       const row = knownRow(ref);
-      if (!row.owned) throw new PrCommandError(`${label(ref)} no lo abrió el sistema: el core nunca reescribe la branch de un PR ajeno.`);
       const state = await prs.get(ref);
-      if (state.state === "merged" || state.state === "closed") throw new PrCommandError(`${label(ref)} ya está ${state.state === "merged" ? "mergeado" : "cerrado"}.`);
-      if (state.threads.councilEver) throw new PrCommandError(`${label(ref)} tiene threads de council: rebasear reescribiría su historia y eso nunca se fuerza.`);
+      const blocked = rebaseBlocker(state, row.owned);
+      if (blocked) throw new PrCommandError(`${label(ref)}: ${blocked}.`);
       const projectId = row.runId ? store.db.select({ id: runs.projectId }).from(runs).where(eq(runs.id, row.runId)).get()?.id : undefined;
       store.tx((tx) =>
         tx.emit({

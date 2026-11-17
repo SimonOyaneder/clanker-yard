@@ -108,8 +108,8 @@ export { createMergeScope } from "./github/merge-scope";
 export type { MergeScope } from "./github/merge-scope";
 export { startMergeReactions, approveOption, BUTTON_OPTION, WAIT_OPTION } from "./watch/merge-reactions";
 export type { MergeReactions } from "./watch/merge-reactions";
-export { createPrCommands, PrCommandError } from "./github/actions/pr-commands";
-export type { PrCommands } from "./github/actions/pr-commands";
+export { createPrCommands, PrCommandError } from "./github/pr-commands";
+export type { PrCommands } from "./github/pr-commands";
 export { createPrCache } from "./github/pr-cache";
 export type { PrCache } from "./github/pr-cache";
 export { createWatch, WATCH_TICK_MS } from "./watch/watch";
@@ -168,7 +168,7 @@ export { CLEANUP_EVERY_MS, startCleanup } from "./workspaces/cleanup";
 export type { Cleanup } from "./workspaces/cleanup";
 export type { CleanupResult } from "./workspaces/archive";
 export { createRepos, InvalidRepoError, RepoNotFoundError } from "./repos/repos";
-export type { Repos } from "./repos/repos";
+export type { RepoConfig, Repos } from "./repos/repos";
 export { NotAGitRepoError } from "./repos/inspect";
 
 export type { BuiltinTemplate } from "./builtin/install";
@@ -188,7 +188,6 @@ export type {
   CombineRequest,
   CombineResult,
   ExecOptions,
-  RepoConfig,
   RestackCombinedOptions,
   WorkspaceLease,
   WorkspaceRef,
@@ -216,8 +215,8 @@ export type { RecipeTester, RecipeTesterOptions } from "./recipe/recipe-test";
 export { commitsApplyAction } from "./commits/apply";
 export { NO_CI_GRACE_MS, prOfWaitKey, prWaits, signalPr } from "./github/pr-waits";
 export { prPublishAction } from "./github/actions/publish";
-export { createPrRepublisher } from "./github/actions/republisher";
-export type { PrRepublisher } from "./github/actions/republisher";
+export { createPrRepublisher } from "./github/republisher";
+export type { PrRepublisher } from "./github/republisher";
 export type { PrPublishDeps } from "./github/actions/publish";
 export { prPushFixupsAction } from "./github/actions/push-fixups";
 export {

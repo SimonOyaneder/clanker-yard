@@ -7,7 +7,7 @@ import { createConnections } from "../connections/connections";
 import { healthyGitHub, startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { openStore, type Store } from "../store/store";
-import type { RepoConfig } from "../workspaces/workspaces";
+import type { RepoConfig } from "../repos/repos";
 import { createGitIdentityOf } from "./identity";
 
 let dir: string;

@@ -5,7 +5,7 @@ import { git, isAncestor, tryGit } from "../git/git";
 import { workspaces } from "../store/schema";
 import type { Store } from "../store/store";
 import { rebaseInProgress } from "./rebase";
-import type { RepoConfig } from "./workspaces";
+import type { RepoConfig } from "../repos/repos";
 import { prsOfBranch } from "../github/pr-rows";
 
 /** Cuánto vive un worktree archivado antes de borrarse (`docs/design.html#d-ops`, estados del worktree). */

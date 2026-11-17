@@ -4,7 +4,8 @@ import { githubUnauthorized } from "../../breakers/breakers";
 import { PermanentActionError } from "../../flows/catalog";
 import { workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
-import type { RepoConfig, Workspaces, WorkspaceRef } from "../../workspaces/workspaces";
+import type { RepoConfig } from "../../repos/repos";
+import type { Workspaces, WorkspaceRef } from "../../workspaces/workspaces";
 import { openPrOfBranch } from "../pr-rows";
 
 /** Qué iba a hacer la acción con el PR, para los mensajes de `ownedOpenPr`. */

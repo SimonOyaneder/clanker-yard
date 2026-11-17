@@ -1,5 +1,5 @@
 import type { Connections } from "../connections/connections";
-import type { RepoConfig } from "../workspaces/workspaces";
+import type { RepoConfig } from "../repos/repos";
 
 /** La URL explícita de un repo de GitHub: el core nunca pushea al `origin` del checkout, que puede ser SSH. */
 export const githubUrl = (repo: string): string => `https://github.com/${repo}.git`;

@@ -1,6 +1,6 @@
 import type { EventType, RunId } from "@clanker/api";
 import { and, desc, eq } from "drizzle-orm";
-import type { PrRow } from "../github/pr-cache";
+import type { PrRow } from "./pr-cache";
 import { runs, watchMarks } from "../store/schema";
 import type { StoreDb, Tx } from "../store/store";
 

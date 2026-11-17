@@ -2,7 +2,7 @@ import { DecisionId, type Event, type MergeStrategy, type PrRef, type PrState } 
 import { and, eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
 import { closeDecision, openDecision } from "../decisions/decisions";
-import { commentOnPr } from "../github/actions/comment";
+import { commentOnPr } from "../github/comment";
 import type { PrRow } from "../github/pr-cache";
 import type { Prs } from "../github/prs";
 import type { Packs } from "../packs/packs";
@@ -10,7 +10,7 @@ import { decisions, mergeOffers, runs } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import type { Repos } from "../repos/repos";
 import type { ErrorReporter } from "../errors/reporter";
-import { prById } from "../github/pr-rows";
+import { prById, prRefOf } from "../github/pr-rows";
 
 // Lo que el core hace cuando la estrategia de merge dice que un PR está listo (`docs/design.html#d-ops`,
 // "Watch: eventos y qué disparan", `pr.mergeReady`): según el pack, nada, comentar el comando de merge solo
@@ -64,9 +64,8 @@ export function startMergeReactions({ store, repos, packs, prs, connections, err
   /** El PR `id` si lo abrió el sistema (los demás nunca se comentan), con su ref de GitHub. */
   function ownedPr(id: string) {
     const row = prById(store.db, id);
-    const remote = row && repos.get(row.repoId) && repos.config(row.repoId).remote;
-    if (!row?.owned || !remote) return undefined;
-    return { row, ref: { account: remote.account, repo: remote.repo, number: row.number } satisfies PrRef };
+    const ref = row?.owned ? prRefOf(repos, row) : undefined;
+    return row && ref ? { row, ref } : undefined;
   }
 
   const strategyOf = (ref: PrRef) => packs.packFor({ githubOrg: ref.repo.split("/")[0]! }).mergeStrategy;

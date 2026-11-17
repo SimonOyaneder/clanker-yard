@@ -1,5 +1,5 @@
 import type { PrRef } from "@clanker/api";
-import type { Connections } from "../../connections/connections";
+import type { Connections } from "../connections/connections";
 
 /**
  * Comenta en la conversación del PR con el token de su cuenta. Un 401 ya deja la conexión `revoked` en el

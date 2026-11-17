@@ -1,3 +1,4 @@
+import { mergeBlocker, rebaseBlocker } from "@clanker/api"
 import type { OpenPr } from "./prs"
 
 /** Qué acciones del core se le ofrecen a un PR: las mismas que el core acepta (`prs.*`), para no ofrecer lo que va a rechazar. */
@@ -18,23 +19,17 @@ export interface PrCaps {
 }
 
 export function prCaps(pr: OpenPr): PrCaps {
-  const { merge, hold, threads } = pr.state
-  const mergeable = merge.ready && !hold && merge.queue === null
   return {
-    merge: mergeable ? (merge.via === "comment" ? "comment" : "button") : null,
+    merge: mergeBlocker(pr.state) === undefined ? (pr.state.merge.via === "comment" ? "comment" : "button") : null,
     requestReview: pr.reviewBot,
-    rebase: pr.owned && !threads.councilEver,
+    rebase: rebaseBlocker(pr.state, pr.owned) === undefined,
     hold: true,
     run: pr.runId !== null,
   }
 }
 
-/** La razón por la que no se puede mergear, para el tooltip del ítem apagado; `undefined` si se puede. */
+/** La razón por la que no se puede mergear (la misma con que el core lo rechazaría), para el tooltip del ítem apagado; `undefined` si se puede. */
 export function whyNotMerge(pr: OpenPr): string | undefined {
-  const { merge, hold } = pr.state
-  if (hold) return "Tiene hold: quítalo para poder mergear"
-  if (merge.queue === "queued") return "Ya está en cola"
-  if (merge.queue === "failed") return "El merge falló en la cola: revisa por qué en GitHub"
-  if (!merge.ready) return merge.blockers.length ? `Falta: ${merge.blockers.join(", ")}` : "No está listo para mergear"
-  return undefined
+  const why = mergeBlocker(pr.state)
+  return why && why.charAt(0).toUpperCase() + why.slice(1)
 }

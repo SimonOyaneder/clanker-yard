@@ -37,7 +37,7 @@ export async function planRestack(git: Git, { onto, from, committer }: { onto: s
       continue;
     }
     for (const parent of others) {
-      if (!(await isAncestor(git, parent, from)) && !(await isAncestor(git, parent, onto))) {
+      if (!(await isAncestorIn(git, parent, from)) && !(await isAncestorIn(git, parent, onto))) {
         return {
           status: "foreign-merge",
           merge: sha,
@@ -65,7 +65,8 @@ export async function planRestack(git: Git, { onto, from, committer }: { onto: s
   return { status: "ok", head: tip, commits: own.length };
 }
 
-export async function isAncestor(git: Git, ancestor: string, descendant: string): Promise<boolean> {
+/** `merge-base --is-ancestor` con el `Git` de un worktree (`isAncestor` de `git/git.ts` es el mismo con una ruta). */
+export async function isAncestorIn(git: Git, ancestor: string, descendant: string): Promise<boolean> {
   return git(["merge-base", "--is-ancestor", ancestor, descendant]).then(
     () => true,
     (error) => {

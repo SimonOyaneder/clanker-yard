@@ -1,4 +1,4 @@
-import { isAncestor, mergeTree, type Git } from "./restack";
+import { isAncestorIn, mergeTree, type Git } from "./restack";
 
 // La mecánica de git de una base combinada (`docs/design.html#d-ops`, "Bases combinadas"): la punta
 // de la branch por defecto con un merge --no-ff de cada padre encima, sin tocar ningún worktree. Solo crea
@@ -43,7 +43,7 @@ export async function planCombinedBase(
   let tip = onto;
   const merged: string[] = [];
   for (const parent of parents) {
-    if (!(await isAncestor(git, parent.sha, tip))) {
+    if (!(await isAncestorIn(git, parent.sha, tip))) {
       const result = await mergeTree(git, tip, parent.sha);
       if (!result.ok) return { status: "conflict", parent, merged, conflicts: result.conflicts, failures: result.failures };
       tip = await git(

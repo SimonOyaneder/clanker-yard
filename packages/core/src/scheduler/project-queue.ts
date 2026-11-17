@@ -11,7 +11,7 @@ import type { Tracker } from "../tracker/tracker";
 import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../repos/repos";
 import { type QueuePrFact, tickDev } from "./queue";
-import { openOwnedPrsOfIssues } from "../github/pr-rows";
+import { openOwnedPrsOfIssues, prRefOf } from "../github/pr-rows";
 import { BadRequestError } from "../errors/domain";
 import { messageOf } from "../errors/format";
 
@@ -58,10 +58,10 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
           baseRef: row.baseRef,
         };
         if (!readCi) return { ...fact, ci: "not_green" };
-        const remote = repo && repos.config(repo.id).remote;
-        if (!remote) return { ...fact, ci: "unread", ciError: "el repo no tiene remoto de GitHub o no hay una cuenta conectada" };
+        const ref = prRefOf(repos, row);
+        if (!ref) return { ...fact, ci: "unread", ciError: "el repo no tiene remoto de GitHub o no hay una cuenta conectada" };
         try {
-          const pr = row.detail ?? (await prs.get({ account: remote.account, repo: remote.repo, number: row.number }));
+          const pr = row.detail ?? (await prs.get(ref));
           if (pr.state === "merged" || pr.state === "closed") return undefined;
           return { ...fact, ci: pr.ci.state === "green" ? "green" : "not_green" };
         } catch (error) {

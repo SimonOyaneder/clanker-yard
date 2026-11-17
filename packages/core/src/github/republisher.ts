@@ -1,20 +1,20 @@
 import { randomUUID } from "node:crypto";
-import type { IssueId, Origin, PrRef, PrRepublish, RepoId, RepublishInput, RepublishProgress, RunId } from "@clanker/api";
+import type { CachedIssue, IssueId, Origin, PrRef, PrRepublish, RepoId, RepublishInput, RepublishProgress, RunId } from "@clanker/api";
 import { and, eq, inArray, or } from "drizzle-orm";
 import * as z from "zod";
-import type { Connections } from "../../connections/connections";
-import { githubUnauthorized } from "../../breakers/breakers";
-import type { Engine } from "../../flows/engine";
-import type { FetchOutcome } from "../../git/remote";
-import { freshIssueBranch } from "../../projects/branch-name";
+import type { Connections } from "../connections/connections";
+import { githubUnauthorized } from "../breakers/breakers";
+import type { Engine } from "../flows/engine";
+import type { FetchOutcome } from "../git/remote";
+import { freshIssueBranch } from "../projects/branch-name";
 import { PrCommandError } from "./pr-commands";
-import type { Projects } from "../../projects/projects";
-import { prParents, pullRequests, runs } from "../../store/schema";
-import type { Store } from "../../store/store";
-import type { Issues } from "../../tracker/issues";
-import type { Repos } from "../../repos/repos";
-import type { Prs } from "../prs";
-import { messageOf } from "../../errors/format";
+import type { Projects } from "../projects/projects";
+import { prParents, pullRequests, runs } from "../store/schema";
+import type { Store } from "../store/store";
+import type { Issues } from "../tracker/issues";
+import type { Repos } from "../repos/repos";
+import type { Prs } from "./prs";
+import { messageOf } from "../errors/format";
 
 export interface PrRepublisherDeps {
   store: Store;
@@ -69,9 +69,14 @@ const Pull = z.object({
 
 type PrRow = typeof pullRequests.$inferSelect;
 
+/** Un PR del sistema abierto por una corrida sobre una issue: los únicos que se republican. */
+type IssuePrRow = PrRow & { issueId: IssueId };
+
 /** Un PR del lote: espera a su padre, corre su flujo o ya tiene su resultado final. */
 interface Entry {
-  row: PrRow;
+  row: IssuePrRow;
+  /** Su issue en el caché, leída al armar el lote; sin ella el PR se salta. */
+  issue: CachedIssue | undefined;
   /** Los padres del PR viejo cuando arrancó el lote: al republicarse uno, `pr.supersede` repunta `pr_parents` al nuevo. */
   parents: string[];
   /** La branch nueva y su base, desde que se decidieron. */
@@ -121,11 +126,11 @@ export function createPrRepublisher(deps: PrRepublisherDeps): PrRepublisher {
         .from(pullRequests)
         .where(and(eq(pullRequests.state, "open"), eq(pullRequests.owned, true)))
         .all()
-        .filter((row) => row.issueId !== null && (!draftOnly || row.isDraft) && (numbers.length === 0 || numbers.includes(row.number)));
+        .filter((row): row is IssuePrRow => row.issueId !== null && (!draftOnly || row.isDraft) && (numbers.length === 0 || numbers.includes(row.number)));
       const entries: Entry[] = [];
       for (const row of inStackOrder(store, rows)) {
-        const entry: Entry = { row, parents: parentsOf(store, row).map((p) => p.id) };
-        const issue = deps.issues.get(row.issueId as IssueId);
+        const issue = deps.issues.get(row.issueId);
+        const entry: Entry = { row, issue, parents: parentsOf(store, row).map((p) => p.id) };
         if (!issue) finish(entry, { status: "skipped", reason: "la issue no está en el caché" });
         else if (projectId !== undefined && issue.projectId !== projectId) continue;
         entries.push(entry);
@@ -172,8 +177,9 @@ export function createPrRepublisher(deps: PrRepublisherDeps): PrRepublisher {
 
   /** Decide qué pasa con un PR que aún no tiene corrida: espera a su padre, se salta, se planea (`dryRun`) o lanza su flujo. */
   async function launch(batch: Batch, e: Entry): Promise<void> {
-    const { row } = e;
-    const issue = deps.issues.get(row.issueId as IssueId)!;
+    const { row, issue } = e;
+    // Sin issue el PR ya quedó saltado al armar el lote.
+    if (!issue) return;
     const skip = (reason: string): void => finish(e, { status: "skipped", reason });
 
     const parents = e.parents.flatMap((id) => parentEntry(batch, id) ?? []);
@@ -286,11 +292,11 @@ function parentsOf(store: Store, row: PrRow): PrRow[] {
 }
 
 /** Los padres antes que los hijos; entre los que no se relacionan, por número. */
-function inStackOrder(store: Store, rows: PrRow[]): PrRow[] {
+function inStackOrder<R extends PrRow>(store: Store, rows: R[]): R[] {
   const byId = new Map(rows.map((row) => [row.id, row]));
-  const ordered: PrRow[] = [];
+  const ordered: R[] = [];
   const seen = new Set<string>();
-  const visit = (row: PrRow) => {
+  const visit = (row: R) => {
     if (seen.has(row.id)) return;
     seen.add(row.id);
     for (const parent of parentsOf(store, row)) {

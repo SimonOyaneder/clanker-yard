@@ -20,32 +20,13 @@ import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
 import { combinedBases, runs, workspaces } from "../store/schema";
 import type { Store, Tx } from "../store/store";
+import type { RepoConfig } from "../repos/repos";
 
 const REMOTE = "origin";
 const WORKTREE_LOCK_REASON = "clanker-yard";
 
 /** 2 min; el core renueva cada ttl/3. */
 export const LEASE_TTL_MS = 120_000;
-
-export interface RepoConfig {
-  /** El checkout del usuario: de ahí cuelgan los worktrees y ahí se hace el fetch. */
-  path: string;
-  /** La branch por defecto nunca es de un workspace. */
-  defaultBranch: string;
-  /** Otras branches que ningún workspace puede usar. */
-  protectedBranches?: string[];
-  /** Raíz de los worktrees en lugar de `<dataDir>/worktrees`; relativa se resuelve contra `dataDir`. */
-  worktreeDir?: string;
-  /** Adónde y como quién se pushea; sin esto el repo no tiene `push` ni `fetch`. */
-  remote?: {
-    /** `https://github.com/<owner>/<repo>.git`: explícita, aunque `origin` sea SSH. */
-    url: string;
-    /** `owner/repo` en GitHub: donde `pr.publish` abre el PR. */
-    repo: string;
-    /** La cuenta de GitHub conectada cuyo token autentica. */
-    account: string;
-  };
-}
 
 export interface WorkspacesOptions {
   store: Store;

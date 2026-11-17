@@ -1,6 +1,6 @@
 import type { RepoId } from "@clanker/api";
 import type { Connections } from "../connections/connections";
-import type { RepoConfig } from "../workspaces/workspaces";
+import type { RepoConfig } from "../repos/repos";
 import { tryGit } from "./git";
 
 /** Autor y committer de los commits que salen de un repo: la persona dueña del checkout. */

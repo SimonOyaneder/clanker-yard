@@ -2,9 +2,9 @@ import { API_MAJOR, type AgentOptions, type ClientOrigin, contract, type Project
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { githubPatForm } from "../github/pat";
 import type { PrCache } from "../github/pr-cache";
-import { createPrCommands} from "../github/actions/pr-commands";
+import { createPrCommands} from "../github/pr-commands";
 import type { Prs } from "../github/prs";
-import type { PrRepublisher } from "../github/actions/republisher";
+import type { PrRepublisher } from "../github/republisher";
 import { type Connections } from "../connections/connections";
 import { createTranscripts} from "../agents/transcripts";
 import type { Breakers } from "../breakers/breakers";

@@ -28,8 +28,8 @@ import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/actions/publish";
 import { stackRestackAction, stackRestackRewrittenAction } from "./github/actions/restack";
 import { prPushFixupsAction } from "./github/actions/push-fixups";
-import { prReplayAction, prSupersedeAction } from "./github/actions/republish";
-import { createPrRepublisher } from "./github/actions/republisher";
+import { prReplayAction, prSupersedeAction } from "./github/actions/replay-supersede";
+import { createPrRepublisher } from "./github/republisher";
 import {
   prPushLeaseAction,
   prRebaseApprovalAction,
