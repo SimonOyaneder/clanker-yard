@@ -31,6 +31,7 @@ import { connections } from "../store/schema";
 import type { Store } from "../store/store";
 import { OAuthSession } from "./oauth-session";
 import { messageOf } from "../errors/format";
+import { BadRequestError, requireUiOrigin } from "../errors/domain";
 
 export interface ConnectInput {
   provider: ConnectionProvider;
@@ -87,7 +88,10 @@ export interface ClaudeOptions {
 const CLAUDE_API_KEY_ACCOUNT = "api-key" satisfies ClaudeMode;
 
 /** Claude no está listo para conectarse (pidió probar una API key que no hay, o Anthropic la rechazó). */
-export class ClaudeSetupError extends Error {}
+export class ClaudeSetupError extends BadRequestError {}
+
+/** La cuenta que se pide no está conectada, ya no tiene su credencial o se pidió conectar algo de la forma equivocada: el mensaje dice qué hacer. */
+export class ConnectionError extends BadRequestError {}
 
 /** La GitHub App del device flow (`docs/github-app.md`). */
 export interface GitHubAppOptions {
@@ -102,6 +106,9 @@ export interface GitHubAppOptions {
 }
 
 export interface ConnectionsOptions {
+  store: Store;
+  /** Donde viven los tokens; la base guarda solo su referencia. */
+  secrets: Secrets;
   /** Dónde está GitHub; en tests, un servidor local. */
   github?: GitHubApiOptions;
   githubApp?: GitHubAppOptions;
@@ -126,7 +133,7 @@ export interface Connections {
   /**
    * Valida un PAT classic de GitHub y lo conecta con la cuenta a la que pertenece (`GitHubPatError`
    * si no sirve, sin guardar nada). Sus scopes quedan como `scopes`. Emite
-   * `connection.changed`.
+   * `connection.changed`. Solo desde la app (`UiOnlyError` con otro origin): cambiar la credencial es de una persona.
    */
   setPat(token: string, origin: Origin): Promise<Connection>;
   /**
@@ -165,7 +172,8 @@ export interface Connections {
   /**
    * Guarda la API key de Anthropic en `Secrets` y deja la cuenta `claude/api-key` activa: desde entonces
    * `claudeCredentials` la usa. Antes la prueba; si Anthropic la rechaza o no se pudo probar lanza
-   * `ClaudeSetupError` sin guardar nada. Volver a la suscripción es `disconnect("claude", "api-key")`.
+   * `ClaudeSetupError` sin guardar nada. Volver a la suscripción es `disconnect("claude", "api-key")`. Solo desde la
+   * app (`UiOnlyError` con otro origin).
    */
   setClaudeApiKey(key: string, origin: Origin): Promise<Connection>;
   /**
@@ -208,7 +216,7 @@ export interface Connections {
   token(provider: ConnectionProvider, account: string): Promise<string>;
   /**
    * Borra el token y la cuenta y emite `connection.changed`. No hace nada si no estaba conectada. Con
-   * Linear y GitHub, espera a que termine un refresh en vuelo.
+   * Linear y GitHub, espera a que termine un refresh en vuelo. Solo desde la app (`UiOnlyError` con otro origin).
    */
   disconnect(provider: ConnectionProvider, account: string, origin: Origin): Promise<void>;
 }
@@ -248,11 +256,7 @@ function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export function createConnections(
-  store: Store,
-  secrets: Secrets,
-  { github = {}, githubApp, linear = {}, claude = {}, now = Date.now }: ConnectionsOptions = {},
-): Connections {
+export function createConnections({ store, secrets, github = {}, githubApp, linear = {}, claude = {}, now = Date.now }: ConnectionsOptions): Connections {
   const githubClients = new Map<string, GitHubClient>();
   const endpoints = linear.endpoints ?? LINEAR_ENDPOINTS;
   const linearClientId = linear.clientId ?? LINEAR_DEFAULT_CLIENT_ID;
@@ -402,7 +406,7 @@ export function createConnections(
     const raw = await secrets.get(secretRef);
     const parsed = raw === undefined ? undefined : OAuthSession.safeParse(safeJson(raw));
     if (!parsed?.success) {
-      throw new Error(
+      throw new ConnectionError(
         `Falta o está dañado el token de ${ROTATING[provider].label} en el almacén de secretos: desconecta la cuenta y vuelve a conectarla.`,
       );
     }
@@ -474,7 +478,7 @@ export function createConnections(
     const key = sessionKey(provider, account);
     const row = find(provider, account);
     if (!row || (provider === "github" && row.auth !== "app")) {
-      throw new Error(`La cuenta de ${label} "${account}" se desconectó o cambió de credencial.`);
+      throw new ConnectionError(`La cuenta de ${label} "${account}" se desconectó o cambió de credencial.`);
     }
     if (row.status === "revoked") throw new Rejection(revokedMessage(provider, account));
     // Otro refresh pudo terminar mientras este esperaba su turno.
@@ -540,18 +544,19 @@ export function createConnections(
     githubAppConfigured: Boolean(githubApp?.clientId),
     async connect({ provider, account, scopes, token, expiresAt }, origin) {
       if (account === "" || token === "") {
-        throw new Error(`Conectar ${provider} necesita una cuenta y un token no vacíos.`);
+        throw new ConnectionError(`Conectar ${provider} necesita una cuenta y un token no vacíos.`);
       }
       if (provider === "linear") {
-        throw new Error("Linear se conecta con linearAuth: su token se refresca y no se pega.");
+        throw new ConnectionError("Linear se conecta con linearAuth: su token se refresca y no se pega.");
       }
       if (provider === "claude") {
-        throw new Error("Claude se conecta con testClaude (suscripción) o setClaudeApiKey (API key).");
+        throw new ConnectionError("Claude se conecta con testClaude (suscripción) o setClaudeApiKey (API key).");
       }
-      return save({ provider, account, scopes, secret: token, expiresAt, ...(provider === "github" ? { auth: "pat" as const } : {}) }, origin);
+      return save({ provider, account, scopes, secret: token, expiresAt, auth: "pat" }, origin);
     },
 
     async setPat(token, origin) {
+      requireUiOrigin(origin, "Un token de GitHub se pega desde la app, en Conexiones.");
       const { login, scopes, expiresAt } = await validatePat(token, github);
       return self.connect(
         { provider: "github", account: login, scopes, token, expiresAt },
@@ -635,6 +640,7 @@ export function createConnections(
     },
 
     async setClaudeApiKey(key, origin) {
+      requireUiOrigin(origin, "La API key de Anthropic se pega desde la app, en Conexiones.");
       if (key === "") throw new ClaudeSetupError("La API key de Claude no puede estar vacía.");
       const status = await probe(apiKeyCredentials(key, { env: claudeEnv }));
       if (status.state !== "ready" && status.state !== "quota_exhausted") {
@@ -653,7 +659,7 @@ export function createConnections(
     githubClient(account) {
       const row = find("github", account);
       if (!row) {
-        throw new Error(`No hay una cuenta github conectada como "${account}": conéctala primero.`);
+        throw new ConnectionError(`No hay una cuenta github conectada como "${account}": conéctala primero.`);
       }
       let client = githubClients.get(account);
       if (!client) {
@@ -695,7 +701,7 @@ export function createConnections(
     async token(provider, account) {
       const row = find(provider, account);
       if (!row) {
-        throw new Error(`No hay una cuenta ${provider} conectada como "${account}": conéctala primero.`);
+        throw new ConnectionError(`No hay una cuenta ${provider} conectada como "${account}": conéctala primero.`);
       }
       if (provider === "linear" || (provider === "github" && row.auth === "app")) {
         if (row.status === "revoked") throw new ROTATING[provider].Rejection(revokedMessage(provider, account));
@@ -704,11 +710,11 @@ export function createConnections(
         return refresh(provider, account, false);
       }
       if (row.secretRef === "") {
-        throw new Error(`La cuenta ${provider} "${account}" no guarda ningún token: lo lee el programa que la usa.`);
+        throw new ConnectionError(`La cuenta ${provider} "${account}" no guarda ningún token: lo lee el programa que la usa.`);
       }
       const token = await secrets.get(row.secretRef);
       if (token === undefined) {
-        throw new Error(
+        throw new ConnectionError(
           `Falta el token de ${provider} "${account}" en el almacén de secretos: desconecta la cuenta y vuelve a conectarla.`,
         );
       }
@@ -716,6 +722,7 @@ export function createConnections(
     },
 
     async disconnect(provider, account, origin) {
+      requireUiOrigin(origin, "Una cuenta se desconecta desde la app, en Conexiones.");
       if (provider === "linear" || provider === "github") {
         // Después de un refresh en vuelo, no antes: si no, escribiría el secreto recién borrado.
         const key = sessionKey(provider, account);

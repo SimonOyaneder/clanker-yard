@@ -1,11 +1,14 @@
-import type { RuntimeOptions } from "@clanker/api";
+import type { AgentRuntimeId, RuntimeOptions } from "@clanker/api";
+
+/** El id del runtime de Claude: el de los perfiles, las sesiones y su breaker (`runtime:claude-sdk`). */
+export const CLAUDE_RUNTIME_ID = "claude-sdk" satisfies AgentRuntimeId;
 
 /**
  * Lo que el runtime de Claude acepta en un perfil: alias de modelo (los resuelve Claude Code a su versión
  * vigente) y los niveles de esfuerzo del SDK. De menos a más potente, que es el orden en que la UI los ofrece.
  */
 export const CLAUDE_OPTIONS: RuntimeOptions = {
-  id: "claude-sdk",
+  id: CLAUDE_RUNTIME_ID,
   label: "Claude Code",
   about: "Claude Code con tu suscripción o API key (Conexiones > Claude). Los modelos son alias que Claude Code resuelve a su versión vigente.",
   available: true,

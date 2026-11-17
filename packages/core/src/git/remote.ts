@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import type { Connections } from "../connections/connections";
 import type { Procs } from "../procs/procs";
 import type { Askpass } from "./askpass";
-import { pickEnv } from "./git";
+import { pickEnv } from "../procs/env";
 
 /**
  * Lo único que git hereda del entorno del core, que puede traer `GH_TOKEN` y otros tokens de la shell
@@ -64,11 +64,11 @@ export interface GitRemoteOptions {
 
 export function createGitRemote({ askpass, connections, procs }: GitRemoteOptions): GitRemote {
   /** `credential.helper=` vacío: el Keychain no puede contestar con otra cuenta. */
-  async function run({ cwd, url, account }: RemoteTarget, args: string[]) {
+  async function withCredentials({ cwd, url, account }: RemoteTarget, args: string[]) {
     const token = await connections.token("github", account);
     const session = await askpass.issue({ username: account, password: token }, url);
     try {
-      const { code, stdout, stderr } = await runGit(cwd, ["-c", "credential.helper=", ...args], { ...pickEnv(INHERITED_ENV), ...session.env });
+      const { code, stdout, stderr } = await spawnGit(cwd, ["-c", "credential.helper=", ...args], { ...pickEnv(INHERITED_ENV), ...session.env });
       if (code === 0) return { ok: true as const, stdout: stdout.trimEnd() };
       if (UNAUTHORIZED.test(stderr)) {
         connections.markRevoked("github", account, "core");
@@ -81,7 +81,7 @@ export function createGitRemote({ askpass, connections, procs }: GitRemoteOption
   }
 
   /** `git` en su propio grupo de procesos y registrado en `procs`: un fetch o push colgado no sobrevive al core. */
-  function runGit(cwd: string, args: string[], env: Record<string, string>) {
+  function spawnGit(cwd: string, args: string[], env: Record<string, string>) {
     return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
       const child = spawn("git", args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
       procs?.track(child, { kind: "git" });
@@ -104,13 +104,13 @@ export function createGitRemote({ askpass, connections, procs }: GitRemoteOption
       const { url, branch, sha, expectedRemoteSha } = request;
       const ref = `refs/heads/${branch}`;
       const args = ["push", `--force-with-lease=${ref}:${expectedRemoteSha ?? ""}`, url, `${sha}:${ref}`];
-      const pushed = await run(request, args);
+      const pushed = await withCredentials(request, args);
       if (pushed.ok) return "ok";
       if (pushed.reason === "unauthorized") return "unauthorized";
       if (!STALE_LEASE.test(pushed.stderr)) throw failure(request, args, pushed.stderr);
 
       const lsArgs = ["ls-remote", url, ref];
-      const listed = await run(request, lsArgs);
+      const listed = await withCredentials(request, lsArgs);
       if (!listed.ok) {
         if (listed.reason === "unauthorized") return "unauthorized";
         throw failure(request, lsArgs, listed.stderr);
@@ -120,7 +120,7 @@ export function createGitRemote({ askpass, connections, procs }: GitRemoteOption
 
     async fetch(target) {
       const args = [...NO_HOOKS, "fetch", "--no-tags", target.url, "+refs/heads/*:refs/remotes/origin/*"];
-      const fetched = await run(target, args);
+      const fetched = await withCredentials(target, args);
       if (fetched.ok) return "ok";
       if (fetched.reason === "unauthorized") return "unauthorized";
       throw failure(target, args, fetched.stderr);
@@ -128,7 +128,7 @@ export function createGitRemote({ askpass, connections, procs }: GitRemoteOption
 
     async lsRemote(target) {
       const args = [...NO_HOOKS, "ls-remote", "--heads", target.url];
-      const listed = await run(target, args);
+      const listed = await withCredentials(target, args);
       if (!listed.ok) {
         if (listed.reason === "unauthorized") return "unauthorized";
         throw failure(target, args, listed.stderr);

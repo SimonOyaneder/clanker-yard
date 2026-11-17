@@ -1,7 +1,7 @@
 import type { ClankerProject, DefRecord } from "@clanker/api"
 import { expect, test } from "vitest"
 import { SEED_REBASE, SEED_TECHLEAD, SEED_TOY } from "@/demo/seed-flows"
-import { allParamSpecs, changedSections, draftOf, flowParamGroups, managedParams, patchOf, undoPatch, validateProjectDraft } from "./project-settings"
+import { allParamSpecs, changedSections, draftOf, flowParamGroups, managedParams, patchOf, undoPatch, validateProjectDraft, type ProjectDraft } from "./project-settings"
 
 const flow = (body: object, slug: string): DefRecord => ({
   id: slug,
@@ -149,7 +149,7 @@ test("deshacer devuelve cada campo cambiado a como estaba, incluso una cola vac�
 
 test("un label en dos repos, en pedidos y excluidos, un parámetro inválido y un tope inválido dicen qué cambiar", () => {
   const b = base(project())
-  const draft = {
+  const draft: ProjectDraft = {
     ...b,
     repos: [
       { repoId: "repo_a", labels: ["api"] },

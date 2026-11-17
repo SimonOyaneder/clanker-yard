@@ -12,9 +12,10 @@ import { ProjectNotFoundError, type Projects } from "./projects";
 import { repoOfRun, type IssuePlan } from "./issue-repos";
 import { issueBranch } from "./branch-name";
 import { issuePlan } from "./repo-question";
+import { NotFoundError } from "../errors/domain";
 
 /** La issue no está en el caché de issues. */
-export class IssueNotCachedError extends Error {}
+export class IssueNotCachedError extends NotFoundError {}
 
 export interface RunStarterDeps {
   store: Store;

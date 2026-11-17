@@ -11,6 +11,13 @@ export type DecisionStatus = z.infer<typeof DecisionStatus>;
  * Una entrada de la bandeja. Un `review_note` o un `note` no bloquea nada: el flujo siguió cuando se
  * abrió. Un `gate` o un `needs_human` estaciona solo la corrida de `runId` (`docs/design.html#d-flows`).
  */
+/**
+ * Cómo se cerró una decisión: la opción que se eligió (`null` si venció sin una por defecto), o por qué se cerró sola
+ * (`reason`, por ejemplo `pr_merged`). Las que se reemplazan (`superseded`) no tienen.
+ */
+export const DecisionResolution = z.object({ option: z.string().nullable().optional(), reason: z.string().optional() });
+export type DecisionResolution = z.infer<typeof DecisionResolution>;
+
 export const Decision = z.object({
   id: DecisionId,
   projectId: ProjectId.nullable(),
@@ -24,7 +31,7 @@ export const Decision = z.object({
   options: z.array(z.string()),
   status: DecisionStatus,
   /** Lo que se eligió o respondió; `null` mientras está `pending`. */
-  resolution: z.unknown().nullable(),
+  resolution: DecisionResolution.nullable(),
   resolvedBy: z.string().nullable(),
   /** ms epoch */
   createdAt: z.int().nonnegative(),

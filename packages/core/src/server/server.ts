@@ -10,38 +10,8 @@ import { createMcpHandler } from "../mcp/server";
 import { createDevRouter, type DevTools } from "./dev-router";
 import { createRouter, type CoreContext, type CoreRouter, type RouterDeps } from "./router";
 
-export interface StartServerOptions extends Pick<
-  RouterDeps,
-  | "store"
-  | "connections"
-  | "issues"
-  | "projects"
-  | "packs"
-  | "repos"
-  | "repoConfigSync"
-  | "repoConfigExport"
-  | "projectConfigs"
-  | "recipeTester"
-  | "runs"
-  | "queue"
-  | "trackerProjects"
-  | "scheduler"
-  | "lanes"
-  | "breakers"
-  | "flows"
-  | "prs"
-  | "prCache"
-  | "artifacts"
-  | "decisions"
-  | "learnings"
-  | "defs"
-  | "legacyImport"
-  | "republisher"
-  | "agentOptions"
-  | "coreVersion"
-  | "dataDir"
-  | "onShutdown"
-> {
+/** Lo que el router necesita (salvo `bootId` y `startedAt`, que pone el servidor) más lo propio del servidor. */
+export interface StartServerOptions extends Omit<RouterDeps, "bootId" | "startedAt"> {
   /** Identifica a este arranque; por defecto uno nuevo. Quien arma los módulos que lo necesitan (Flows) lo fija antes. */
   bootId?: string;
   /** Origins de navegador que pueden llamar a la API (la ventana de la app). Cualquier otro Origin se rechaza. */

@@ -8,16 +8,16 @@ import { createDefs } from "../defs/defs";
 import { createPacks, type Packs } from "../packs/packs";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createRouter } from "../server/router";
-import { apiDeps, withPrs } from "../server/testing";
-import { pullRequests } from "../store/schema";
+import { apiDeps, withPrs } from "../testing/router-deps";
 import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { createRepos, type Repos } from "../repos/repos";
 import { healthyGitHub, startFakeGitHub, type FakeGitHub, type FakeRequest, type RecordedResponse } from "../testing/github/fake-github";
 import { PrNotFoundError } from "./pr-query";
 import { graphqlNotFound, prGraphql } from "../testing/github/fake-pr-graphql";
-import { bot, checkRun, HEAD_SHA, prNode, review, thread, user } from "./pr-fixtures";
+import { bot, checkRun, HEAD_SHA, prNode, review, thread, user } from "../testing/github/pr-fixtures";
 import { createPrs } from "./prs";
+import { seedPr } from "../testing/pull-requests";
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const REPO = { account: "octocat", repo: "acme/api", number: 4251 };
@@ -30,7 +30,7 @@ let packs: Packs;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "clanker-prs-"));
   store = openStore({ path: ":memory:" });
-  packs = createPacks({ defs: createDefs(store) });
+  packs = createPacks({ defs: createDefs({ store }) });
 });
 
 afterEach(async () => {
@@ -44,7 +44,7 @@ afterEach(async () => {
 async function connect(graphql: (request: FakeRequest) => RecordedResponse | undefined): Promise<Connections> {
   const rest = healthyGitHub();
   github = await startFakeGitHub((request) => (request.path === "/graphql" ? graphql(request) : rest(request)));
-  const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: github.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: github.baseUrl } });
   await connections.setPat(TOKEN, "ui");
   return connections;
 }
@@ -195,7 +195,7 @@ describe("API", () => {
     const router = createRouter(withPrs({
       store,
       connections,
-      issues: createIssues(store),
+      issues: createIssues({ store }),
       ...apiDeps(store, dir),
       ...(repos && { repos }),
       packs,
@@ -217,14 +217,9 @@ describe("API", () => {
 
   test("prs.list sirve el caché sin ir a GitHub y prs.refresh lo pone al día", async () => {
     const connections = await connect(prGraphql(prNode({ isDraft: true })));
-    const repos = createRepos(store, { remote: (repo) => ({ url: `https://example.invalid/${repo}.git`, repo, account: "octocat" }) });
+    const repos = createRepos({ store, remote: (repo) => ({ url: `https://example.invalid/${repo}.git`, repo, account: "octocat" }) });
     const repoId = repos.add({ name: "api", path: "/tmp/api", remote: "acme/api" });
-    store.tx((tx) =>
-      tx.db
-        .insert(pullRequests)
-        .values({ id: "pr_1", repoId, number: 4251, nodeId: "PR_1", headRef: "feat/x", baseRef: "main", headSha: HEAD_SHA, state: "open", isDraft: false, owned: true })
-        .run(),
-    );
+    seedPr(store, { id: "pr_1", repoId, number: 4251, headRef: "feat/x", headSha: HEAD_SHA });
     const client = await clientFor(connections, repos);
 
     expect(await client.prs.list({})).toEqual([

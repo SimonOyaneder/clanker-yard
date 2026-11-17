@@ -11,10 +11,12 @@ import type { Tracker } from "../tracker/tracker";
 import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../repos/repos";
 import { type QueuePrFact, tickDev } from "./queue";
-import { openOwnedPrsOfIssues } from "../github/pr-rows";
+import { openOwnedPrsOfIssues, prRefOf } from "../github/pr-rows";
+import { BadRequestError } from "../errors/domain";
+import { messageOf } from "../errors/format";
 
 /** El core no puede calcular la cola de este proyecto (no tiene el adapter de su tracker o no puede leerlo): el mensaje dice qué falta. */
-export class QueueUnavailableError extends Error {}
+export class QueueUnavailableError extends BadRequestError {}
 
 export interface ProjectQueueDeps {
   store: Store;
@@ -56,10 +58,10 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
           baseRef: row.baseRef,
         };
         if (!readCi) return { ...fact, ci: "not_green" };
-        const remote = repo && repos.config(repo.id).remote;
-        if (!remote) return { ...fact, ci: "unread", ciError: "el repo no tiene remoto de GitHub o no hay una cuenta conectada" };
+        const ref = prRefOf(repos, row);
+        if (!ref) return { ...fact, ci: "unread", ciError: "el repo no tiene remoto de GitHub o no hay una cuenta conectada" };
         try {
-          const pr = row.detail ?? (await prs.get({ account: remote.account, repo: remote.repo, number: row.number }));
+          const pr = row.detail ?? (await prs.get(ref));
           if (pr.state === "merged" || pr.state === "closed") return undefined;
           return { ...fact, ci: pr.ci.state === "green" ? "green" : "not_green" };
         } catch (error) {
@@ -98,13 +100,13 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
         .map(({ params, ...run }) => ({ ...run, repoId: repoOfRun(params) }));
       // Sin saber quién es la persona no hay cola (decide qué issues son suyas); sin cuenta conectada el adapter lanza.
       const viewer = tracker.viewer().catch((error: unknown) => {
-        throw new QueueUnavailableError(`No se pudo leer tu usuario de ${project.tracker} para calcular la cola de ${project.slug}: ${(error as Error).message}`);
+        throw new QueueUnavailableError(`No se pudo leer tu usuario de ${project.tracker} para calcular la cola de ${project.slug}: ${messageOf(error)}`, { cause: error });
       });
       // Las issues con corridas siguen una cadena entre repos: de ellas solo importa qué PRs siguen abiertos.
       const ran = new Set(devRuns.map((run) => run.issueId));
       const chainIds = all.map((issue) => issue.id).filter((id) => ran.has(id) && !blockerIds.has(id));
       const [me, prs, chainPrs] = await Promise.all([viewer, prFacts([...blockerIds], project.stackOn === "ci_green"), prFacts(chainIds, false)]);
-      const skipped = new Set<string>(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
+      const skipped = new Set(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
       const boosted = new Map(store.db.select().from(issueBoosts).all().map((row) => [row.issueId, row.createdAt]));
       const repoNames = new Map(project.repos.map(({ repoId }) => [repoId, repos.get(repoId)?.name ?? repoId]));
       const repoChoices = chosenRepos(store, repos, project);

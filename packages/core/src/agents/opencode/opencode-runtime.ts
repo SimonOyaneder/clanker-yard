@@ -1,20 +1,21 @@
 import { randomBytes } from "node:crypto";
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Effort, TRANSCRIPT_TEXT_MAX_CHARS, type RuntimeOptions, type TranscriptEntry } from "@clanker/api";
+import { Effort, type RuntimeOptions, type TranscriptEntry } from "@clanker/api";
+import { messageOf } from "../../errors/format";
 import type { Procs } from "../../procs/procs";
 import { usdToMicros } from "../../store/conventions";
-import { writeGitConfig } from "../agent-env";
-import { transcriptFile } from "../claude/transcript";
+import { agentDirsPreparer, createSessionStore, writeGitConfig } from "../agent-env";
 import { createEventQueue } from "../event-queue";
-import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, SessionRef, Usage } from "../runtime";
+import { addUsage, emptyUsage, type AgentEvent, type AgentRun, type AgentRuntime, type ResumeSpec, type RunResult, type RunSpec, type RunStatus, type SessionRef } from "../runtime";
+import { clip, createTranscriptAppender, entryRecord, transcriptFile } from "../transcripts";
 import { createOpencodeApi, type ModelRef, type OpencodeApi } from "./api";
 import { createOpencodeCli, parseModels, versionProblem, type OpencodeCli } from "./cli";
 import { configFor, inheritedEnv, OPENCODE_AGENT, parseModel, SERVE_ARGS, serverEnv } from "./config";
 import { REPORT_PLUGIN_SOURCE } from "./report-plugin";
 import { launchOpencodeServer, type LaunchServer } from "./server";
 import { catalogPrices, type PriceOf } from "./prices";
-import { createTranslator, statusOfError } from "./translate";
+import { createTranslator, statusOfError, type Translated } from "./translate";
 
 /** Cuántas veces dejar que opencode reintente un error que no es de cuota ni de login (un 5xx, un proveedor saturado). */
 export const MAX_PROVIDER_RETRIES = 6;
@@ -64,31 +65,109 @@ export interface OpencodeRuntimeOptions {
   pollMs?: number;
 }
 
-/** Lo que `resume` necesita y `ResumeSpec` no trae (modelo, prompt del rol, herramientas): se guarda al iniciar. */
-interface StoredSession {
-  spec: RunSpec;
-}
-
 type Stop = { status: Exclude<RunStatus, "success">; message: string; resetsAt?: number };
 
-const emptyUsage = (): Usage => ({ turns: 0, tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0, costMicros: 0, costSource: "runtime" });
+type End = { outcome: "succeeded" } | { outcome: "failed"; error: Stop } | { outcome: "interrupted"; reason: string };
 
-function clip(text: string): { text: string; truncated: boolean } {
-  return text.length <= TRANSCRIPT_TEXT_MAX_CHARS ? { text, truncated: false } : { text: text.slice(0, TRANSCRIPT_TEXT_MAX_CHARS), truncated: true };
-}
+/**
+ * Lo que va pasando en una ejecución según sus eventos: el uso, el último texto, el reporte, los topes del adapter y
+ * cómo terminó. `launch` solo conecta el servidor, los eventos y el sondeo con esto.
+ */
+function createRunState({ spec, now, interrupt, emit, record }: {
+  spec: RunSpec;
+  now: () => number;
+  /** Le pide a opencode cortar la sesión. */
+  interrupt: () => void;
+  emit: (event: AgentEvent) => void;
+  record: (entry: TranscriptEntry) => void;
+}) {
+  const tally = emptyUsage();
+  /** Por qué el adapter cortó la sesión (tope, interrupción, cuota): manda sobre cómo diga opencode que terminó. */
+  let stopped: Stop | undefined;
+  let report: unknown;
+  let lastText = "";
+  let steps = 0;
+  let end: End | undefined;
+  let finish!: () => void;
+  const ended = new Promise<void>((resolve) => (finish = resolve));
 
-/** El transcript normalizado de una sesión, una entrada por línea (`entriesOf` las lee), escrito en orden. */
-function createTranscriptWriter(file: string) {
-  let chain: Promise<void> = Promise.resolve();
-  let failure: unknown;
+  function stop(reason: Stop): void {
+    if (stopped || end) return;
+    stopped = reason;
+    interrupt();
+    // Si opencode no confirma la interrupción, el run se cierra igual.
+    setTimeout(finish, INTERRUPT_SETTLE_MS).unref();
+  }
+
+  function markEnd(how: End): void {
+    if (end) return;
+    end = how;
+    finish();
+  }
+
+  function onTranslated(t: Translated): void {
+    for (const e of t.events) {
+      emit(e);
+      if (e.type === "text") lastText = e.text;
+      if (e.type !== "usage") continue;
+      addUsage(tally, e.usage);
+      // Con un paso estimado, el total también lo es.
+      if (e.usage.costSource === "estimate") tally.costSource = "estimate";
+    }
+    for (const entry of t.transcript) record(entry);
+    if (t.report !== undefined) report = t.report;
+    if (t.step) {
+      steps += 1;
+      if (spec.maxTurns !== undefined && steps >= spec.maxTurns && t.step.finish === "tool-calls" && report === undefined) {
+        stop({ status: "error_max_turns", message: `El agente llegó al tope de ${spec.maxTurns} turnos sin entregar su reporte.` });
+      }
+    }
+    if (spec.maxBudgetUsd !== undefined && tally.costMicros > usdToMicros(spec.maxBudgetUsd)) {
+      stop({ status: "error_max_budget_usd", message: `El agente gastó USD ${(tally.costMicros / 1_000_000).toFixed(2)}, más que el tope de USD ${spec.maxBudgetUsd}.` });
+    }
+    if (t.retry) {
+      const cause = statusOfError(t.retry.error, now());
+      if (cause.status !== "error") stop(cause);
+      else if (t.retry.attempt > MAX_PROVIDER_RETRIES) stop({ status: "error", message: `opencode reintentó ${t.retry.attempt} veces sin éxito: ${t.retry.error.message}` });
+    }
+    if (t.blocked) stop({ status: "error", message: t.blocked });
+    if (t.end) markEnd(t.end.outcome === "failed" ? { outcome: "failed", error: statusOfError(t.end.error, now()) } : t.end);
+  }
+
+  function conclude(): RunResult {
+    const base = { text: lastText, usage: tally };
+    if (stopped) {
+      return {
+        ...base,
+        ...stopped,
+        // Un tope que cae después de entregar el reporte no lo pierde: el core lo valida y lo usa.
+        ...(stopped.status === "error_max_budget_usd" && report !== undefined ? { structured: report } : {}),
+      };
+    }
+    if (end?.outcome === "failed") return { ...base, ...end.error };
+    if (end?.outcome === "interrupted") return { ...base, status: "error", message: `opencode interrumpió la ejecución (${end.reason}) sin que el core lo pidiera.` };
+    // Sin reporte el core lo trata como inválido y retoma la sesión pidiéndolo.
+    return { ...base, status: "success", ...(report === undefined ? {} : { structured: report }) };
+  }
+
   return {
-    append(entry: TranscriptEntry) {
-      const line = `${JSON.stringify({ type: "clanker", subtype: "entry", entry })}\n`;
-      chain = chain.then(() => appendFile(file, line)).catch((error: unknown) => void (failure ??= error));
+    tally,
+    ended,
+    stop,
+    markEnd,
+    onTranslated,
+    conclude,
+    get steps() {
+      return steps;
     },
-    async flush() {
-      await chain;
-      if (failure !== undefined) throw failure;
+    get lastText() {
+      return lastText;
+    },
+    get stopped() {
+      return stopped !== undefined;
+    },
+    get finished() {
+      return end !== undefined;
     },
   };
 }
@@ -124,25 +203,12 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
     sessions: join(home, "agent-sessions"),
   };
 
-  let prepared: Promise<void> | undefined;
-  function prepare(): Promise<void> {
-    prepared ??= (async () => {
-      // Siempre vacía: lo que un agente haya dejado en una corrida anterior no cuenta como login de gh.
-      await rm(paths.ghConfigDir, { recursive: true, force: true });
-      await mkdir(paths.ghConfigDir, { recursive: true });
-      await mkdir(paths.reportPlugin, { recursive: true });
-      await mkdir(paths.transcripts, { recursive: true });
-      await mkdir(paths.sessions, { recursive: true });
-      await mkdir(paths.gitConfigs, { recursive: true });
-      await writeFile(join(paths.reportPlugin, "index.js"), REPORT_PLUGIN_SOURCE);
-    })().catch((error: unknown) => {
-      prepared = undefined;
-      throw error;
-    });
-    return prepared;
-  }
-
-  const storedOf = (sessionId: string) => join(paths.sessions, `${sessionId}.json`);
+  const prepare = agentDirsPreparer({
+    ghConfigDir: paths.ghConfigDir,
+    dirs: [paths.reportPlugin, paths.transcripts, paths.sessions, paths.gitConfigs],
+    extra: () => writeFile(join(paths.reportPlugin, "index.js"), REPORT_PLUGIN_SOURCE),
+  });
+  const sessions = createSessionStore(paths.sessions, "opencode");
 
   async function launch(spec: RunSpec, prompt: string, resumeId: string | undefined): Promise<AgentRun> {
     const model = parseModel(spec.model);
@@ -176,75 +242,28 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
       throw error;
     }
 
-    const transcript = createTranscriptWriter(transcriptFile(home, sessionID));
-    transcript.append({ kind: "prompt", ...clip(prompt) });
+    const transcriptPath = transcriptFile(home, sessionID);
+    const transcript = createTranscriptAppender();
+    const record = (entry: TranscriptEntry) => transcript.append(transcriptPath, entryRecord(entry));
+    record({ kind: "prompt", ...clip(prompt) });
     const translator = createTranslator(sessionID, priceOf);
-    const tally = emptyUsage();
     const stopListening = new AbortController();
-
-    /** Por qué el adapter cortó la sesión (tope, interrupción, cuota): manda sobre cómo diga opencode que terminó. */
-    let stopped: Stop | undefined;
-    let report: unknown;
-    let lastText = "";
-    let steps = 0;
     let prompted = 0;
-    let end: { outcome: "succeeded" } | { outcome: "failed"; error: Stop } | { outcome: "interrupted"; reason: string } | undefined;
-    let finish!: () => void;
-    const ended = new Promise<void>((resolve) => (finish = resolve));
-
-    const stop = (reason: Stop) => {
-      if (stopped || end) return;
-      stopped = reason;
-      void api.interrupt(sessionID).catch(() => {});
-      // Si opencode no confirma la interrupción, el run se cierra igual.
-      setTimeout(finish, INTERRUPT_SETTLE_MS).unref();
-    };
-
-    const onEvent = (event: Parameters<ReturnType<typeof createTranslator>["handle"]>[0]) => {
-      const t = translator.handle(event);
-      for (const e of t.events) {
-        events.push(e);
-        if (e.type === "text") lastText = e.text;
-        if (e.type !== "usage") continue;
-        tally.turns += 1;
-        tally.tokensIn += e.usage.tokensIn;
-        tally.tokensOut += e.usage.tokensOut;
-        tally.tokensCacheRead += e.usage.tokensCacheRead;
-        tally.tokensCacheWrite += e.usage.tokensCacheWrite;
-        tally.costMicros += e.usage.costMicros;
-        // Con un paso estimado, el total también lo es.
-        if (e.usage.costSource === "estimate") tally.costSource = "estimate";
-      }
-      for (const entry of t.transcript) transcript.append(entry);
-      if (t.report !== undefined) report = t.report;
-      if (t.step) {
-        steps += 1;
-        if (spec.maxTurns !== undefined && steps >= spec.maxTurns && t.step.finish === "tool-calls" && report === undefined) {
-          stop({ status: "error_max_turns", message: `El agente llegó al tope de ${spec.maxTurns} turnos sin entregar su reporte.` });
-        }
-      }
-      if (spec.maxBudgetUsd !== undefined && tally.costMicros > usdToMicros(spec.maxBudgetUsd)) {
-        stop({ status: "error_max_budget_usd", message: `El agente gastó USD ${(tally.costMicros / 1_000_000).toFixed(2)}, más que el tope de USD ${spec.maxBudgetUsd}.` });
-      }
-      if (t.retry) {
-        const cause = statusOfError(t.retry.error, now());
-        if (cause.status !== "error") stop(cause);
-        else if (t.retry.attempt > MAX_PROVIDER_RETRIES) stop({ status: "error", message: `opencode reintentó ${t.retry.attempt} veces sin éxito: ${t.retry.error.message}` });
-      }
-      if (t.blocked) stop({ status: "error", message: t.blocked });
-      if (t.end && !end) {
-        end = t.end.outcome === "failed" ? { outcome: "failed", error: statusOfError(t.end.error, now()) } : t.end;
-        finish();
-      }
-    };
+    const state = createRunState({
+      spec,
+      now,
+      interrupt: () => void api.interrupt(sessionID).catch(() => {}),
+      emit: (event) => events.push(event),
+      record,
+    });
 
     const listening = (async () => {
       try {
-        for await (const event of api.events(stopListening.signal)) onEvent(event);
+        for await (const event of api.events(stopListening.signal)) state.onTranslated(translator.translate(event));
       } catch (error) {
         if (stopListening.signal.aborted) return;
         // Los eventos no se reconectan: sin ellos no hay actividad en vivo, pero el sondeo sigue sabiendo cuándo terminó.
-        events.push({ type: "error", kind: "other", message: `Se cortaron los eventos de opencode: ${error instanceof Error ? error.message : String(error)}` });
+        events.push({ type: "error", kind: "other", message: `Se cortaron los eventos de opencode: ${messageOf(error)}` });
       }
     })();
 
@@ -255,14 +274,14 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
       void api
         .session(sessionID)
         .then((info) => {
-          if (end || info.time.idle === undefined || info.time.idle < prompted || info.outcome === undefined) return;
-          end =
+          if (state.finished || info.time.idle === undefined || info.time.idle < prompted || info.outcome === undefined) return;
+          state.markEnd(
             info.outcome === "failed"
               ? { outcome: "failed", error: { status: "error", message: "opencode terminó con error (el detalle se perdió con los eventos)." } }
               : info.outcome === "interrupted"
                 ? { outcome: "interrupted", reason: "user" }
-                : { outcome: "succeeded" };
-          finish();
+                : { outcome: "succeeded" },
+          );
         })
         .catch(() => {});
     }, pollMs);
@@ -280,21 +299,21 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
     }
 
     const finished = (async (): Promise<RunResult> => {
-      const crash = await Promise.race([ended.then(() => undefined), server.exited]);
+      const crash = await Promise.race([state.ended.then(() => undefined), server.exited]);
       clearInterval(poll);
       stopListening.abort();
       await listening;
       server.close();
-      if (crash !== undefined && !stopped) throw new Error(crash);
+      if (crash !== undefined && !state.stopped) throw new Error(crash);
 
-      const result = conclude();
-      transcript.append({
+      const result = state.conclude();
+      record({
         kind: "result",
         subtype: result.status,
         isError: result.status !== "success",
-        turns: steps,
-        costUsd: tally.costMicros / 1_000_000,
-        text: result.message ?? (lastText || null),
+        turns: state.steps,
+        costUsd: state.tally.costMicros / 1_000_000,
+        text: result.message ?? (state.lastText || null),
       });
       await transcript.flush();
       return result;
@@ -302,26 +321,10 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
     // Quien recibe el run espera `result` recién cuando `start` vuelve; si el servidor muere antes, no es un rechazo perdido.
     finished.catch(() => {});
 
-    function conclude(): RunResult {
-      const base = { text: lastText, usage: tally };
-      if (stopped) {
-        return {
-          ...base,
-          ...stopped,
-          // Un tope que cae después de entregar el reporte no lo pierde: el core lo valida y lo usa.
-          ...(stopped.status === "error_max_budget_usd" && report !== undefined ? { structured: report } : {}),
-        };
-      }
-      if (end?.outcome === "failed") return { ...base, ...end.error };
-      if (end?.outcome === "interrupted") return { ...base, status: "error", message: `opencode interrumpió la ejecución (${end.reason}) sin que el core lo pidiera.` };
-      // Sin reporte el core lo trata como inválido y retoma la sesión pidiéndolo.
-      return { ...base, status: "success", ...(report === undefined ? {} : { structured: report }) };
-    }
-
     return {
       ref: { runtime: "opencode", sessionId: sessionID, cwd: directory },
       events,
-      interrupt: async () => stop({ status: "error", message: "El run fue interrumpido." }),
+      interrupt: async () => state.stop({ status: "error", message: "El run fue interrumpido." }),
       result: finished,
     };
   }
@@ -354,13 +357,13 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
     try {
       return versionProblem(await cli(["--version"]));
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return messageOf(error);
     }
   }
 
   return {
     id: "opencode",
-    capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+    capabilities: { costPerTurn: true },
     probe,
 
     async describe(): Promise<RuntimeOptions> {
@@ -387,32 +390,22 @@ export function createOpencodeRuntime(options: OpencodeRuntimeOptions): AgentRun
           ...(list.includes(DEFAULT_OPENCODE_MODEL) ? { defaultModel: DEFAULT_OPENCODE_MODEL } : {}),
         };
       } catch (error) {
-        return { ...base, available: true, message: `No pude listar los modelos (opencode models): ${error instanceof Error ? error.message : String(error)}`, models: [] };
+        return { ...base, available: true, message: `No pude listar los modelos (opencode models): ${messageOf(error)}`, models: [] };
       }
     },
 
     async start(spec) {
       await prepare();
       const run = await launch(spec, spec.prompt, undefined);
-      const stored: StoredSession = { spec: { ...spec, native: undefined, references: [], stepRunId: undefined } };
-      await writeFile(storedOf(run.ref.sessionId), JSON.stringify(stored));
+      await sessions.save(run.ref.sessionId, spec);
       return run;
     },
 
     async resume(ref: SessionRef, message: string, resumeSpec: ResumeSpec) {
       await prepare();
-      const stored = await readStored(storedOf(ref.sessionId), ref.sessionId);
-      const spec: RunSpec = { ...stored.spec, ...resumeSpec, cwd: ref.cwd, prompt: message };
+      const spec: RunSpec = { ...(await sessions.load(ref.sessionId)), ...resumeSpec, cwd: ref.cwd, prompt: message };
       return launch(spec, message, ref.sessionId);
     },
   };
 }
 
-async function readStored(file: string, sessionId: string): Promise<StoredSession> {
-  try {
-    return JSON.parse(await readFile(file, "utf8")) as StoredSession;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    throw new Error(`No hay registro de la sesión ${sessionId} en ${file}: el runtime opencode solo retoma las sesiones que él inició.`);
-  }
-}

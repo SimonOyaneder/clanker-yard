@@ -22,7 +22,7 @@ beforeEach(async () => {
   await mkdir(cwd);
   await mkdir(userDir);
   store = openStore({ path: ":memory:" });
-  defs = createDefs(store);
+  defs = createDefs({ store });
   packs = createPacks({ defs });
   resolver = createContextResolver({ defs, packs, remoteOf: (repoId) => (repoId === "repo_acme" ? "acme/app" : null), userDir });
 });

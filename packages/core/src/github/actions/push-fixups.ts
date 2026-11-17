@@ -9,7 +9,8 @@ import { branchCommits, fixupMessage, FIXUP_PREFIX, oldRange, routeHunks } from 
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
 import { diffBetween, listHunks, snapshotTree, type Hunk } from "../../git/tree";
 import type { Store } from "../../store/store";
-import type { RepoConfig, Workspaces } from "../../workspaces/workspaces";
+import type { RepoConfig } from "../../repos/repos";
+import type { Workspaces } from "../../workspaces/workspaces";
 import type { Prs } from "../prs";
 import { ownedOpenPr, pushOrThrow, type PrPurpose } from "./push";
 

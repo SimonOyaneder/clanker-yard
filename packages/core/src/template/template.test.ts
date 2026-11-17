@@ -27,7 +27,7 @@ describe("defs", () => {
   test("todos los roles y perfiles se guardan como defs builtin", () => {
     const store = openStore({ path: ":memory:" });
     open.push(store);
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     defs.register("role", Role);
     defs.register("profile", Profile);
 

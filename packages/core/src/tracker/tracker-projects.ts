@@ -3,9 +3,10 @@ import type { Connections } from "../connections/connections";
 import { isLinearId, type LinearTracker } from "../linear/tracker";
 import { ProjectNotFoundError, type Projects } from "../projects/projects";
 import type { ProjectBinding } from "./issues";
+import { BadRequestError } from "../errors/domain";
 
 /** El core no puede listar los proyectos de este tracker (sin adapter, sin cuenta conectada o el tracker falló): el mensaje dice qué hacer. */
-export class TrackerProjectsError extends Error {}
+export class TrackerProjectsError extends BadRequestError {}
 
 export interface TrackerProjectsDeps {
   connections: Pick<Connections, "list">;

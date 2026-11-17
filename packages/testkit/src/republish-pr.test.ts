@@ -6,6 +6,7 @@ import type { IssueId } from "@clanker/api";
 import { newId } from "@clanker/core";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { startTechleadScenario, type TechleadScenario } from "./techlead-scenario";
+import { seedPr } from "@clanker/core/testing";
 
 // `prs.republish` con el core real, el GitHub simulado y el runtime fake: el committer sale de los guiones de
 // `techlead-e2e` (dos commits: la implementación y su test), así que cada PR sembrado cambia `src/<x>.ts` y `src/<x>.test.ts`.
@@ -49,17 +50,17 @@ async function seed(s: TechleadScenario, name: string, opts: { base?: string; dr
 
   const pr = s.github.openPr({ head: branch, base: opts.base ?? "main", title: `Cambio ${name}`, body: `Cuerpo de ${name}`, draft: opts.draft ?? true });
   const repoId = s.project.repos[0]!.repoId;
-  const id = newId("pr");
-  s.store.db
-    .$client.prepare(
-      `INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, issue_id, owned)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, 1)`,
-    )
-    .run(id, repoId, pr.number, `PR_${pr.number}`, branch, opts.base ?? "main", pr.headSha(), opts.draft === false ? 0 : 1, issue.id);
-  if (opts.base) {
-    const parent = s.store.db.$client.prepare("SELECT id FROM pull_requests WHERE head_ref = ?").get(opts.base) as { id: string };
-    s.store.db.$client.prepare("INSERT INTO pr_parents (child_id, parent_id) VALUES (?, ?)").run(id, parent.id);
-  }
+  const parent = opts.base && (s.store.db.$client.prepare("SELECT id FROM pull_requests WHERE head_ref = ?").get(opts.base) as { id: string });
+  seedPr(s.store, {
+    repoId,
+    number: pr.number,
+    headRef: branch,
+    baseRef: opts.base ?? "main",
+    headSha: pr.headSha(),
+    isDraft: opts.draft !== false,
+    issueId: issue.id,
+    parents: parent ? [parent.id] : [],
+  });
   return { number: pr.number, branch, issueId: issue.id, key: issue.ref.key };
 }
 

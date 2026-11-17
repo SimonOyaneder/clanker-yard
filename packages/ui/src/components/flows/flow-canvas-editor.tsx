@@ -12,8 +12,8 @@ import { KIND } from "@/components/graph/flow-node"
 import { Button } from "@/components/ui/button"
 import { useColorMode } from "@/hooks/use-color-mode"
 import { useLiveQuery } from "@/hooks/use-live"
-import { addStep, branchOwners, connect, edgeSpec, ENDS, marksOf, NODE_SUMMARY, NODE_TYPES, outcomesOf, type Point, positionsOf, removeNodes, setNode, setStart, usedValues, withEdge } from "@/lib/flow-canvas"
-import { describePath, plain } from "@/lib/def-edit"
+import { addStep, branchOwners, connect, edgeSpec, ENDS, marksOf, NODE_SUMMARY, NODE_TYPES, outcomesOf, type Point, positionsOf, removeNodes, setNode, setStart, usedValues, withEdge } from "@/lib/flows/flow-canvas"
+import { describePath, plain } from "@/lib/flows/def-edit"
 import { readPref, writePref } from "@/lib/prefs"
 import { shapeOf } from "@/lib/run-graph"
 import { cn } from "@/lib/utils"
@@ -233,7 +233,7 @@ function Editor({ defId, flow, onChange, errors, warnings }: Props) {
             }
             onPaneClick={() => setSelection({ nodes: [], edges: [] })}
             proOptions={{ hideAttribution: true }}
-            className="cc-flow"
+            className="flow-canvas"
           >
             <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
             <Controls position="bottom-right" showInteractive={false} />

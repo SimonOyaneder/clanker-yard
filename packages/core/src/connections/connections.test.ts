@@ -9,6 +9,7 @@ import { createFileSecrets } from "../secrets/encrypted-file";
 import type { Secrets } from "../secrets/secrets";
 import { openStore, type Store } from "../store/store";
 import { ClaudeSetupError, createConnections, type ConnectInput, type Connections } from "./connections";
+import { UiOnlyError } from "../errors/domain";
 
 /** Fijo: los vencimientos de los tests no deben depender del reloj real. */
 const NOW = 1_700_000_000_000;
@@ -28,7 +29,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "clanker-connections-"));
   store = openStore({ path: join(dir, "clanker.db") });
   secrets = createFileSecrets({ dir: join(dir, "secrets") });
-  connections = createConnections(store, secrets, { now: () => NOW });
+  connections = createConnections({ store, secrets, now: () => NOW });
 });
 
 afterEach(() => {
@@ -86,7 +87,7 @@ describe("connect", () => {
 
   test("si el almacén de secretos falla no queda ni la cuenta ni el evento", async () => {
     const broken: Secrets = { ...secrets, set: () => Promise.reject(new Error("llavero bloqueado")) };
-    await expect(createConnections(store, broken).connect({ ...github, token: TOKEN }, "ui")).rejects.toThrow(
+    await expect(createConnections({ store, secrets: broken }).connect({ ...github, token: TOKEN }, "ui")).rejects.toThrow(
       "llavero bloqueado",
     );
     expect(connections.list()).toEqual([]);
@@ -113,7 +114,7 @@ describe("disconnect", () => {
     await connections.connect({ ...github, token: TOKEN }, "ui");
     const broken: Secrets = { ...secrets, delete: () => Promise.reject(new Error("llavero bloqueado")) };
 
-    await expect(createConnections(store, broken).disconnect("github", "simon", "ui")).rejects.toThrow(
+    await expect(createConnections({ store, secrets: broken }).disconnect("github", "simon", "ui")).rejects.toThrow(
       "llavero bloqueado",
     );
     expect(connections.list()).toHaveLength(1);
@@ -158,13 +159,22 @@ describe("token", () => {
 
 describe("connection.changed", () => {
   test("se emite al conectar y al desconectar, con el origen de la llamada", async () => {
-    await connections.connect({ ...github, token: TOKEN }, "ui");
-    await connections.disconnect("github", "simon", "cli");
+    await connections.connect({ ...github, token: TOKEN }, "cli");
+    await connections.disconnect("github", "simon", "ui");
 
     expect(store.events.since(0).map((e) => [e.type, e.origin, e.payload])).toEqual([
-      ["connection.changed", "ui", { provider: "github", account: "simon", status: "active" }],
-      ["connection.changed", "cli", { provider: "github", account: "simon", status: "disconnected" }],
+      ["connection.changed", "cli", { provider: "github", account: "simon", status: "active" }],
+      ["connection.changed", "ui", { provider: "github", account: "simon", status: "disconnected" }],
     ]);
+  });
+
+  test("pegar un token, una API key o desconectar es de la app: otro origin es UiOnlyError y no cambia nada", async () => {
+    await connections.connect({ ...github, token: TOKEN }, "ui");
+
+    await expect(connections.disconnect("github", "simon", "mcp")).rejects.toThrow(UiOnlyError);
+    await expect(connections.setPat(TOKEN, "cli")).rejects.toThrow(UiOnlyError);
+    await expect(connections.setClaudeApiKey("sk-ant-x", "cli")).rejects.toThrow(UiOnlyError);
+    expect(connections.list()).toMatchObject([{ provider: "github", account: "simon" }]);
   });
 });
 
@@ -232,7 +242,7 @@ describe("claude", () => {
   }
 
   function connectionsWith(stubs: ReturnType<typeof withClaude>) {
-    return createConnections(store, secrets, { now: () => NOW, claude: stubs.claude });
+    return createConnections({ store, secrets, now: () => NOW, claude: stubs.claude });
   }
 
   test("probar con claude instalado y logueado conecta la suscripción, sin guardar ningún secreto", async () => {

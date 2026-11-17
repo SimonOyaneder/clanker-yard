@@ -4,7 +4,7 @@ import { type ReactNode, useId, useState } from "react"
 import { KIND } from "@/components/graph/flow-node"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { branchOwners, edgeSpec, END_NAME, ENDS, type Mark, NODE_SUMMARY, outcomesOf, withEdge } from "@/lib/flow-canvas"
+import { branchOwners, edgeSpec, END_NAME, ENDS, type Mark, NODE_SUMMARY, outcomesOf, withEdge } from "@/lib/flows/flow-canvas"
 import { messageOf } from "@/lib/utils"
 
 const SELECT = "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"

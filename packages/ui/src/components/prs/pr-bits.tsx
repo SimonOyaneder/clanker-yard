@@ -2,14 +2,14 @@ import type { PrSignal, PrState, ReviewerState } from "@clanker/api"
 import { useState } from "react"
 import { Bot, Check, CheckCircle2, Circle, CircleAlert, CircleCheck, CircleDot, Clock, GitMerge, GitPullRequest, GitPullRequestDraft, Layers, MessageSquare, MessagesSquare, PauseCircle, TriangleAlert, X, XCircle } from "lucide-react"
 import { tone } from "@/lib/format"
-import { mergeMark, type ReviewStatus, reviewTone } from "@/lib/pr-status"
-import { isDraft, type OpenPr } from "@/lib/prs"
+import { mergeMark, type ReviewStatus, reviewTone } from "@/lib/prs/pr-status"
+import { isDraft, type OpenPr } from "@/lib/prs/prs"
 import { cn } from "@/lib/utils"
 import { Hint, Pill } from "../common"
 
 // Piezas compartidas entre la tarjeta del grafo y la fila de la lista.
 
-export function PRStateIcon({ pr, className }: { pr: OpenPr; className?: string }) {
+export function PrStateIcon({ pr, className }: { pr: OpenPr; className?: string }) {
   const draft = isDraft(pr)
   const Icon = draft ? GitPullRequestDraft : GitPullRequest
   return (
@@ -27,11 +27,11 @@ type CiState = PrState["ci"]["state"]
 const CI: Record<CiState, { Icon: typeof Circle; className: string; label: string; hint: string }> = {
   green: { Icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400", label: "CI verde", hint: "Todos los checks que cuentan del último commit pasaron" },
   red: { Icon: XCircle, className: "text-red-600 dark:text-red-400", label: "CI rojo", hint: "Algún check que cuenta del último commit falló" },
-  pending: { Icon: CircleDot, className: "cc-blink text-amber-600 dark:text-amber-400", label: "CI corriendo", hint: "Hay checks del último commit corriendo o por partir" },
+  pending: { Icon: CircleDot, className: "animate-blink text-amber-600 dark:text-amber-400", label: "CI corriendo", hint: "Hay checks del último commit corriendo o por partir" },
   none: { Icon: Circle, className: "text-muted-foreground/60", label: "Sin checks", hint: "El último commit no tiene checks que cuenten" },
 }
 
-export function CIBadge({ ci, compact = false }: { ci: PrState["ci"]; compact?: boolean }) {
+export function CiBadge({ ci, compact = false }: { ci: PrState["ci"]; compact?: boolean }) {
   const c = CI[ci.state]
   const failing = ci.state === "red" && ci.failing.length ? `. En rojo: ${ci.failing.join(", ")}${ci.flaky.length ? ` (flaky conocidos: ${ci.flaky.join(", ")})` : ""}` : ""
   return (
@@ -217,7 +217,7 @@ export function MergePill({ pr }: { pr: OpenPr }) {
     case "queued":
       return (
         <Pill className={tone.violet} hint="Ya se pidió el merge: la cola está corriendo el CI final para mergearlo">
-          <span className="cc-blink size-1.5 rounded-full bg-current" /> En cola
+          <span className="animate-blink size-1.5 rounded-full bg-current" /> En cola
         </Pill>
       )
     case "hold":

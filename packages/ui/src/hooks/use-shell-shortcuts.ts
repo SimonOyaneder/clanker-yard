@@ -2,11 +2,11 @@ import type { ClankerProject, DecisionId, RunDetail, RunId } from "@clanker/api"
 import { useEffect, useRef } from "react"
 import { toast } from "sonner"
 import { PROJECT_TABS, type ProjectTab } from "@/components/project/project-view"
-import type { RunCommands } from "@/components/project/run-commands"
-import { STEP_TAB_KEYS, type StepTab } from "@/components/project/step-panel"
-import type { RunTab } from "@/components/project/run-view"
+import type { RunCommands } from "@/components/run/run-commands"
+import { STEP_TAB_KEYS, type StepTab } from "@/components/run/step-panel"
+import type { RunTab } from "@/components/run/run-view"
 import { isTypingTarget, overlayOpen } from "@/lib/keys"
-import type { runCaps } from "@/lib/run-commands"
+import type { runCaps } from "@/lib/project/run-commands"
 
 /** Lo que los atajos globales de la app leen y hacen; lo arma `Shell` en cada render. */
 export interface ShellShortcuts {

@@ -19,7 +19,7 @@ afterEach(() => h.close());
 
 /** Un proyecto local con la plantilla `juguete` y una corrida terminada. */
 async function finishedRun() {
-  const repoId = createRepos(h.store).add({ name: "demo", path: h.repo.dir });
+  const repoId = createRepos({ store: h.store }).add({ name: "demo", path: h.repo.dir });
   const project = await h.api.projects.create({ slug: "demo", name: "Demo", tracker: "local", defaultFlowId: "juguete", defaultProfileId: "juguete", flowParams: { repo: repoId } });
   const issue = await h.api.issues.createLocal({ projectId: project.id, title: "Saluda" });
   const { id } = await h.api.runs.start({ projectId: project.id, issueId: issue.id });

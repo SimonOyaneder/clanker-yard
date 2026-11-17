@@ -18,7 +18,7 @@ afterEach(() => {
 function setup(dirs: { factoryDir?: string; installedDir?: string } = {}): { defs: Defs; packs: Packs } {
   const store = openStore({ path: ":memory:" });
   stores.push(store);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   // Los kinds `flow` y `role` los registran Flows y Agents con estos mismos esquemas.
   defs.register("flow", FlowDef.omit({ version: true }));
   defs.register("role", Role);

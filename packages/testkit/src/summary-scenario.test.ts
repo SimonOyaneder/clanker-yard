@@ -23,7 +23,7 @@ beforeEach(async () => {
   core = await startCore({
     store,
     dataDir: home.path,
-    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
+    connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }) }),
     runtimes: [createFakeRuntime({ fixtures: join(import.meta.dirname, "../fixtures/runs/juguete"), speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
     scheduler: false,

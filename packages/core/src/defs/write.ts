@@ -3,16 +3,17 @@ import type { Flows } from "../flows/flows";
 import { canonicalJson, DefValidationError, type Def, type DefScope, type Defs } from "./defs";
 import { issuesAsLines } from "../errors/format";
 import { isRecord } from "./defs";
+import { BadRequestError, NotFoundError } from "../errors/domain";
 
 /** No existe la def que se quiere cambiar. */
-export class DefNotFoundError extends Error {
+export class DefNotFoundError extends NotFoundError {
   constructor(kind: string, id: string) {
     super(`No existe ${kind} ${id}.`);
   }
 }
 
 /** El body es inválido o la def no admite el cambio: no se guardó nada. */
-export class DefWriteError extends Error {}
+export class DefWriteError extends BadRequestError {}
 
 /** El core regenera las `builtin` en cada arranque y sincroniza las de un pack: un cambio no se queda. */
 const WRITABLE_SCOPES: readonly DefScope[] = ["user", "repo"];

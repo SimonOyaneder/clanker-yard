@@ -91,7 +91,7 @@ export async function seedSummary({ client, store, now = Date.UTC(2026, 10, 15, 
   const project = (await client.projects.list()).find((p) => p.slug === SUMMARY_PROJECT_SLUG);
   if (!project) throw new Error(`El fixture importado no trajo el proyecto ${SUMMARY_PROJECT_SLUG}.`);
   const sql = store.db.$client;
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const flow = defs.resolve("flow", "techlead-clasico");
   if (!flow) throw new Error("El core no instaló la plantilla techlead-clasico.");
 

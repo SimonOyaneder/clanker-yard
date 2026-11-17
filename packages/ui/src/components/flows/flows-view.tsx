@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useLiveQuery } from "@/hooks/use-live"
-import { KIND_LABEL, libraryRows, nameOf, type LibraryRow } from "@/lib/defs-library"
+import { KIND_LABEL, libraryRows, nameOf, type LibraryRow } from "@/lib/flows/defs-library"
 import { cn } from "@/lib/utils"
 
 const KINDS: readonly DefWriteKind[] = ["flow", "role", "profile"]

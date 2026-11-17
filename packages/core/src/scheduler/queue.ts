@@ -1,18 +1,24 @@
-import type { CachedIssue,
-  ClankerProject,
-  IssueRef,
-  Person,
-  QueueBase,
-  QueueEntry,
-  QueuePr,
-  RunStatus,
-  StatusCategory,
-  TrackerCapabilities, RepoId } from "@clanker/api";
+import {
+  isLiveRun,
+  type CachedIssue,
+  type ClankerProject,
+  type IssueId,
+  type IssueRef,
+  type Person,
+  type QueueBase,
+  type QueueEntry,
+  type QueuePr,
+  type RepoId,
+  type RunStatus,
+  type StatusCategory,
+  type TrackerCapabilities,
+} from "@clanker/api";
 import { planIssue, type IssuePlan } from "../projects/issue-repos";
 import { matchesIssueFilter } from "../tracker/tracker";
 
 /** Una corrida raíz del carril dev sobre una issue. */
 export interface QueueRun {
+  /** El sujeto de la corrida (`runs.subject_id`): texto, porque el sujeto de una corrida puede ser cualquier cosa. */
   issueId: string;
   status: RunStatus;
   /** El `@fin` con que terminó el flujo (`done`, `blocked`, `failed`); `null` mientras vive. */
@@ -23,7 +29,7 @@ export interface QueueRun {
 
 /** Un PR abierto (draft o no) que el sistema abrió para una issue. */
 export interface QueuePrFact {
-  issueId: string;
+  issueId: IssueId;
   repoId: RepoId;
   /** `repo#número`. */
   key: string;
@@ -44,16 +50,15 @@ export interface TickDevInput {
   runs: readonly QueueRun[];
   prs: readonly QueuePrFact[];
   /** Ids de issues que el usuario pidió no lanzar (`projects.skipIssue`): quedan en la cola como `blocked`. */
-  skipped?: ReadonlySet<string>;
+  skipped?: ReadonlySet<IssueId>;
   /** Issue id → el repo que el usuario eligió en la decisión de una issue ambigua (`askWhichRepo`). */
-  repoChoices?: ReadonlyMap<string, RepoId>;
+  repoChoices?: ReadonlyMap<IssueId, RepoId>;
   /** Repo id → nombre, para los motivos; sin él se usa el id. */
-  repoNames?: ReadonlyMap<string, string>;
+  repoNames?: ReadonlyMap<RepoId, string>;
   /** Issue id → ms epoch en que el usuario la subió (`projects.boostIssue`): van antes que el resto, la más reciente primero. */
-  boosted?: ReadonlyMap<string, number>;
+  boosted?: ReadonlyMap<IssueId, number>;
 }
 
-const LIVE: ReadonlySet<RunStatus> = new Set(["queued", "running", "waiting", "parked", "paused"]);
 const CLOSED: ReadonlySet<StatusCategory> = new Set(["done", "canceled"]);
 
 /**
@@ -179,7 +184,7 @@ function chainOf(issue: CachedIssue, next: NonNullable<Extract<IssuePlan, { kind
   const before = world.repoNames.get(next.after) ?? next.after;
   const after = next.repoId === undefined ? "el siguiente repo" : (world.repoNames.get(next.repoId) ?? next.repoId);
   const runs = (world.runsOf.get(issue.id) ?? []).filter((run) => run.repoId === next.after);
-  if (runs.some((run) => LIVE.has(run.status))) {
+  if (runs.some((run) => isLiveRun(run.status))) {
     return { state: "waiting", reason: `espera la corrida en ${before}: ${issue.ref.key} va primero ahí y después en ${after}` };
   }
   if (!runs.some((run) => run.status === "done" && run.outcome === "done")) {
@@ -203,9 +208,9 @@ function judge(ref: IssueRef, repo: string | undefined, world: World): Verdict {
   const cross = open.filter((pr) => pr.repoId !== repo);
   if (stack.length > 0 || cross.length > 0) return { kind: "pr", stack, cross };
 
-  const parked = open.filter((pr) => !stack.includes(pr));
-  const pending = parked.map((pr) => pendingReason(pr, world.project.stackOn)).join(" y ");
-  if (runs.some((run) => LIVE.has(run.status))) {
+  // Aquí todo PR abierto del bloqueante es del mismo repo y no cumple `stackOn`: los que sirven ya volvieron arriba.
+  const pending = open.map((pr) => pendingReason(pr, world.project.stackOn)).join(" y ");
+  if (runs.some((run) => isLiveRun(run.status))) {
     return { kind: "waiting", reason: pending === "" ? `espera a ${blocker.ref.key}, en curso` : `espera a ${blocker.ref.key}: ${pending}` };
   }
   const owner = blocker.assignee !== undefined && blocker.assignee.id !== world.me.id ? `, de ${blocker.assignee.name}` : "";

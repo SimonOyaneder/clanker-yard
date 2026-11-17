@@ -1,7 +1,8 @@
-import type { Client, RunId } from "@clanker/api";
-import { newId, type Store } from "@clanker/core";
+import type { Client, IssueId, RepoId, RunId } from "@clanker/api";
+import { type Store } from "@clanker/core";
 import type { CommitSpec } from "./git";
 import type { GitHubSim, SimPr } from "./github-sim";
+import { seedPr } from "@clanker/core/testing";
 
 // El escenario de `DEMO_SCENARIO=prs` (ver `demo-core.ts`): los PRs de la vista de Stacks de PR contra el GitHub
 // simulado y el pack de ejemplo: un stack de tres, dos PRs de riesgo alto (uno con su cola caída) que un tercero junta en
@@ -67,11 +68,10 @@ export async function seedPrs({
   client: Client;
   store: Store;
   sim: GitHubSim;
-  repoId: string;
+  repoId: RepoId;
   /** La issue y la corrida que "abrió" el primer PR, para ver "Ver corrida". */
-  origin: { issueId: string; runId: RunId };
+  origin: { issueId: IssueId; runId: RunId };
 }): Promise<void> {
-  const sql = store.db.$client;
   const account = sim.account;
   // El pack solo aplica la estrategia de merge donde `merge-queue` corre en la branch por defecto.
   sim.defaultBranchCheck("merge-queue");
@@ -141,18 +141,23 @@ export async function seedPrs({
   for (const [index, spec] of specs.entries()) {
     const pr = sim.openPr({ head: spec.head, ...(spec.base && { base: spec.base }), title: spec.title, ...(spec.draft && { draft: true }) });
     spec.setup(pr, account);
-    const id = newId("pr");
-    ids.set(spec.head, id);
     const first = index === 0;
-    sql
-      .prepare(
-        `INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, issue_id, run_id, owned)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`,
-      )
-      .run(id, repoId, pr.number, `PR_${pr.number}`, spec.head, spec.base ?? "main", pr.headSha(), spec.draft ? 1 : 0, first ? origin.issueId : null, first ? origin.runId : null, spec.owned ? 1 : 0);
-  }
-  for (const spec of specs) {
-    for (const parent of spec.parents ?? []) sql.prepare("INSERT INTO pr_parents (child_id, parent_id) VALUES (?, ?)").run(ids.get(spec.head)!, ids.get(parent)!);
+    ids.set(
+      spec.head,
+      seedPr(store, {
+        repoId,
+        number: pr.number,
+        headRef: spec.head,
+        baseRef: spec.base ?? "main",
+        headSha: pr.headSha(),
+        isDraft: spec.draft === true,
+        issueId: first ? origin.issueId : null,
+        runId: first ? origin.runId : null,
+        owned: spec.owned === true,
+        // Los padres van antes en `specs`: su fila ya existe.
+        parents: (spec.parents ?? []).map((parent) => ids.get(parent)!),
+      }),
+    );
   }
 
   const ref = (number: number) => ({ account, repo: sim.repo, number });

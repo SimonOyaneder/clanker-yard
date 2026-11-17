@@ -1,7 +1,8 @@
 import { resolve } from "node:path";
 import { CachedIssue, type Client, ClankerProject, type Event, type RunDetail } from "@clanker/api";
 import { describe, expect, test } from "vitest";
-import { type CliContext, runCli } from "./cli";
+import type { CliContext } from "./command";
+import { runCli } from "./cli";
 
 const projectId = "prj_00000000000000000000000001" as const;
 const issueId = "iss_00000000000000000000000001" as const;

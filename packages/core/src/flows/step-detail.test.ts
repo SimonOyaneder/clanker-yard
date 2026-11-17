@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { COMMAND_OUTPUT_MAX_CHARS, type StepRunId } from "@clanker/api";
 import { afterEach, describe, expect, test } from "vitest";
 import { stepLogPath } from "../workspaces/exec";
-import { harness as createHarness, okReport } from "./harness";
+import { harness as createHarness, okReport } from "../testing/flows-harness";
 import { createStepDetails, parseCommandLog, StepNotFoundError } from "./step-detail";
 
 const cleanups: (() => Promise<void> | void)[] = [];

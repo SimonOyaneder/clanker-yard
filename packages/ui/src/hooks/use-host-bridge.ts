@@ -1,10 +1,10 @@
-import type { DecisionId } from "@clanker/api"
+import { isEventOf, type DecisionId, type DecisionKind } from "@clanker/api"
 import { useEffect, useRef } from "react"
 import { useLive } from "@/hooks/use-live"
 import { type MenuAction, useHost } from "@/host"
 
 // Estas decisiones avisan con una notificación nativa: alguien las tiene que atender. Las notas no entran a la bandeja: viven en su corrida y su PR.
-const NOTIFY_KINDS = new Set(["gate", "needs_human", "alert"])
+const NOTIFY_KINDS: ReadonlySet<DecisionKind> = new Set(["gate", "needs_human", "alert"])
 
 /** Lo que hace la app con cada acción del menú nativo, y adónde lleva una notificación. */
 export interface HostBridge {
@@ -39,8 +39,9 @@ export function useHostBridge(bridge: HostBridge): void {
   useEffect(
     () =>
       live.subscribe((event) => {
-        const { decisionId: id, kind, title } = event.payload as { decisionId?: string; kind?: string; title?: string }
-        if (event.type !== "decision.opened" || !id || !title || !NOTIFY_KINDS.has(kind ?? "") || document.hasFocus()) return
+        if (!isEventOf(event, "decision.opened")) return
+        const { decisionId: id, kind, title } = event.payload
+        if (!NOTIFY_KINDS.has(kind) || document.hasFocus()) return
         host.notify({ title: kind === "alert" ? "Alerta en Clanker Yard" : "Una corrida te espera", body: title, target: { decisionId: id } })
       }),
     [live, host],

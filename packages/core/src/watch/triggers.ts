@@ -1,11 +1,11 @@
-import { FlowDef, type Event, type EventType, type PrRef } from "@clanker/api";
+import { FlowDef, type Event, type EventType} from "@clanker/api";
 import type { Defs } from "../defs/defs";
 import type { Engine } from "../flows/engine";
 import type { Projects } from "../projects/projects";
 import type { Store } from "../store/store";
 import type { Repos } from "../repos/repos";
 import type { ErrorReporter } from "../errors/reporter";
-import { prById } from "../github/pr-rows";
+import { prById, prRefOf } from "../github/pr-rows";
 
 /** Los eventos de un PR que arrancan flujos (`trigger.type` del flujo es el mismo texto). */
 const TRIGGERS = ["pr.comment", "pr.conflict", "pr.merged", "pr.base_rewritten"] as const satisfies readonly EventType[];
@@ -37,12 +37,11 @@ export function startTriggers({ store, defs, projects, repos, flows, errors }: T
   function dispatch(event: Event): void {
     if (event.subject?.type !== "pr") return;
     const row = prById(store.db, event.subject.id);
-    const remote = row && repos.get(row.repoId) && repos.config(row.repoId).remote;
-    if (!row?.owned || !remote) return;
+    const pr = row?.owned ? prRefOf(repos, row) : undefined;
+    if (!row || !pr) return;
     // Con threads de council un rebase reescribiría su historia, y eso nunca se fuerza (`workspaces.rebase`).
     if (event.type === "pr.conflict" && row.detail?.threads.councilEver) return;
 
-    const pr: PrRef = { account: remote.account, repo: remote.repo, number: row.number };
     const project = event.projectId ? projects.get(event.projectId) : undefined;
     // Lo que el evento da pisa a los `flowParams` del proyecto, que solo cambian defaults.
     const available: Record<string, unknown> = { ...project?.flowParams, ...event.payload, pr, repo: row.repoId, branch: row.headRef };

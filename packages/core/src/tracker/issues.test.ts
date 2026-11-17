@@ -3,7 +3,7 @@ import { createRouterClient, ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { Connections } from "../connections/connections";
 import { createRouter } from "../server/router";
-import { apiDeps, withPrs } from "../server/testing";
+import { apiDeps, withPrs } from "../testing/router-deps";
 import { newId } from "../store/conventions";
 import { issues as issuesTable } from "../store/schema";
 import { openStore, type Store } from "../store/store";
@@ -18,8 +18,8 @@ let projectId: ProjectId;
 
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
-  local = createLocalTracker(store);
-  issues = createIssues(store, local);
+  local = createLocalTracker({ store });
+  issues = createIssues({ store, local });
   projectId = newId("prj");
 });
 

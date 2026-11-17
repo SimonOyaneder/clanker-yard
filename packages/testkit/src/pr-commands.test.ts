@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type PrRef } from "@clanker/api";
+import { type PrRef, type RepoId } from "@clanker/api";
 import {
   createConnections,
   createDefs,
@@ -18,14 +18,13 @@ import {
   type PrCommands,
   type Store,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
+import { seedPr } from "@clanker/core/testing";
 
 // Lo que una persona le pide a un PR desde la app (`prs.merge`, `prs.requestReview`, `prs.rebase`, `prs.setHold`) con
 // el pack de ejemplo (`fixtures/packs/example`, salvo su alcance) sobre el GitHub simulado.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";
@@ -38,17 +37,17 @@ let origin: TempGitRepo;
 let sim: GitHubSim;
 let cache: PrCache;
 let commands: PrCommands;
-let repoId: string;
+let repoId: RepoId;
 
 const ref = (number: number): PrRef => ({ account: ACCOUNT, repo: REPO, number });
 
 async function setup(pack: "example" | "none") {
-  const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
-  const repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  const repos = createRepos({ store, remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repoId = repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
-  const packs = createPacks({ defs: createDefs(store) });
+  const packs = createPacks({ defs: createDefs({ store }) });
   if (pack === "example") {
     const packDir = join(dir, "pack");
     mkdirSync(packDir);
@@ -81,9 +80,7 @@ afterEach(async () => {
 
 /** Un PR que Watch ya conoce (con su fila), y que si se quiere lo abrió el sistema. */
 function known(pr: SimPr, { owned = false }: { owned?: boolean } = {}) {
-  store.db
-    .$client.prepare("insert into pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) values (?, ?, ?, ?, 'one', 'main', ?, 'open', 0, ?)")
-    .run(`pr_${pr.number}`, repoId, pr.number, `PR_${pr.number}`, pr.headSha(), owned ? 1 : 0);
+  seedPr(store, { id: `pr_${pr.number}`, repoId, number: pr.number, headRef: "one", headSha: pr.headSha(), owned });
 }
 
 const sent = (pr: SimPr, body: string) => pr.node().comments.filter((c) => c.body === body && c.author?.login === ACCOUNT);

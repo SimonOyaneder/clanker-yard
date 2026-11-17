@@ -2,9 +2,9 @@ import { cpSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createClient, type Client, type Event } from "@clanker/api";
+import { createClient, type Client, type Event, type RepoId } from "@clanker/api";
 import { createConnections, createFileSecrets, createProcs, createRepos, newId, openStore, type Core, type StartCoreOptions, type Store } from "@clanker/core";
-import { JUGUETE_FLOW } from "@clanker/core/testing";
+import { JUGUETE_FLOW, seedPr } from "@clanker/core/testing";
 import { startCore } from "./start-core";
 import { ORPCError } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -47,7 +47,7 @@ async function boot(env: Record<string, string> = { CORE_RUNTIME: "fake" }, extr
     ...extra,
     store,
     dataDir: home.path,
-    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
+    connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }) }),
     runtimes: [createFakeRuntime({ fixtures: juguete, speed: Infinity })],
     env,
     scheduler: false,
@@ -84,7 +84,7 @@ async function follow(client: Client, projectId: Event["projectId"], types: Even
 describe("runs sobre el runtime fake", () => {
   test("crea un proyecto y una issue local, lanza la corrida y recibe run.finished con outcome done", async () => {
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const nextFinished = await follow(client, project.id, ["run.finished"]);
@@ -107,7 +107,7 @@ describe("runs sobre el runtime fake", () => {
 
   test("runs.get devuelve los pasos con su outcome y el costo, y el worktree queda suelto", async () => {
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const nextFinished = await follow(client, project.id, ["run.finished"]);
@@ -285,7 +285,7 @@ describe("runs.start con los repos del proyecto", () => {
 describe("projects.queue", () => {
   test("una issue ya lanzada sale de la cola, también cuando su corrida termina, y la otra sigue lista", async () => {
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const first = await client.issues.createLocal({ projectId: project.id, title: "Una", priority: 1 });
     const second = await client.issues.createLocal({ projectId: project.id, title: "Otra" });
@@ -363,9 +363,7 @@ describe("arranque", () => {
       store.db.$client
         .prepare("INSERT INTO workspaces (id, repo_id, path, branch, base_ref, state, fencing_token) VALUES (?, 'demo', ?, ?, 'main', 'idle', 1)")
         .run(id, join(home.path, "worktrees", branch), branch);
-      store.db.$client
-        .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'demo', ?, '', ?, 'main', '', 'merged', 0, 1)")
-        .run(`pr_${id}`, number, branch);
+      seedPr(store, { id: `pr_${id}`, repoId: "demo" as RepoId, number, headRef: branch, state: "merged" });
     };
     const states = () => store.db.$client.prepare("SELECT branch, state FROM workspaces ORDER BY branch").all();
     insert("wsp_a", "a", 1);
@@ -380,7 +378,7 @@ describe("arranque", () => {
 
   test("al arrancar despacha los pasos pending que dejó el core anterior", async () => {
     let client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const nextRetry = await follow(client, project.id, ["step.retrying"]);
@@ -464,7 +462,7 @@ describe("arranque", () => {
 describe("recuperación al arrancar", () => {
   test("un corte con el agente en curso: el core nuevo reabre el paso, conserva el worktree y termina la corrida", async () => {
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const nextFinished = await follow(client, project.id, ["run.finished"]);

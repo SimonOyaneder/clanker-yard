@@ -44,8 +44,7 @@ export function planIssue(
   return { kind: "repos", repoIds, next: index < 0 ? undefined : { repoId: repoIds[index], after: repoIds[index - 1] } };
 }
 
-/** El repo en que corrió una corrida: el `repo` de sus params, que `runs.start` fija desde el plan de la issue. */
-/** El repo de una corrida, de sus params (`repo`), si es un id de repo válido. */
+/** El repo en que corrió una corrida: el `repo` de sus params, que `runs.start` fija desde el plan de la issue, si es un id de repo válido. */
 export const repoOfRun = (params: Record<string, unknown>): RepoId | undefined => {
   const parsed = RepoId.safeParse(params.repo);
   return parsed.success ? parsed.data : undefined;

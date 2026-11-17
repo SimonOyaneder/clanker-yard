@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { RepoId, type DetectedRepo, type RecipeStatus, type Repo, type RepoOverview } from "@clanker/api";
+import { isEventOf, RepoId, type DetectedRepo, type Origin, type RecipeStatus, type Repo, type RepoOverview } from "@clanker/api";
 import { asc, eq } from "drizzle-orm";
 import { DefValidationError } from "../defs/defs";
 import { readRecipe, RecipeSyntaxError } from "../recipe/recipe";
@@ -7,17 +7,38 @@ import { newId } from "../store/conventions";
 import { repos } from "../store/schema";
 import type { Store } from "../store/store";
 import { findRepos, inspectRepo } from "./inspect";
-import type { RepoConfig } from "../workspaces/workspaces";
+import { BadRequestError, NotFoundError } from "../errors/domain";
 
 /** El repo que se pidió no está registrado. */
-export class RepoNotFoundError extends Error {
+/** Lo que el core necesita de un repo registrado para tomar worktrees, pushear y abrir PRs (`Repos.config`). */
+export interface RepoConfig {
+  /** El checkout del usuario: de ahí cuelgan los worktrees y ahí se hace el fetch. */
+  path: string;
+  /** La branch por defecto nunca es de un workspace. */
+  defaultBranch: string;
+  /** Otras branches que ningún workspace puede usar. */
+  protectedBranches?: string[];
+  /** Raíz de los worktrees en lugar de `<dataDir>/worktrees`; relativa se resuelve contra `dataDir`. */
+  worktreeDir?: string;
+  /** Adónde y como quién se pushea; sin esto el repo no tiene `push` ni `fetch`. */
+  remote?: {
+    /** `https://github.com/<owner>/<repo>.git`: explícita, aunque `origin` sea SSH. */
+    url: string;
+    /** `owner/repo` en GitHub: donde `pr.publish` abre el PR. */
+    repo: string;
+    /** La cuenta de GitHub conectada cuyo token autentica. */
+    account: string;
+  };
+}
+
+export class RepoNotFoundError extends NotFoundError {
   constructor(id: string) {
     super(`No existe el repo ${id}: regístralo con repos.add.`);
   }
 }
 
 /** El repo no se puede registrar: el mensaje dice por qué. */
-export class InvalidRepoError extends Error {}
+export class InvalidRepoError extends BadRequestError {}
 
 export interface Repos {
   /** Registra un checkout sin mirar git (para código y tests; la API usa `register`). El path es único. Devuelve el id que usan los flujos (`repo`). */
@@ -26,8 +47,8 @@ export interface Repos {
    * Registra el repo de `path`, que debe ser la raíz de un checkout de git: la branch por defecto y el
    * remoto de GitHub salen de él. Lanza `NotAGitRepoError` si no lo es e `InvalidRepoError` si ya está registrado.
    */
-  register(path: string, name?: string): Promise<Repo>;
-  get(id: string): Repo | undefined;
+  register(path: string, name: string | undefined, by: Origin): Promise<Repo>;
+  get(id: RepoId): Repo | undefined;
   /**
    * Los registrados, por nombre, con el estado de su receta (`invalid` si la carpeta ya no existe) y cómo
    * terminó su última prueba (el último `recipe.test_finished` de cada uno).
@@ -40,47 +61,49 @@ export interface Repos {
   /** Los repos de git de `folder` con el estado de su receta, registrados o no. */
   detect(folder: string): Promise<DetectedRepo[]>;
   /** La configuración que Workspaces necesita de un repo. Lanza si el id no existe. */
-  config(id: string): RepoConfig;
+  config(id: RepoId): RepoConfig;
   /**
    * Fija si la estrategia de merge del pack aplica a este repo (`on`, `off`) o vuelve a detectarlo (`null`:
    * `appliesWhen` del pack). Vale desde la próxima lectura de cada PR del repo. Lanza `RepoNotFoundError` si
    * el id no existe.
    */
-  setMergeStrategy(id: string, override: Repo["mergeStrategy"]): void;
+  setMergeStrategy(id: RepoId, override: Repo["mergeStrategy"]): void;
 }
 
 export interface ReposOptions {
+  store: Store;
   /** `RepoConfig.remote` de un repo por su `owner/name` de GitHub (`githubRemote`); sin esto ningún repo se puede pushear. */
   remote?: (repo: string) => RepoConfig["remote"];
 }
 
-export function createRepos(store: Store, { remote: remoteOf }: ReposOptions = {}): Repos {
+export function createRepos({ store, remote: remoteOf }: ReposOptions): Repos {
   const byPath = (path: string) => store.db.select().from(repos).where(eq(repos.path, path)).get();
 
+  /** Con `by` (lo que registra una persona o un agente), en la misma tx emite `repo.added` con quién lo pidió. */
+  function insert({ name, path, defaultBranch = "main", remote = null }: Parameters<Repos["add"]>[0], by?: Origin): RepoId {
+    const id = newId("repo");
+    store.tx((tx) => {
+      tx.db.insert(repos).values({ id, name, path, defaultBranch, remote }).run();
+      if (by) tx.emit({ type: "repo.added", origin: by, payload: { repoId: id, name, path } });
+    });
+    return id;
+  }
+
   const self: Repos = {
-    add({ name, path, defaultBranch = "main", remote = null }) {
-      const id = newId("repo");
-      store.tx((tx) => tx.db.insert(repos).values({ id, name, path, defaultBranch, remote }).run());
-      return id;
-    },
-    async register(path, name) {
+    add: (repo) => insert(repo),
+    async register(path, name, by) {
       const info = await inspectRepo(path);
       if (byPath(info.path)) throw new InvalidRepoError(`${info.path} ya está registrado.`);
-      const id = self.add({ ...info, name: name ?? info.name });
-      return self.get(id)!;
+      return self.get(insert({ ...info, name: name ?? info.name }, by))!;
     },
-    get(id) {
-      const repoId = RepoId.safeParse(id);
-      return repoId.success ? store.db.select().from(repos).where(eq(repos.id, repoId.data)).get() : undefined;
-    },
+    get: (id) => store.db.select().from(repos).where(eq(repos.id, id)).get(),
     list: () => store.db.select().from(repos).orderBy(asc(repos.name), asc(repos.id)).all(),
     byRemote: (remote) =>
       store.db.select().from(repos).where(eq(repos.remote, remote)).orderBy(asc(repos.name), asc(repos.id)).get(),
     overview() {
       const lastTest = new Map<string, { ok: boolean; at: number }>();
       for (const event of store.events.since(0, { types: ["recipe.test_finished"] })) {
-        const repoId = event.payload.repoId;
-        if (typeof repoId === "string") lastTest.set(repoId, { ok: event.payload.ok === true, at: event.ts });
+        if (isEventOf(event, "recipe.test_finished")) lastTest.set(event.payload.repoId, { ok: event.payload.ok, at: event.ts });
       }
       return self.list().map((repo) => ({
         repo,

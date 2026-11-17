@@ -2,7 +2,7 @@ import type { Breaker } from "@clanker/api"
 import { OctagonPause } from "lucide-react"
 import { Pill } from "@/components/common"
 import { absolute, tone } from "@/lib/format"
-import { BREAKER_CAUSE, pausedBy } from "@/lib/project-ops"
+import { BREAKER_CAUSE, pausedBy } from "@/lib/project/project-ops"
 
 const clock = (at: number) => new Date(at).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false })
 

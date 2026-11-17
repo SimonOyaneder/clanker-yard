@@ -7,10 +7,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { DefOption } from "@/components/def-option"
+import { DefSelect } from "@/components/def-option"
 import { TrackerProjectPicker } from "@/components/tracker-project-picker"
 import { useLiveQuery } from "@/hooks/use-live"
-import { defaultFlowSlug, defaultProfileSlug, defName, selectableFlows } from "@/lib/defs"
+import { defaultFlowSlug, defaultProfileSlug, selectableFlows } from "@/lib/defs"
 import { messageOf } from "@/lib/utils"
 
 // Los trackers con adapter en el core. GitHub Issues y Jira existen en la API pero no tienen adapter: no se ofrecen.
@@ -147,8 +147,8 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <DefSelect id="project-flow" label="Flujo por defecto" help="Los pasos que sigue cada issue." noun="flujos" query={defs} defs={defs.data?.flows} value={flow} onChange={setPickedFlow} />
-        <DefSelect id="project-profile" label="Perfil por defecto" help="Qué modelo usa cada agente." noun="perfiles" query={defs} defs={defs.data?.profiles} value={profile} onChange={setPickedProfile} />
+        <DefField id="project-flow" label="Flujo por defecto" help="Los pasos que sigue cada issue." noun="flujos" query={defs} defs={defs.data?.flows} value={flow} onChange={setPickedFlow} />
+        <DefField id="project-profile" label="Perfil por defecto" help="Qué modelo usa cada agente." noun="perfiles" query={defs} defs={defs.data?.profiles} value={profile} onChange={setPickedProfile} />
       </div>
 
       {error ? (
@@ -169,7 +169,7 @@ function Form({ onCreated, onCancel, onOpenConnections }: { onCreated: (project:
 }
 
 // Un flujo o perfil por defecto: el nombre y, más chico y en mono, el slug que usan la CLI y el MCP.
-function DefSelect({
+function DefField({
   id,
   label,
   help,
@@ -188,7 +188,6 @@ function DefSelect({
   value: string
   onChange: (slug: string) => void
 }) {
-  const selected = defs?.find((d) => d.slug === value)
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Label htmlFor={id}>{label}</Label>
@@ -204,18 +203,7 @@ function DefSelect({
       ) : defs.length === 0 ? (
         <p className="text-xs text-muted-foreground">No hay {noun}: el proyecto se crea sin uno por defecto.</p>
       ) : (
-        <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id={id} className="w-full">
-            <SelectValue>{selected ? defName(selected) : null}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {defs.map((d) => (
-              <SelectItem key={d.slug} value={d.slug}>
-                <DefOption def={d} />
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <DefSelect id={id} value={value} defs={defs} onChange={(slug) => slug !== null && onChange(slug)} />
       )}
       <p className="text-xs text-muted-foreground">{help}</p>
     </div>

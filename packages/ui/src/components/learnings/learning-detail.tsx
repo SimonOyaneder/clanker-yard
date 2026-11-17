@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ChipsInput } from "@/components/settings/settings-fields"
+import { ChipsInput } from "@/components/settings-form/settings-fields"
 import { copy } from "@/lib/clipboard"
 import { approveLabel, BRIEF_LIMIT, capsOf, rejectLabel } from "@/lib/learnings"
 

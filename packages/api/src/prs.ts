@@ -248,3 +248,27 @@ export type PrRepublish = z.infer<typeof PrRepublish>;
  */
 export const RepublishProgress = z.object({ id: z.string().min(1), done: z.boolean(), results: z.array(PrRepublish) });
 export type RepublishProgress = z.infer<typeof RepublishProgress>;
+
+/**
+ * Por qué no se puede pedir el merge de un PR por la estrategia del pack (`prs.merge`), o `undefined` si se puede. Es
+ * la regla del core: `prs.merge` rechaza con este motivo y la UI apaga el ítem con él, así nunca ofrece lo que el core
+ * va a rechazar. Que el repo se mergee con el botón de GitHub (`merge.via`) no es un bloqueo: ahí la UI manda a GitHub.
+ */
+export function mergeBlocker({ hold, merge }: Pick<PrState, "hold" | "merge">): string | undefined {
+  if (hold) return "tiene hold (no mergear nunca): quítalo antes de mergear";
+  if (merge.queue === "queued") return "ya está en cola: el merge ya se pidió";
+  if (merge.queue === "failed") return "el merge falló en la cola: revisa por qué en GitHub antes de volver a pedirlo";
+  if (!merge.ready) return merge.blockers.length > 0 ? `no está listo para mergear: ${merge.blockers.join(", ")}` : "no está listo para mergear";
+  return undefined;
+}
+
+/**
+ * Por qué el core no rebasea un PR (`prs.rebase`), o `undefined` si puede: solo uno que abrió el sistema (`owned`),
+ * abierto y que nunca tuvo threads de council (rebasear reescribe su historia). La UI ofrece rebasear con la misma regla.
+ */
+export function rebaseBlocker({ state, threads }: Pick<PrState, "state" | "threads">, owned: boolean): string | undefined {
+  if (!owned) return "no lo abrió el sistema: el core nunca reescribe la branch de un PR ajeno";
+  if (state === "merged" || state === "closed") return `ya está ${state === "merged" ? "mergeado" : "cerrado"}`;
+  if (threads.councilEver) return "tiene threads de council: rebasear reescribiría su historia y eso nunca se fuerza";
+  return undefined;
+}

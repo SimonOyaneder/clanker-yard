@@ -78,7 +78,7 @@ async function runPlan(withDefs: (defs: Defs) => void = () => {}) {
       yield* script;
     })();
   };
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const runtime = createClaudeRuntime({
     credentials: async () => subscriptionCredentials({ executable: "/bin/claude" }),
     home: join(root, "home"),

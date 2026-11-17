@@ -28,7 +28,7 @@ export function chosenRepos(store: Store, repos: Repos, project: ProjectRepos): 
   for (const row of rows) {
     if (row.subject?.type !== "issue" || !row.title.startsWith(QUESTION) || seen.has(row.subject.id)) continue;
     seen.add(row.subject.id);
-    const option = (row.resolution as { option?: unknown } | null)?.option;
+    const option = row.resolution?.option;
     const bound = project.repos.find(({ repoId }) => repoId === option || repoOption(repos, project, repoId) === option);
     if (bound) chosen.set(row.subject.id as IssueId, bound.repoId);
   }

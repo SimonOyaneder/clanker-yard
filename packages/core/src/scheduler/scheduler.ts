@@ -1,4 +1,4 @@
-import type { CachedIssue, ClankerProject, IssueId, Origin, ProjectId, QueueEntry, RepoId } from "@clanker/api";
+import { LIVE_RUN_STATUSES, type CachedIssue, type ClankerProject, type IssueId, type Origin, type ProjectId, type QueueEntry, type RepoId } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Breakers as AllBreakers } from "../breakers/breakers";
 import { openDecision } from "../decisions/decisions";
@@ -19,6 +19,7 @@ import { messageOf } from "../errors/format";
 import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import type { LaneSettings } from "./lanes";
 import type { ProjectQueue } from "./project-queue";
+import { BadRequestError } from "../errors/domain";
 
 /** El tick periódico del diseño (`docs/design.html#d-ops`, "Scheduler: la cola"), además de los eventos que lo disparan. */
 export const SCHEDULER_TICK_MS = 5 * 60_000;
@@ -38,9 +39,6 @@ const TRIGGERS = [
   "project.updated",
   "project.resumed",
 ] as const;
-
-/** Los estados en que una corrida de dev sobre una issue sigue en vuelo. */
-const IN_FLIGHT = ["queued", "running", "waiting", "parked", "paused"] as const;
 
 /**
  * Los circuit breakers por causa (`docs/design.html#d-ops`, `breakers/`): el Scheduler no lanza issues de un
@@ -103,11 +101,11 @@ export interface Scheduler {
 }
 
 /** La issue no existe o no es del proyecto. */
-export class IssueNotInProjectError extends Error {}
+export class IssueNotInProjectError extends BadRequestError {}
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
   const { store, projects, issues, repos, lanes, breakers } = deps;
-  const errors = deps.errors ?? createErrorReporter(store);
+  const errors = deps.errors ?? createErrorReporter({ store });
   /** Lo que el último tick no pudo lanzar de cada proyecto, con su motivo. */
   const skipped = new Map<ProjectId, Map<IssueId, string>>();
   let running: Promise<void> | undefined;
@@ -127,16 +125,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** Corre ticks mientras alguien haya pedido otro; `running` se limpia en el mismo turno en que el último termina, así ningún disparo se pierde. */
   async function loop(): Promise<void> {
-    // Que `running` ya esté asignado antes de que `pass` (y el `wake` del motor, que emite eventos) corra.
+    // Que `running` ya esté asignado antes de que `tickOnce` (y el `wake` del motor, que emite eventos) corra.
     await Promise.resolve();
     try {
       do {
         again = false;
         try {
-          await pass();
+          await tickOnce();
+          errors.clear(TICK_SCOPE);
         } catch (error) {
           // Un tick corre desde timers y eventos: un throw tumbaría el core.
-          console.error("El tick del Scheduler falló:", error);
+          errors.report(TICK_SCOPE, error);
         }
       } while (again && !closed);
     } finally {
@@ -144,7 +143,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   }
 
-  async function pass(): Promise<void> {
+  async function tickOnce(): Promise<void> {
     if (closed) return;
     // Primero lo que ya tiene dueño de cupo: el mantenimiento y las corridas que vuelven de estacionadas van antes que las issues nuevas.
     deps.flows.wake();
@@ -197,7 +196,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         }
       }
     } finally {
-      remember(project.id, marks);
+      recordSkips(project.id, marks);
     }
   }
 
@@ -267,14 +266,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       store.db
         .select({ issueId: runs.subjectId })
         .from(runs)
-        .where(and(eq(runs.subjectType, "issue"), eq(runs.lane, "dev"), isNull(runs.parentRunId), inArray(runs.status, IN_FLIGHT)))
+        .where(and(eq(runs.subjectType, "issue"), eq(runs.lane, "dev"), isNull(runs.parentRunId), inArray(runs.status, LIVE_RUN_STATUSES)))
         .all()
         .map((row) => row.issueId),
     );
   }
 
   /** Deja el motivo de lo que no se lanzó y avisa (`issue.skipped`) solo cuando el motivo cambió. */
-  function remember(projectId: ProjectId, marks: Map<IssueId, string>): void {
+  function recordSkips(projectId: ProjectId, marks: Map<IssueId, string>): void {
     const before = skipped.get(projectId);
     skipped.set(projectId, marks);
     for (const [issueId, reason] of marks) {

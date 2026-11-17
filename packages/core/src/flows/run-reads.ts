@@ -9,6 +9,7 @@ import type { EngineDeps, RunSummary, RunView } from "./engine";
 import { parseInlineBranch } from "./parallel";
 import { navigate, refPath } from "./refs";
 import { readRunDetail } from "./run-detail";
+import { NotFoundError } from "../errors/domain";
 
 // Lo que el motor lee de una corrida sin cambiarla: el flujo que fijó, su linaje de subflujos, los outputs de
 // sus pasos, los refs (`$nodo`, `$prev`, `$item`...) y las vistas de `getRun` y `listRuns`. Nada de aquí toca
@@ -21,7 +22,7 @@ type StepRow = typeof stepRuns.$inferSelect;
 export const OUTPUT_INLINE_MAX_BYTES = 16 * 1024;
 
 /** La corrida pedida no existe. */
-export class RunNotFoundError extends Error {
+export class RunNotFoundError extends NotFoundError {
   constructor(runId: RunId) {
     super(`No existe la corrida ${runId}.`);
   }

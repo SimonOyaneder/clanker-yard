@@ -10,7 +10,8 @@ import { createArtifacts } from "./artifacts/artifacts";
 import { installBuiltins, type BuiltinTemplate } from "./builtin/install";
 import { commitsApplyAction } from "./commits/apply";
 import type { Connections } from "./connections/connections";
-import { CLAUDE_RUNTIME, createBreakers, runtimeScope } from "./breakers/breakers";
+import { CLAUDE_RUNTIME_ID } from "./agents/claude/models";
+import { createBreakers, repoOfScope, runtimeScope } from "./breakers/breakers";
 import { environmentProbe } from "./breakers/probes";
 import { createDecisions } from "./decisions/decisions";
 import { createLearnings } from "./learnings/learnings";
@@ -27,8 +28,8 @@ import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/actions/publish";
 import { stackRestackAction, stackRestackRewrittenAction } from "./github/actions/restack";
 import { prPushFixupsAction } from "./github/actions/push-fixups";
-import { prReplayAction, prSupersedeAction } from "./github/actions/republish";
-import { createPrRepublisher } from "./github/actions/republisher";
+import { prReplayAction, prSupersedeAction } from "./github/actions/replay-supersede";
+import { createPrRepublisher } from "./github/republisher";
 import {
   prPushLeaseAction,
   prRebaseApprovalAction,
@@ -41,7 +42,7 @@ import { createPacks } from "./packs/packs";
 import { createLinearTracker } from "./linear/tracker";
 import { createTrackers } from "./tracker/trackers";
 import { createTrackerProjects } from "./tracker/tracker-projects";
-import { createProcs, type Procs } from "./procs/procs";
+import { createProcs, KILL_GROUP_AFTER_MS, type Procs } from "./procs/procs";
 import { createProjectConfigs } from "./projects/config";
 import { createProjects } from "./projects/projects";
 import { createRepoConfigExporter } from "./repo-config/export";
@@ -78,8 +79,6 @@ import {
 
 /** Cuánto espera un apagado con `drain` a las acciones en curso antes de abortarlas (`docs/design.html#d-data`). */
 const DRAIN_MS = 60_000;
-/** De SIGTERM a SIGKILL sobre los procesos que lanzó el core. */
-const KILL_AFTER_MS = 10_000;
 /** Lo que tarda en soltarse un paso después de SIGKILL; pasado esto se deja atrás y el próximo arranque lo recupera. */
 const SETTLE_MS = 5_000;
 
@@ -95,6 +94,11 @@ export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion"
   runtimes: readonly AgentRuntime[];
   /** Plantillas extra como builtin, solo para demos y tests (p. ej. `JUGUETE_TEMPLATE`): producción no pasa ninguna. */
   builtins?: readonly BuiltinTemplate[];
+  /**
+   * Solo tests y demo: `recipe.check` no corre los checks y consume `run.<check>` del guion del runtime fake (sus
+   * `requires` sí corren: son el entorno real del repo). Producción no lo pasa.
+   */
+  recipeResults?: ScriptedRecipe;
   /** De aquí sale `CORE_RUNTIME`. Por defecto, `process.env`. */
   env?: Record<string, string | undefined>;
   /**
@@ -148,9 +152,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const procs = opts.procs ?? createProcs({ store, bootId: newId("boot") });
   const { bootId } = procs;
   const runtimes = createRuntimeRegistry(opts.runtimes, opts.env);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const packs = createPacks({ defs, installedDir: opts.packsDir ?? join(dataDir, "packs"), factoryDir: opts.factoryPacksDir });
-  const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
+  const repos = createRepos({ store, remote: githubRemote(opts.connections, opts.gitUrl) });
   const identityOf = createGitIdentityOf({ repoConfig: repos.config, connections: opts.connections });
   const agents = createAgents({ store, defs, runtimes, packs, remoteOf: (repoId) => repos.get(repoId)?.remote, identityOf });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
@@ -166,8 +170,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     remote: gitRemote,
     worktreeSetup: (dir) => readRecipe(dir)?.setup?.worktree ?? [],
   });
-  const local = createLocalTracker(store);
-  const issues = createIssues(store, local);
+  const local = createLocalTracker({ store });
+  const issues = createIssues({ store, local });
   const projects = createProjects({ store, defs });
   const trackers = createTrackers({
     local,
@@ -185,28 +189,31 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     linear: (account) => createLinearTracker({ connections: opts.connections, account, endpoint: opts.linearEndpoint }),
     projects,
   });
-  const lanes = createLaneSettings(store);
+  const lanes = createLaneSettings({ store });
   // Un solo dedupe para todo el core; lo de Watch (y los triggers y reacciones que cuelgan de sus eventos) va bajo `watch.`.
-  const reporter = createErrorReporter(store);
+  const reporter = createErrorReporter({ store });
   const breakers = createBreakers({
     store,
     errors: reporter,
     runtimes: runtimes.all.map((r) => r.id),
     probe: environmentProbe({ connections: opts.connections, repos, runtimes: runtimes.all }),
     ...(opts.breakerBackoffMs && { backoffMs: opts.breakerBackoffMs }),
-    label: (scope) => (scope.startsWith("repo:") ? `repo ${repos.get(scope.slice("repo:".length))?.name ?? scope}` : scope),
+    label: (scope) => {
+      const repoId = repoOfScope(scope);
+      return repoId ? `repo ${repos.get(repoId)?.name ?? scope}` : scope;
+    },
   });
   // Antes de despachar nada: un breaker que dejó un corte sigue pausando lo suyo.
   breakers.start();
   // Un run real que encuentra el login de Claude vencido deja la cuenta `claude` en rojo, como un `testClaude`.
   const stopMarkingLogin = store.events.subscribe(
     ({ payload }) => {
-      if (payload.scope === runtimeScope(CLAUDE_RUNTIME) && payload.cause === "login_expired") opts.connections.markClaudeLoginLost("core");
+      if (payload.scope === runtimeScope(CLAUDE_RUNTIME_ID) && payload.cause === "login_expired") opts.connections.markClaudeLoginLost("core");
     },
     { types: ["breaker.opened"] },
   );
   // El filtro de learnings pide un modelo barato de Claude: corre en `claude-sdk` salvo que `CORE_RUNTIME` fuerce otro.
-  const learnings = createLearnings({ store, runtime: runtimes.forced ?? runtimes.all.find((r) => r.id === CLAUDE_RUNTIME) ?? runtimes.default });
+  const learnings = createLearnings({ store, runtime: runtimes.forced ?? runtimes.all.find((r) => r.id === CLAUDE_RUNTIME_ID) ?? runtimes.default });
   const flows = createFlows({
     store,
     environment: { breakers, runtimeOf: runtimes.idFor },
@@ -225,7 +232,25 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       workspaces.extendLeases();
       slots.extendLeases();
     },
+    errors: reporter,
   });
+  // Antes que nada pueda terminar una corrida o soltar un worktree (también `flows.recover()`, más abajo): una corrida
+  // que termina no se lleva el worktree, porque el flujo puede no haberlo soltado (`@done` no lo hace).
+  const stopReleasing = store.events.subscribe(
+    ({ runId }) => {
+      if (runId) workspaces.releaseHeldBy(runId);
+    },
+    { types: ["run.finished"] },
+  );
+  // Un worktree cuyo PR terminó se archiva en cuanto nadie lo tiene: al soltarse el último lease (`pr.merged` y los
+  // cierres sin merge llegan por `onPrChange`), y a los 7 días se borra.
+  const cleanup = startCleanup({ workspaces, errors: reporter, initialPass: false });
+  const stopCleaningOnRelease = store.events.subscribe(
+    ({ payload }) => {
+      if (payload.resource === "workspace") cleanup.request();
+    },
+    { types: ["lease.released"] },
+  );
   const prs = createPrs({ connections: opts.connections, packs, merge: createMergeScope({ store, repos, connections: opts.connections }) });
   const watchErrors = reporter.within("watch");
   const prEvents = createPrEvents({ store, repos, workspaces, errors: watchErrors });
@@ -236,7 +261,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     if (state.state === "merged" || state.state === "closed") cleanup.request();
   };
   const prCache = createPrCache({ store, repos, packs, prs, onChange: onPrChange });
-  const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: isScripted(runtimes.default) ? runtimes.default : undefined });
+  const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: opts.recipeResults });
   flows.registerAction(workspaceAcquireAction(workspaces));
   flows.registerAction(workspaceAttachAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
@@ -279,22 +304,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   if (orphans + leases + steps > 0) {
     store.tx((tx) => tx.emit({ type: "core.recovered", origin: "core", payload: { steps, leases, orphans } }));
   }
-  // Una corrida que termina no se lleva el worktree: el flujo puede no haberlo soltado (`@done` no lo hace).
-  const stopReleasing = store.events.subscribe(
-    ({ runId }) => {
-      if (runId) workspaces.releaseHeldBy(runId);
-    },
-    { types: ["run.finished"] },
-  );
-  // Un worktree cuyo PR terminó se archiva en cuanto nadie lo tiene: al soltarse el último lease (`pr.merged` y los
-  // cierres sin merge llegan por `onPrChange`), y a los 7 días se borra.
-  const cleanup = startCleanup({ workspaces, errors: reporter });
-  const stopCleaningOnRelease = store.events.subscribe(
-    ({ payload }) => {
-      if (payload.resource === "workspace") cleanup.request();
-    },
-    { types: ["lease.released"] },
-  );
+  // La primera pasada de limpieza, ya con los worktrees de las corridas vivas recuperados.
+  cleanup.request();
   // Al devolver un sujeto prestado la branch pudo moverse: la dueña relee su `head_sha` antes de seguir.
   const stopRereading = store.events.subscribe(
     ({ payload }) => {
@@ -346,7 +357,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     packs,
     repos,
     repoConfigSync,
-    repoConfigExport: createRepoConfigExporter({ defs, repos, config: repos.config, remote: gitRemote, connections: opts.connections, dataDir, identityOf }),
+    repoConfigExport: createRepoConfigExporter({ store, defs, repos, config: repos.config, remote: gitRemote, connections: opts.connections, dataDir, identityOf }),
     projectConfigs: createProjectConfigs({ projects, repos, defs }),
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
     runs,
@@ -360,7 +371,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     prs,
     prCache,
     artifacts,
-    decisions: createDecisions(store),
+    decisions: createDecisions({ store }),
     learnings,
     defs,
     agentOptions: () => describeRuntimes(runtimes),
@@ -379,20 +390,19 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   return {
     server,
     async close({ drain } = { drain: false }) {
+      // Primero lo que abre corridas (Watch y sus triggers, el Scheduler): un cierre no abre corridas nuevas.
       await watch.stop();
-      // Como el Scheduler: un cierre no abre corridas nuevas.
       stopTriggers();
       await stopRepoConfigSync.stop();
       mergeReactions.stop();
       const graceMs = drain ? DRAIN_MS : 0;
-      // Antes de apagar el motor: un cierre no abre corridas nuevas.
       await scheduler.close();
       breakers.close();
       stopMarkingLogin();
       const stopped = flows.close({ graceMs });
       // Con `drain`, hasta que las acciones terminen solas; sin él, el SIGTERM sale de inmediato.
       await Promise.race([stopped, delay(graceMs, undefined, { ref: false })]);
-      await procs.stop(KILL_AFTER_MS);
+      await procs.stop(KILL_GROUP_AFTER_MS);
       await Promise.race([stopped, delay(SETTLE_MS, undefined, { ref: false })]);
       await server.close();
       stopReleasing();
@@ -414,7 +424,6 @@ function roleInfoOf(defs: Defs) {
   };
 }
 
-/** El runtime `fake` entrega los resultados de la receta desde su guion; los demás no tienen `nextRecipeResult`. */
 /**
  * Los runtimes que usan los agentes del perfil por defecto de un proyecto (su breaker pausa sus lanzamientos). Sin
  * perfil, o uno que no se lee, el runtime por defecto.
@@ -426,6 +435,3 @@ function profileRuntimes(defs: Defs, runtimes: RuntimeRegistry, profileSlug: str
   return [...new Set(Object.values(profile.data.roles).map((entry) => runtimes.idFor(entry.runtime)))];
 }
 
-function isScripted(runtime: AgentRuntime): runtime is AgentRuntime & ScriptedRecipe {
-  return "nextRecipeResult" in runtime && typeof runtime.nextRecipeResult === "function";
-}

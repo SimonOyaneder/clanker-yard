@@ -4,9 +4,9 @@ import type { PrRow } from "../github/pr-cache";
 import type { Store } from "../store/store";
 import type { Repos } from "../repos/repos";
 import type { Workspaces } from "../workspaces/workspaces";
-import { approvalEpoch, emitOnce, lastEvaluatedHead, markHead, recordMarks, type PrEventInput } from "./marks";
+import { approvalEpoch, emitOnce, lastEvaluatedHead, markHead, recordMarks, type PrEventInput } from "../github/marks";
 import type { ErrorReporter } from "../errors/reporter";
-import { openPrsWithDetail } from "../github/pr-rows";
+import { openPrsWithDetail, prRefOf } from "../github/pr-rows";
 
 // Los eventos de Watch (`docs/design.html#d-ops`, "Watch: eventos y qué disparan"): de lo que cambió en un
 // PR salen los hechos nuevos, cada uno una sola vez por su clave en `watch_marks`.
@@ -93,9 +93,8 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
       const rows = openPrsWithDetail(store.db);
       for (const row of rows) {
         const { detail } = row;
-        const remote = repos.get(row.repoId) && repos.config(row.repoId).remote;
-        if (!detail || !remote || lastEvaluatedHead(store.db, row.id) === detail.headSha) continue;
-        const ref = { account: remote.account, repo: remote.repo, number: row.number };
+        const ref = prRefOf(repos, row);
+        if (!detail || !ref || lastEvaluatedHead(store.db, row.id) === detail.headSha) continue;
         enqueue(`events ${ref.repo}#${ref.number}`, () => evaluate(row, ref, detail, at));
       }
       await queue;

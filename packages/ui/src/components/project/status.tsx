@@ -46,7 +46,7 @@ export function RunStatusPill({ run }: { run: Pick<Run, "status" | "outcome"> })
 
 export function RunStatusIcon({ run, className }: { run: Pick<Run, "status" | "outcome">; className?: string }) {
   const look = lookOf(run)
-  return <look.Icon aria-label={look.label} className={cn("size-3.5 flex-none", look.iconClass, look.pulse && "cc-blink", className)} />
+  return <look.Icon aria-label={look.label} className={cn("size-3.5 flex-none", look.iconClass, look.pulse && "animate-blink", className)} />
 }
 
 const STEP: Record<StepStatus, Look> = {

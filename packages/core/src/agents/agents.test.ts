@@ -140,7 +140,7 @@ function stubRuntime(steps: Step[], id: AgentRuntime["id"] = "fake") {
   };
   const runtime: AgentRuntime = {
     id,
-    capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+    capabilities: { costPerTurn: true },
     async start(spec) {
       calls.starts.push(spec);
       return next(spec.cwd);
@@ -156,7 +156,7 @@ function stubRuntime(steps: Step[], id: AgentRuntime["id"] = "fake") {
 function setup(steps: Step[], now?: () => number, prefixWaitMs?: number) {
   const store = openStore({ path: ":memory:" });
   open.push(store);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const stub = stubRuntime(steps);
   const agents: Agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([stub.runtime], {}), now, prefixWaitMs });
   defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });
@@ -473,7 +473,7 @@ describe("resume", () => {
   test("una sesión de otro runtime no se retoma con el actual", async () => {
     const { store, agents, calls } = setup([{ result: { structured: validReport } }]);
     const first = await agents.run(request());
-    store.db.update(agentSessions).set({ runtime: "acp" }).run();
+    store.db.update(agentSessions).set({ runtime: "opencode" }).run();
 
     await expect(
       agents.resume({
@@ -482,7 +482,7 @@ describe("resume", () => {
         mode: "followup",
         brief: brief("followup"),
       }),
-    ).rejects.toThrow(`La sesión ${first.sessionId} es del runtime "acp"`);
+    ).rejects.toThrow(`La sesión ${first.sessionId} es del runtime "opencode"`);
     expect(calls.resumes).toEqual([]);
   });
 
@@ -984,7 +984,7 @@ describe("varios runtimes", () => {
   function setupBoth(claudeSteps: Step[], opencodeSteps: Step[]) {
     const store = openStore({ path: ":memory:" });
     open.push(store);
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     const claude = stubRuntime(claudeSteps, "claude-sdk");
     const opencode = stubRuntime(opencodeSteps, "opencode");
     const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([claude.runtime, opencode.runtime], {}) });
@@ -1047,7 +1047,7 @@ describe("varios runtimes", () => {
   test("una entrada que pide un runtime que el core no tiene falla antes de lanzar", async () => {
     const store = openStore({ path: ":memory:" });
     open.push(store);
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     const claude = stubRuntime([], "claude-sdk");
     const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([claude.runtime], {}) });
     defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });

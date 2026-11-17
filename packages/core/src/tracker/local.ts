@@ -31,6 +31,7 @@ export interface LocalTracker extends Tracker {
 }
 
 export interface LocalTrackerOptions {
+  store: Store;
   /** La persona que reclama issues y comenta. */
   me?: Person;
   now?: () => number;
@@ -52,13 +53,7 @@ type IssueRow = typeof localIssues.$inferSelect;
  * `issues`. Cada cambio de una issue (también un comentario o una relación) le sube `rev`, y `rev` es
  * el cursor de `changesSince`.
  */
-export function createLocalTracker(
-  store: Store,
-  {
-    me = { id: "local", name: "Local" },
-    now = Date.now,
-  }: LocalTrackerOptions = {},
-): LocalTracker {
+export function createLocalTracker({ store, me = { id: "local", name: "Local" }, now = Date.now }: LocalTrackerOptions): LocalTracker {
   const { db } = store;
 
   function byId(from: StoreDb, id: string): IssueRow | undefined {
@@ -245,6 +240,10 @@ export function createLocalTracker(
         changed: changed.map((row) => ({ ...toRef(row), project: row.project })),
         cursor: String(latestRev(db)),
       };
+    },
+
+    async currentCursor() {
+      return String(latestRev(db));
     },
 
     async createIssue(project, input) {

@@ -1,16 +1,16 @@
 import type { CachedIssue, ClankerProject, Decision, QueueEntry, Run, RunId } from "@clanker/api"
 import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, X } from "lucide-react"
 import type { ProjectTab } from "@/components/project/project-view"
-import type { OpenPr } from "@/lib/prs"
-import { repoNameOf } from "@/lib/prs"
-import { whyNotMerge } from "@/lib/pr-commands"
+import type { OpenPr } from "@/lib/prs/prs"
+import { repoNameOf } from "@/lib/prs/prs"
+import { whyNotMerge } from "@/lib/prs/pr-commands"
 import { usePrCommands } from "@/components/prs/pr-commands"
 import { PR_KEYS } from "@/components/prs/pr-menu"
-import type { RunTab } from "@/components/project/run-view"
-import type { StepTab } from "@/components/project/step-panel"
+import type { RunTab } from "@/components/run/run-view"
+import type { StepTab } from "@/components/run/step-panel"
 import { KindIcon } from "@/components/inbox/decision-parts"
 import { LanesPage, ParallelPage, QueueCommands } from "@/components/project/project-palette"
-import { useRunCommands } from "@/components/project/run-commands"
+import { useRunCommands } from "@/components/run/run-commands"
 import { RunStatusIcon, isLive } from "@/components/project/status"
 import {
   CommandDialog,
@@ -23,7 +23,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { useState } from "react"
-import type { SettingsControls } from "@/components/project/settings-view"
+import type { SettingsControls } from "@/components/project-settings/settings-view"
 import type { LearningsView } from "@/hooks/use-learnings-view"
 import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { useHost } from "@/host"
@@ -32,7 +32,7 @@ import { KIND_LABEL, optionLabel, optionsOf, takesText } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
 import { approveLabel, capsOf, rejectLabel, SOURCE_LABEL, SOURCES, STATUS_LABEL, STATUSES } from "@/lib/learnings"
 import { DEFAULT_RANGE, ORIGIN_LABELS, ORIGINS, RANGE_LABELS, RANGE_PRESETS } from "@/lib/summary"
-import type { RunCaps } from "@/lib/run-commands"
+import { RUN_KEYS, type RunCaps } from "@/lib/project/run-commands"
 import { barProjects } from "@/lib/projects"
 import { cn } from "@/lib/utils"
 
@@ -178,40 +178,40 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
           <CommandGroup heading="Esta corrida">
             <CommandItem onSelect={run(() => onRunTab("graph"))}>
               <Network /> Ver el grafo del flujo
-              <CommandShortcut>G</CommandShortcut>
+              <CommandShortcut>{RUN_KEYS.graph}</CommandShortcut>
             </CommandItem>
             <CommandItem onSelect={run(() => onRunTab("timeline"))}>
               <ListTree /> Ver la línea de tiempo
-              <CommandShortcut>L</CommandShortcut>
+              <CommandShortcut>{RUN_KEYS.timeline}</CommandShortcut>
             </CommandItem>
             {runCaps?.caps.failedStep ? (
               <CommandItem onSelect={run(() => commands.retry(runCaps.caps.failedStep!.id, runCaps.caps.failedStep!.nodeId))}>
                 <RotateCcw /> Reintentar el paso fallido
-                <CommandShortcut>⇧⌘R</CommandShortcut>
+                <CommandShortcut>{RUN_KEYS.retry}</CommandShortcut>
               </CommandItem>
             ) : null}
             {runCaps?.caps.pause ? (
               <CommandItem onSelect={run(() => commands.pause(runCaps.id))}>
                 <Pause /> Pausar la corrida
-                <CommandShortcut>⇧⌘.</CommandShortcut>
+                <CommandShortcut>{RUN_KEYS.pauseResume}</CommandShortcut>
               </CommandItem>
             ) : null}
             {runCaps?.caps.resume ? (
               <CommandItem onSelect={run(() => commands.resume(runCaps.id))}>
                 <Play /> Retomar la corrida
-                <CommandShortcut>⇧⌘.</CommandShortcut>
+                <CommandShortcut>{RUN_KEYS.pauseResume}</CommandShortcut>
               </CommandItem>
             ) : null}
             {runCaps?.caps.interrupt ? (
               <CommandItem onSelect={run(() => commands.interrupt(runCaps.id))}>
                 <Square /> Interrumpir al agente en curso
-                <CommandShortcut>⌘.</CommandShortcut>
+                <CommandShortcut>{RUN_KEYS.interrupt}</CommandShortcut>
               </CommandItem>
             ) : null}
             {runCaps?.caps.cancel ? (
               <CommandItem onSelect={run(() => commands.cancel(runCaps.id))}>
                 <Octagon /> Cancelar la corrida
-                <CommandShortcut>⇧⌘⌫</CommandShortcut>
+                <CommandShortcut>{RUN_KEYS.cancel}</CommandShortcut>
               </CommandItem>
             ) : null}
           </CommandGroup>

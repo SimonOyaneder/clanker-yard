@@ -1,6 +1,7 @@
-import { TRANSCRIPT_TEXT_MAX_CHARS, type TranscriptEntry } from "@clanker/api";
+import type { TranscriptEntry } from "@clanker/api";
 import { usdToMicros } from "../../store/conventions";
 import type { AgentEvent, RunStatus, Usage } from "../runtime";
+import { clip, detailOf } from "../transcripts";
 import type { ModelRef, OpencodeError, OpencodeEvent, TokenUsage, ToolContent } from "./api";
 import { REPORT_TOOL } from "./config";
 import { estimateMicros, type PriceOf } from "./prices";
@@ -48,20 +49,6 @@ export function usageOf(cost: number, tokens: TokenUsage, price?: ReturnType<Pri
 
 const modelName = (model: ModelRef) => `${model.providerID}/${model.id}`;
 
-/** Lo más útil de lo que recibió una herramienta. */
-function detailOf(input: unknown): string | undefined {
-  if (typeof input !== "object" || input === null) return undefined;
-  for (const key of ["path", "filePath", "file_path", "command", "pattern", "url", "query"]) {
-    const value = (input as Record<string, unknown>)[key];
-    if (typeof value === "string") return value;
-  }
-  return undefined;
-}
-
-function clip(text: string): { text: string; truncated: boolean } {
-  return text.length <= TRANSCRIPT_TEXT_MAX_CHARS ? { text, truncated: false } : { text: text.slice(0, TRANSCRIPT_TEXT_MAX_CHARS), truncated: true };
-}
-
 const textOf = (content: ToolContent[] | undefined) =>
   (content ?? []).flatMap((c) => (c.type === "text" && typeof c.text === "string" ? [c.text] : [])).join("\n");
 
@@ -98,7 +85,7 @@ export function createTranslator(sessionID: string, priceOf: PriceOf = () => und
     out.events.push({ type: "usage", turn, usage: usageOf(cost, tokens, price), ...(model === undefined ? {} : { model }) });
   }
 
-  function handle(event: OpencodeEvent): Translated {
+  function translate(event: OpencodeEvent): Translated {
     const out: Translated = { events: [], transcript: [] };
     const main = (id: string | undefined) => id === sessionID;
     switch (event.type) {
@@ -181,5 +168,5 @@ export function createTranslator(sessionID: string, priceOf: PriceOf = () => und
     return out;
   }
 
-  return { handle };
+  return { translate };
 }

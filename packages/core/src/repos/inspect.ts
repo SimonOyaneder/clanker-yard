@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { git } from "../git/git";
+import { BadRequestError } from "../errors/domain";
 
 /** Lo que se sabe de un checkout de git sin que nadie lo haya registrado. */
 export interface RepoInfo {
@@ -13,7 +14,7 @@ export interface RepoInfo {
 }
 
 /** La ruta no es la raíz de un repo de git: el mensaje dice qué pasó. */
-export class NotAGitRepoError extends Error {}
+export class NotAGitRepoError extends BadRequestError {}
 
 /** Solo lee el repo del usuario: sin los locks opcionales que estorbarían a su git. */
 const READ_ONLY = { GIT_OPTIONAL_LOCKS: "0" };

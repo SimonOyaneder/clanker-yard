@@ -8,20 +8,21 @@ import { readMetaJson } from "../store/meta-json";
 import { issues, meta, projectRepos, projects, repos, syncCursors } from "../store/schema";
 import { issuesCursorKey } from "../tracker/issues";
 import type { Store, Tx } from "../store/store";
+import { BadRequestError, NotFoundError } from "../errors/domain";
 
 type ProjectRow = typeof projects.$inferSelect;
 /** Lo que `projects.update` cambia en la fila: todo menos la lista de repos, que vive en `project_repos`. */
 type ProjectColumns = Omit<ProjectRow, "id">;
 
 /** El proyecto que se pidió no existe. */
-export class ProjectNotFoundError extends Error {
+export class ProjectNotFoundError extends NotFoundError {
   constructor(id: ProjectId) {
     super(`No existe el proyecto ${id}.`);
   }
 }
 
 /** Los datos no forman un proyecto válido: el mensaje dice qué cambiar. Nada se guardó. */
-export class InvalidProjectError extends Error {}
+export class InvalidProjectError extends BadRequestError {}
 
 export interface Projects {
   /** Por slug. */
@@ -40,7 +41,8 @@ export interface Projects {
    */
   defaults(): ProjectDefaults;
   /** Cambia los defaults de proyectos nuevos (lo que no se pasa no cambia) sin tocar proyectos existentes. Lanza `InvalidProjectError` si el flujo o el perfil no existen. */
-  setDefaults(patch: ProjectDefaultsPatch): ProjectDefaults;
+  /** Emite `project.defaults_changed` con los campos que llegaron y quién lo pidió. */
+  setDefaults(patch: ProjectDefaultsPatch, by: Origin): ProjectDefaults;
   /**
    * Cambia solo los campos presentes (`repos` reemplaza la lista). Emite `project.updated` con lo que
    * cambió y, si cambió el estado, `project.paused`, `project.resumed` o `project.archived`; sin cambios no emite nada.
@@ -133,11 +135,15 @@ export function createProjects({ store, defs }: { store: Store; defs: Defs }): P
       return { ...BASE_DEFAULTS, ...readMetaJson(store.db, DEFAULTS_KEY, ProjectDefaultsPatch) };
     },
 
-    setDefaults(patch) {
+    setDefaults(patch, by) {
       assertDefaults(patch);
-      const next: ProjectDefaults = { ...projectsApi.defaults(), ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) };
+      const changed = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+      const next: ProjectDefaults = { ...projectsApi.defaults(), ...changed };
       const value = JSON.stringify(next);
-      store.tx((tx) => tx.db.insert(meta).values({ key: DEFAULTS_KEY, value }).onConflictDoUpdate({ target: meta.key, set: { value } }).run());
+      store.tx((tx) => {
+        tx.db.insert(meta).values({ key: DEFAULTS_KEY, value }).onConflictDoUpdate({ target: meta.key, set: { value } }).run();
+        tx.emit({ type: "project.defaults_changed", origin: by, payload: { fields: Object.keys(changed).sort() } });
+      });
       return next;
     },
 

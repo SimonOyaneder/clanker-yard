@@ -79,9 +79,9 @@ async function setup(options: SetupOptions = {}) {
 
   const origin = tempGitRepo({ remote: true, branches: { "cla-1": [{ message: "feat: algo", files: { "b.txt": "b\n" } }] } });
   const sim = await startGitHubSim({ origin, repo: "acme/web", account: "acme", token: "ghp_acme", bot: BOT });
-  const connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), { github: { baseUrl: sim.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: "acme", scopes: [], token: "ghp_acme" }, "core");
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const packs = createPacks({ defs });
   mkdirSync(join(dir, "pack"));
   writeFileSync(join(dir, "pack", "pack.json"), JSON.stringify(PACK));

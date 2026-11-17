@@ -36,7 +36,7 @@ export function ClaudeCard({ connection, plan, onChanged }: { connection: Connec
   const removeConnection = async () => {
     if (!connection) return
     try {
-      await appData.disconnect("claude", connection.account)
+      await appData.disconnect({ provider: "claude", account: connection.account })
       plan.clear()
       onChanged()
       toast.success(apiKey ? "Volviste al login de la suscripción" : "Claude desconectado")

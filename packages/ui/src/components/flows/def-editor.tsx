@@ -8,7 +8,7 @@ import { FlowCanvasEditor } from "@/components/flows/flow-canvas-editor"
 import { JsonEditor } from "@/components/flows/json-editor"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { lineIssues, type LineIssue, syntaxIssue } from "@/lib/def-edit"
+import { lineIssues, type LineIssue, syntaxIssue } from "@/lib/flows/def-edit"
 import { cn, messageOf } from "@/lib/utils"
 
 const DEBOUNCE_MS = 300

@@ -63,7 +63,7 @@ async function setup(files: Record<string, string> = {}, recipe?: unknown) {
   });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   briefs = createBriefs({ workspaces, artifacts });
-  const recipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts, slots: createSlots({ store }) });
+  const recipes = createRecipes({ store, defs: createDefs({ store }), workspaces, artifacts, slots: createSlots({ store }) });
   apply = commitsApplyAction({ workspaces, recipes });
   lease = await workspaces.acquire({ repo: "repo_r1", branch: "cla-43", base: "main", runId });
   base = lease.baseSha;

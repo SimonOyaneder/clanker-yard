@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { OpencodeEvent } from "./api";
 import { parseModels, versionProblem } from "./cli";
-import { ev } from "./fake-opencode";
+import { ev } from "../../testing/opencode/fake-opencode";
 import { createTranslator, statusOfError } from "./translate";
 
 const S = "ses_main";
@@ -27,8 +27,8 @@ describe("errores", () => {
 describe("traductor", () => {
   test("cada paso que termina es un turno con su costo, tokens y modelo; el razonamiento se cobra como salida", () => {
     const t = createTranslator(S);
-    t.handle(ev.stepStarted(S, "msg_1", { providerID: "openai", id: "gpt-6.1-terra" }));
-    const out = t.handle(ev.stepEnded(S, "msg_1", "tool-calls", 0.0123, { input: 10, output: 20, reasoning: 5, cache: { read: 30, write: 40 } }));
+    t.translate(ev.stepStarted(S, "msg_1", { providerID: "openai", id: "gpt-6.1-terra" }));
+    const out = t.translate(ev.stepEnded(S, "msg_1", "tool-calls", 0.0123, { input: 10, output: 20, reasoning: 5, cache: { read: 30, write: 40 } }));
 
     expect(out.events).toEqual([
       { type: "usage", turn: 1, model: "openai/gpt-6.1-terra", usage: { turns: 1, tokensIn: 10, tokensOut: 25, tokensCacheRead: 30, tokensCacheWrite: 40, costMicros: 12_300, costSource: "runtime" } },
@@ -39,8 +39,8 @@ describe("traductor", () => {
   test("un proveedor que reporta costo 0 (suscripción) queda con lo que costaría a precio de lista, marcado estimate", () => {
     const price = { input: 1, output: 5, cache_read: 0.05, cache_write: 1.25 };
     const t = createTranslator(S, (model) => (model === "openai/gpt-6.1-terra" ? price : undefined));
-    t.handle(ev.stepStarted(S, "msg_1", { providerID: "openai", id: "gpt-6.1-terra" }));
-    const out = t.handle(ev.stepEnded(S, "msg_1", "stop", 0, { input: 1_000_000, output: 100_000, reasoning: 100_000, cache: { read: 2_000_000, write: 0 } }));
+    t.translate(ev.stepStarted(S, "msg_1", { providerID: "openai", id: "gpt-6.1-terra" }));
+    const out = t.translate(ev.stepEnded(S, "msg_1", "stop", 0, { input: 1_000_000, output: 100_000, reasoning: 100_000, cache: { read: 2_000_000, write: 0 } }));
 
     // 1M de entrada a 1 + 200k de salida a 5 + 2M de caché a 0,05 = USD 2,10
     expect(out.events).toMatchObject([{ type: "usage", usage: { costMicros: 2_100_000, costSource: "estimate" } }]);
@@ -48,16 +48,16 @@ describe("traductor", () => {
 
   test("con costo reportado, o sin precio para el modelo, queda lo que dice opencode", () => {
     const t = createTranslator(S, () => ({ input: 1, output: 5 }));
-    t.handle(ev.stepStarted(S, "msg_1", { providerID: "openai", id: "gpt-6.1-terra" }));
-    expect(t.handle(ev.stepEnded(S, "msg_1", "stop", 0.5)).events).toMatchObject([{ usage: { costMicros: 500_000, costSource: "runtime" } }]);
+    t.translate(ev.stepStarted(S, "msg_1", { providerID: "openai", id: "gpt-6.1-terra" }));
+    expect(t.translate(ev.stepEnded(S, "msg_1", "stop", 0.5)).events).toMatchObject([{ usage: { costMicros: 500_000, costSource: "runtime" } }]);
 
     const unknown = createTranslator(S);
-    unknown.handle(ev.stepStarted(S, "msg_2", { providerID: "otro", id: "x" }));
-    expect(unknown.handle(ev.stepEnded(S, "msg_2", "stop", 0)).events).toMatchObject([{ usage: { costMicros: 0, costSource: "runtime" } }]);
+    unknown.translate(ev.stepStarted(S, "msg_2", { providerID: "otro", id: "x" }));
+    expect(unknown.translate(ev.stepEnded(S, "msg_2", "stop", 0)).events).toMatchObject([{ usage: { costMicros: 0, costSource: "runtime" } }]);
   });
 
   test("lo que gasta un subagente cuenta, pero sus pasos no son turnos de la sesión", () => {
-    const out = createTranslator(S).handle(ev.stepEnded("ses_child", "msg_9", "stop", 0.3));
+    const out = createTranslator(S).translate(ev.stepEnded("ses_child", "msg_9", "stop", 0.3));
     expect(out.events).toMatchObject([{ type: "usage", usage: { costMicros: 300_000 } }]);
     expect(out.step).toBeUndefined();
   });
@@ -65,9 +65,9 @@ describe("traductor", () => {
   test("una herramienta empieza con su nombre y lo más útil de su entrada, y termina con su salida en el transcript", () => {
     const t = createTranslator(S);
     const [inputStarted, called, success] = ev.tool(S, "c1", "shell", { command: "npm test" });
-    expect(t.handle(inputStarted!).events).toEqual([]);
-    expect(t.handle(called!)).toMatchObject({ events: [{ type: "tool_start", tool: "shell", detail: "npm test" }], transcript: [{ kind: "tool_call", id: "c1", tool: "shell", detail: "npm test" }] });
-    expect(t.handle(success!)).toMatchObject({ events: [{ type: "tool_end", tool: "shell" }], transcript: [{ kind: "tool_result", id: "c1", isError: false, text: "salida" }] });
+    expect(t.translate(inputStarted!).events).toEqual([]);
+    expect(t.translate(called!)).toMatchObject({ events: [{ type: "tool_start", tool: "shell", detail: "npm test" }], transcript: [{ kind: "tool_call", id: "c1", tool: "shell", detail: "npm test" }] });
+    expect(t.translate(success!)).toMatchObject({ events: [{ type: "tool_end", tool: "shell" }], transcript: [{ kind: "tool_result", id: "c1", isError: false, text: "salida" }] });
   });
 
   test("el reporte es la entrada de clanker_report; otra herramienta no lo es", () => {
@@ -75,31 +75,31 @@ describe("traductor", () => {
     const report = { outcome: "done", summary: "listo", payload: {} };
     const toolReport = ev.tool(S, "c2", "clanker_report", report);
     const otherTool = ev.tool(S, "c3", "read", { path: "a.ts" });
-    t.handle(toolReport[0]!);
-    t.handle(otherTool[0]!);
-    expect(t.handle(toolReport[1]!).report).toEqual(report);
-    expect(t.handle(otherTool[1]!).report).toBeUndefined();
+    t.translate(toolReport[0]!);
+    t.translate(otherTool[0]!);
+    expect(t.translate(toolReport[1]!).report).toEqual(report);
+    expect(t.translate(otherTool[1]!).report).toBeUndefined();
   });
 
   test("primer token, texto, razonamiento y compactación", () => {
     const t = createTranslator(S);
-    expect(t.handle(ev.firstToken(S)).events).toEqual([{ type: "first_token" }]);
-    expect(t.handle(ev.firstToken(S)).events).toEqual([]);
-    expect(t.handle(ev.text(S, "Listo."))).toMatchObject({ events: [{ type: "text", text: "Listo." }], transcript: [{ kind: "text", text: "Listo." }] });
-    expect(t.handle({ type: "session.reasoning.ended", data: { sessionID: S, text: "pienso" } })).toMatchObject({ events: [], transcript: [{ kind: "thinking", text: "pienso" }] });
+    expect(t.translate(ev.firstToken(S)).events).toEqual([{ type: "first_token" }]);
+    expect(t.translate(ev.firstToken(S)).events).toEqual([]);
+    expect(t.translate(ev.text(S, "Listo."))).toMatchObject({ events: [{ type: "text", text: "Listo." }], transcript: [{ kind: "text", text: "Listo." }] });
+    expect(t.translate({ type: "session.reasoning.ended", data: { sessionID: S, text: "pienso" } })).toMatchObject({ events: [], transcript: [{ kind: "thinking", text: "pienso" }] });
     const compacted: OpencodeEvent = { type: "session.compaction.ended", data: { sessionID: S, reason: "auto", model: { providerID: "openai", id: "gpt-6.1-terra" }, cost: 0.02, tokens: { input: 5, output: 5, reasoning: 0, cache: { read: 0, write: 0 } } } };
-    expect(t.handle(compacted).events.map((e) => e.type)).toEqual(["usage", "compaction"]);
+    expect(t.translate(compacted).events.map((e) => e.type)).toEqual(["usage", "compaction"]);
   });
 
   test("cómo termina la ejecución, sus reintentos y lo que espera a una persona", () => {
     const t = createTranslator(S);
-    expect(t.handle(ev.succeeded(S)).end).toEqual({ outcome: "succeeded" });
-    expect(t.handle(ev.succeeded("ses_child")).end).toBeUndefined();
-    expect(t.handle(ev.failed(S, { type: "provider.api", message: "boom" })).end).toEqual({ outcome: "failed", error: { type: "provider.api", message: "boom" } });
-    expect(t.handle(ev.interrupted(S, "shutdown")).end).toEqual({ outcome: "interrupted", reason: "shutdown" });
-    expect(t.handle(ev.retry(S, 2, { type: "provider.api", message: "slow", status: 429 })).retry).toEqual({ attempt: 2, error: { type: "provider.api", message: "slow", status: 429 } });
-    expect(t.handle({ type: "permission.asked", data: { sessionID: S, action: "shell", resources: ["rm -rf /"] } }).blocked).toContain('"shell"');
-    expect(t.handle({ type: "form.created", data: { form: { sessionID: S, title: "¿Sigo?" } } }).blocked).toContain("¿Sigo?");
+    expect(t.translate(ev.succeeded(S)).end).toEqual({ outcome: "succeeded" });
+    expect(t.translate(ev.succeeded("ses_child")).end).toBeUndefined();
+    expect(t.translate(ev.failed(S, { type: "provider.api", message: "boom" })).end).toEqual({ outcome: "failed", error: { type: "provider.api", message: "boom" } });
+    expect(t.translate(ev.interrupted(S, "shutdown")).end).toEqual({ outcome: "interrupted", reason: "shutdown" });
+    expect(t.translate(ev.retry(S, 2, { type: "provider.api", message: "slow", status: 429 })).retry).toEqual({ attempt: 2, error: { type: "provider.api", message: "slow", status: 429 } });
+    expect(t.translate({ type: "permission.asked", data: { sessionID: S, action: "shell", resources: ["rm -rf /"] } }).blocked).toContain('"shell"');
+    expect(t.translate({ type: "form.created", data: { form: { sessionID: S, title: "¿Sigo?" } } }).blocked).toContain("¿Sigo?");
   });
 });
 

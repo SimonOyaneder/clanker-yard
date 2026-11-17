@@ -71,7 +71,7 @@ function ProjectItem({ project, live, index, active }: { project: ClankerProject
             title={`${project.name}${index !== null && index < 9 ? ` · ⌘${index + 1}` : ""}${b ? ` · ${b.title}` : ""}`}
             className={cn("h-8", b && "pr-16")}
           >
-            <span className={cn("size-2 flex-none rounded-full", working ? "cc-blink bg-emerald-500" : project.status === "active" ? "bg-emerald-500" : "bg-muted-foreground/50")} />
+            <span className={cn("size-2 flex-none rounded-full", working ? "animate-blink bg-emerald-500" : project.status === "active" ? "bg-emerald-500" : "bg-muted-foreground/50")} />
             <span className="truncate">{project.name}</span>
           </SidebarMenuButton>
         </ContextMenuTrigger>
@@ -90,7 +90,7 @@ function ProjectItem({ project, live, index, active }: { project: ClankerProject
 }
 
 const DOT: Record<FooterTone, string> = {
-  live: "cc-blink bg-emerald-500",
+  live: "animate-blink bg-emerald-500",
   pending: "bg-muted-foreground",
   down: "bg-destructive",
   error: "bg-destructive",

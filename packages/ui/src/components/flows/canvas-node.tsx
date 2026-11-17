@@ -2,7 +2,7 @@ import { Handle, type Node, type NodeProps, Position } from "@xyflow/react"
 import { Flag, TriangleAlert } from "lucide-react"
 import { Hint } from "@/components/common"
 import { KIND } from "@/components/graph/flow-node"
-import { END_NAME, type Mark, type NodeType } from "@/lib/flow-canvas"
+import { END_NAME, type Mark, type NodeType } from "@/lib/flows/flow-canvas"
 import { cn } from "@/lib/utils"
 
 export interface CanvasNodeData extends Record<string, unknown> {

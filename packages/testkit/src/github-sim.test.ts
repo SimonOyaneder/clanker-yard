@@ -13,11 +13,9 @@ import {
   type Packs,
   type Store,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const REPO = "octocat/secret-project";
@@ -42,9 +40,9 @@ beforeEach(async () => {
     },
   });
   sim = await startGitHubSim({ origin, token: TOKEN });
-  connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: "octocat", scopes: [], token: TOKEN }, "core");
-  packs = createPacks({ defs: createDefs(store) });
+  packs = createPacks({ defs: createDefs({ store }) });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
   writeFileSync(
@@ -662,9 +660,7 @@ describe("rutas y repos", () => {
   });
 
   test("conecta un PAT: el simulador pasa la validación de permisos del core", async () => {
-    const fresh = createConnections(openStore({ path: ":memory:" }), createFileSecrets({ dir: join(dir, "otro") }), {
-      github: { baseUrl: sim.baseUrl },
-    });
+    const fresh = createConnections({ store: openStore({ path: ":memory:" }), secrets: createFileSecrets({ dir: join(dir, "otro") }), github: { baseUrl: sim.baseUrl } });
 
     await expect(fresh.setPat(TOKEN, "ui")).resolves.toMatchObject({ account: "octocat", status: "active" });
   });

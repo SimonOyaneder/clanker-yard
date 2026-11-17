@@ -1,47 +1,44 @@
-import { API_MAJOR, type AgentOptions, type ClientOrigin, contract, type PrRef, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
+import { API_MAJOR, type AgentOptions, type ClientOrigin, contract, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
-import { GitHubAuthError } from "../github/device-flow";
-import { GitHubPatError, githubPatForm } from "../github/pat";
-import { PrNotFoundError } from "../github/pr-query";
+import { githubPatForm } from "../github/pat";
 import type { PrCache } from "../github/pr-cache";
-import { createPrCommands, PrCommandError } from "../github/actions/pr-commands";
+import { createPrCommands} from "../github/pr-commands";
 import type { Prs } from "../github/prs";
-import type { PrRepublisher } from "../github/actions/republisher";
-import { LinearAuthError } from "../linear/oauth";
-import { ClaudeSetupError, type Connections } from "../connections/connections";
-import { createTranscripts, SessionNotFoundError } from "../agents/transcripts";
+import type { PrRepublisher } from "../github/republisher";
+import { type Connections } from "../connections/connections";
+import { createTranscripts} from "../agents/transcripts";
 import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
 import type { Decisions } from "../decisions/decisions";
-import { LearningNotFoundError, LearningScreenError, LearningUpdateError, type Learnings } from "../learnings/learnings";
+import { LearningNotFoundError, type Learnings } from "../learnings/learnings";
 import type { Engine } from "../flows/engine";
 import type { Flows } from "../flows/flows";
-import { DecisionNotFoundError, DecisionResolveError, RunCommandError, RunNotFoundError, RunStartError } from "../flows/engine";
-import { createStepDetails, StepNotFoundError } from "../flows/step-detail";
-import { LegacyImportError, type LegacyImporter } from "../import/legacy";
+import { DecisionNotFoundError } from "../flows/engine-shared";
+import { createStepDetails} from "../flows/step-detail";
+import { type LegacyImporter } from "../import/legacy";
 import { createMetrics } from "../metrics/metrics";
-import { PackInstallError, PackLoadError, type Packs } from "../packs/packs";
-import { DefValidationError, type Defs } from "../defs/defs";
-import { createDefWriter, DefNotFoundError, DefWriteError } from "../defs/write";
-import { InvalidProjectError, ProjectNotFoundError, type Projects } from "../projects/projects";
+import { type Packs } from "../packs/packs";
+import { type Defs } from "../defs/defs";
+import { createDefWriter} from "../defs/write";
+import { ProjectNotFoundError, type Projects } from "../projects/projects";
 import type { ProjectConfigs } from "../projects/config";
-import { RepoExportError, type RepoConfigExporter } from "../repo-config/export";
+import { type RepoConfigExporter } from "../repo-config/export";
 import type { RepoConfigSyncer } from "../repo-config/sync";
-import { IssueNotCachedError, type RunStarter } from "../projects/start-run";
+import { type RunStarter } from "../projects/start-run";
 import type { LaneSettings } from "../scheduler/lanes";
-import { QueueUnavailableError, type ProjectQueue } from "../scheduler/project-queue";
-import { IssueNotInProjectError, type Scheduler } from "../scheduler/scheduler";
-import { RecipeSyntaxError } from "../recipe/recipe";
-import { RecipeTestError, type RecipeTester } from "../recipe/recipe-test";
+import { type ProjectQueue } from "../scheduler/project-queue";
+import { type Scheduler } from "../scheduler/scheduler";
+import { type RecipeTester } from "../recipe/recipe-test";
 import { readSchemaVersion } from "../store/migrate";
 import type { Store } from "../store/store";
 import type { Issues } from "../tracker/issues";
 import { TrackerProjectsError, type TrackerProjects } from "../tracker/tracker-projects";
 import { defaultLogDir } from "../workspaces/exec";
-import { NotAGitRepoError } from "../repos/inspect";
-import { InvalidRepoError, RepoNotFoundError, type Repos } from "../repos/repos";
+import { type Repos } from "../repos/repos";
 import { isMergeOffer } from "../watch/merge-reactions";
 import { eventsAfter } from "./event-stream";
+import { mapApiErrors } from "./api-errors";
+import { requireUiOrigin } from "../errors/domain";
 
 /** Lo que cada llamada trae consigo, venga por HTTP o en proceso (`createRouterClient`, MCP). */
 export interface CoreContext {
@@ -100,13 +97,13 @@ export interface RouterDeps {
   onShutdown(opts: { drain: boolean }): void;
 }
 
-const os = implement(contract).$context<CoreContext>();
+const os = implement(contract).$context<CoreContext>().use(mapApiErrors);
 
 export function createRouter(deps: RouterDeps) {
   const { store } = deps;
   const schemaVersion = readSchemaVersion(store.db.$client);
   const { artifacts, flows, projects, repos, recipeTester, runs } = deps;
-  const metrics = createMetrics(store);
+  const metrics = createMetrics({ store });
   const defWriter = createDefWriter({ defs: deps.defs, flows: deps.flows });
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
@@ -114,28 +111,17 @@ export function createRouter(deps: RouterDeps) {
   const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
-    if (!project) throw toApiError(new ProjectNotFoundError(id));
+    if (!project) throw new ProjectNotFoundError(id);
     return project;
   };
   /** `runs.pause|resume|cancel|interrupt`: el comando y la corrida como quedó. */
-  const controlRun = (id: RunId, cmd: "pause" | "resume" | "cancel", by: ClientOrigin, now?: boolean) =>
-    asApiError(() => {
-      flows.control(id, cmd, by, { now });
-      return flows.getRun(id);
-    });
+  const controlRun = (id: RunId, cmd: "pause" | "resume" | "cancel", by: ClientOrigin, now?: boolean) => {
+    flows.control(id, cmd, by, { now });
+    return flows.getRun(id);
+  };
   /** `runs.retryStep|steerStep|forceOutcome`: el comando y la corrida del paso como quedó. */
   const commandStep = (stepId: StepRunId, cmd: Parameters<Engine["stepCommand"]>[1], by: ClientOrigin) =>
-    asApiError(() => flows.getRun(flows.stepCommand(stepId, cmd, by)));
-  /** Lo que `prs.*` hace con un PR de GitHub (leerlo, mergearlo...), con la cuenta del PR ya conectada y sus errores traducidos a los de la API. */
-  const readPr = <T>(ref: PrRef, read: (ref: PrRef) => Promise<T>): Promise<T> =>
-    asApiErrorAsync(() => {
-      if (!deps.connections.list().some((c) => c.provider === "github" && c.account === ref.account)) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: `No hay una cuenta github conectada como "${ref.account}": conéctala primero.`,
-        });
-      }
-      return read(ref);
-    });
+    flows.getRun(flows.stepCommand(stepId, cmd, by));
   const platform = process.platform;
   if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
     throw new Error(
@@ -150,6 +136,7 @@ export function createRouter(deps: RouterDeps) {
         apiMajor: API_MAJOR,
         schemaVersion,
         bootId: deps.bootId,
+        // Las que están trabajando o por trabajar, sin las que esperan a una persona (`parked`, `paused`).
         activeRuns: flows.listRuns({ status: ["queued", "running", "waiting"] }).length,
         uiKey: context.uiKey === true,
       })),
@@ -163,8 +150,8 @@ export function createRouter(deps: RouterDeps) {
       })),
       lanes: os.system.lanes.handler(() => deps.lanes.usage()),
       breakers: os.system.breakers.handler(() => deps.breakers.list()),
-      setLanes: os.system.setLanes.handler(({ input }) => {
-        deps.lanes.set(input);
+      setLanes: os.system.setLanes.handler(({ input, context }) => {
+        deps.lanes.set(input, context.origin);
         void deps.scheduler.tick();
         return deps.lanes.usage();
       }),
@@ -181,17 +168,17 @@ export function createRouter(deps: RouterDeps) {
     },
     connections: {
       list: os.connections.list.handler(() => deps.connections.list()),
-      setPat: os.connections.setPat.handler(({ input, context }) => asApiErrorAsync(() => deps.connections.setPat(input.token, context.origin))),
+      setPat: os.connections.setPat.handler(({ input, context }) => deps.connections.setPat(input.token, context.origin)),
       githubPatForm: os.connections.githubPatForm.handler(() => githubPatForm()),
-      startDeviceFlow: os.connections.startDeviceFlow.handler(({ context }) => asApiErrorAsync(() => deps.connections.startDeviceFlow(context.origin))),
-      githubInstallations: os.connections.githubInstallations.handler(() => asApiErrorAsync(() => deps.connections.githubInstallations())),
+      startDeviceFlow: os.connections.startDeviceFlow.handler(({ context }) => deps.connections.startDeviceFlow(context.origin)),
+      githubInstallations: os.connections.githubInstallations.handler(() => deps.connections.githubInstallations()),
       // `done` no se espera: el resultado llega como `connection.changed`, y un fallo se le muestra al usuario en la pestaña del navegador.
-      linearAuth: os.connections.linearAuth.handler(({ context }) =>
-        asApiErrorAsync(async () => ({ url: (await deps.connections.linearAuth(context.origin)).url })),
+      linearAuth: os.connections.linearAuth.handler(async ({ context }) =>
+        ({ url: (await deps.connections.linearAuth(context.origin)).url }),
       ),
-      testClaude: os.connections.testClaude.handler(({ input, context }) => asApiErrorAsync(() => deps.connections.testClaude(input.mode, context.origin))),
+      testClaude: os.connections.testClaude.handler(({ input, context }) => deps.connections.testClaude(input.mode, context.origin)),
       setClaudeApiKey: os.connections.setClaudeApiKey.handler(({ input, context }) =>
-        asApiErrorAsync(() => deps.connections.setClaudeApiKey(input.key, context.origin)),
+        deps.connections.setClaudeApiKey(input.key, context.origin),
       ),
       disconnect: os.connections.disconnect.handler(async ({ input, context }) => {
         await deps.connections.disconnect(input.provider, input.account, context.origin);
@@ -225,105 +212,91 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     trackers: {
-      projects: os.trackers.projects.handler(({ input }) => asApiErrorAsync(() => deps.trackerProjects.list(input.tracker))),
+      projects: os.trackers.projects.handler(({ input }) => deps.trackerProjects.list(input.tracker)),
     },
     projects: {
       list: os.projects.list.handler(() => projects.list()),
       get: os.projects.get.handler(({ input }) => projectOrNotFound(input.id)),
-      create: os.projects.create.handler(({ input, context }) =>
-        asApiErrorAsync(async () =>
-          projects.create(
-            input.trackerRef === undefined ? input : { ...input, trackerRef: await deps.trackerProjects.resolve(input.tracker, input.trackerRef) },
-            context.origin,
-          ),
+      create: os.projects.create.handler(async ({ input, context }) =>
+        projects.create(
+          input.trackerRef === undefined ? input : { ...input, trackerRef: await deps.trackerProjects.resolve(input.tracker, input.trackerRef) },
+          context.origin,
         ),
       ),
       defaults: os.projects.defaults.handler(() => projects.defaults()),
-      setDefaults: os.projects.setDefaults.handler(({ input }) => asApiError(() => projects.setDefaults(input))),
-      update: os.projects.update.handler(({ input: { id, ...patch }, context }) =>
-        asApiErrorAsync(async () => {
-          const { tracker } = projectOrNotFound(id);
-          const trackerRef = patch.trackerRef === undefined ? undefined : await deps.trackerProjects.resolve(tracker, patch.trackerRef);
-          // Elegir de nuevo el mismo proyecto de Linear que guarda su identificador no cambia su cola: se normaliza antes.
-          // Si no se puede resolver el ref guardado no se sabe si es el mismo proyecto y rige la regla de `update`.
-          if (trackerRef !== undefined) {
-            await deps.trackerProjects.normalize(id, context.origin).catch((error: unknown) => {
-              if (!(error instanceof TrackerProjectsError)) throw error;
-            });
-          }
-          return projects.update(id, trackerRef === undefined ? patch : { ...patch, trackerRef }, context.origin);
-        }),
-      ),
-      exportConfig: os.projects.exportConfig.handler(({ input }) => asApiError(() => deps.projectConfigs.export(input.id))),
+      setDefaults: os.projects.setDefaults.handler(({ input, context }) => projects.setDefaults(input, context.origin)),
+      update: os.projects.update.handler(async ({ input: { id, ...patch }, context }) => {
+        const { tracker } = projectOrNotFound(id);
+        const trackerRef = patch.trackerRef === undefined ? undefined : await deps.trackerProjects.resolve(tracker, patch.trackerRef);
+        // Elegir de nuevo el mismo proyecto de Linear que guarda su identificador no cambia su cola: se normaliza antes.
+        // Si no se puede resolver el ref guardado no se sabe si es el mismo proyecto y rige la regla de `update`.
+        if (trackerRef !== undefined) {
+          await deps.trackerProjects.normalize(id, context.origin).catch((error: unknown) => {
+            if (!(error instanceof TrackerProjectsError)) throw error;
+          });
+        }
+        return projects.update(id, trackerRef === undefined ? patch : { ...patch, trackerRef }, context.origin);
+      }),
+      exportConfig: os.projects.exportConfig.handler(({ input }) => deps.projectConfigs.export(input.id)),
       importConfig: os.projects.importConfig.handler(({ input, context }) =>
-        asApiError(() => deps.projectConfigs.import(input.id, input.config, context.origin, { dryRun: input.dryRun })),
+        deps.projectConfigs.import(input.id, input.config, context.origin, { dryRun: input.dryRun }),
       ),
-      pause: os.projects.pause.handler(({ input, context }) => asApiError(() => projects.pause(input.id, context.origin))),
-      resume: os.projects.resume.handler(({ input, context }) => asApiError(() => projects.resume(input.id, context.origin))),
+      pause: os.projects.pause.handler(({ input, context }) => projects.pause(input.id, context.origin)),
+      resume: os.projects.resume.handler(({ input, context }) => projects.resume(input.id, context.origin)),
       skipIssue: os.projects.skipIssue.handler(({ input: { id, issueId, skipped }, context }) =>
-        asApiError(() => deps.scheduler.skipIssue({ projectId: id, issueId, skipped }, context.origin)),
+        deps.scheduler.skipIssue({ projectId: id, issueId, skipped }, context.origin),
       ),
       boostIssue: os.projects.boostIssue.handler(({ input: { id, issueId, boosted }, context }) =>
-        asApiError(() => deps.scheduler.boostIssue({ projectId: id, issueId, boosted }, context.origin)),
+        deps.scheduler.boostIssue({ projectId: id, issueId, boosted }, context.origin),
       ),
-      queue: os.projects.queue.handler(({ input }) => asApiErrorAsync(() => deps.queue.of(input.id))),
+      queue: os.projects.queue.handler(({ input }) => deps.queue.of(input.id)),
       summary: os.projects.summary.handler(({ input: { id, ...filter } }) => metrics.summary(projectOrNotFound(id).id, filter)),
     },
     packs: {
       list: os.packs.list.handler(() => deps.packs.list()),
-      install: os.packs.install.handler(({ input, context }) =>
-        asApiErrorAsync(async () => {
-          const pack = await deps.packs.install(input.path);
-          store.tx((tx) => tx.emit({ type: "pack.installed", origin: context.origin, payload: { packId: pack.id, version: pack.version } }));
-          return pack;
-        }),
-      ),
-      remove: os.packs.remove.handler(({ input, context }) =>
-        asApiErrorAsync(async () => {
-          await deps.packs.remove(input.id);
-          store.tx((tx) => tx.emit({ type: "pack.removed", origin: context.origin, payload: { packId: input.id } }));
-        }),
-      ),
+      install: os.packs.install.handler(async ({ input, context }) => {
+        const pack = await deps.packs.install(input.path);
+        store.tx((tx) => tx.emit({ type: "pack.installed", origin: context.origin, payload: { packId: pack.id, version: pack.version } }));
+        return pack;
+      }),
+      remove: os.packs.remove.handler(async ({ input, context }) => {
+        await deps.packs.remove(input.id);
+        store.tx((tx) => tx.emit({ type: "pack.removed", origin: context.origin, payload: { packId: input.id } }));
+      }),
     },
     prs: {
-      get: os.prs.get.handler(({ input }) => readPr(input, prs.get)),
+      get: os.prs.get.handler(({ input }) => prs.get(input)),
       list: os.prs.list.handler(({ input }) => prCache.list(input)),
-      refresh: os.prs.refresh.handler(({ input }) => readPr(input, prCache.refresh)),
-      setHold: os.prs.setHold.handler(({ input, context }) => readPr(input.ref, (ref) => prCommands.setHold(ref, input.hold, context.origin))),
-      merge: os.prs.merge.handler(({ input, context }) => {
-        // Mergear lo decide una persona: un agente que use el CLI o el MCP no comenta el comando de merge por su cuenta.
-        requireUi(context, "Mergear lo pide una persona desde la app: un agente no lo hace por su cuenta.");
-        return readPr(input, (ref) => prCommands.merge(ref, context.origin));
-      }),
-      requestReview: os.prs.requestReview.handler(({ input, context }) => readPr(input, (ref) => prCommands.requestReview(ref, context.origin))),
-      rebase: os.prs.rebase.handler(({ input, context }) => readPr(input, (ref) => prCommands.rebase(ref, context.origin))),
-      republish: os.prs.republish.handler(({ input, context }) => asApiErrorAsync(() => deps.republisher.republish(input, context.origin))),
-      republishProgress: os.prs.republishProgress.handler(({ input }) => asApiErrorAsync(() => deps.republisher.progress(input.id))),
+      refresh: os.prs.refresh.handler(({ input }) => prCache.refresh(input)),
+      setHold: os.prs.setHold.handler(({ input, context }) => prCommands.setHold(input.ref, input.hold, context.origin)),
+      merge: os.prs.merge.handler(({ input, context }) => prCommands.merge(input, context.origin)),
+      requestReview: os.prs.requestReview.handler(({ input, context }) => prCommands.requestReview(input, context.origin)),
+      rebase: os.prs.rebase.handler(({ input, context }) => prCommands.rebase(input, context.origin)),
+      republish: os.prs.republish.handler(({ input, context }) => deps.republisher.republish(input, context.origin)),
+      republishProgress: os.prs.republishProgress.handler(({ input }) => deps.republisher.progress(input.id)),
     },
     repos: {
       list: os.repos.list.handler(() => repos.list()),
       overview: os.repos.overview.handler(() => repos.overview()),
-      add: os.repos.add.handler(({ input }) =>
-        asApiErrorAsync(async () => {
-          const repo = await repos.register(input.path, input.name);
-          // Quien registra el repo recibe de una vez lo que el repo trae en `.clanker/`.
-          await deps.repoConfigSync.sync(repo.id);
-          return repo;
-        }),
-      ),
-      detect: os.repos.detect.handler(({ input }) => asApiErrorAsync(() => repos.detect(input.folder))),
+      add: os.repos.add.handler(async ({ input, context }) => {
+        const repo = await repos.register(input.path, input.name, context.origin);
+        // Quien registra el repo recibe de una vez lo que el repo trae en `.clanker/`.
+        await deps.repoConfigSync.sync(repo.id);
+        return repo;
+      }),
+      detect: os.repos.detect.handler(({ input }) => repos.detect(input.folder)),
       testRecipe: os.repos.testRecipe.handler(({ input, context }) =>
-        asApiErrorAsync(() => recipeTester.test(input.repoId, context.origin)),
+        recipeTester.test(input.repoId, context.origin),
       ),
-      syncConfig: os.repos.syncConfig.handler(({ input }) => asApiErrorAsync(() => deps.repoConfigSync.sync(input.repoId))),
+      syncConfig: os.repos.syncConfig.handler(({ input }) => deps.repoConfigSync.sync(input.repoId)),
     },
     runs: {
       list: os.runs.list.handler(({ input }) => flows.listRuns(input)),
-      get: os.runs.get.handler(({ input }) => asApiError(() => flows.getRun(input.id))),
-      step: os.runs.step.handler(({ input }) => asApiErrorAsync(() => stepDetails.get(input.id))),
-      transcript: os.runs.transcript.handler(({ input }) => asApiErrorAsync(() => transcripts.read(input))),
+      get: os.runs.get.handler(({ input }) => flows.getRun(input.id)),
+      step: os.runs.step.handler(({ input }) => stepDetails.get(input.id)),
+      transcript: os.runs.transcript.handler(({ input }) => transcripts.read(input)),
       start: os.runs.start.handler(({ input, context }) =>
-        asApiErrorAsync(() => runs.start(input, context.origin)),
+        runs.start(input, context.origin),
       ),
       pause: os.runs.pause.handler(({ input, context }) => controlRun(input.id, "pause", context.origin, input.now)),
       resume: os.runs.resume.handler(({ input, context }) => controlRun(input.id, "resume", context.origin)),
@@ -341,53 +314,38 @@ export function createRouter(deps: RouterDeps) {
       byIssue: os.metrics.byIssue.handler(({ input }) => metrics.byIssue(input)),
     },
     imports: {
-      legacy: os.imports.legacy.handler(({ input }) => asApiError(() => deps.legacyImport.run(input))),
+      legacy: os.imports.legacy.handler(({ input }) => deps.legacyImport.run(input)),
     },
     decisions: {
       list: os.decisions.list.handler(({ input }) => deps.decisions.list(input)),
-      get: os.decisions.get.handler(({ input }) =>
-        asApiError(() => {
-          const decision = deps.decisions.get(input.id);
-          if (!decision) throw new DecisionNotFoundError(input.id);
-          return decision;
-        }),
-      ),
-      resolve: os.decisions.resolve.handler(({ input, context }) =>
-        asApiError(() => {
-          if (isMergeOffer(store, input.id)) {
-            requireUi(context, "Una oferta de merge la aprueba una persona desde la app: comenta el comando de merge con tu identidad.");
-          }
-          deps.flows.resolveGate(input.id, input.option, context.origin);
-          const decision = deps.decisions.get(input.id);
-          if (!decision) throw new DecisionNotFoundError(input.id);
-          return decision;
-        }),
-      ),
+      get: os.decisions.get.handler(({ input }) => {
+        const decision = deps.decisions.get(input.id);
+        if (!decision) throw new DecisionNotFoundError(input.id);
+        return decision;
+      }),
+      resolve: os.decisions.resolve.handler(({ input, context }) => {
+        if (isMergeOffer(store, input.id)) {
+          requireUiOrigin(context.origin, "Una oferta de merge la aprueba una persona desde la app: comenta el comando de merge con tu identidad.");
+        }
+        deps.flows.resolveGate(input.id, input.option, context.origin);
+        const decision = deps.decisions.get(input.id);
+        if (!decision) throw new DecisionNotFoundError(input.id);
+        return decision;
+      }),
     },
     learnings: {
       list: os.learnings.list.handler(({ input }) => deps.learnings.list(input)),
-      get: os.learnings.get.handler(({ input }) =>
-        asApiError(() => {
-          const learning = deps.learnings.get(input.id);
-          if (!learning) throw new LearningNotFoundError(input.id);
-          return learning;
-        }),
-      ),
+      get: os.learnings.get.handler(({ input }) => {
+        const learning = deps.learnings.get(input.id);
+        if (!learning) throw new LearningNotFoundError(input.id);
+        return learning;
+      }),
       propose: os.learnings.propose.handler(({ input, context }) => deps.learnings.propose(input, context.origin)),
-      // Lo aprobado entra a los briefs de las corridas que siguen: un agente que lo aprobara por el CLI se dejaría instrucciones a sí mismo.
-      approve: os.learnings.approve.handler(({ input, context }) => {
-        requireUi(context, "Un learning lo aprueba una persona desde la app.");
-        return asApiError(() => deps.learnings.approve(input.id, context.origin));
-      }),
-      reject: os.learnings.reject.handler(({ input, context }) => asApiError(() => deps.learnings.reject(input.id, context.origin))),
-      screen: os.learnings.screen.handler(({ input }) => asApiErrorAsync(() => deps.learnings.screen(input))),
-      archive: os.learnings.archive.handler(({ input, context }) => asApiError(() => deps.learnings.archive(input.ids, context.origin))),
-      update: os.learnings.update.handler(({ input, context }) => {
-        if (deps.learnings.get(input.id)?.status === "approved") {
-          requireUi(context, "Un learning aprobado solo se edita desde la app: el texto nuevo entra a los briefs sin otra aprobación.");
-        }
-        return asApiError(() => deps.learnings.update(input, context.origin));
-      }),
+      approve: os.learnings.approve.handler(({ input, context }) => deps.learnings.approve(input.id, context.origin)),
+      reject: os.learnings.reject.handler(({ input, context }) => deps.learnings.reject(input.id, context.origin)),
+      screen: os.learnings.screen.handler(({ input }) => deps.learnings.screen(input)),
+      archive: os.learnings.archive.handler(({ input, context }) => deps.learnings.archive(input.ids, context.origin)),
+      update: os.learnings.update.handler(({ input, context }) => deps.learnings.update(input, context.origin)),
     },
     defs: {
       list: os.defs.list.handler(({ input }) => deps.defs.list(input.kind, { includeArchived: input.includeArchived })),
@@ -399,12 +357,12 @@ export function createRouter(deps: RouterDeps) {
         }
         return def;
       }),
-      create: os.defs.create.handler(({ input, context }) => asApiError(() => defWriter.create(input, context.origin))),
-      update: os.defs.update.handler(({ input, context }) => asApiError(() => defWriter.update(input, context.origin))),
-      archive: os.defs.archive.handler(({ input, context }) => asApiError(() => defWriter.archive(input.kind, input.id, context.origin))),
+      create: os.defs.create.handler(({ input, context }) => defWriter.create(input, context.origin)),
+      update: os.defs.update.handler(({ input, context }) => defWriter.update(input, context.origin)),
+      archive: os.defs.archive.handler(({ input, context }) => defWriter.archive(input.kind, input.id, context.origin)),
       agentOptions: os.defs.agentOptions.handler(() => deps.agentOptions()),
-      exportToRepo: os.defs.exportToRepo.handler(({ input }) => asApiErrorAsync(() => deps.repoConfigExport.exportDef(input))),
-      restore: os.defs.restore.handler(({ input, context }) => asApiError(() => defWriter.restore(input.kind, input.id, context.origin))),
+      exportToRepo: os.defs.exportToRepo.handler(({ input, context }) => deps.repoConfigExport.exportDef(input, context.origin)),
+      restore: os.defs.restore.handler(({ input, context }) => defWriter.restore(input.kind, input.id, context.origin)),
     },
     events: {
       list: os.events.list.handler(({ input }) =>
@@ -425,77 +383,6 @@ export function createRouter(deps: RouterDeps) {
 }
 
 export type CoreRouter = ReturnType<typeof createRouter>;
-
-/**
- * Lo que solo una persona puede pedir desde la app (origin `ui`, que exige la llave de la app): un agente con
- * el CLI o el MCP recibe `FORBIDDEN` con `message`, que dice por qué.
- */
-function requireUi(context: CoreContext, message: string): void {
-  if (context.origin !== "ui") throw new ORPCError("FORBIDDEN", { message });
-}
-
-/** Los errores de un pedido inválido o de algo que no existe llegan al cliente con su mensaje; el resto es un bug del core. */
-export function asApiError<T>(fn: () => T): T {
-  try {
-    return fn();
-  } catch (error) {
-    throw toApiError(error);
-  }
-}
-
-async function asApiErrorAsync<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (error) {
-    throw toApiError(error);
-  }
-}
-
-function toApiError(error: unknown): unknown {
-  if (
-    error instanceof ProjectNotFoundError ||
-    error instanceof RunNotFoundError ||
-    error instanceof DecisionNotFoundError ||
-    error instanceof LearningNotFoundError ||
-    error instanceof StepNotFoundError ||
-    error instanceof DefNotFoundError ||
-    error instanceof SessionNotFoundError ||
-    error instanceof RepoNotFoundError ||
-    error instanceof IssueNotCachedError ||
-    error instanceof PrNotFoundError
-  ) {
-    return new ORPCError("NOT_FOUND", { message: error.message, cause: error });
-  }
-  if (
-    error instanceof InvalidProjectError ||
-    error instanceof IssueNotInProjectError ||
-    error instanceof QueueUnavailableError ||
-    error instanceof TrackerProjectsError ||
-    error instanceof RunStartError ||
-    error instanceof RunCommandError ||
-    error instanceof DecisionResolveError ||
-    error instanceof LearningUpdateError ||
-    error instanceof LearningScreenError ||
-    error instanceof InvalidRepoError ||
-    error instanceof NotAGitRepoError ||
-    error instanceof PrCommandError ||
-    error instanceof RecipeTestError ||
-    error instanceof RecipeSyntaxError ||
-    error instanceof DefValidationError ||
-    error instanceof DefWriteError ||
-    error instanceof LegacyImportError ||
-    error instanceof PackLoadError ||
-    error instanceof PackInstallError ||
-    error instanceof RepoExportError ||
-    error instanceof GitHubPatError ||
-    error instanceof GitHubAuthError ||
-    error instanceof LinearAuthError ||
-    error instanceof ClaudeSetupError
-  ) {
-    return new ORPCError("BAD_REQUEST", { message: error.message, cause: error });
-  }
-  return error;
-}
 
 /** El `Last-Event-ID` del reconectado manda sobre `after`: es lo último que el cliente vio. */
 function resumeFrom(lastEventId: string | undefined, after: number | undefined): number {

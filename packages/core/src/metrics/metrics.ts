@@ -16,7 +16,7 @@ export interface Metrics {
 }
 
 /** Lo que se calculó al cerrar cada corrida (`recordRunMetrics`), agregado. */
-export function createMetrics(store: Pick<Store, "db">): Metrics {
+export function createMetrics({ store }: { store: Pick<Store, "db"> }): Metrics {
   const { db } = store;
   const closed = (f: MetricsFilter) =>
     and(

@@ -60,7 +60,7 @@ export function GitHubCard({ connection, onChanged }: { connection: Connection |
   const disconnect = async () => {
     if (!connection) return
     try {
-      await appData.disconnect("github", connection.account)
+      await appData.disconnect({ provider: "github", account: connection.account })
       onChanged()
       toast.success("GitHub desconectado")
     } catch (e) {

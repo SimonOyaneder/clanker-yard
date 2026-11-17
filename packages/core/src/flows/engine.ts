@@ -1,25 +1,27 @@
 import {
   FlowDef,
+  LIVE_RUN_STATUSES,
   Profile,
   Role,
+  type AgentRuntimeId,
   type ArtifactHash,
   type Brief,
   type DecisionId,
-  type Edge,
   type Node,
   type Origin,
-  type ParkReason,
   type ProjectId,
   type RunId,
   type RunUsage,
   type RunWorkspace,
   type StepRunId,
-  type SubjectRef, type RepoId } from "@clanker/api";
+  type SubjectRef,
+  type RepoId,
+} from "@clanker/api";
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, max, ne, or, sql, sum } from "drizzle-orm";
 import type { AgentResult, Agents } from "../agents/agents";
 import type { Artifacts } from "../artifacts/artifacts";
 import { GITHUB_SCOPE, repoScope, runtimeScope, type Breakers } from "../breakers/breakers";
-import { closeDecision, openDecision } from "../decisions/decisions";
+import { openDecision } from "../decisions/decisions";
 import type { Defs } from "../defs/defs";
 import { MAX_PROPOSED_PER_STEP } from "../learnings/criteria";
 import { proposeLearning } from "../learnings/learnings";
@@ -27,23 +29,57 @@ import { recordRunMetrics } from "../metrics/record";
 import { microsToUsd, newId, usdToMicros } from "../store/conventions";
 import { actionEffects, agentSessions, decisions, projects, runs, stepRuns, stepUsage, type DefPin } from "../store/schema";
 import type { Store, Tx } from "../store/store";
-import { EnvironmentError, PermanentActionError, type ActionCtx, type ActionDef, type ConsolidatorDef, type ExternalEvent, type RetryPolicy, type WaitDef, type WaitResult } from "./catalog";
-import { edgeFor, edgesOf, maxRoundsOf, takeEdge, type Taken } from "./edges";
 import {
-  agentRolesOf,
-  branchIds,
-  joinStepId,
-  parallelOf,
-  stepNode,
-  type ParallelNode,
-} from "./parallel";
+  EnvironmentError,
+  PermanentActionError,
+  type ActionCtx,
+  type ActionDef,
+  type ConsolidatorDef,
+  type ExternalEvent,
+  type RetryPolicy,
+  type WaitDef,
+  type WaitResult,
+} from "./catalog";
+import { edgeFor, edgesOf, maxRoundsOf, takeEdge, type Taken } from "./edges";
+import { agentRolesOf, branchIds, joinStepId, parallelOf, stepNode, type ParallelNode } from "./parallel";
 import { createRunReads, OUTPUT_INLINE_MAX_BYTES, RunNotFoundError } from "./run-reads";
-import { createSubjects, hasWaiting, loanOf, type SubjectsDeps } from "./subjects";
-import { StepNotFoundError } from "./step-detail";
+import {
+  ESCALATED,
+  FORCE,
+  forceable,
+  Interruption,
+  LATEST_PROFILE,
+  permanent,
+  REOPENED,
+  RESUMED_AFTER_CUT,
+  scopeOf,
+  SESSION_CUT,
+  StaleStepError,
+  STEER_NOTICE,
+  stepPayload,
+  StepTimeout,
+  timedOut,
+  type Closing,
+  type EngineSteps,
+  type InsertAt,
+  type Job,
+  type Parking,
+  type Reported,
+  type RunRow,
+  type Settled,
+  type StepRow,
+} from "./engine-shared";
+import { createRunCommands } from "./commands";
+import { createGates } from "./gates";
+import { createRunFamily } from "./run-family";
+import { createSubjects, hasWaiting, type SubjectsDeps } from "./subjects";
+
 import { isTruthy, resolveRefs } from "./refs";
 import { calledFlows, LANE_BY_TRIGGER } from "./validate";
 import { issuesInline, messageOf } from "../errors/format";
 import { isRecord } from "../defs/defs";
+import { BadRequestError } from "../errors/domain";
+import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 
 /** El lease de un paso: el core dueño lo renueva cada tercio mientras el paso vive. */
 const STEP_LEASE_TTL_MS = 120_000;
@@ -51,51 +87,6 @@ const STEP_LEASE_TTL_MS = 120_000;
 const CLOCK_JUMP_MS = 30_000;
 /** A la tercera vez que un corte interrumpe el mismo paso, el paso da error en vez de reabrirse. */
 const MAX_CUTS = 3;
-/** El `error` con que `recover` reabre un paso: lo que sigue en el paso hasta que se cierre o falle de nuevo. */
-const RESUMED_AFTER_CUT = "La app se cerró con este paso en curso; se retoma.";
-/** El `error` con que se reabre un paso cuya corrida se pausó con `now`: igual que un corte, pero lo pidió una persona. */
-const RESUMED_AFTER_PAUSE = "La corrida se pausó con este paso en curso; se retoma.";
-/** El `error` con que se reabre un paso al que una persona le dejó un mensaje (`steer`): se retoma la sesión con ese mensaje. */
-const STEERED = "Una persona le dejó un mensaje al agente; se retoma su sesión.";
-/** El `error` de un paso que una persona reintentó: su sesión es nueva aunque el nodo diga `resumeFrom`. */
-const RETRIED = "Una persona reintentó este paso; la sesión es nueva.";
-/** El `error` de una sesión de agente que una interrupción (corte, apagado, pausa o mensaje) dejó sin cerrar: así `performAgent` la reconoce para retomarla. */
-const SESSION_CUT = "La sesión se interrumpió con el paso en curso; se retoma.";
-const CUT_NOTICE =
-  "La app se reinició mientras trabajabas en esta tarea. Revisa el worktree: puede tener cambios a medias de antes del corte. Termina tu tarea.";
-const PAUSE_NOTICE =
-  "Una persona pausó la corrida mientras trabajabas en esta tarea. Revisa el worktree: puede tener cambios a medias de antes de la pausa. Termina tu tarea.";
-/** El `error` con que se reintenta un paso de agente que se pasó de su tope: así `performAgent` sabe que ya escaló y la segunda vez no reintenta. */
-const ESCALATED = "El agente se pasó de su tope de gasto o de turnos; se reintenta con el perfil escalado y un handoff.";
-const STEER_NOTICE = "Una persona que supervisa esta corrida te dejó este mensaje para tu tarea:";
-const HANDOFF_NOTICE =
-  "La sesión anterior de esta tarea se pasó de su tope de gasto o de turnos y se cerró. Revisa el worktree (git status y git diff --stat): puede tener cambios a medias. Termina tu tarea.";
-
-/**
- * Por qué se reabrió un paso de agente, leído de su `error` (lo único que sobrevive a un corte): con qué aviso
- * arranca el agente y qué sesión retoma. `unfinished` es la que la interrupción dejó sin cerrar, `steer` la del
- * mensaje de la persona y `none` una nueva (sin `resumeFrom` del nodo).
- */
-const REOPENED: Record<string, { notice?: string; resume: "unfinished" | "steer" | "none" }> = {
-  [RESUMED_AFTER_CUT]: { notice: CUT_NOTICE, resume: "unfinished" },
-  [RESUMED_AFTER_PAUSE]: { notice: PAUSE_NOTICE, resume: "unfinished" },
-  [STEERED]: { resume: "steer" },
-  [ESCALATED]: { notice: HANDOFF_NOTICE, resume: "none" },
-  [RETRIED]: { resume: "none" },
-};
-/** Prefijo de la opción de un `needs_human` que sigue el edge de un outcome sin ejecutar el paso: `force:ok`. */
-const FORCE = "force:";
-
-/** Si una persona puede forzar el outcome del nodo: solo action y wait, nunca un agente (decisión #44). */
-function forceable(node: Node): boolean {
-  return node.type === "action" || node.type === "wait";
-}
-/**
- * Sufijo de `retry` y `continue` en una decisión de `needs_human`: antes de seguir, la corrida toma la versión
- * vigente de su perfil en vez de la que fijó al empezar (así un tope por rol que la persona subió vale ya).
- * Es lo único que una opción cambia del pin: los roles y los flujos siguen en su versión.
- */
-const LATEST_PROFILE = ":latest-profile";
 export const TICK_MS = 5000;
 export const DEFAULT_MAX_AGENTS = 4;
 /** Cada cuánto se sondea un wait con `probe`; Watch avisa antes con `signal`, así que el sondeo es la red de seguridad. */
@@ -106,15 +97,10 @@ const ENVIRONMENT_BACKOFF_MS = 60_000;
 const DEFAULT_ACTION_RETRY: RetryPolicy = { max: 3, backoffSec: [10, 60, 300] };
 const DEFAULT_AGENT_RETRY: RetryPolicy = { max: 1, backoffSec: [10] };
 
-/** Los estados en que una corrida sigue viva: los mismos del índice parcial de `runs`. */
-const LIVE_RUN_STATUSES = ["queued", "running", "waiting", "parked", "paused"] as const;
 /** Una corrida pausada no despacha pasos nuevos, pero sus waits y sus hijas siguen cerrándose: lo que pasó mientras tanto no se pierde. */
 const ADVANCING_RUN_STATUSES = ["running", "paused"] as const;
 
-type RunRow = typeof runs.$inferSelect;
-type StepRow = typeof stepRuns.$inferSelect;
 type FlowNode = Extract<Node, { type: "flow" }>;
-type GateNode = Extract<Node, { type: "gate" }>;
 
 export interface StartOptions {
   projectId?: ProjectId;
@@ -220,7 +206,7 @@ export interface EngineDeps extends SubjectsDeps {
    * `runtime:<id>`). Un paso cuyo ámbito está abierto no se despacha; un error de entorno abre el de su causa.
    * `runtimeOf` dice qué runtime corre una entrada de perfil que pide `requested` (`ProfileRole.runtime`).
    */
-  environment?: { breakers: Pick<Breakers, "openReason" | "trip">; runtimeOf(requested: string | undefined): string };
+  environment?: { breakers: Pick<Breakers, "openReason" | "trip">; runtimeOf(requested: AgentRuntimeId | undefined): string };
   /** Tope global de agentes a la vez. */
   maxAgents?: number;
   tickMs?: number;
@@ -230,6 +216,8 @@ export interface EngineDeps extends SubjectsDeps {
   bootId?: string;
   /** Al despertar de un sleep, además de los leases de los pasos: extender los de lo que este core mantiene fuera del motor. */
   onClockJump?: () => void;
+  /** Donde queda lo que falla en un despertar del dispatcher (`flows.dispatch`); sin él, el que crea con el store. */
+  errors?: ErrorReporter;
   now?: () => number;
 }
 
@@ -319,93 +307,9 @@ export interface Engine {
 }
 
 /** `start` rechazó el pedido (flujo o perfil que no existen, params inválidos): no se creó nada y el mensaje dice qué cambiar. */
-export class RunStartError extends Error {}
-
-/** La decisión pedida no existe. */
-export class DecisionNotFoundError extends Error {
-  constructor(id: DecisionId) {
-    super(`No existe la decisión ${id}.`);
-  }
-}
-
-/** La decisión no se puede resolver así (ya se resolvió, no estaciona a nadie o la opción no es suya): no cambió nada. */
-export class DecisionResolveError extends Error {}
+export class RunStartError extends BadRequestError {}
 
 export { OUTPUT_INLINE_MAX_BYTES, RunNotFoundError };
-
-/** El comando no se puede aplicar a la corrida o al paso en su estado actual: no cambió nada y el mensaje dice qué hacer. */
-export class RunCommandError extends Error {}
-
-/** El `reason` del abort de los pasos de una corrida cancelada. */
-class RunCanceled extends Error {
-  constructor(runId: RunId) {
-    super(`La corrida ${runId} se canceló.`);
-  }
-}
-
-/** El `reason` del abort de un paso que una persona reemplazó (`retry`) o cerró a mano (`force`): su cierre tardío se descarta. */
-class StepSuperseded extends Error {
-  constructor(stepId: StepRunId) {
-    super(`El paso ${stepId} lo reemplazó una persona.`);
-  }
-}
-
-/**
- * El `reason` del abort de un paso en vuelo que no falló: el core se apaga, la corrida se pausa con `now` o una
- * persona le deja un mensaje. El paso vuelve a pending, sin gastar intento, y su sesión se retoma. `at` es el
- * instante de la interrupción: la sesión que terminó después es la que cortó.
- */
-class Interruption extends Error {
-  constructor(
-    readonly why: "stop" | "pause" | "steer",
-    readonly at: number,
-  ) {
-    super(
-      why === "stop"
-        ? "El core se apagó con este paso en curso."
-        : why === "pause"
-          ? "La corrida se pausó con este paso en curso."
-          : "Una persona le dejó un mensaje a este paso.",
-    );
-  }
-
-  /** El `error` con que el paso queda en pending: lo que `performAgent` lee para saber cómo retomarlo. */
-  get marker(): string {
-    return this.why === "stop" ? RESUMED_AFTER_CUT : this.why === "pause" ? RESUMED_AFTER_PAUSE : STEERED;
-  }
-}
-
-/** Un cierre con un attempt que ya no es el vigente: otro dueño tomó el paso y este resultado se descarta. */
-class StaleStepError extends Error {}
-
-/** Cómo terminó una ejecución, antes de decidir qué hace el motor con ella. */
-type Settled =
-  /** Un outcome del nodo, o `error`/`timeout`/`skipped`: sigue su edge. `reported` es lo que el reporte del agente le deja a una persona. */
-  | { kind: "outcome"; outcome: string; output?: unknown; error?: string; reported?: Reported }
-  /** Una excepción: se reintenta según `retry`. */
-  | { kind: "failed"; error: string }
-  /** El agente se pasó de su tope: un reintento con el perfil escalado y un handoff, sin gastar el `retry` del nodo. */
-  | { kind: "escalate" }
-  /** Falló el entorno, no el paso: vuelve a pending sin gastar intento. */
-  | { kind: "deferred"; error: string; notBefore: number }
-  /** Un parallel que abrió sus ramas: el padre espera y lo cierra la transacción de la última rama. */
-  | { kind: "waiting" };
-
-/** Lo que un agente dejó en su reporte para una persona (`Report.decisions` y `Report.learnings`): ninguna cosa bloquea a la corrida. */
-interface Reported {
-  notes: { title: string; body: string }[];
-  learnings: string[];
-}
-
-interface Job {
-  run: RunRow;
-  /** Con el attempt de este lease. */
-  step: StepRow;
-  flow: FlowDef;
-  node: Node;
-  /** Si el paso es una rama de un parallel o su rol consolidador: el id del parallel. */
-  parallel?: { parent: string; role: "branch" | "join" };
-}
 
 /** Qué hacer con el parallel al cerrar un paso suyo. */
 type JoinPlan =
@@ -427,11 +331,15 @@ interface BranchState {
   error: string | null;
 }
 
+/** El `scope` del evento `error` cuando falla un despertar del dispatcher. */
+const DISPATCH_SCOPE = "flows.dispatch";
+
 export function createEngine(deps: EngineDeps): Engine {
   const { store, defs, agents, artifacts, actions, consolidators, waits, workspaceOf, briefFor, environment, now = Date.now } = deps;
   const maxAgents = deps.maxAgents ?? DEFAULT_MAX_AGENTS;
   const probeEveryMs = (deps.probeEverySec ?? DEFAULT_PROBE_EVERY_SEC) * 1000;
   const bootId = deps.bootId ?? newId("boot");
+  const errors = deps.errors ?? createErrorReporter({ store });
   const { flowOf, workspaceFor, lineage, resolveRef, selectStep, readArtifact, parallelStepOf, itemsOf, latestStep, getRun, listRuns } =
     createRunReads({ store, defs, artifacts, workspaceOf });
   const inFlight = new Set<Promise<void>>();
@@ -447,12 +355,13 @@ export function createEngine(deps: EngineDeps): Engine {
   let ticker: NodeJS.Timeout | undefined;
   let closed = false;
 
-  const scopeOf = (run: RunRow, stepRunId?: StepRunId) => ({
-    projectId: run.projectId ?? undefined,
-    runId: run.id,
-    stepRunId,
-    subject: { type: run.subjectType, id: run.subjectId },
-  });
+  // Las piezas del motor que viven en su propio módulo (`run-family.ts`, `gates.ts`, `commands.ts`): reciben las
+  // funciones del motor que necesitan, que se declaran más abajo.
+  const steps: EngineSteps = { wake, jobOf, loadJob, park, insertStep, nextVisit, advance, follow, openEdgeNote, closeStep, lastSessionOf };
+  const family = createRunFamily({ now, subjects, controllers, nextProbeAt });
+  const gates = createGates({ store, now, defs, subjects, steps, family });
+  const { openGate, sweepGates, resolveGate } = gates;
+  const { control, stepCommand } = createRunCommands({ store, now, controllers, agentSteps, steps, family, gates });
 
   // --- start -----------------------------------------------------------------------------------
 
@@ -649,12 +558,7 @@ export function createEngine(deps: EngineDeps): Engine {
     return run;
   }
 
-  function insertStep(
-    tx: Tx,
-    run: RunRow,
-    nodeId: string,
-    at: { visit: number; round: number; prev?: StepRunId; /** Lo que `performAgent` lee para saber cómo retomarlo. */ error?: string },
-  ): StepRunId {
+  function insertStep(tx: Tx, run: RunRow, nodeId: string, at: InsertAt): StepRunId {
     const id = newId("stp");
     tx.db
       .insert(stepRuns)
@@ -707,9 +611,10 @@ export function createEngine(deps: EngineDeps): Engine {
       // Una dueña que se estacionó o terminó puede dejar libre (o prestable) el sujeto de una corrida que espera, y una que terminó o se estacionó deja un cupo.
       if (hasWaiting(store.db)) store.tx((tx) => subjects.promoteQueued(tx));
       dispatch();
+      errors.clear(DISPATCH_SCOPE);
     } catch (error) {
       // Un wake que lanza tumbaría a quien lo llamó (un `start`, el cierre de otro paso, un timer).
-      console.error("El dispatcher de flujos falló:", error);
+      errors.report(DISPATCH_SCOPE, error);
     }
   }
 
@@ -823,12 +728,7 @@ export function createEngine(deps: EngineDeps): Engine {
    * Estaciona la corrida y abre la decisión que la espera, en la transacción de quien la estaciona. Un
    * paso a la vez avanza una corrida, así que no hay otra decisión bloqueante abierta sobre ella.
    */
-  function park(
-    tx: Tx,
-    run: RunRow,
-    step: StepRow,
-    parking: { reason: ParkReason; kind: "gate" | "needs_human"; title: string; body: string; options: string[] },
-  ): void {
+  function park(tx: Tx, run: RunRow, step: StepRow, parking: Parking): void {
     tx.db.update(runs).set({ status: "parked", parkReason: parking.reason }).where(eq(runs.id, run.id)).run();
     const { reason, ...decision } = parking;
     const opened = openDecision(tx, { ...scopeOf(run, step.id), ...decision });
@@ -1086,7 +986,7 @@ export function createEngine(deps: EngineDeps): Engine {
       job.parallel?.role === "join"
         ? branchOutputs(run.id, job.parallel.parent, job.flow)
         : resolveRefs(
-            node.type === "agent" ? node.brief : node.type === "action" || node.type === "wait" ? node.args : node.type === "gate" ? node.question : null,
+            node.type === "agent" ? node.brief : node.type === "action" || node.type === "wait" ? node.args : node.question,
             resolve,
           );
     const inputHash = artifacts.put(JSON.stringify(input), "brief", { mime: "application/json" });
@@ -1468,23 +1368,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** Marca el paso como cerrado, escribe `step.finished` y suma su costo a la corrida. Devuelve el costo. */
-  function closeStep(
-    tx: Tx,
-    run: RunRow,
-    step: StepRow,
-    closing: {
-      status: "done" | "failed";
-      outcome: string;
-      outputHash?: ArtifactHash;
-      message?: string;
-      /** La nota del edge que se tomó. */
-      note?: string;
-      /** En qué estados está el paso que se cierra; por defecto, el de uno que se ejecutó. Una persona puede cerrar uno pending. */
-      from?: StepRow["status"][];
-      /** Lo que el reporte del agente le deja a una persona. */
-      reported?: Reported;
-    },
-  ): number {
+  function closeStep(tx: Tx, run: RunRow, step: StepRow, closing: Closing): number {
     const cost = Number(
       tx.db.select({ total: sum(stepUsage.costMicros) }).from(stepUsage).where(eq(stepUsage.stepRunId, step.id)).get()?.total ?? 0,
     );
@@ -1723,181 +1607,6 @@ export function createEngine(deps: EngineDeps): Engine {
 
   // --- gate ------------------------------------------------------------------------------------
 
-  /**
-   * Entra a un gate: el paso queda `waiting` (con su plazo si hay `timeoutSec`), se abre la decisión
-   * `gate` y la corrida queda parked, todo en una transacción. Solo esta corrida espera: no retiene
-   * slot ni cupo, y el worktree sigue suyo. Lo cierra `resolveGate` o el vencimiento del plazo.
-   */
-  function openGate(job: Job, node: GateNode, question: unknown): Settled {
-    const { run, step } = job;
-    const deadline = node.timeoutSec === undefined ? null : now() + node.timeoutSec * 1000;
-    store.tx((tx) => {
-      const waiting = tx.db
-        .update(stepRuns)
-        .set({ status: "waiting", owner: null, leaseUntil: null, deadline })
-        .where(and(eq(stepRuns.id, step.id), eq(stepRuns.attempt, step.attempt), eq(stepRuns.status, "running")))
-        .returning({ id: stepRuns.id })
-        .get();
-      if (!waiting) throw new StaleStepError(step.id);
-      tx.emit({ type: "step.waiting", origin: "core", ...scopeOf(run, step.id), payload: { ...stepPayload(step), waitKey: null, deadline } });
-      park(tx, run, step, {
-        reason: "gate",
-        kind: "gate",
-        title: typeof question === "string" ? question : JSON.stringify(question),
-        body: node.options.map((option) => `${option.id}: ${option.label}`).join("\n"),
-        options: node.options.map((option) => option.id),
-      });
-    });
-    return { kind: "waiting" };
-  }
-
-  /** El tick: los gates con `timeoutSec` cuyo plazo pasó siguen solos, con su `default` o con outcome `timeout`. */
-  function sweepGates(): void {
-    const due = store.db
-      .select({ step: stepRuns, run: runs })
-      .from(stepRuns)
-      .innerJoin(runs, eq(stepRuns.runId, runs.id))
-      .where(
-        and(
-          eq(stepRuns.status, "waiting"),
-          isNull(stepRuns.waitKey),
-          isNotNull(stepRuns.deadline),
-          lte(stepRuns.deadline, now()),
-          eq(runs.status, "parked"),
-          eq(runs.parkReason, "gate"),
-        ),
-      )
-      .orderBy(asc(stepRuns.id))
-      .all();
-    for (const { step, run } of due) {
-      const job = loadJob(run, step);
-      if (job?.node.type !== "gate") continue;
-      const { node } = job;
-      try {
-        store.tx((tx) => {
-          const decision = pendingDecisionOf(tx, step.id);
-          if (!decision) return;
-          const fallback = node.default;
-          closeDecision(tx, decision.id, {
-            status: "expired",
-            resolution: fallback === undefined ? { option: null } : { option: fallback },
-            by: "timeout",
-          });
-          leaveParking(tx, run, decision.id, (current) =>
-            advance(
-              tx,
-              current,
-              step,
-              node,
-              fallback ?? "timeout",
-              undefined,
-              fallback === undefined ? new StepTimeout(node.timeoutSec ?? 0, "El gate").message : undefined,
-            ),
-          );
-        });
-      } catch (error) {
-        if (error instanceof StaleStepError) continue;
-        console.error(`No se pudo vencer el gate ${step.id} (${step.nodeId}):`, error);
-      }
-    }
-  }
-
-  /** La decisión bloqueante que sigue abierta sobre `stepId`. */
-  function pendingDecisionOf(tx: Tx, stepId: StepRunId) {
-    return tx.db
-      .select()
-      .from(decisions)
-      .where(and(eq(decisions.stepRunId, stepId), eq(decisions.status, "pending"), inArray(decisions.kind, ["gate", "needs_human"])))
-      .get();
-  }
-
-  /**
-   * La corrida deja de estar estacionada: `leave` la lleva adonde corresponda (el edge de un gate, un
-   * paso nuevo, nada) y, si sigue viva, vuelve a la cola de su carril. Va antes que las corridas nuevas
-   * porque el dispatcher toma primero las más antiguas. Si mantenimiento tiene prestado su sujeto, la
-   * decisión queda resuelta pero la corrida sigue `parked` hasta que se lo devuelvan (`subjects.ended`).
-   * Lo mismo si su carril no tiene cupo: sigue `parked` hasta que lo haya.
-   */
-  function leaveParking(tx: Tx, run: RunRow, decisionId: DecisionId, leave: (current: RunRow) => void): void {
-    // Sin cupo en su carril, igual que con el sujeto prestado: la decisión queda resuelta y la corrida sigue
-    // `parked` hasta que `promoteQueued` la devuelva (con `run.requeued`).
-    const waits = loanOf(tx.db, run.id) !== undefined || !subjects.hasLaneRoom(tx.db, run);
-    const resumed: RunRow = waits ? run : { ...run, status: "running", parkReason: null };
-    if (!waits) tx.db.update(runs).set({ status: "running", parkReason: null }).where(eq(runs.id, run.id)).run();
-    leave(resumed);
-    const after = tx.db.select().from(runs).where(eq(runs.id, run.id)).get();
-    if (!waits && after?.status === "running") {
-      tx.emit({ type: "run.requeued", origin: "core", ...scopeOf(run), payload: { decisionId, reason: run.parkReason } });
-    }
-  }
-
-  /** La corrida pasa a la versión vigente del perfil que fijó (no cambia de perfil); sin perfil fijado no hay nada que tomar. */
-  function adoptCurrentProfile(tx: Tx, run: RunRow): void {
-    if (run.profileDefId === null) return;
-    const current = defs.get("profile", run.profileDefId);
-    if (!current) throw new DecisionResolveError(`El perfil que fijó la corrida ${run.id} ya no existe.`);
-    tx.db.update(runs).set({ profileVersion: current.currentVersion }).where(eq(runs.id, run.id)).run();
-  }
-
-  function resolveGate(decisionId: DecisionId, option: string, by: Origin): void {
-    const canceled = store.tx((tx) => resolveDecision(tx, decisionId, option, by));
-    if (canceled) abortInFlight(canceled.stepIds, new RunCanceled(canceled.runId));
-    wake();
-  }
-
-  /** `resolveGate` dentro de la transacción de quien llama. Si la opción canceló la corrida, devuelve lo que `abortInFlight` debe interrumpir. */
-  function resolveDecision(tx: Tx, decisionId: DecisionId, option: string, by: Origin): { runId: RunId; stepIds: StepRunId[] } | undefined {
-    const decision = tx.db.select().from(decisions).where(eq(decisions.id, decisionId)).get();
-    if (!decision) throw new DecisionNotFoundError(decisionId);
-    if (decision.status !== "pending") {
-      throw new DecisionResolveError(`La decisión ${decisionId} ya está ${decision.status}: no hay nada que resolver.`);
-    }
-    // Una decisión que no bloquea (nota, pregunta, alerta) no tiene corrida que reencolar: resolverla es
-    // dejar constancia de lo elegido o respondido (`option` es una de sus opciones o un texto libre).
-    if (decision.kind !== "gate" && decision.kind !== "needs_human") {
-      closeDecision(tx, decisionId, { status: "answered", resolution: { option }, by });
-      return undefined;
-    }
-    const run = decision.runId === null ? undefined : tx.db.select().from(runs).where(eq(runs.id, decision.runId)).get();
-    const step = decision.stepRunId === null ? undefined : tx.db.select().from(stepRuns).where(eq(stepRuns.id, decision.stepRunId)).get();
-    if (!run || run.status !== "parked" || !step) {
-      throw new DecisionResolveError(`La decisión ${decisionId} no tiene a ninguna corrida estacionada esperándola.`);
-    }
-    if (!decision.options.includes(option)) {
-      throw new DecisionResolveError(`"${option}" no es una opción de la decisión ${decisionId}: ${decision.options.join(", ")}.`);
-    }
-    closeDecision(tx, decisionId, { status: "answered", resolution: { option }, by });
-
-    if (run.parkReason === "gate") {
-      const { node } = jobOf(run, step);
-      if (node.type !== "gate") throw new DecisionResolveError(`El paso ${step.id} no es un gate.`);
-      leaveParking(tx, run, decisionId, (current) => advance(tx, current, step, node, option, undefined, undefined));
-    } else if (option === "cancel") {
-      return { runId: run.id, stepIds: cancelFamily(tx, run.id, by) };
-    } else if (option === "continue" || option === `continue${LATEST_PROFILE}`) {
-      // El paso listo sigue pending: al volver la corrida a running, el dispatcher lo toma.
-      leaveParking(tx, run, decisionId, (current) => {
-        if (option !== "continue") adoptCurrentProfile(tx, current);
-      });
-    } else if (option === "retry" || option === `retry${LATEST_PROFILE}`) {
-      leaveParking(tx, run, decisionId, (current) => {
-        if (option !== "retry") adoptCurrentProfile(tx, current);
-        insertStep(tx, current, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined });
-      });
-    } else {
-      const outcome = option.slice(FORCE.length);
-      const { node } = jobOf(run, step);
-      leaveParking(tx, run, decisionId, (current) => {
-        const edge = edgeFor(node, outcome);
-        if (edge === undefined) throw new DecisionResolveError(`El nodo "${step.nodeId}" no tiene edge para el outcome "${outcome}".`);
-        const taken = takeEdge(edge, `${step.nodeId}.${outcome}`, current.rounds, current.params);
-        if (taken.note !== undefined) openEdgeNote(tx, current, step, outcome, taken.note);
-        follow(tx, current, step, taken, 0);
-      });
-    }
-    return undefined;
-  }
-
   // --- parallel --------------------------------------------------------------------------------
 
   /**
@@ -2125,271 +1834,6 @@ export function createEngine(deps: EngineDeps): Engine {
 
   // --- comandos de una persona ----------------------------------------------------------------
 
-  function control(runId: RunId, cmd: "pause" | "resume" | "cancel", by: Origin, { now: immediately = false }: { now?: boolean } = {}): void {
-    if (cmd === "cancel") abortInFlight(store.tx((tx) => cancelFamily(tx, runId, by)), new RunCanceled(runId));
-    else if (cmd === "pause") pause(runId, by, immediately);
-    else resume(runId, by);
-    wake();
-  }
-
-  /** La corrida y todas sus descendientes (las de los subflujos), la corrida primero. */
-  function familyOf(tx: Tx, runId: RunId): RunId[] {
-    const family = [runId];
-    for (const id of family) {
-      family.push(...tx.db.select({ id: runs.id }).from(runs).where(eq(runs.parentRunId, id)).all().map((r) => r.id));
-    }
-    return family;
-  }
-
-  function runOrThrow(tx: Tx, runId: RunId): RunRow {
-    const run = tx.db.select().from(runs).where(eq(runs.id, runId)).get();
-    if (!run) throw new RunNotFoundError(runId);
-    return run;
-  }
-
-  /** Pasa a `to` las corridas de la familia que están en `from` y lo anota con quién lo pidió. Devuelve las que cambió. */
-  function moveFamily(tx: Tx, runId: RunId, from: RunRow["status"], to: RunRow["status"], by: Origin, extra: object = {}): RunRow[] {
-    const moved = tx.db
-      .update(runs)
-      .set({ status: to })
-      .where(and(inArray(runs.id, familyOf(tx, runId)), eq(runs.status, from)))
-      .returning()
-      .all();
-    for (const run of moved) tx.emit({ type: "run.status", origin: by, ...scopeOf(run), payload: { from, to, ...extra } });
-    return moved;
-  }
-
-  function pause(runId: RunId, by: Origin, immediately: boolean): void {
-    const interrupted = store.tx((tx) => {
-      const run = runOrThrow(tx, runId);
-      if (run.status === "running") moveFamily(tx, runId, "running", "paused", by, { now: immediately });
-      else if (run.status !== "paused") {
-        throw new RunCommandError(
-          run.status === "parked"
-            ? `La corrida ${runId} está estacionada: ya espera a una persona y no ocupa nada. Resuelve su decisión o cancélala.`
-            : `La corrida ${runId} está ${run.status}: solo se pausa una corrida que corre.`,
-        );
-      }
-      if (!immediately) return [];
-      // Los agentes de las corridas pausadas (también las que ya lo estaban) vuelven a pending con su sesión.
-      return tx.db
-        .select({ id: stepRuns.id })
-        .from(stepRuns)
-        .innerJoin(runs, eq(stepRuns.runId, runs.id))
-        .where(and(inArray(runs.id, familyOf(tx, runId)), eq(runs.status, "paused"), inArray(stepRuns.status, ["leased", "running"])))
-        .all()
-        .map((step) => step.id);
-    });
-    const interruption = new Interruption("pause", now());
-    for (const id of interrupted) if (agentSteps.has(id)) controllers.get(id)?.abort(interruption);
-  }
-
-  function resume(runId: RunId, by: Origin): void {
-    store.tx((tx) => {
-      const run = runOrThrow(tx, runId);
-      if (run.status === "paused") moveFamily(tx, runId, "paused", "running", by);
-      else if (run.status !== "running") {
-        throw new RunCommandError(`La corrida ${runId} está ${run.status}: solo se retoma una pausada.`);
-      }
-    });
-  }
-
-  function cancelFamily(tx: Tx, runId: RunId, by: Origin): StepRunId[] {
-    runOrThrow(tx, runId);
-    const canceled: StepRunId[] = [];
-    for (const run of tx.db.select().from(runs).where(and(inArray(runs.id, familyOf(tx, runId)), inArray(runs.status, LIVE_RUN_STATUSES))).all()) {
-      const steps = tx.db
-        .update(stepRuns)
-        .set({ status: "canceled", error: `La corrida ${runId} se canceló.`, owner: null, leaseUntil: null, notBefore: null })
-        .where(and(eq(stepRuns.runId, run.id), inArray(stepRuns.status, ["pending", "leased", "running", "waiting"])))
-        .returning({ id: stepRuns.id })
-        .all();
-      canceled.push(...steps.map((s) => s.id));
-      const blocking = tx.db
-        .select({ id: decisions.id })
-        .from(decisions)
-        .where(and(eq(decisions.runId, run.id), eq(decisions.status, "pending"), inArray(decisions.kind, ["gate", "needs_human"])))
-        .all();
-      for (const { id } of blocking) closeDecision(tx, id, { status: "superseded", by });
-      const endedAt = now();
-      tx.db.update(runs).set({ status: "canceled", parkReason: null, endedAt }).where(eq(runs.id, run.id)).run();
-      recordRunMetrics(tx, run.id);
-      subjects.ended(tx, run);
-      tx.emit({
-        type: "run.finished",
-        origin: by,
-        ...scopeOf(run),
-        payload: { outcome: "canceled", costMicros: run.costMicros, minutes: (endedAt - run.startedAt) / 60_000 },
-      });
-    }
-    return canceled;
-  }
-
-  /** Lo que este proceso tiene en vuelo de esos pasos se interrumpe: su cierre ya no calza con su attempt y se descarta. */
-  function abortInFlight(stepIds: StepRunId[], reason: Error): void {
-    for (const id of stepIds) {
-      nextProbeAt.delete(id);
-      controllers.get(id)?.abort(reason);
-    }
-  }
-
-  function stepCommand(stepId: StepRunId, cmd: { retry: true } | { steer: string } | { force: string }, by: Origin): RunId {
-    const done = store.tx((tx) => {
-      const step = tx.db.select().from(stepRuns).where(eq(stepRuns.id, stepId)).get();
-      const run = step && tx.db.select().from(runs).where(eq(runs.id, step.runId)).get();
-      if (!step || !run) throw new StepNotFoundError(stepId);
-      if (run.status === "queued" || !LIVE_RUN_STATUSES.includes(run.status as (typeof LIVE_RUN_STATUSES)[number])) {
-        throw new RunCommandError(`La corrida ${run.id} está ${run.status}: solo se comanda un paso de una corrida viva.`);
-      }
-      let job: Job;
-      try {
-        job = jobOf(run, step);
-      } catch (error) {
-        throw new RunCommandError(`No se puede cargar el paso ${stepId}: ${messageOf(error)}`, { cause: error });
-      }
-      if ("retry" in cmd) return retryStep(tx, job, by);
-      if ("steer" in cmd) return steerStep(tx, job, cmd.steer, by);
-      return forceStep(tx, job, cmd.force, by);
-    });
-    abortInFlight(done.superseded, new StepSuperseded(stepId));
-    if (done.interrupt) controllers.get(stepId)?.abort(done.interrupt);
-    wake();
-    return done.runId;
-  }
-
-  /** Lo que `stepCommand` hace tras confirmar la transacción: qué pasos interrumpir y cuál es la corrida. */
-  interface Commanded {
-    runId: RunId;
-    /** Pasos que una persona reemplazó o cerró: su cierre tardío se descarta. */
-    superseded: StepRunId[];
-    /** El paso en curso que recibe un mensaje: vuelve a pending y retoma su sesión. */
-    interrupt?: Interruption;
-  }
-
-  function emitCommanded(tx: Tx, { run, step }: Job, by: Origin, command: string, extra: object = {}, at: StepRow = step): void {
-    tx.emit({ type: "step.commanded", origin: by, ...scopeOf(run, at.id), payload: { ...stepPayload(at), command, ...extra } });
-  }
-
-  /** La decisión bloqueante abierta sobre la corrida. Hay una a lo más: un paso a la vez avanza una corrida. */
-  function blockingDecision(tx: Tx, runId: RunId) {
-    return tx.db
-      .select()
-      .from(decisions)
-      .where(and(eq(decisions.runId, runId), eq(decisions.status, "pending"), inArray(decisions.kind, ["gate", "needs_human"])))
-      .get();
-  }
-
-  /**
-   * "Reintentar desde acá": cancela lo que la corrida tiene en marcha (pasos, ramas y corridas hijas), cierra la
-   * decisión que la estacionaba y deja una visita nueva del nodo, con sesión nueva. Una corrida estacionada vuelve a
-   * la cola de su carril; una pausada sigue pausada.
-   */
-  function retryStep(tx: Tx, job: Job, by: Origin): Commanded {
-    const { run, step } = job;
-    if (job.parallel) {
-      throw new RunCommandError(`El paso "${step.nodeId}" es ${job.parallel.role === "join" ? "el join" : "una rama"} del parallel "${job.parallel.parent}": reintenta el parallel.`);
-    }
-    const decision = blockingDecision(tx, run.id);
-    const active = tx.db
-      .update(stepRuns)
-      .set({ status: "canceled", error: `${by} reintentó la corrida desde "${step.nodeId}".`, owner: null, leaseUntil: null, notBefore: null })
-      .where(and(eq(stepRuns.runId, run.id), inArray(stepRuns.status, ["pending", "leased", "running", "waiting"])))
-      .returning({ id: stepRuns.id })
-      .all()
-      .map((s) => s.id);
-    // Las corridas hijas de lo que se cancela (un nodo `flow` espera a la suya) no pueden seguir sueltas.
-    const children = tx.db
-      .select({ id: runs.id })
-      .from(runs)
-      .where(and(inArray(runs.parentStepRunId, active), inArray(runs.status, LIVE_RUN_STATUSES)))
-      .all();
-    const superseded = [...active, ...children.flatMap((child) => cancelFamily(tx, child.id, by))];
-    if (decision) {
-      // Reintentar el paso que falló es justo la opción `retry` de su decisión.
-      const answered = decision.stepRunId === step.id && decision.options.includes("retry");
-      closeDecision(tx, decision.id, { status: answered ? "answered" : "superseded", ...(answered && { resolution: { option: "retry" } }), by });
-    }
-    emitCommanded(tx, job, by, "retry");
-    const reopen = () => insertStep(tx, run, step.nodeId, { visit: nextVisit(tx, run.id, step.nodeId), round: step.round, prev: step.prevStepRunId ?? undefined, error: RETRIED });
-    if (decision) leaveParking(tx, run, decision.id, reopen);
-    else reopen();
-    return { runId: run.id, superseded };
-  }
-
-  function steerStep(tx: Tx, job: Job, message: string, by: Origin): Commanded {
-    const { run, step, node } = job;
-    if (node.type !== "agent") throw new RunCommandError(`Solo un paso de agente recibe un mensaje: "${step.nodeId}" es un ${node.type}.`);
-    if (message.trim() === "") throw new RunCommandError("El mensaje para el agente está vacío.");
-    if (step.status === "leased" || step.status === "running") {
-      if (!controllers.has(step.id)) throw new RunCommandError(`El paso ${step.id} no está en curso en este core.`);
-      emitCommanded(tx, job, by, "steer", { message });
-      return { runId: run.id, superseded: [], interrupt: new Interruption("steer", now()) };
-    }
-    if (step.status === "pending") {
-      tx.db.update(stepRuns).set({ error: STEERED, notBefore: null }).where(eq(stepRuns.id, step.id)).run();
-      emitCommanded(tx, job, by, "steer", { message });
-      return { runId: run.id, superseded: [] };
-    }
-    const decision = blockingDecision(tx, run.id);
-    if (step.status === "failed" && run.status === "parked" && decision?.kind === "needs_human" && decision.stepRunId === step.id) {
-      // El paso nuevo retoma la última sesión del que falló, con el mensaje.
-      closeDecision(tx, decision.id, { status: "superseded", by });
-      leaveParking(tx, run, decision.id, (current) => {
-        const reopened = insertStep(tx, current, step.nodeId, {
-          visit: nextVisit(tx, run.id, step.nodeId),
-          round: step.round,
-          prev: step.prevStepRunId ?? undefined,
-          error: STEERED,
-        });
-        const session = lastSessionOf(step.id);
-        tx.emit({
-          type: "step.commanded",
-          origin: by,
-          ...scopeOf(run, reopened),
-          payload: { stepId: reopened, nodeId: step.nodeId, round: step.round, attempt: 0, command: "steer", message, ...(session && { session }) },
-        });
-      });
-      return { runId: run.id, superseded: [] };
-    }
-    throw new RunCommandError(
-      `El paso "${step.nodeId}" está ${step.status}: un mensaje solo llega a un agente en curso, pendiente o que falló y espera tu decisión. Para volver a correr un paso terminado, reintenta desde él.`,
-    );
-  }
-
-  function forceStep(tx: Tx, job: Job, outcome: string, by: Origin): Commanded {
-    const { run, step, node } = job;
-    if (!forceable(node)) {
-      throw new RunCommandError(`Solo se fuerza el resultado de un paso action o wait (nunca el de un agente): "${step.nodeId}" es un ${node.type}.`);
-    }
-    if (job.parallel) {
-      throw new RunCommandError(`El paso "${step.nodeId}" es una rama del parallel "${job.parallel.parent}": fuerza el parallel o reintenta.`);
-    }
-    const declared = Object.keys(node.on ?? {});
-    if (!declared.includes(outcome)) {
-      throw new RunCommandError(`El nodo "${step.nodeId}" no declara el outcome "${outcome}": ${declared.join(", ") || "ninguno"}.`);
-    }
-    const decision = blockingDecision(tx, run.id);
-    if (step.status === "failed" && run.status === "parked" && decision?.kind === "needs_human" && decision.stepRunId === step.id) {
-      emitCommanded(tx, job, by, "force", { outcome });
-      resolveDecision(tx, decision.id, `${FORCE}${outcome}`, by);
-      return { runId: run.id, superseded: [] };
-    }
-    const open = ["pending", "leased", "running", "waiting"].includes(step.status);
-    if (!open || run.status === "parked") {
-      throw new RunCommandError(
-        run.status === "parked"
-          ? `La corrida ${run.id} está estacionada esperando una decisión: resuélvela, o reintenta desde el paso.`
-          : `El paso "${step.nodeId}" está ${step.status}: solo se fuerza el que la corrida tiene en marcha.`,
-      );
-    }
-    // Como `advance`, pero el paso no se ejecutó (o no terminó de esperar): lo cierra la persona.
-    const taken = takeEdge(edgeFor(node, outcome) as Edge, `${step.nodeId}.${outcome}`, run.rounds, run.params);
-    emitCommanded(tx, job, by, "force", { outcome });
-    const cost = closeStep(tx, run, step, { status: "done", outcome, note: taken.note, from: ["pending", "leased", "running", "waiting"] });
-    follow(tx, tx.db.select().from(runs).where(eq(runs.id, run.id)).get() ?? run, step, taken, cost);
-    return { runId: run.id, superseded: [step.id] };
-  }
-
   // --- lectura ---------------------------------------------------------------------------------
 
   async function close(opts?: { graceMs: number }): Promise<void> {
@@ -2413,27 +1857,6 @@ export function createEngine(deps: EngineDeps): Engine {
   return { start, signal, waitKeys, resolveGate, control, stepCommand, getRun, listRuns, recover, wake, close };
 }
 
-class StepTimeout extends Error {
-  constructor(
-    readonly timeoutSec: number,
-    subject = "El paso",
-  ) {
-    super(`${subject} superó su timeoutSec de ${timeoutSec} s.`);
-  }
-}
-
-const timedOut = (timeout: StepTimeout): Settled => ({ kind: "outcome", outcome: "timeout", error: timeout.message });
-
-/** Un error que reintentar no arregla (args inválidos, tope de turnos): el outcome `error` sin reintento. */
-const permanent = (error: string): Settled => ({ kind: "outcome", outcome: "error", error });
-
-const stepPayload = (step: StepRow) => ({
-  stepId: step.id,
-  nodeId: step.nodeId,
-  round: step.round,
-  attempt: step.attempt,
-});
-
 /** Una acción que ignora su `signal` no puede dejar al motor esperando: al abortarse, se la deja atrás. */
 function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   const aborted = new Promise<never>((_, reject) => {
@@ -2442,5 +1865,4 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
   return Promise.race([work, aborted]);
 }
-
 

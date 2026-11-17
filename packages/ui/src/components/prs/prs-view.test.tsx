@@ -7,7 +7,7 @@ import { PrsView } from "@/components/prs/prs-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { HostProvider, type Host } from "@/host"
-import { openPrsOf } from "@/lib/prs"
+import { openPrsOf } from "@/lib/prs/prs"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
@@ -23,7 +23,7 @@ beforeAll(() => {
     m22 = 1
   } as unknown as typeof DOMMatrixReadOnly
 })
-beforeEach(() => localStorage.setItem("cc.prs.mode", JSON.stringify("list")))
+beforeEach(() => localStorage.setItem("clanker.prs.mode", JSON.stringify("list")))
 afterEach(() => {
   cleanup()
   localStorage.clear()
@@ -85,7 +85,7 @@ test("marcar hold desde el menú contextual lo manda al core y quitarlo también
   fireEvent.contextMenu(screen.getByText("Prohibir imports cruzados entre engines"))
   fireEvent.click(await screen.findByRole("menuitem", { name: /Marcar hold/ }))
 
-  await waitFor(() => expect(spies.setPrHold).toHaveBeenCalledWith(pr.ref, true))
+  await waitFor(() => expect(spies.setPrHold).toHaveBeenCalledWith({ ref: pr.ref, hold: true }))
 })
 
 test("mergear confirma antes, nombra el comando del pack y solo entonces lo pide al core", async () => {
@@ -123,7 +123,7 @@ test("los atajos actúan sobre el PR enfocado: B pide la review del bot y H marc
   fireEvent.keyDown(document.body, { key: "b" })
   await waitFor(() => expect(spies.requestPrReview).toHaveBeenCalledWith(pr.ref))
   fireEvent.keyDown(document.body, { key: "h" })
-  await waitFor(() => expect(spies.setPrHold).toHaveBeenCalledWith(pr.ref, true))
+  await waitFor(() => expect(spies.setPrHold).toHaveBeenCalledWith({ ref: pr.ref, hold: true }))
 })
 
 test("sin PRs abiertos el estado vacío dice qué esperar", async () => {

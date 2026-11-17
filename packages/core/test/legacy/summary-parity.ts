@@ -53,7 +53,7 @@ const COUNCIL_NOTE = "Yard cuenta las corridas council; Control solo las de mode
 export function importInMemory(from: string): { store: Store; dispose: () => void } {
   const store = openStore({ path: ":memory:" });
   const dir = mkdtempSync(join(tmpdir(), "legacy-parity-"));
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   defs.register("flow", FlowBody);
   defs.register("profile", Profile);
   createLegacyImporter({ store, defs, artifacts: createArtifacts({ store, dir: join(dir, "artifacts") }) }).run({ from, dryRun: false });
@@ -77,7 +77,7 @@ export function compareWithControl(store: Store, from: string): Check[] {
   const rows: MetricRow[] = readMetrics(readFileSync(join(from, "metrics.jsonl"), "utf8"));
   // Lo que Yard muestra por diseño: las mismas filas con el filtro de `mode` de Control levantado.
   const withCouncil = rows.map((row) => ({ ...row, mode: "real" }));
-  const metrics = createMetrics(store);
+  const metrics = createMetrics({ store });
   const projectsDir = join(from, "projects");
   const slugs = readdirSync(projectsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && existsSync(join(projectsDir, d.name, "state.md")))

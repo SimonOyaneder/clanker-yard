@@ -21,7 +21,7 @@ import { LEARNING_PROMPT } from "../learnings/criteria";
 import { claudeSchemaError } from "./claude/report-schema";
 import { createContextResolver, type ContextResolver } from "./context";
 import { estimateCostMicros, minUsefulBudgetMicros, PREFIX_TOKENS, type TurnTokens } from "./pricing";
-import type { AgentEvent, AgentRun, AgentRuntime, ResumeSpec, RunResult, RunSpec, RunStatus, RuntimeId, RuntimeRegistry, Usage } from "./runtime";
+import { addUsage, emptyUsage, NO_TOKENS, subtractTokens, sumTokens, totalTokens, type AgentEvent, type AgentRun, type AgentRuntime, type ResumeSpec, type RunResult, type RunSpec, type RunStatus, type RuntimeId, type RuntimeRegistry, type Usage } from "./runtime";
 import { issuesInline, messageOf } from "../errors/format";
 
 /** Una diferencia mayor a este porcentaje entre la suma de los turnos y el total del runtime queda como evento `error`. */
@@ -301,11 +301,10 @@ export function createAgents({ store, defs, runtimes, now = Date.now, packs, rem
    */
   const writingPrefix = new Map<string, Promise<void>>();
 
-  /** Devuelve qué llamar cuando el prefijo ya quedó escrito (o la sesión terminó sin escribirlo). */
-  async function gitIdentityFor(repoId: RepoId | undefined) {
-    return repoId === undefined ? undefined : identityOf?.(repoId);
-  }
+  /** La identidad de git del usuario en el repo del worktree, para los commits del agente. */
+  const gitIdentityFor = (repoId: RepoId | undefined) => (repoId === undefined ? undefined : identityOf?.(repoId));
 
+  /** Devuelve qué llamar cuando el prefijo ya quedó escrito (o la sesión terminó sin escribirlo). */
   async function claimPrefix(runtimeId: RuntimeId, spec: RunSpec, signal: AbortSignal | undefined): Promise<() => void> {
     const key = createHash("sha256")
       .update(JSON.stringify([runtimeId, spec.model, spec.cacheTtl ?? "5m", spec.tools, spec.native, spec.systemPrompt]))
@@ -715,15 +714,12 @@ export function createAgents({ store, defs, runtimes, now = Date.now, packs, rem
     const costMicros = costPerTurn ? usage.costMicros : estimateOrWarn(tx, c, sessionId, model, seq, ts, tokens);
 
     tx.db.insert(agentTurns).values({ sessionId, seq, ts, model, ...tokens, costMicros }).run();
-    addStepUsage(tx, c, sessionId, tokens.tokensIn + tokens.tokensOut + tokens.tokensCacheRead + tokens.tokensCacheWrite, costMicros);
+    addStepUsage(tx, c, sessionId, totalTokens(tokens), costMicros);
     tx.db
       .update(agentSessions)
       .set({
         turns: seq,
-        tokensIn: session.tokensIn + tokens.tokensIn,
-        tokensOut: session.tokensOut + tokens.tokensOut,
-        tokensCacheRead: session.tokensCacheRead + tokens.tokensCacheRead,
-        tokensCacheWrite: session.tokensCacheWrite + tokens.tokensCacheWrite,
+        ...sumTokens([session, tokens]),
         costMicros: session.costMicros + costMicros,
         costSource: costPerTurn ? usage.costSource : "estimate",
       })
@@ -745,12 +741,7 @@ export function createAgents({ store, defs, runtimes, now = Date.now, packs, rem
         costMicros,
       },
     });
-    turns.turns += 1;
-    turns.tokensIn += tokens.tokensIn;
-    turns.tokensOut += tokens.tokensOut;
-    turns.tokensCacheRead += tokens.tokensCacheRead;
-    turns.tokensCacheWrite += tokens.tokensCacheWrite;
-    turns.costMicros += costMicros;
+    addUsage(turns, { turns: 1, ...tokens, costMicros });
   }
 
   /** El USD de un turno con `model_prices`; sin precio para el modelo avisa y lo deja en 0. */
@@ -802,10 +793,7 @@ export function createAgents({ store, defs, runtimes, now = Date.now, packs, rem
     const seq = last?.seq ?? session.turns + 1;
     const ts = last?.ts ?? now();
     const tokens = {
-      tokensIn: (last?.tokensIn ?? 0) + rest.tokensIn,
-      tokensOut: (last?.tokensOut ?? 0) + rest.tokensOut,
-      tokensCacheRead: (last?.tokensCacheRead ?? 0) + rest.tokensCacheRead,
-      tokensCacheWrite: (last?.tokensCacheWrite ?? 0) + rest.tokensCacheWrite,
+      ...sumTokens([last ?? NO_TOKENS, rest]),
       tokensCacheWrite1h: (last?.tokensCacheWrite1h ?? 0) + event.cacheWrite1hTokens,
     };
     const costMicros = estimateOrWarn(tx, c, sessionId, model, seq, ts, tokens);
@@ -819,24 +807,17 @@ export function createAgents({ store, defs, runtimes, now = Date.now, packs, rem
         set: { ...tokens, costMicros },
       })
       .run();
-    addStepUsage(tx, c, sessionId, rest.tokensIn + rest.tokensOut + rest.tokensCacheRead + rest.tokensCacheWrite, costDelta);
+    addStepUsage(tx, c, sessionId, totalTokens(rest), costDelta);
     tx.db
       .update(agentSessions)
       .set({
         turns: Math.max(session.turns, seq),
-        tokensIn: session.tokensIn + rest.tokensIn,
-        tokensOut: session.tokensOut + rest.tokensOut,
-        tokensCacheRead: session.tokensCacheRead + rest.tokensCacheRead,
-        tokensCacheWrite: session.tokensCacheWrite + rest.tokensCacheWrite,
+        ...sumTokens([session, rest]),
         costMicros: session.costMicros + costDelta,
       })
       .where(eq(agentSessions.id, sessionId))
       .run();
-    turns.tokensIn += rest.tokensIn;
-    turns.tokensOut += rest.tokensOut;
-    turns.tokensCacheRead += rest.tokensCacheRead;
-    turns.tokensCacheWrite += rest.tokensCacheWrite;
-    turns.costMicros += costDelta;
+    addUsage(turns, { turns: 0, ...rest, costMicros: costDelta });
   }
 
   /** Suma lo consumido al paso que corría; un resume con el mismo id de sesión lo cuenta en el paso que lo pidió. */
@@ -878,18 +859,14 @@ export function createAgents({ store, defs, runtimes, now = Date.now, packs, rem
           report: outcome.report ?? null,
           error: outcome.error ?? null,
           turns: row.turns + spent.turns - turns.turns,
-          tokensIn: row.tokensIn + spent.tokensIn - turns.tokensIn,
-          tokensOut: row.tokensOut + spent.tokensOut - turns.tokensOut,
-          tokensCacheRead: row.tokensCacheRead + spent.tokensCacheRead - turns.tokensCacheRead,
-          tokensCacheWrite: row.tokensCacheWrite + spent.tokensCacheWrite - turns.tokensCacheWrite,
+          ...subtractTokens(sumTokens([row, spent]), turns),
           costMicros: row.costMicros + spent.costMicros - turns.costMicros,
           costSource: runtimeKnowsTotal ? reported.costSource : row.costSource,
           endedAt: now(),
         })
         .where(eq(agentSessions.id, sessionId))
         .run();
-      const tokensOf = (u: Usage) => u.tokensIn + u.tokensOut + u.tokensCacheRead + u.tokensCacheWrite;
-      addStepUsage(tx, c, sessionId, tokensOf(spent) - tokensOf(turns), spent.costMicros - turns.costMicros);
+      addStepUsage(tx, c, sessionId, totalTokens(spent) - totalTokens(turns), spent.costMicros - turns.costMicros);
       if (runtimeKnowsTotal && turns.turns > 0) {
         const gap = Math.abs(reported.costMicros - turns.costMicros);
         if (gap * 100 > reported.costMicros * USAGE_MISMATCH_PERCENT) {
@@ -946,17 +923,6 @@ function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}\n… (truncado: ${text.length - max} caracteres más)`;
 }
 
-function emptyUsage(): Usage {
-  return {
-    turns: 0,
-    tokensIn: 0,
-    tokensOut: 0,
-    tokensCacheRead: 0,
-    tokensCacheWrite: 0,
-    costMicros: 0,
-    costSource: "runtime",
-  };
-}
 
 function scope(c: { placement: Placement; runId: Brief["run"]["id"] }) {
   return { projectId: c.placement.projectId, runId: c.runId, stepRunId: c.placement.stepRunId };

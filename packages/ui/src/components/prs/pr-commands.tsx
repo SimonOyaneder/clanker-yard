@@ -4,9 +4,9 @@ import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { useHost } from "@/host"
-import { usePerform } from "@/hooks/use-perform"
-import { type PrCaps, prCaps } from "@/lib/pr-commands"
-import type { OpenPr } from "@/lib/prs"
+import { useToastedCommand } from "@/hooks/use-toasted-command"
+import { type PrCaps, prCaps } from "@/lib/prs/pr-commands"
+import type { OpenPr } from "@/lib/prs/prs"
 import { messageOf } from "@/lib/utils"
 
 // Lo que una persona le pide a un PR (`prs.*` del core): mergear según la estrategia del pack, pedir la review del
@@ -50,7 +50,7 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, children }: Props
   const [selectedId, select] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<OpenPr | null>(null)
 
-  const perform = usePerform()
+  const perform = useToastedCommand()
 
   const commands = useMemo<PrCommands>(
     () => ({
@@ -62,7 +62,7 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, children }: Props
       rebase: (pr) => void perform(() => appData.rebasePr(pr.ref), `Rebase de ${pr.state.key} en marcha: corre en el carril de mantenimiento`),
       toggleHold: (pr) =>
         void perform(
-          () => appData.setPrHold(pr.ref, !pr.state.hold),
+          () => appData.setPrHold({ ref: pr.ref, hold: !pr.state.hold }),
           pr.state.hold ? `${pr.state.key} sin hold: vuelve a ofrecerse cuando esté listo` : `${pr.state.key} en hold: no se ofrece ni se mergea`,
         ),
       openRun: (pr) => {

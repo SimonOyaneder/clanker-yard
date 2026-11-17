@@ -10,12 +10,12 @@ import { ExportToRepoDialog } from "@/components/flows/export-to-repo-dialog"
 import { RowPills, UsedBy } from "@/components/flows/flow-parts"
 import { ProfileForm } from "@/components/flows/profile-form"
 import { RoleForm } from "@/components/flows/role-form"
-import { FlowDefGraph } from "@/components/project/run-graph"
+import { FlowDefGraph } from "@/components/run/run-graph"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { useLiveQuery } from "@/hooks/use-live"
-import { profileSummary } from "@/lib/def-form"
-import { duplicateOf, isReadOnly, KIND_LABEL, type LibraryRow, nameOf, repoOrigin, sourceLabel } from "@/lib/defs-library"
+import { profileSummary } from "@/lib/flows/def-form"
+import { duplicateOf, isReadOnly, KIND_LABEL, type LibraryRow, nameOf, repoOrigin, sourceLabel } from "@/lib/flows/defs-library"
 import { undoable } from "@/lib/undoable"
 import { cn, messageOf } from "@/lib/utils"
 
@@ -65,7 +65,7 @@ export function DefDetail({ row, defs, onChanged, onFocusChange }: Props) {
         onChanged(created)
       },
       async () => {
-        if (created) await appData.archiveDef(kind, created.id)
+        if (created) await appData.archiveDef({ kind, id: created.id })
         onChanged()
       },
     )
@@ -100,14 +100,14 @@ export function DefDetail({ row, defs, onChanged, onFocusChange }: Props) {
   const archive = () =>
     undoable(
       `Archivé ${nameOf(def)}`,
-      () => appData.archiveDef(kind, def.id).then(() => onChanged()),
-      () => appData.restoreDef(kind, def.id).then(() => onChanged()),
+      () => appData.archiveDef({ kind, id: def.id }).then(() => onChanged()),
+      () => appData.restoreDef({ kind, id: def.id }).then(() => onChanged()),
     )
   const restore = () =>
     undoable(
       `Restauré ${nameOf(def)}`,
-      () => appData.restoreDef(kind, def.id).then(() => onChanged()),
-      () => appData.archiveDef(kind, def.id).then(() => onChanged()),
+      () => appData.restoreDef({ kind, id: def.id }).then(() => onChanged()),
+      () => appData.archiveDef({ kind, id: def.id }).then(() => onChanged()),
     )
   // Archivar lo que un proyecto usa y nada más lo reemplaza lo deja sin eso: antes se pregunta.
   const askArchive = () => (row.projects.length > 0 && row.overrides === null ? setConfirmArchive(true) : void archive())

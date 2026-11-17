@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { PackSettings, type ResolvedPack } from "@clanker/api";
 import { buildPrState, EXCERPT_MAX_CHARS } from "./pr-state";
 import type { PrNode } from "./pr-query";
-import { bot, checkRun, comment, HEAD_SHA, OLD_SHA, prNode, review, statusContext, thread, user } from "./pr-fixtures";
+import { bot, checkRun, comment, HEAD_SHA, OLD_SHA, prNode, review, statusContext, thread, user } from "../testing/github/pr-fixtures";
 
 const VIEWER = "simon";
 

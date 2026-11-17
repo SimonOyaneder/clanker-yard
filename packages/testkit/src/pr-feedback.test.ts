@@ -55,9 +55,9 @@ async function setup({ pack = PACK, draft = true }: { pack?: object | null; draf
   const store: Store = openStore({ path: ":memory:" });
   const repo: TempGitRepo = tempGitRepo({ remote: true, commits: [{ message: "chore: base", files: { "a.txt": "a\n" } }], branches: { feat: [{ message: "feat: algo", files: { "b.txt": "b\n" } }] } });
   const sim: GitHubSim = await startGitHubSim({ origin: repo, repo: REPO, token: TOKEN, bot: BOT });
-  const connections: Connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), { github: { baseUrl: sim.baseUrl } });
+  const connections: Connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
-  const packs = createPacks({ defs: createDefs(store) });
+  const packs = createPacks({ defs: createDefs({ store }) });
   if (pack) {
     const packDir = join(dir, "pack");
     mkdirSync(packDir);

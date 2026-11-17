@@ -13,7 +13,7 @@ describe("update por slug", () => {
   function setup() {
     const store = openStore({ path: ":memory:" });
     open.push(store);
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     defs.register("profile", Profile);
     const writer = createDefWriter({ defs, flows: { validate: () => ({ errors: [], warnings: [] }), save: () => { throw new Error("no es un flujo"); } } });
     const { id } = defs.save({ kind: "profile", slug: "default", scope: "user", body: { roles: { dev: { model: "sonnet" } } }, source: "ui" });

@@ -384,8 +384,8 @@ describe("pureza", () => {
 });
 
 describe("repo de la issue", () => {
-  const FRONT = "repo_front";
-  const BACK = "repo_back";
+  const FRONT: RepoId = "repo_front";
+  const BACK: RepoId = "repo_back";
   const repoOf = (repoId: string) => repoId as ClankerProject["repos"][number]["repoId"];
   const twoRepos = project({
     repos: [

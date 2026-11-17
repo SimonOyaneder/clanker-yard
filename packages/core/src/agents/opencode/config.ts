@@ -1,4 +1,5 @@
 import type { JsonSchema } from "@clanker/api";
+import { pickEnv } from "../../procs/env";
 import type { RunSpec } from "../runtime";
 
 /** El agente de opencode con que corren las sesiones del core: uno propio, para que el `build` del usuario no le cambie el prompt. */
@@ -81,14 +82,7 @@ export function configFor(spec: Pick<RunSpec, "tools" | "native" | "hooks" | "sy
 }
 
 /** De `baseEnv`, solo lo que opencode necesita para encontrar sus credenciales, sus sesiones y los comandos. */
-export function inheritedEnv(baseEnv: Record<string, string | undefined>): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of INHERITED_ENV) {
-    const value = baseEnv[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
-}
+export const inheritedEnv = (baseEnv: Record<string, string | undefined>): Record<string, string> => pickEnv(INHERITED_ENV, baseEnv);
 
 export interface ServerEnvInput {
   baseEnv: Record<string, string | undefined>;

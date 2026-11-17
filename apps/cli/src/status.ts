@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import type { Command } from "./cli";
+import type { Command } from "./command";
 
 export const status: Command = {
   usage: "clanker status [--json]",

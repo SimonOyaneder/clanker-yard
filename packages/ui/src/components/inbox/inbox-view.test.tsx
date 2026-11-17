@@ -97,7 +97,7 @@ test("elegir una opción con su número saca la decisión de las pendientes y re
   expect(resolve).not.toHaveBeenCalled()
   await act(() => vi.advanceTimersByTimeAsync(UNDO_MS + 10))
 
-  expect(resolve).toHaveBeenCalledWith(expect.stringMatching(/^dec_/), "ready")
+  expect(resolve).toHaveBeenCalledWith({ id: expect.stringMatching(/^dec_/), option: "ready" })
   expect((await data.decisions({ status: ["answered"] })).map((d) => d.resolution)).toContainEqual({ option: "ready" })
   expect((await data.runs()).find((r) => r.id.endsWith("4"))?.status).toBe("running")
 })
@@ -151,7 +151,7 @@ test("una alerta no tiene botones para resolver: se cierra sola y lleva a Conexi
 test("sin pendientes dice qué pasa y cuántas se resolvieron hoy, y ofrece ver las resueltas", async () => {
   const data = createMemoryAppData(NOW)
   const closed = (await data.decisions()).filter((d) => d.status === "pending")
-  for (const d of closed) await data.resolveDecision(d.id, d.options[0] ?? "seen")
+  for (const d of closed) await data.resolveDecision({ id: d.id, option: d.options[0] ?? "seen" })
   await openInbox(data)
 
   expect(screen.getByText("No hay nada esperando tu decisión.")).toBeTruthy()

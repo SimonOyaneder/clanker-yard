@@ -6,6 +6,7 @@ import { ApplyArgs, cleanMessage, commitsApplyAction } from "../../commits/apply
 import { preparePush } from "../../commits/prepare-push";
 import type { Connections } from "../../connections/connections";
 import { openDecision } from "../../decisions/decisions";
+import { githubUnauthorized } from "../../breakers/breakers";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
 import { claimPr } from "../../flows/subjects";
 import type { Packs } from "../../packs/packs";
@@ -13,7 +14,8 @@ import type { Recipes } from "../../recipe/recipe";
 import { newId } from "../../store/conventions";
 import { type CombinedBaseParent, combinedBases, issues, prParents, pullRequests, runs, workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
-import { RebaseError, type RepoConfig, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
+import type { RepoConfig } from "../../repos/repos";
+import { RebaseError, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
 import type { GitHubClient } from "../client";
 import { pushOrThrow } from "./push";
 import { messageOf } from "../../errors/format";
@@ -176,7 +178,7 @@ async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, r
   if (watched.every((branch) => open.has(branch))) return unchanged;
 
   if ((await workspaces.fetch(row.repoId)) === "unauthorized") {
-    throw new Error(`GitHub rechazó el token de ${remote.account}: reconecta la cuenta para publicar ${ws.branch}.`);
+    throw githubUnauthorized(remote.account, `traer el repo para publicar ${ws.branch}`);
   }
   const parents = declared.filter((parent) => open.has(parent.branch));
   const baseRef = parents[0]?.branch ?? defaultBranch;

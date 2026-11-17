@@ -1,6 +1,7 @@
-import type { IssueId, RepoId } from "@clanker/api";
+import type { IssueId, PrRef, RepoId } from "@clanker/api";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { pullRequests } from "../store/schema";
+import type { Repos } from "../repos/repos";
 import type { Store } from "../store/store";
 import type { PrRow } from "./pr-cache";
 
@@ -9,6 +10,15 @@ import type { PrRow } from "./pr-cache";
 // en las acciones que las hacen (`pr.publish`, el restack, `republish`), cada una dentro de su transacción.
 
 type Db = Store["db"];
+
+/**
+ * El `PrRef` de GitHub de una fila: la cuenta y el `owner/name` salen del remoto de su repo. `undefined` si el repo ya
+ * no está registrado o no tiene remoto (sin cuenta de GitHub conectada).
+ */
+export function prRefOf(repos: Pick<Repos, "get" | "config">, row: Pick<PrRow, "repoId" | "number">): PrRef | undefined {
+  const remote = repos.get(row.repoId) && repos.config(row.repoId).remote;
+  return remote ? { account: remote.account, repo: remote.repo, number: row.number } : undefined;
+}
 
 /** El PR por su id interno (`pr_...`), sea del sistema o no. */
 export function prById(db: Db, id: string): PrRow | undefined {

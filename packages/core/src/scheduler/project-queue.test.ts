@@ -5,13 +5,13 @@ import { z } from "zod";
 import { createDefs } from "../defs/defs";
 import { createProjects, ProjectNotFoundError, type Projects } from "../projects/projects";
 import { newId } from "../store/conventions";
-import { pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createIssues, type Issues } from "../tracker/issues";
 import { createLocalTracker, type LocalTracker } from "../tracker/local";
 import type { Tracker } from "../tracker/tracker";
 import { createRepos, type Repos } from "../repos/repos";
 import { createProjectQueue, QueueUnavailableError } from "./project-queue";
+import { seedPr } from "../testing/pull-requests";
 
 let store: Store;
 let local: LocalTracker;
@@ -23,13 +23,13 @@ let readPr: (ref: PrRef) => Promise<PrState>;
 
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
-  local = createLocalTracker(store);
-  issues = createIssues(store, local);
-  const defs = createDefs(store);
+  local = createLocalTracker({ store });
+  issues = createIssues({ store, local });
+  const defs = createDefs({ store });
   defs.register("flow", z.unknown());
   defs.register("profile", z.unknown());
   projects = createProjects({ store, defs });
-  repos = createRepos(store, { remote: (repo) => ({ url: `https://example.com/${repo}.git`, repo, account: "octocat" }) });
+  repos = createRepos({ store, remote: (repo) => ({ url: `https://example.com/${repo}.git`, repo, account: "octocat" }) });
   reads = [];
   readPr = () => Promise.reject(new Error("no se esperaba leer un PR"));
 });
@@ -48,6 +48,7 @@ const strictTracker = (): Tracker => ({
   setStatus: () => Promise.reject(new Error("la cola no cambia estados")),
   comment: () => Promise.reject(new Error("la cola no comenta")),
   changesSince: () => Promise.reject(new Error("la cola no sincroniza")),
+  currentCursor: () => Promise.reject(new Error("la cola no sincroniza")),
 });
 
 const queueOf = () => createProjectQueue({ store, projects, issues, repos, trackers: trackersByKind({ local: strictTracker() }), prs: { get: (ref) => (reads.push(ref), readPr(ref)) } });
@@ -64,12 +65,7 @@ async function sync(projectId: ProjectId) {
 }
 
 function openPr(issueId: IssueId, repoId: RepoId, number: number, headRef: string, detail?: PrState) {
-  store.tx((tx) =>
-    tx.db
-      .insert(pullRequests)
-      .values({ id: newId("pr"), repoId, number, nodeId: `n${number}`, headRef, baseRef: "main", headSha: "abc", state: "open", isDraft: true, issueId, owned: true, detail })
-      .run(),
-  );
+  seedPr(store, { repoId, number, headRef, headSha: "abc", isDraft: true, issueId, detail });
 }
 
 const prState = (state: PrState["state"], ci: PrState["ci"]["state"]): PrState => ({

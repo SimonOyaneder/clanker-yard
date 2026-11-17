@@ -12,13 +12,13 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { useEffect, useMemo, useState } from "react"
-import type { OpenPr } from "@/lib/prs"
+import type { OpenPr } from "@/lib/prs/prs"
 import { useColorMode } from "@/hooks/use-color-mode"
 import { useHost } from "@/host"
-import { buildStackForest, layoutStackGroups, listStackGroups } from "@/lib/stack"
-import { NODE_HEIGHT, NODE_WIDTH, PRNode, type PRNodeData } from "./pr-node"
+import { buildStackForest, layoutStackGroups, listStackGroups } from "@/lib/prs/stack"
+import { NODE_HEIGHT, NODE_WIDTH, PrNode, type PrNodeData } from "./pr-node"
 
-const nodeTypes = { pr: PRNode }
+const nodeTypes = { pr: PrNode }
 
 /** La clave de la issue que originó el PR, con las issues de todos los proyectos. */
 const issueKeyOf = (pr: OpenPr, issueKeys: ReadonlyMap<string, string>) => (pr.issueId === null ? undefined : issueKeys.get(pr.issueId))
@@ -30,7 +30,7 @@ function layoutStacks(
   dimmed: Set<string>,
   issueKeys: ReadonlyMap<string, string>,
   heights: ReadonlyMap<string, number>,
-): { nodes: Node<PRNodeData>[]; edges: Edge[] } {
+): { nodes: Node<PrNodeData>[]; edges: Edge[] } {
   const forest = buildStackForest(prs)
   const positions = layoutStackGroups(forest, listStackGroups(forest), {
     width: NODE_WIDTH,
@@ -38,7 +38,7 @@ function layoutStacks(
     maxRowWidth: MAX_ROW_WIDTH,
     gap: GROUP_GAP,
   })
-  const nodes: Node<PRNodeData>[] = [...positions].map(([id, position]) => ({
+  const nodes: Node<PrNodeData>[] = [...positions].map(([id, position]) => ({
     id,
     type: "pr",
     position,
@@ -100,9 +100,9 @@ function GraphInner({ prs, dimmed, issueKeys, layoutKey }: { prs: OpenPr[]; dimm
       elementsSelectable={false}
       // Sin un handler de click, xyflow les pone pointer-events: none a los nodos que no se
       // seleccionan ni arrastran: el click caía en el fondo y la tarjeta nunca abría el PR.
-      onNodeClick={(_e, n) => host.openExternal((n.data as PRNodeData).pr.state.url)}
+      onNodeClick={(_e, n) => host.openExternal((n.data as PrNodeData).pr.state.url)}
       proOptions={{ hideAttribution: true }}
-      className="cc-flow"
+      className="flow-canvas"
     >
       <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
       <Controls position="bottom-right" showInteractive={false} />

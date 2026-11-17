@@ -469,14 +469,14 @@ export function createMemoryAppData(now = Date.now()): AppData {
       projects.push(created)
       return created
     },
-    updateProject: async (projectId, patch) => {
+    updateProject: async ({ id: projectId, ...patch }) => {
       const project = projectOf(projectId)
       if (!project) throw new Error(`No existe el proyecto ${projectId}`)
       Object.assign(project, patch)
       return { ...project }
     },
-    skipIssue: async (_projectId, issueId, skip) => void (skip ? skipped.add(issueId) : skipped.delete(issueId)),
-    boostIssue: async (_projectId, issueId, boost) => {
+    skipIssue: async ({ issueId, skipped: skip }) => void (skip ? skipped.add(issueId) : skipped.delete(issueId)),
+    boostIssue: async ({ issueId, boosted: boost }) => {
       const at = boosted.indexOf(issueId)
       if (at >= 0) boosted.splice(at, 1)
       if (boost) boosted.unshift(issueId)
@@ -513,7 +513,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
     breakers: async () => breakers.map((b) => ({ ...b })),
     openPrs: async () => prs.map((p) => ({ ...p })),
     refreshPrs: async () => {},
-    setPrHold: async (ref, hold) => {
+    setPrHold: async ({ ref, hold }) => {
       const found = prOf(ref)
       // Como el core: el hold apaga la oferta y el merge automático.
       found.state = { ...found.state!, hold, merge: { ...found.state!.merge, offer: hold ? false : found.state!.merge.ready, auto: false } }
@@ -603,13 +603,13 @@ export function createMemoryAppData(now = Date.now()): AppData {
         steps: [...cancelOpen(r.steps), step(nextId++, target.nodeId, "pending", { visit: Math.max(...r.steps.filter((st) => st.nodeId === target.nodeId).map((st) => st.visit)) + 1, round: target.round })],
       }))
     },
-    steerStep: async (stepId, message) => {
+    steerStep: async ({ stepId, message }) => {
       const { run: owner, step: target } = ownerOf(stepId)
       if (!message.trim()) throw new Error("El mensaje para el agente está vacío.")
       if (target.status === "done") throw new Error(`El paso "${target.nodeId}" está done: un mensaje solo llega a un agente en curso, pendiente o que falló.`)
       return owner
     },
-    forceOutcome: async (stepId, outcome) => {
+    forceOutcome: async ({ stepId, outcome }) => {
       const { run: owner, step: target } = ownerOf(stepId)
       return update(owner.id, (r) => ({ steps: r.steps.map((st) => (st.id === target.id ? { ...st, status: "done", outcome, error: null } : st)) }))
     },
@@ -625,7 +625,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
         .filter((d) => (!filter.projectId || d.projectId === filter.projectId) && (!filter.runId || d.runId === filter.runId) && (!filter.status || filter.status.includes(d.status)) && (!filter.kind || filter.kind.includes(d.kind)))
         .toSorted((a, b) => b.createdAt - a.createdAt)
         .map((d) => ({ ...d })),
-    resolveDecision: async (decisionId, option) => {
+    resolveDecision: async ({ id: decisionId, option }) => {
       const found = decisions.find((d) => d.id === decisionId)
       if (!found) throw new Error(`No existe la decisión ${decisionId}`)
       if (found.status !== "pending") throw new Error(`La decisión ${decisionId} ya está ${found.status}: no hay nada que resolver.`)
@@ -706,7 +706,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
       if (key.startsWith("bad")) throw new Error("Anthropic rechazó la API key de Claude: revisa que sea válida y esté activa, y guárdala de nuevo.")
       return connect({ provider: "claude", account: "api-key", scopes: [], status: "active" })
     },
-    disconnect: async (provider, account) => {
+    disconnect: async ({ provider, account }) => {
       const at = connections.findIndex((c) => c.provider === provider && c.account === account)
       if (at >= 0) connections.splice(at, 1)
     },
@@ -787,12 +787,12 @@ export function createMemoryAppData(now = Date.now()): AppData {
       defsStore.push(created)
       return { ...created }
     },
-    archiveDef: async (kind, defId) => {
+    archiveDef: async ({ kind, id: defId }) => {
       const found = writableDef(kind, defId)
       found.archivedAt ??= Date.now()
       return { ...found }
     },
-    restoreDef: async (kind, defId) => {
+    restoreDef: async ({ kind, id: defId }) => {
       const found = writableDef(kind, defId)
       found.archivedAt = null
       return { ...found }

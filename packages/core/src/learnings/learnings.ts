@@ -5,9 +5,10 @@ import { newId } from "../store/conventions";
 import { learnings } from "../store/schema";
 import type { Store, Tx } from "../store/store";
 import { LearningScreenError, screenLearnings } from "./screen";
+import { BadRequestError, NotFoundError, requireUiOrigin, UiOnlyError } from "../errors/domain";
 
 /** El learning pedido no existe. */
-export class LearningNotFoundError extends Error {
+export class LearningNotFoundError extends NotFoundError {
   constructor(id: LearningId) {
     super(`No existe el learning ${id}.`);
   }
@@ -16,7 +17,7 @@ export class LearningNotFoundError extends Error {
 export { LearningScreenError };
 
 /** El cambio pedido choca con otro learning: ya existe el mismo texto en el mismo alcance. */
-export class LearningUpdateError extends Error {}
+export class LearningUpdateError extends BadRequestError {}
 
 /** Dónde y para quién aplica un brief: el proyecto de la corrida, el repo de su worktree y el rol del paso. */
 export interface BriefScope {
@@ -31,10 +32,17 @@ export interface Learnings {
   get(id: LearningId): Learning | undefined;
   /** El mismo texto en el mismo alcance devuelve el que ya había, sin evento. */
   propose(input: { projectId?: ProjectId; repoId?: RepoId; text: string; roles: string[]; tags: string[] }, by: Origin): Learning;
+  /**
+   * Lo aprobado entra a los briefs de las corridas que siguen sin otra revisión: solo lo aprueba una persona desde la
+   * app (`by: "ui"`). Otro origin lanza `UiOnlyError`: un agente que aprobara por el CLI se dejaría instrucciones a sí mismo.
+   */
   approve(id: LearningId, by: Origin): Learning;
   /** Un `proposed` queda `rejected` y un `approved` queda `archived`. */
   reject(id: LearningId, by: Origin): Learning;
-  /** Cambia texto, roles o tags y emite `learning.updated` con los campos que llegaron y quién lo pidió. */
+  /**
+   * Cambia texto, roles o tags y emite `learning.updated` con los campos que llegaron y quién lo pidió. Uno aprobado
+   * solo lo edita la app (`UiOnlyError` si no): el texto nuevo entraría a los briefs sin otra aprobación.
+   */
   update(patch: LearningPatch, by: Origin): Learning;
   /**
    * Los textos `approved` que entran al brief de ese alcance: los del repo primero y luego los del
@@ -53,7 +61,6 @@ export interface Learnings {
 }
 
 /** Con `runtime` el core puede filtrar los propuestos (`screen`); sin él, `screen` falla. */
-/** Sin `runtime` no se pueden filtrar los propuestos (`screen`). */
 export function createLearnings({ store, runtime }: { store: Store; runtime?: AgentRuntime }): Learnings {
   const find = (db: Store["db"] | Tx["db"], id: LearningId) => db.select().from(learnings).where(eq(learnings.id, id)).get();
   const need = (db: Store["db"] | Tx["db"], id: LearningId) => {
@@ -93,7 +100,10 @@ export function createLearnings({ store, runtime }: { store: Store; runtime?: Ag
         .all(),
     get: (id) => find(store.db, id),
     propose: (input, by) => store.tx((tx) => proposeLearning(tx, { ...input, source: by === "import" ? "import" : "human", origin: by })),
-    approve: (id, by) => move(id, by, (status) => (status === "approved" ? undefined : { to: "approved", type: "learning.approved" })),
+    approve: (id, by) => {
+      requireUiOrigin(by, "Un learning lo aprueba una persona desde la app.");
+      return move(id, by, (status) => (status === "approved" ? undefined : { to: "approved", type: "learning.approved" }));
+    },
     reject: (id, by) =>
       move(id, by, (status) => {
         if (status === "proposed") return { to: "rejected", type: "learning.rejected" };
@@ -102,6 +112,9 @@ export function createLearnings({ store, runtime }: { store: Store; runtime?: Ag
     update: (patch, by) =>
       store.tx((tx) => {
         const learning = need(tx.db, patch.id);
+        if (learning.status === "approved" && by !== "ui") {
+          throw new UiOnlyError("Un learning aprobado solo se edita desde la app: el texto nuevo entra a los briefs sin otra aprobación.");
+        }
         const { id, ...changes } = patch;
         const text = changes.text ?? learning.text;
         const clash = sameText(tx, text, learning.projectId, learning.repoId);

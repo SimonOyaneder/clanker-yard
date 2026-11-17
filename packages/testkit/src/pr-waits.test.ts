@@ -25,7 +25,7 @@ import {
   type Store,
   createRuntimeRegistry,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { z } from "zod";
 import { createFakeRuntime } from "./fake-runtime";
 import { tempGitRepo, type TempGitRepo } from "./git";
@@ -33,8 +33,6 @@ import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 
 // `pr.botReview`, `pr.ci`, `pr.merged` y `review.requestBot` sobre el GitHub simulado, dentro del motor
 // de flujos real: el sondeo (`probe`), el signal (`match`) y el plazo (`timeout`) de cada wait.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";
@@ -69,10 +67,10 @@ beforeEach(async () => {
   });
   sim = await startGitHubSim({ origin, token: TOKEN });
   pr = sim.openPr({ head: BRANCH });
-  connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
 
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   packs = createPacks({ defs });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
@@ -105,7 +103,7 @@ beforeEach(async () => {
     probeEverySec: 0.01,
   });
   clock = Date.UTC(2026, 10, 15);
-  const repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  const repos = createRepos({ store, remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repoId = repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
   const prs = createPrs({ connections, packs });
   cache = createPrCache({ store, repos, packs, prs, now: () => clock });

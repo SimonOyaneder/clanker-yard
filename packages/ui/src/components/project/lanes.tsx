@@ -9,9 +9,9 @@ import { useLiveQuery } from "@/hooks/use-live"
 import { useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
 import { costUsd, elapsed, tone } from "@/lib/format"
-import { holdsLane, type LaneUsage } from "@/lib/project-ops"
-import { type Stepper, stepperOf } from "@/lib/stepper"
-import type { SubjectLabel } from "@/lib/subject"
+import { holdsLane, type LaneUsage } from "@/lib/project/project-ops"
+import { type Stepper, stepperOf } from "@/lib/project/stepper"
+import type { SubjectLabel } from "@/lib/project/subject"
 import { cn } from "@/lib/utils"
 
 const LANE = {
@@ -215,7 +215,7 @@ function FlowStepper({ stepper }: { stepper: Stepper }) {
             <Hint label={`${item.label} · ${state}`}>
               <div
                 data-state={item.current ? "current" : item.reached ? item.status : "pending"}
-                className={cn("h-1.5 rounded-full bg-muted", item.reached && SEGMENT[item.status], item.current && "cc-blink bg-violet-500")}
+                className={cn("h-1.5 rounded-full bg-muted", item.reached && SEGMENT[item.status], item.current && "animate-blink bg-violet-500")}
               />
             </Hint>
             <span className="sr-only">

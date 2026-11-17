@@ -1,4 +1,6 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { PR_KEYS } from "@/components/prs/pr-menu"
+import { RUN_KEYS } from "@/lib/project/run-commands"
 import { Shortcut } from "./common"
 
 const SECTIONS: { title: string; items: [string, string][] }[] = [
@@ -28,13 +30,13 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
   {
     title: "Corrida",
     items: [
-      ["Ver el grafo del flujo", "G"],
-      ["Ver la línea de tiempo", "L"],
+      ["Ver el grafo del flujo", RUN_KEYS.graph],
+      ["Ver la línea de tiempo", RUN_KEYS.timeline],
       ["Abrir el panel del paso enfocado en el grafo", "⏎"],
-      ["Interrumpir al agente en curso (confirma)", "⌘."],
-      ["Pausar o retomar la corrida", "⇧⌘."],
-      ["Reintentar el paso fallido", "⇧⌘R"],
-      ["Cancelar la corrida (confirma)", "⇧⌘⌫"],
+      ["Interrumpir al agente en curso (confirma)", RUN_KEYS.interrupt],
+      ["Pausar o retomar la corrida", RUN_KEYS.pauseResume],
+      ["Reintentar el paso fallido", RUN_KEYS.retry],
+      ["Cancelar la corrida (confirma)", RUN_KEYS.cancel],
     ],
   },
   {
@@ -92,11 +94,11 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
   {
     title: "Stacks de PR (con un PR enfocado)",
     items: [
-      ["Mergear según la estrategia del pack (confirma)", "M"],
-      ["Pedir review del bot", "B"],
-      ["Rebasear", "R"],
-      ["Marcar o quitar hold (no mergear nunca)", "H"],
-      ["Ver la corrida que abrió el PR", "V"],
+      ["Mergear según la estrategia del pack (confirma)", PR_KEYS.merge],
+      ["Pedir review del bot", PR_KEYS.requestReview],
+      ["Rebasear", PR_KEYS.rebase],
+      ["Marcar o quitar hold (no mergear nunca)", PR_KEYS.hold],
+      ["Ver la corrida que abrió el PR", PR_KEYS.run],
       ["Abrir el PR en GitHub", "⏎"],
     ],
   },

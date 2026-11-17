@@ -30,14 +30,14 @@ afterEach(async () => {
 describe("github", () => {
   async function probeAgainst(status: number) {
     github = await startFakeGitHub(() => ({ status, headers: {}, body: status === 200 ? { login: "simon" } : { message: "Bad credentials" } }));
-    const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: github.baseUrl } });
+    const connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: github.baseUrl } });
     await connections.connect({ provider: "github", account: "simon", scopes: [], token: "tok" }, "ui");
-    return { connections, probe: environmentProbe({ connections, repos: createRepos(store), runtimes: [{ id: "fake" }] }) };
+    return { connections, probe: environmentProbe({ connections, repos: createRepos({ store }), runtimes: [{ id: "fake" }] }) };
   }
 
   test("sin ninguna cuenta conectada sigue pausado", async () => {
-    const connections = createConnections(store, createFileSecrets({ dir }));
-    const probe = environmentProbe({ connections, repos: createRepos(store), runtimes: [{ id: "fake" }] });
+    const connections = createConnections({ store, secrets: createFileSecrets({ dir }) });
+    const probe = environmentProbe({ connections, repos: createRepos({ store }), runtimes: [{ id: "fake" }] });
 
     expect(await probe(GITHUB_SCOPE)).toBe("No hay una cuenta de GitHub conectada.");
   });
@@ -69,7 +69,7 @@ describe("runtime", () => {
     ({ testClaude: () => Promise.resolve({ mode: "subscription", state: "ready", ...status }) }) as unknown as Connections;
 
   test("claude-sdk pasa solo con Claude listo y si no dice por qué", async () => {
-    const repos = createRepos(store);
+    const repos = createRepos({ store });
     const ready = environmentProbe({ connections: claude({}), repos, runtimes: [{ id: "claude-sdk" }] });
     const out = environmentProbe({ connections: claude({ state: "quota_exhausted", message: "Se agotó la cuota de Claude." }), repos, runtimes: [{ id: "claude-sdk" }] });
 
@@ -79,14 +79,14 @@ describe("runtime", () => {
 
   test("otro runtime se prueba con su probe, y sin él no tiene causas de entorno que probar", async () => {
     const opencode = { id: "opencode" as const, probe: () => Promise.resolve("opencode no está instalado.") };
-    const probe = environmentProbe({ connections: claude({ state: "login_expired" }), repos: createRepos(store), runtimes: [{ id: "fake" }, opencode] });
+    const probe = environmentProbe({ connections: claude({ state: "login_expired" }), repos: createRepos({ store }), runtimes: [{ id: "fake" }, opencode] });
 
     expect(await probe(runtimeScope("fake"))).toBeUndefined();
     expect(await probe(runtimeScope("opencode"))).toBe("opencode no está instalado.");
   });
 
   test("claude-sdk solo se prueba con la conexión si el core lo tiene registrado", async () => {
-    const probe = environmentProbe({ connections: claude({ state: "login_expired" }), repos: createRepos(store), runtimes: [{ id: "fake" }] });
+    const probe = environmentProbe({ connections: claude({ state: "login_expired" }), repos: createRepos({ store }), runtimes: [{ id: "fake" }] });
 
     expect(await probe(runtimeScope("claude-sdk"))).toBeUndefined();
   });
@@ -97,10 +97,10 @@ describe("repo", () => {
     const path = join(dir, "repo");
     mkdirSync(join(path, ".clanker"), { recursive: true });
     if (recipe) writeFileSync(join(path, ".clanker", "recipe.json"), JSON.stringify(recipe));
-    return createRepos(store).add({ name: "api", path });
+    return createRepos({ store }).add({ name: "api", path });
   }
   const probeFor = () =>
-    environmentProbe({ connections: createConnections(store, createFileSecrets({ dir })), repos: createRepos(store), runtimes: [{ id: "fake" }] });
+    environmentProbe({ connections: createConnections({ store, secrets: createFileSecrets({ dir }) }), repos: createRepos({ store }), runtimes: [{ id: "fake" }] });
 
   test("pasa si todos los requires responden y falla nombrando los que no", async () => {
     const id = repoWith({ version: 1, requires: [{ name: "Postgres", check: "true" }, { name: "Redis", check: "exit 1" }, { name: "Doppler", check: "exit 3" }] });

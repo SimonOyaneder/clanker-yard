@@ -1,5 +1,7 @@
-import { BreakerCause, DecisionId, type RepoId } from "@clanker/api";
+import { BreakerCause, DecisionId, RepoId, type ConnectionProvider, type EventOf } from "@clanker/api";
+import { CLAUDE_RUNTIME_ID } from "../agents/claude/models";
 import { closeDecision, openDecision } from "../decisions/decisions";
+import { EnvironmentError } from "../flows/catalog";
 import { createErrorReporter, type ErrorReporter } from "../errors/reporter";
 import { meta } from "../store/schema";
 import { readMetaJson } from "../store/meta-json";
@@ -14,10 +16,22 @@ export const GITHUB_SCOPE = "github";
 /** El prefijo del ámbito de un repo: `repo:<id>`. */
 export const REPO_SCOPE_PREFIX = "repo:";
 export const repoScope = (repoId: RepoId): string => `${REPO_SCOPE_PREFIX}${repoId}`;
+/** El repo de un ámbito `repo:<id>`, si lo es y el id es válido. */
+export function repoOfScope(scope: string): RepoId | undefined {
+  if (!scope.startsWith(REPO_SCOPE_PREFIX)) return undefined;
+  const parsed = RepoId.safeParse(scope.slice(REPO_SCOPE_PREFIX.length));
+  return parsed.success ? parsed.data : undefined;
+}
 export const runtimeScope = (runtime: string): string => `runtime:${runtime}`;
 
-/** El runtime que depende de la conexión `claude`. */
-export const CLAUDE_RUNTIME = "claude-sdk";
+/**
+ * GitHub rechazó el token de `account` al hablar con el remoto (fetch o push). La conexión ya quedó revocada y eso abre
+ * el breaker `github`: es un error del entorno, no del paso, así que el paso espera a que se reconecte en vez de fallar.
+ * `what` dice para qué hacía falta (`pushear cla-1`, `traer <repo>`).
+ */
+export function githubUnauthorized(account: string, what: string): EnvironmentError {
+  return new EnvironmentError(GITHUB_SCOPE, `GitHub rechazó el token de ${account} al ${what}: la conexión quedó revocada, reconéctala.`);
+}
 
 export type { BreakerCause };
 
@@ -88,7 +102,7 @@ export interface BreakersOptions {
   errors?: ErrorReporter;
 }
 
-export function createBreakers({ store, runtimes, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS, errors = createErrorReporter(store) }: BreakersOptions): Breakers {
+export function createBreakers({ store, runtimes, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS, errors = createErrorReporter({ store }) }: BreakersOptions): Breakers {
   const entries = new Map<string, OpenBreaker>();
   const timers = new Map<string, NodeJS.Timeout>();
   const probing = new Set<string>();
@@ -96,8 +110,8 @@ export function createBreakers({ store, runtimes, probe, label = (scope) => scop
   let closed = false;
 
   /** La conexión de la que depende cada ámbito global. */
-  const scopeOfProvider = (provider: unknown): string | undefined =>
-    provider === "github" ? GITHUB_SCOPE : provider === "claude" && runtimes.includes(CLAUDE_RUNTIME) ? runtimeScope(CLAUDE_RUNTIME) : undefined;
+  const scopeOfProvider = (provider: ConnectionProvider): string | undefined =>
+    provider === "github" ? GITHUB_SCOPE : provider === "claude" && runtimes.includes(CLAUDE_RUNTIME_ID) ? runtimeScope(CLAUDE_RUNTIME_ID) : undefined;
 
   /** Guarda lo que sobrevive a un corte, en la misma transacción que el cambio. */
   function persist(tx: Tx): void {
@@ -181,22 +195,16 @@ export function createBreakers({ store, runtimes, probe, label = (scope) => scop
     schedule(entries.get(scope)!);
   }
 
-  function onEvent({ type, payload }: { type: string; payload: Record<string, unknown> }): void {
-    if (type === "sync.rate_limited") {
-      const resetAt = typeof payload.resetAt === "number" ? payload.resetAt : undefined;
-      trip({
-        scope: GITHUB_SCOPE,
-        cause: "rate_limited",
-        reason: "GitHub cortó las requests por cuota.",
-        ...(resetAt === undefined ? {} : { resetsAt: resetAt }),
-      });
+  function onEvent(event: EventOf<"connection.changed" | "sync.rate_limited">): void {
+    if (event.type === "sync.rate_limited") {
+      trip({ scope: GITHUB_SCOPE, cause: "rate_limited", reason: "GitHub cortó las requests por cuota.", resetsAt: event.payload.resetAt });
       return;
     }
-    const scope = scopeOfProvider(payload.provider);
+    const { provider, account, status } = event.payload;
+    const scope = scopeOfProvider(provider);
     if (scope === undefined) return;
-    const { status, account } = payload;
     if (status === "expired" || status === "revoked") {
-      trip({ scope, cause: "connection_lost", reason: `La conexión de ${String(payload.provider)} (${String(account)}) quedó ${String(status)}: reconéctala.` });
+      trip({ scope, cause: "connection_lost", reason: `La conexión de ${provider} (${account}) quedó ${status}: reconéctala.` });
     } else if (entries.has(scope) && !probing.has(scope)) {
       // Reconectar la causa: se prueba ya, sin esperar al backoff.
       void attempt(scope);

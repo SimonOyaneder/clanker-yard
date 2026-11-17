@@ -1,6 +1,6 @@
 import type { Role } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { harness as createHarness, okReport, reportSchema, type AgentCall, WAIT } from "./harness";
+import { harness as createHarness, okReport, reportSchema, type AgentCall, WAIT } from "../testing/flows-harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {

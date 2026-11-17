@@ -15,6 +15,14 @@ export const RunStatus = z.enum([
 ]);
 export type RunStatus = z.infer<typeof RunStatus>;
 
+/**
+ * Los estados en que una corrida sigue viva: ocupa su sujeto (o espera tomarlo) y todavía puede avanzar. Son los del
+ * índice parcial de `runs` del core; `done`, `failed` y `canceled` son finales.
+ */
+export const LIVE_RUN_STATUSES = ["queued", "running", "waiting", "parked", "paused"] as const satisfies readonly RunStatus[];
+
+export const isLiveRun = (status: RunStatus): boolean => (LIVE_RUN_STATUSES as readonly RunStatus[]).includes(status);
+
 export const ParkReason = z.enum(["gate", "needs_human", "limit"]);
 export type ParkReason = z.infer<typeof ParkReason>;
 

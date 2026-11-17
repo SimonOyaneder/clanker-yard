@@ -1,5 +1,5 @@
 import type { DefRecord } from "@clanker/api"
-import { isInternal } from "./defs-library"
+import { isInternal } from "./flows/defs-library"
 
 /** El nombre legible de un flujo (`name` de su body) y, si la def no lo trae (un perfil), su slug. */
 export function defName(def: DefRecord): string {

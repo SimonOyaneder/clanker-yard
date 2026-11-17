@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { StreamableHTTPClientTransport, isJSONRPCRequest, type JSONRPCMessage } from "@modelcontextprotocol/client";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import type { Command } from "./cli";
+import type { Command } from "./command";
 
 /** JSON-RPC "internal error". */
 const INTERNAL_ERROR = -32603;

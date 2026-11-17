@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useLiveQuery } from "@/hooks/use-live"
-import { type RoleDraft, roleDraftOf, roleFromDraft, splitList } from "@/lib/def-form"
+import { type RoleDraft, roleDraftOf, roleFromDraft, splitList } from "@/lib/flows/def-form"
 
 interface Props {
   def: DefRecord

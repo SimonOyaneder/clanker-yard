@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   query as sdkQuery,
@@ -9,28 +9,34 @@ import {
   type SDKMessage,
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { Procs } from "../../procs/procs";
+import { killGroup, type Procs } from "../../procs/procs";
 import { usdToMicros } from "../../store/conventions";
-import type {
-  AgentEvent,
-  AgentRun,
-  AgentRuntime,
-  ResumeSpec,
-  RunResult,
-  RunSpec,
-  SessionRef,
-  Usage,
+import {
+  addUsage,
+  emptyUsage,
+  NO_TOKENS,
+  subtractTokens,
+  sumTokens,
+  type AgentEvent,
+  type AgentRun,
+  type AgentRuntime,
+  type ResumeSpec,
+  type RunResult,
+  type RunSpec,
+  type SessionRef,
+  type TokenCounts,
+  type Usage,
 } from "../runtime";
 import type { ClaudeCredentials } from "./credentials";
 import { userConfigDir } from "../context";
-import { writeGitConfig } from "../agent-env";
+import { agentDirsPreparer, createSessionStore, writeGitConfig } from "../agent-env";
 import { createEventQueue } from "../event-queue";
-import { CLAUDE_OPTIONS } from "./models";
+import { CLAUDE_OPTIONS, CLAUDE_RUNTIME_ID } from "./models";
 import { agentEnv, toOptions } from "./options";
 import { credentialMismatch, noteSignals, outcomeOf, type Signals } from "./outcome";
 import { startRecording } from "./record";
 import { skillDirs, watchDirs } from "./skills-watch";
-import { transcriptFile } from "./transcript";
+import { createTranscriptAppender, detailOf, transcriptFile } from "../transcripts";
 import { messageOf } from "../../errors/format";
 
 /** La herramienta con la que Claude Code entrega el reporte cuando se le pide `outputFormat`. */
@@ -67,17 +73,6 @@ export interface ClaudeRuntimeOptions {
   record?: string;
 }
 
-/** Tras bajar el grupo de un agente con SIGTERM, lo que siga vivo a los 10 s cae con SIGKILL (`docs/design.html#d-flows`, "Cancelar"). */
-export const KILL_GROUP_AFTER_MS = 10_000;
-
-/**
- * Lo que `resume` necesita y `ResumeSpec` no trae; se guarda al iniciar para sobrevivir a un reinicio del
- * core. Sin el contexto: cada lanzamiento lo vuelve a leer del original.
- */
-interface StoredSession {
-  spec: RunSpec;
-}
-
 /**
  * Runtime `claude-sdk`: lanza Claude Code con el Agent SDK, sin tocar credenciales
  * (`docs/claude-subscription.md`) y con un entorno sin tokens de GitHub ni Linear.
@@ -105,55 +100,24 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
       const child = spawn(command, args, { cwd, env, detached: true, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
       child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk.toString()));
       procs.track(child, { kind: "agent", stepRunId });
-      signal.addEventListener(
-        "abort",
-        () => {
-          if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-          const pid = child.pid;
-          try {
-            process.kill(-pid, "SIGTERM");
-          } catch {
-            // Terminó entre medio.
-            return;
-          }
-          const hardKill = setTimeout(() => {
-            try {
-              process.kill(-pid, "SIGKILL");
-            } catch {
-              // Terminó entre medio.
-            }
-          }, options.killAfterMs ?? KILL_GROUP_AFTER_MS);
-          hardKill.unref();
-          child.once("close", () => clearTimeout(hardKill));
-        },
-        { once: true },
-      );
+      signal.addEventListener("abort", () => killGroup(child, options.killAfterMs), { once: true });
       return child;
     };
   }
 
-  let prepared: Promise<void> | undefined;
-  function prepare(): Promise<void> {
-    prepared ??= (async () => {
-      // Siempre vacía: lo que un agente haya dejado en una corrida anterior no cuenta como login de gh.
-      await rm(paths.ghConfigDir, { recursive: true, force: true });
-      await mkdir(paths.ghConfigDir, { recursive: true });
-      await mkdir(paths.transcripts, { recursive: true });
-      await mkdir(paths.sessions, { recursive: true });
-      // Las instalaciones anteriores a la identidad por usuario dejaron aquí un gitconfig global con
-      // clanker@localhost: nunca debe usarse.
+  const prepare = agentDirsPreparer({
+    ghConfigDir: paths.ghConfigDir,
+    dirs: [paths.transcripts, paths.sessions, paths.gitConfigs],
+    // Las instalaciones anteriores a la identidad por usuario dejaron aquí un gitconfig global con
+    // clanker@localhost: nunca debe usarse.
+    extra: async () => {
       const legacyGitConfig = join(home, "agent-env", "gitconfig");
       if ((await stat(legacyGitConfig).catch(() => undefined))?.isFile()) await rm(legacyGitConfig);
-      await mkdir(paths.gitConfigs, { recursive: true });
-    })().catch((error: unknown) => {
-      prepared = undefined;
-      throw error;
-    });
-    return prepared;
-  }
+    },
+  });
+  const sessions = createSessionStore(paths.sessions, CLAUDE_RUNTIME_ID);
 
   const transcriptOf = (sessionId: string) => transcriptFile(home, sessionId);
-  const storedOf = (sessionId: string) => join(paths.sessions, `${sessionId}.json`);
 
   async function launch(spec: RunSpec, prompt: string, resumeId: string | undefined): Promise<AgentRun> {
     const credentials = await options.credentials();
@@ -167,7 +131,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     };
 
     const events = createEventQueue<AgentEvent>();
-    const transcript = createTranscript(transcriptOf);
+    const transcript = createTranscriptAppender();
     let sessionId: string | undefined;
     let sessionReady!: (id: string) => void;
     let sessionFailed!: (error: unknown) => void;
@@ -179,7 +143,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
     const logCompaction: HookCallback = async (input) => {
       if (input.hook_event_name === "PreCompact") {
         events.push({ type: "compaction" });
-        transcript.append(input.session_id, {
+        transcript.append(transcriptOf(input.session_id), {
           type: "clanker",
           subtype: "pre_compact",
           trigger: input.trigger,
@@ -294,7 +258,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
         for await (const message of stream) {
           const id = message.session_id ?? sessionId;
           if (id === undefined) throw new Error("Claude mandó un mensaje sin sesión antes de iniciarla.");
-          transcript.append(id, message);
+          transcript.append(transcriptOf(id), message);
           recording?.message(message);
           onMessage(message);
         }
@@ -349,7 +313,7 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
 
     const startedId = await session;
     return {
-      ref: { runtime: "claude-sdk", sessionId: startedId, cwd: spec.cwd },
+      ref: { runtime: CLAUDE_RUNTIME_ID, sessionId: startedId, cwd: spec.cwd },
       events,
       interrupt: async () => stop("El run fue interrumpido."),
       result: finished,
@@ -357,23 +321,21 @@ export function createClaudeRuntime(options: ClaudeRuntimeOptions): AgentRuntime
   }
 
   return {
-    id: "claude-sdk",
-    capabilities: { structuredOutput: true, costPerTurn: false, resume: true, fork: false, steer: false },
+    id: CLAUDE_RUNTIME_ID,
+    capabilities: { costPerTurn: false },
 
     describe: () => Promise.resolve(CLAUDE_OPTIONS),
 
     async start(spec) {
       await prepare();
       const run = await launch(spec, spec.prompt, undefined);
-      const stored: StoredSession = { spec: { ...spec, native: undefined, references: [], stepRunId: undefined } };
-      await writeFile(storedOf(run.ref.sessionId), JSON.stringify(stored));
+      await sessions.save(run.ref.sessionId, spec);
       return run;
     },
 
     async resume(ref: SessionRef, message: string, resumeSpec: ResumeSpec) {
       await prepare();
-      const stored = await readStored(storedOf(ref.sessionId), ref.sessionId);
-      const spec: RunSpec = { ...stored.spec, ...resumeSpec, cwd: ref.cwd, prompt: message };
+      const spec: RunSpec = { ...(await sessions.load(ref.sessionId)), ...resumeSpec, cwd: ref.cwd, prompt: message };
       return launch(spec, message, ref.sessionId);
     },
   };
@@ -400,17 +362,6 @@ function createStderrTail(): StderrTail {
 function withStderr(error: unknown, stderr: string): unknown {
   if (stderr === "" || !(error instanceof Error)) return error;
   return new Error(`${error.message}\nstderr de claude: ${stderr}`, { cause: error });
-}
-
-async function readStored(file: string, sessionId: string): Promise<StoredSession> {
-  try {
-    return JSON.parse(await readFile(file, "utf8")) as StoredSession;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    throw new Error(
-      `No hay registro de la sesión ${sessionId} en ${file}: el runtime claude-sdk solo retoma las sesiones que él inició.`,
-    );
-  }
 }
 
 type SDKUsage = Extract<SDKMessage, { type: "assistant" }>["message"]["usage"];
@@ -441,7 +392,7 @@ function createTurnUsage(
   previous: Totals,
   emit: (event: Extract<AgentEvent, { type: "usage" | "usage_remainder" }>) => void,
 ): TurnUsage {
-  const tally = emptyUsage(credentials);
+  const tally = emptyUsage(costSourceOf(credentials));
   let turn: { id: string; model: string; usage: SDKUsage } | undefined;
   const counted = new Set<string>();
   const emitted = new Map<string, TokenCounts>();
@@ -504,31 +455,6 @@ function costSourceOf(credentials: ClaudeCredentials): Usage["costSource"] {
   return credentials.mode === "subscription" ? "estimate" : "runtime";
 }
 
-function emptyUsage(credentials: ClaudeCredentials): Usage {
-  return {
-    turns: 0,
-    tokensIn: 0,
-    tokensOut: 0,
-    tokensCacheRead: 0,
-    tokensCacheWrite: 0,
-    costMicros: 0,
-    costSource: costSourceOf(credentials),
-  };
-}
-
-function addUsage(into: Usage, usage: Usage): void {
-  into.turns += usage.turns;
-  into.tokensIn += usage.tokensIn;
-  into.tokensOut += usage.tokensOut;
-  into.tokensCacheRead += usage.tokensCacheRead;
-  into.tokensCacheWrite += usage.tokensCacheWrite;
-  into.costMicros += usage.costMicros;
-}
-
-type TokenCounts = Pick<Usage, "tokensIn" | "tokensOut" | "tokensCacheRead" | "tokensCacheWrite">;
-
-const NO_TOKENS: TokenCounts = { tokensIn: 0, tokensOut: 0, tokensCacheRead: 0, tokensCacheWrite: 0 };
-
 /** Acumulado de una sesión según un `result`, por modelo: el SDK lo arrastra al retomar. */
 interface Totals {
   costUsd: number;
@@ -548,26 +474,6 @@ function totalsOf(result: SDKResultMessage): Totals {
     });
   }
   return { costUsd: result.total_cost_usd, byModel };
-}
-
-function subtractTokens(a: TokenCounts, b: TokenCounts = NO_TOKENS): TokenCounts {
-  return {
-    tokensIn: a.tokensIn - b.tokensIn,
-    tokensOut: a.tokensOut - b.tokensOut,
-    tokensCacheRead: a.tokensCacheRead - b.tokensCacheRead,
-    tokensCacheWrite: a.tokensCacheWrite - b.tokensCacheWrite,
-  };
-}
-
-function sumTokens(counts: Iterable<TokenCounts>): TokenCounts {
-  const sum = { ...NO_TOKENS };
-  for (const c of counts) {
-    sum.tokensIn += c.tokensIn;
-    sum.tokensOut += c.tokensOut;
-    sum.tokensCacheRead += c.tokensCacheRead;
-    sum.tokensCacheWrite += c.tokensCacheWrite;
-  }
-  return sum;
 }
 
 /**
@@ -612,33 +518,4 @@ async function totalsAtEndOf(transcript: string): Promise<Totals> {
     if (record.type === "result") return totalsOf(record);
   }
   return ZERO_TOTALS;
-}
-
-/** Lo más útil para mostrar en la UI de lo que recibió la herramienta. */
-function detailOf(input: unknown): string | undefined {
-  if (typeof input !== "object" || input === null) return undefined;
-  for (const key of ["file_path", "path", "command", "pattern", "url"]) {
-    const value = (input as Record<string, unknown>)[key];
-    if (typeof value === "string") return value;
-  }
-  return undefined;
-}
-
-function createTranscript(fileOf: (sessionId: string) => string) {
-  let chain: Promise<void> = Promise.resolve();
-  let failure: unknown;
-  return {
-    append(sessionId: string, record: unknown) {
-      const line = `${JSON.stringify(record)}\n`;
-      chain = chain
-        .then(() => appendFile(fileOf(sessionId), line))
-        .catch((error: unknown) => {
-          failure ??= error;
-        });
-    },
-    async flush() {
-      await chain;
-      if (failure !== undefined) throw failure;
-    },
-  };
 }

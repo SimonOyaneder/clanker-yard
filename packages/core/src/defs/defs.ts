@@ -6,6 +6,7 @@ import { newId } from "../store/conventions";
 import { DEF_SCOPES, defs, defVersions } from "../store/schema";
 import type { Store } from "../store/store";
 import { issuesAsLines } from "../errors/format";
+import { BadRequestError } from "../errors/domain";
 
 export type DefScope = (typeof DEF_SCOPES)[number];
 
@@ -52,7 +53,7 @@ export interface DefIssue {
 }
 
 /** El body no cumple el validador de su kind. */
-export class DefValidationError extends Error {
+export class DefValidationError extends BadRequestError {
   constructor(
     readonly kind: DefKind,
     readonly slug: string,
@@ -94,7 +95,7 @@ export interface Defs {
   restore(kind: DefKind, id: string, origin: Origin): void;
 }
 
-export function createDefs(store: Store, now: () => number = Date.now): Defs {
+export function createDefs({ store, now = Date.now }: { store: Store; now?: () => number }): Defs {
   const schemas = new Map<DefKind, ZodType>();
 
   function load(kind: DefKind, id: string, version?: number): Def | undefined {

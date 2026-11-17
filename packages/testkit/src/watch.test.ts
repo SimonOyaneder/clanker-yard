@@ -45,8 +45,6 @@ const WAIT = { timeout: 10_000 };
 // Watch contra el GitHub simulado: qué mira, cuándo, y lo que gasta de cuota. El reloj es el de `clock`
 // (Watch no usa timers en estos tests: cada `wake` es un `watch.tick()`), y el motor de flujos corre real.
 
-vi.setConfig({ testTimeout: 20_000 });
-
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";
 const REPO = "octocat/secret-project";
@@ -85,13 +83,13 @@ beforeEach(async () => {
     },
   });
   sim = await startGitHubSim({ origin, token: TOKEN });
-  connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
 
-  repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  repos = createRepos({ store, remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
-  defs = createDefs(store);
+  defs = createDefs({ store });
   const packs = createPacks({ defs });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
@@ -124,7 +122,7 @@ beforeEach(async () => {
   for (const wait of Object.values(prWaits(prs))) flows.registerWait(wait);
   askpass = createAskpass();
   const gitRemote = createGitRemote({ askpass, connections });
-  const errors = createErrorReporter(store);
+  const errors = createErrorReporter({ store });
   const events = createPrEvents({
     store,
     repos,

@@ -130,12 +130,12 @@ const connections = {
   /** Cuentas conectadas, sin sus tokens. */
   list: base.output(z.array(Connection)),
   /**
-   * Valida el fine-grained PAT contra GitHub (usuario, repos y un check por permiso) y lo conecta con
+   * Valida el PAT classic contra GitHub (usuario, scope `repo`, repos visibles y una lectura por permiso) y lo conecta con
    * la cuenta a la que pertenece. Rechaza el token con un mensaje accionable si GitHub lo rechaza, si
    * no ve repos o si le falta un permiso. Sin `meta.mcp`: un token no pasa por el MCP.
    */
   setPat: base.input(z.object({ token: z.string().min(1) })).output(Connection),
-  /** El link y la lista de permisos para crear el PAT. */
+  /** El link y los scopes para crear el PAT classic. */
   githubPatForm: base.output(GitHubPatForm),
   /**
    * Inicia el device flow de la GitHub App y devuelve el código que hay que escribir en `verificationUri`
@@ -317,7 +317,7 @@ const projects = {
     .meta({
       mcp: {
         action: "project_queue",
-        description: "La cola de un proyecto: cada issue con su estado (`ready`, `blocked`, `running`...) y el motivo, en el orden en que el Scheduler la lanzaría.",
+        description: "La cola de un proyecto: cada issue con su estado (`ready`, `waiting` o `blocked`) y el motivo, en el orden en que el Scheduler la lanzaría.",
         annotations: READ_ONLY,
       },
     })

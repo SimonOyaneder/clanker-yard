@@ -16,7 +16,7 @@ export interface FakeClaudeOptions {
 }
 
 export interface FakeClaude {
-  /** Va en `createConnections(..., { claude: fake.options })`: el core no llama a Claude real ni mira el `PATH` del usuario. */
+  /** Va en `createConnections({ store: ..., secrets: { claude: fake.options } })`: el core no llama a Claude real ni mira el `PATH` del usuario. */
   options: ClaudeOptions;
   cleanup(): void;
 }

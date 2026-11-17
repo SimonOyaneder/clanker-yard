@@ -31,9 +31,7 @@ beforeEach(async () => {
   store = openStore({ path: join(dir, "clanker.db") });
   linear = await startFakeLinear({ clientId: CLIENT_ID });
   w = linear.workspace;
-  connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), {
-    linear: { clientId: CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints },
-  });
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }), linear: { clientId: CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints } });
   const { url, done } = await connections.linearAuth("ui");
   const authorize = await fetch(url, { redirect: "manual" });
   await fetch(authorize.headers.get("location")!);
@@ -427,6 +425,15 @@ describe("changesSince", () => {
     expect(await tracker().changesSince(third.cursor)).toEqual({ changed: [], cursor: third.cursor });
   });
 
+  test("currentCursor es el cursor de changesSince() sin traer las issues, y el epoch en un workspace vacío", async () => {
+    expect(await tracker().currentCursor()).toBe("1970-01-01T00:00:00.000Z");
+    const [, b] = ["a", "b"].map((title) => w.addIssue({ team, title }));
+    w.update(b!, { title: "b2" });
+
+    expect(await tracker().currentCursor()).toBe((await tracker().changesSince()).cursor);
+    expect(await tracker().changesSince(await tracker().currentCursor())).toMatchObject({ changed: [] });
+  });
+
   test("lee todas las páginas de los cambios", async () => {
     for (let n = 1; n <= 230; n++) w.addIssue({ team, title: `i${n}` });
 
@@ -489,7 +496,7 @@ describe("con el caché de issues", () => {
     const quiet = w.addIssue({ team, title: "otra", project: mvp });
     w.addIssue({ team, title: "de otro proyecto", project: other });
     const linearTracker = tracker();
-    const issues = createIssues(store);
+    const issues = createIssues({ store });
     const projectId = newId("prj") as ProjectId;
     const binding = { projectId, project: { tracker: "linear", id: mvp.id } } as const;
 

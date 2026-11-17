@@ -1,12 +1,14 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { IssueId, RepoId, type RunId } from "@clanker/api";
+import { IssueId, LIVE_RUN_STATUSES, RepoId, type RunId } from "@clanker/api";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import * as z from "zod";
+import { githubUnauthorized } from "../breakers/breakers";
 import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/catalog";
 import type { GitIdentity, GitIdentityOf } from "../git/identity";
-import { git, GitError, isAncestor, pickEnv, tryGit, USER_REMOTE_ENV } from "../git/git";
+import { git, GitError, isAncestor, tryGit, USER_REMOTE_ENV } from "../git/git";
+import { pickEnv } from "../procs/env";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
 import { diffBetween, snapshotTree } from "../git/tree";
 import { defaultLogDir, excerpt, execLogged, stepLogPath, type ExecResult } from "./exec";
@@ -18,32 +20,13 @@ import { newId } from "../store/conventions";
 import type { Procs } from "../procs/procs";
 import { combinedBases, runs, workspaces } from "../store/schema";
 import type { Store, Tx } from "../store/store";
+import type { RepoConfig } from "../repos/repos";
 
 const REMOTE = "origin";
 const WORKTREE_LOCK_REASON = "clanker-yard";
 
 /** 2 min; el core renueva cada ttl/3. */
 export const LEASE_TTL_MS = 120_000;
-
-export interface RepoConfig {
-  /** El checkout del usuario: de ahí cuelgan los worktrees y ahí se hace el fetch. */
-  path: string;
-  /** La branch por defecto nunca es de un workspace. */
-  defaultBranch: string;
-  /** Otras branches que ningún workspace puede usar. */
-  protectedBranches?: string[];
-  /** Raíz de los worktrees en lugar de `<dataDir>/worktrees`; relativa se resuelve contra `dataDir`. */
-  worktreeDir?: string;
-  /** Adónde y como quién se pushea; sin esto el repo no tiene `push` ni `fetch`. */
-  remote?: {
-    /** `https://github.com/<owner>/<repo>.git`: explícita, aunque `origin` sea SSH. */
-    url: string;
-    /** `owner/repo` en GitHub: donde `pr.publish` abre el PR. */
-    repo: string;
-    /** La cuenta de GitHub conectada cuyo token autentica. */
-    account: string;
-  };
-}
 
 export interface WorkspacesOptions {
   store: Store;
@@ -830,9 +813,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const row = rowOf(lease);
     const cfg = repoConfig(row.repoId);
     if (cfg.remote && (await fetchRepo(row.repoId)) === "unauthorized") {
-      throw new SyncBaseError(
-        `GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${row.repoId}: la conexión quedó revocada, reconéctala.`,
-      );
+      throw githubUnauthorized(cfg.remote.account, `traer ${row.repoId}`);
     }
     const from = baseSha(lease);
     const target = await resolveBase(cfg, row.baseRef);
@@ -934,9 +915,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const cfg = repoConfig(request.repo);
     const branch = request.branch.replace(/^refs\/heads\//, "");
     if (cfg.remote && (await fetchRepo(request.repo)) === "unauthorized") {
-      throw new AttachError(
-        `GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${request.repo}: la conexión quedó revocada, reconéctala.`,
-      );
+      throw githubUnauthorized(cfg.remote.account, `traer ${request.repo}`);
     }
     const remoteTip = await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE}/${branch}`]);
     if (remoteTip === undefined) {
@@ -1168,7 +1147,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       store.db
         .select({ id: runs.id })
         .from(runs)
-        .where(inArray(runs.status, ["queued", "running", "waiting", "parked", "paused"]))
+        .where(inArray(runs.status, LIVE_RUN_STATUSES))
         .all()
         .map((r) => r.id),
     );
@@ -1247,7 +1226,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const cfg = repoConfig(repo);
     await assertBranchAllowed(cfg, branch);
     if (cfg.remote && (await fetchRepo(repo)) === "unauthorized") {
-      throw new Error(`GitHub rechazó las credenciales de ${cfg.remote.account} al traer ${repo}: la conexión quedó revocada, reconéctala.`);
+      throw githubUnauthorized(cfg.remote.account, `traer ${repo}`);
     }
     return withRepoLock(repo, async () => {
       const defaultSha = await resolveBase(cfg, cfg.defaultBranch);

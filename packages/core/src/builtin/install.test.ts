@@ -8,7 +8,7 @@ import { createArtifacts } from "../artifacts/artifacts";
 import { createDefs, type Defs } from "../defs/defs";
 import { createFlows } from "../flows/flows";
 import { openStore, type Store } from "../store/store";
-import { JUGUETE_TEMPLATE } from "./juguete";
+import { JUGUETE_TEMPLATE } from "../testing/juguete";
 import { installBuiltins } from "./install";
 
 let store: Store | undefined;
@@ -17,7 +17,7 @@ afterEach(() => store?.close());
 /** Solo se guardan defs: ningún paso corre. */
 const unusedRuntime: AgentRuntime = {
   id: "fake",
-  capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+  capabilities: { costPerTurn: true },
   start: () => Promise.reject(new Error("no se usa")),
   resume: () => Promise.reject(new Error("no se usa")),
 };
@@ -50,7 +50,7 @@ const WAITS = { "pr.botReview": ["lgtm", "findings"], "pr.ci": ["ok", "fail"] };
 
 function setup() {
   store = openStore({ path: ":memory:" });
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const flows = createFlows({
     store,
     defs,

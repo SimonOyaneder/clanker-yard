@@ -86,6 +86,9 @@ const QUERIES = {
       nodes { id identifier url updatedAt project { id } } pageInfo { hasNextPage endCursor }
     }
   }`,
+  latest: `query Latest {
+    issues(first: 1, orderBy: updatedAt) { nodes { updatedAt } }
+  }`,
   states: `query States($team: ID, $after: String) {
     workflowStates(filter: { team: { id: { eq: $team } } }, first: 100, after: $after) {
       nodes { id name type position } pageInfo { hasNextPage endCursor }
@@ -401,6 +404,12 @@ export function createLinearTracker({
       // Sin issues todavía, el epoch: la próxima llamada trae todo lo que aparezca.
       const latest = changed.map((c) => c.updatedAt).sort().at(-1) ?? since ?? new Date(0).toISOString();
       return { changed: changed.map((c) => ({ ...toRef(c), project: c.project?.id ?? null })), cursor: latest };
+    },
+
+    async currentCursor() {
+      // `orderBy: updatedAt` trae primero la más reciente: su `updatedAt` es el cursor que daría `changesSince()`.
+      const { issues } = await gql<{ issues: { nodes: { updatedAt: string }[] } }>(QUERIES.latest, {});
+      return issues.nodes[0]?.updatedAt ?? new Date(0).toISOString();
     },
   };
 }

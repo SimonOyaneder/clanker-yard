@@ -3,8 +3,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { projects, runs } from "../store/schema";
 import { PermanentActionError } from "./catalog";
-import { DecisionResolveError } from "./engine";
-import { harness as createHarness, okReport, subjectOf, type AgentScript, WAIT } from "./harness";
+import { DecisionResolveError } from "./engine-shared";
+import { harness as createHarness, okReport, subjectOf, type AgentScript, WAIT } from "../testing/flows-harness";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {

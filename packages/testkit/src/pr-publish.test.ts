@@ -31,15 +31,14 @@ import {
   type Workspaces,
   createRuntimeRegistry,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test} from "vitest";
 import { z } from "zod";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
+import { seedPr } from "@clanker/core/testing";
 
 // Se prueba aquí y no en el core: necesita repos git reales (tempGitRepo) y un remoto bare. GitHub es el
 // simulado (`startGitHubSim`): nunca GitHub ni tokens reales.
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
 const ACCOUNT = "octocat";
@@ -81,9 +80,7 @@ beforeEach(async () => {
   github = await startGitHubSim({ origin: repo, repo: REPO, token: TOKEN });
 
   askpass = createAskpass();
-  connections = createConnections(store, createFileSecrets({ dir: join(dataDir, "secrets") }), {
-    github: { baseUrl: github.baseUrl },
-  });
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dataDir, "secrets") }), github: { baseUrl: github.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
   const repos = () => ({
     path: repo.dir,
@@ -97,7 +94,7 @@ beforeEach(async () => {
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
   });
-  defs = createDefs(store);
+  defs = createDefs({ store });
   const packs = createPacks({ defs });
   const packDir = join(dataDir, "pack");
   mkdirSync(packDir);
@@ -330,9 +327,7 @@ describe("pr.publish", () => {
   });
 
   test("un PR que Watch ya había descubierto (sin owned) se adopta: queda del sistema y con pr.opened", async () => {
-    store.db.$client
-      .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'repo_00000000000000000000000001', 1, '', ?, 'main', '', 'open', 1, 0)")
-      .run(newId("pr"), BRANCH);
+    seedPr(store, { repoId: "repo_00000000000000000000000001", number: 1, headRef: BRANCH, isDraft: true, owned: false });
 
     const ctx = durableCtx();
     await publish.run(args(), ctx);
@@ -394,7 +389,7 @@ describe("en un flujo", () => {
   function flowWith(publishNode: object): Flows {
     const unused = {
       id: "fake" as const,
-      capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+      capabilities: { costPerTurn: true },
       start: () => Promise.reject(new Error("no se usa")),
       resume: () => Promise.reject(new Error("no se usa")),
     };

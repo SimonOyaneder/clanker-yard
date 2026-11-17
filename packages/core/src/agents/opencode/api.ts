@@ -1,3 +1,5 @@
+import { messageOf } from "../../errors/format";
+
 /**
  * Lo que el runtime usa de la API de opencode 2 (`/api/...`, `docs/openapi.json` de opencode.ai): crear una sesión,
  * mandarle un mensaje, interrumpirla, leerla, listar modelos y seguir sus eventos. Los tipos son el subconjunto que el
@@ -72,13 +74,14 @@ export interface OpencodeApi {
   events(signal: AbortSignal): AsyncIterable<OpencodeEvent>;
 }
 
-/** Una llamada que el servidor rechazó, con su estado y su `_tag`/mensaje. */
+/** Una llamada al servidor que falló: con el estado HTTP si respondió, o 0 si no hubo respuesta (o no fue JSON). */
 export class OpencodeApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
@@ -86,15 +89,32 @@ export class OpencodeApiError extends Error {
 export function createOpencodeApi({ url, password }: { url: string; password: string }): OpencodeApi {
   const headers = { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` };
 
-  async function call<T>(what: string, method: string, path: string, body?: unknown): Promise<T> {
-    const response = await fetch(new URL(path, url), {
-      method,
-      headers: body === undefined ? headers : { ...headers, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await response.text();
+  /** El cuerpo de la respuesta, tal cual: `""` si no trae. Un fallo de red o un status de error lanza `OpencodeApiError`. */
+  async function send(what: string, method: string, path: string, body?: unknown): Promise<string> {
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetch(new URL(path, url), {
+        method,
+        headers: body === undefined ? headers : { ...headers, "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      text = await response.text();
+    } catch (error) {
+      throw new OpencodeApiError(`opencode serve falló en ${what}: ${messageOf(error)}`, 0, { cause: error });
+    }
     if (!response.ok) throw new OpencodeApiError(`opencode serve rechazó ${what} (${response.status}): ${text.slice(0, 500)}`, response.status);
-    return (text === "" ? undefined : JSON.parse(text)) as T;
+    return text;
+  }
+
+  /** Como `send`, pero el cuerpo es el JSON que se espera: uno vacío o que no es JSON lanza `OpencodeApiError`. */
+  async function call<T>(what: string, method: string, path: string, body?: unknown): Promise<T> {
+    const text = await send(what, method, path, body);
+    try {
+      return JSON.parse(text) as T;
+    } catch (error) {
+      throw new OpencodeApiError(`opencode serve respondió ${what} sin JSON: ${text.slice(0, 500) || "vacío"}`, 0, { cause: error });
+    }
   }
 
   return {
@@ -103,10 +123,10 @@ export function createOpencodeApi({ url, password }: { url: string; password: st
       return { id: data.id };
     },
     async prompt({ sessionID, text }) {
-      await call("el mensaje", "POST", `/api/session/${encodeURIComponent(sessionID)}/prompt`, { text });
+      await send("el mensaje", "POST", `/api/session/${encodeURIComponent(sessionID)}/prompt`, { text });
     },
     async interrupt(sessionID) {
-      await call("la interrupción", "POST", `/api/session/${encodeURIComponent(sessionID)}/interrupt`, {});
+      await send("la interrupción", "POST", `/api/session/${encodeURIComponent(sessionID)}/interrupt`, {});
     },
     async session(sessionID) {
       return (await call<{ data: SessionInfo }>("leer la sesión", "GET", `/api/session/${encodeURIComponent(sessionID)}`)).data;

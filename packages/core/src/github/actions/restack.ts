@@ -3,14 +3,16 @@ import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
 import { openDecision } from "../../decisions/decisions";
+import { githubUnauthorized } from "../../breakers/breakers";
 import { PermanentActionError, type ActionCtx, type ActionDef } from "../../flows/catalog";
 import { git, GitError, isAncestor, tryGit } from "../../git/git";
 import { combinedBases, prParents, pullRequests } from "../../store/schema";
 import type { Store } from "../../store/store";
-import { emitOnce } from "../../watch/marks";
-import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RepoConfig, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
+import { emitOnce } from "../marks";
+import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
 import type { GitHubClient } from "../client";
 import type { Prs } from "../prs";
+import type { RepoConfig } from "../../repos/repos";
 
 // El restack de la cadena (`docs/design.html#d-ops`, restack y restackRewritten): `stack.restack` al mergear un
 // padre y `stack.restackRewritten` cuando se reescribe su branch.
@@ -266,7 +268,7 @@ async function restackChain(
         case "lease-rejected":
           return skipped(`${child.headRef} ya no está donde el core la dejó en el remoto: alguien más pusheó.`);
         case "unauthorized":
-          throw new Error(`GitHub rechazó el token de ${remote.account}: reconecta la cuenta para pushear ${child.headRef}.`);
+          throw githubUnauthorized(remote.account, `pushear ${child.headRef}`);
       }
     } catch (error) {
       if (error instanceof RebaseError) return skipped(error.message);
@@ -376,7 +378,7 @@ async function restackChain(
 /** `workspaces.fetch` del repo de `found`; un token rechazado lanza (hay que reconectar la cuenta). */
 async function fetchOrThrow(deps: StackRestackDeps, { repoId, remote }: Found, repo: string, what: string): Promise<void> {
   if ((await deps.workspaces.fetch(repoId)) === "unauthorized") {
-    throw new Error(`GitHub rechazó el token de ${remote.account}: reconecta la cuenta para ${what} ${repo}.`);
+    throw githubUnauthorized(remote.account, `traer ${repo} para ${what}`);
   }
 }
 

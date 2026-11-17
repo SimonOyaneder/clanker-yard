@@ -1,5 +1,6 @@
 import type { HookCallback, Options } from "@anthropic-ai/claude-agent-sdk";
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from "@anthropic-ai/claude-agent-sdk";
+import { pickEnv } from "../../procs/env";
 import type { RunSpec } from "../runtime";
 import type { ClaudeCredentials } from "./credentials";
 
@@ -9,14 +10,7 @@ const INHERITED_ENV = ["PATH", "HOME", "USER", "LANG", "CLAUDE_CONFIG_DIR"] as c
 const BASH_TIMEOUT_MS = "1800000";
 
 /** De `baseEnv`, solo `INHERITED_ENV`: lo que hace falta para que `claude` encuentre su login. */
-export function inheritedEnv(baseEnv: Record<string, string | undefined>): Record<string, string> {
-  const inherited: Record<string, string> = {};
-  for (const key of INHERITED_ENV) {
-    const value = baseEnv[key];
-    if (value !== undefined) inherited[key] = value;
-  }
-  return inherited;
-}
+export const inheritedEnv = (baseEnv: Record<string, string | undefined>): Record<string, string> => pickEnv(INHERITED_ENV, baseEnv);
 
 export interface AgentEnvInput {
   baseEnv: Record<string, string | undefined>;

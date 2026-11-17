@@ -1,19 +1,18 @@
 import { NewProject, type CachedIssue, type ProjectId, type RunId } from "@clanker/api";
 import { trackersByKind } from "../tracker/trackers";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { harness as createHarness, type HarnessHome } from "../flows/harness";
+import { harness as createHarness, type HarnessHome } from "../testing/flows-harness";
 import { createProjects } from "../projects/projects";
 import { createRunStarter } from "../projects/start-run";
 import { createIssues } from "../tracker/issues";
 import { createLocalTracker } from "../tracker/local";
 import type { Tracker } from "../tracker/tracker";
 import { createRepos } from "../repos/repos";
-import { pullRequests } from "../store/schema";
-import { newId } from "../store/conventions";
 import type { CombineRequest, CombineResult, Workspaces } from "../workspaces/workspaces";
 import { createLaneSettings } from "./lanes";
 import { createProjectQueue, type ProjectQueue } from "./project-queue";
 import { createScheduler, SCHEDULER_TICK_MS, type Breakers, type SchedulerDeps } from "./scheduler";
+import { seedPr } from "../testing/pull-requests";
 
 /** `vi.waitFor` con holgura: la suite entera corre en paralelo y un tick puede tardar más de 1 s. */
 const until = (check: () => unknown) => vi.waitFor(check, { timeout: 10_000 });
@@ -45,8 +44,8 @@ interface Options {
 function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn, workspaces, runtimesOf = () => ["fake"] }: Options = {}) {
   const h = createHarness({ persist: true, reopen, laneCapacity: () => lanes.capacity() });
   cleanups.push(h.cleanup);
-  const lanes = createLaneSettings(h.store);
-  if (initial) lanes.set(initial);
+  const lanes = createLaneSettings({ store: h.store });
+  if (initial) lanes.set(initial, "ui");
 
   const parkFirst = new Set<string>();
   const open = new Map<string, () => void>();
@@ -78,12 +77,12 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
     nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
   });
 
-  const local = createLocalTracker(h.store);
+  const local = createLocalTracker({ store: h.store });
   const tracker: Tracker = claim ? { ...local, claim } : local;
   const trackers = trackersByKind({ local: tracker });
-  const issues = createIssues(h.store, local);
+  const issues = createIssues({ store: h.store, local });
   const projects = createProjects({ store: h.store, defs: h.defs });
-  const repos = createRepos(h.store);
+  const repos = createRepos({ store: h.store });
   const realQueue = createProjectQueue({ store: h.store, projects, issues, repos, trackers, prs: { get: () => Promise.reject(new Error("no se esperaba leer un PR")) } });
   const queue: ProjectQueue = {
     async of(id) {
@@ -447,7 +446,7 @@ describe("bases combinadas", () => {
   /** Una issue bloqueada por dos issues en curso con un PR abierto cada una, en ramas distintas del mismo repo. */
   async function blockedByTwo(workspaces: Pick<Workspaces, "combineBase" | "dissolveBase">) {
     const h = setup({ parallel: 2, workspaces });
-    const repoId = createRepos(h.store).add({ name: "app", path: "/tmp/app", remote: "acme/app" });
+    const repoId = createRepos({ store: h.store }).add({ name: "app", path: "/tmp/app", remote: "acme/app" });
     h.projects.update(h.projectId, { repos: [{ repoId, labels: [] }], stackOn: "any_open" }, "cli");
     const [one, two] = [await h.local.createIssue(h.projectId, { title: "uno", status: "in_progress" }), await h.local.createIssue(h.projectId, { title: "dos", status: "in_progress" })];
     const child = await h.create("con dos padres");
@@ -457,9 +456,7 @@ describe("bases combinadas", () => {
     const cached = h.issues.list({ projectId: h.projectId });
     [one, two].forEach((parent, i) => {
       const issueId = cached.find((issue) => issue.ref.id === parent.ref.id)!.id;
-      h.store.tx((tx) =>
-        tx.db.insert(pullRequests).values({ id: newId("pr"), repoId, number: 10 + i, nodeId: `n${i}`, headRef: `cla-${i + 1}`, baseRef: "main", headSha: "abc", state: "open", isDraft: true, issueId, owned: true }).run(),
-      );
+      seedPr(h.store, { repoId, number: 10 + i, headRef: `cla-${i + 1}`, headSha: "abc", isDraft: true, issueId });
     });
     return { h, repoId, child, two };
   }

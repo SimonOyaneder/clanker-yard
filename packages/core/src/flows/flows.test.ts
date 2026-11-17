@@ -18,7 +18,7 @@ afterEach(() => {
 /** Estas pruebas solo validan y guardan: ningún paso corre, así que el runtime nunca se usa. */
 const unusedRuntime: AgentRuntime = {
   id: "fake",
-  capabilities: { structuredOutput: true, costPerTurn: true, resume: true, fork: false, steer: false },
+  capabilities: { costPerTurn: true },
   start: () => Promise.reject(new Error("no se usa")),
   resume: () => Promise.reject(new Error("no se usa")),
 };
@@ -29,7 +29,7 @@ const okOnly = ["ok"];
 function setup(): { defs: Defs; flows: Flows } {
   const store = openStore({ path: ":memory:" });
   open.push(store);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const modes = (outcomes: string[], payload?: z.ZodType) => ({ outcomes, payload });
   const roles: Record<string, RoleInfo> = {
     dev: { modes: { plan: modes(okOnly), implement: modes(okOnly), fix: modes(okOnly) } },

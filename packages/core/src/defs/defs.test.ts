@@ -15,7 +15,7 @@ const flowBody = z.object({ name: z.string(), steps: z.array(z.object({ id: z.st
 function setup(): { store: Store; defs: Defs } {
   const store = openStore({ path: ":memory:" });
   open.push(store);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   defs.register("flow", flowBody);
   defs.register("role", z.object({ prompt: z.string() }));
   return { store, defs };

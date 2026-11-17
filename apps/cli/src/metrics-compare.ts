@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { type Client, type LegacyMetricsRow, parseLegacyMetrics, type RoleMetrics } from "@clanker/api";
-import type { Command } from "./cli";
+import type { Command } from "./command";
 import { formatTable, usd } from "./format";
 import { projectBySlug } from "./projects";
 

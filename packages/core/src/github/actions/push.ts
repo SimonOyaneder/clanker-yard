@@ -1,9 +1,11 @@
 import type { PrRef, RepoId } from "@clanker/api";
 import { eq } from "drizzle-orm";
+import { githubUnauthorized } from "../../breakers/breakers";
 import { PermanentActionError } from "../../flows/catalog";
 import { workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
-import type { RepoConfig, Workspaces, WorkspaceRef } from "../../workspaces/workspaces";
+import type { RepoConfig } from "../../repos/repos";
+import type { Workspaces, WorkspaceRef } from "../../workspaces/workspaces";
 import { openPrOfBranch } from "../pr-rows";
 
 /** Qué iba a hacer la acción con el PR, para los mensajes de `ownedOpenPr`. */
@@ -53,6 +55,6 @@ export async function pushOrThrow(
     throw new PermanentActionError(`${ws.branch} ya no está donde el core la dejó en el remoto: alguien más pusheó.`);
   }
   if (outcome === "unauthorized") {
-    throw new Error(`GitHub rechazó el token de ${account}: reconecta la cuenta para pushear ${ws.branch}.`);
+    throw githubUnauthorized(account, `pushear ${ws.branch}`);
   }
 }

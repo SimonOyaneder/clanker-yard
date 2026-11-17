@@ -418,7 +418,7 @@ describe("con el módulo Agents", () => {
   function setup(fixturesDir: string) {
     const store = openStore({ path: ":memory:" });
     open.push(store);
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     const runtimes = createRuntimeRegistry([createFakeRuntime({ fixtures: fixturesDir, speed: Infinity })], { CORE_RUNTIME: "fake" });
     const agents = createAgents({ store, defs, runtimes });
     defs.save({ kind: "role", slug: "review-bugs", scope: "user", body: role, source: "ui" });

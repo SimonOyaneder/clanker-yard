@@ -17,12 +17,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useHost } from "@/host"
 import { absolute, ago } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
-import { mergeMark, reviewStatus, reviewTone } from "@/lib/pr-status"
-import { isDraft, type OpenPr, repoNameOf } from "@/lib/prs"
-import { buildStackForest, listStackGroups, type StackGroup } from "@/lib/stack"
+import { mergeMark, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
+import { isDraft, type OpenPr, repoNameOf } from "@/lib/prs/prs"
+import { buildStackForest, listStackGroups, type StackGroup } from "@/lib/prs/stack"
 import { cn } from "@/lib/utils"
 import { Ago, Hint, Pill } from "../common"
-import { CIBadge, CombinedBaseChip, MergePill, PRStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
+import { CiBadge, CombinedBaseChip, MergePill, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 import { PR_KEYS, PrContextMenu } from "./pr-menu"
 import { PrNotes, PrNotesContext } from "./pr-notes"
@@ -326,7 +326,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-          <PRList groups={visibleGroups} forest={forest} dimmed={dimmed} issueKeys={issueKeys} hasSignals={signals.length > 0} />
+          <PrList groups={visibleGroups} forest={forest} dimmed={dimmed} issueKeys={issueKeys} hasSignals={signals.length > 0} />
         </div>
       )}
     </div>
@@ -347,7 +347,7 @@ function Section({ title, sub, children }: { title: string; sub: string; childre
 }
 
 // Stacks primero, cada uno con su sección; los PRs sueltos van juntos por repo.
-function PRList({
+function PrList({
   groups,
   forest,
   dimmed,
@@ -368,7 +368,7 @@ function PRList({
     solosByRepo.set(repoNameOf(pr), [...(solosByRepo.get(repoNameOf(pr)) ?? []), pr])
   }
   const row = (pr: OpenPr, depth: number) => (
-    <PRRow key={pr.id} pr={pr} depth={depth} dimmed={dimmed.has(pr.id)} issueKey={pr.issueId === null ? undefined : issueKeys.get(pr.issueId)} combined={combined.get(pr.id)} hasSignals={hasSignals} />
+    <PrRow key={pr.id} pr={pr} depth={depth} dimmed={dimmed.has(pr.id)} issueKey={pr.issueId === null ? undefined : issueKeys.get(pr.issueId)} combined={combined.get(pr.id)} hasSignals={hasSignals} />
   )
   return (
     <div className="flex flex-col gap-3">
@@ -399,7 +399,7 @@ function PRList({
   )
 }
 
-function PRRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: OpenPr; depth: number; dimmed: boolean; issueKey: string | undefined; combined: string[] | undefined; hasSignals: boolean }) {
+function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: OpenPr; depth: number; dimmed: boolean; issueKey: string | undefined; combined: string[] | undefined; hasSignals: boolean }) {
   const host = useHost()
   const commands = usePrCommands()
   const { state } = pr
@@ -427,7 +427,7 @@ function PRRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
           <span className="flex flex-none items-center" style={{ width: depth * 18 }}>
             {depth ? <span className="ml-auto h-5 w-2.5 rounded-bl border-b border-l border-border" /> : null}
           </span>
-          <PRStateIcon pr={pr} />
+          <PrStateIcon pr={pr} />
           <span className="w-12 flex-none font-mono text-[11.5px] text-muted-foreground">#{pr.ref.number}</span>
           {hasSignals ? (
             <span className="flex w-[112px] flex-none items-center justify-center">
@@ -449,7 +449,7 @@ function PRRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
             ))}
           </span>
           <ReviewSignals pr={pr} />
-          <CIBadge ci={state.ci} compact />
+          <CiBadge ci={state.ci} compact />
           <time dateTime={state.updatedAt} title={absolute(state.updatedAt)} className="w-20 flex-none text-right text-[11.5px] text-muted-foreground">
             {ago(state.updatedAt)}
           </time>
