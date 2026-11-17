@@ -24,7 +24,7 @@ export interface ErrorReporter {
  * Lo que usan los procesos largos del core (Watch, limpieza, sync de configuración, Scheduler, breakers) para
  * anotar lo que falla: un callback de timer o de evento no puede lanzar, porque tumbaría el core.
  */
-export function createErrorReporter(store: Store): ErrorReporter {
+export function createErrorReporter({ store }: { store: Store }): ErrorReporter {
   const last = new Map<string, string>();
   const keyOf = (scope: string, context: ErrorContext | undefined) => `${scope}\0${context?.projectId ?? ""}`;
 

@@ -103,7 +103,7 @@ export function createRouter(deps: RouterDeps) {
   const { store } = deps;
   const schemaVersion = readSchemaVersion(store.db.$client);
   const { artifacts, flows, projects, repos, recipeTester, runs } = deps;
-  const metrics = createMetrics(store);
+  const metrics = createMetrics({ store });
   const defWriter = createDefWriter({ defs: deps.defs, flows: deps.flows });
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
@@ -150,8 +150,8 @@ export function createRouter(deps: RouterDeps) {
       })),
       lanes: os.system.lanes.handler(() => deps.lanes.usage()),
       breakers: os.system.breakers.handler(() => deps.breakers.list()),
-      setLanes: os.system.setLanes.handler(({ input }) => {
-        deps.lanes.set(input);
+      setLanes: os.system.setLanes.handler(({ input, context }) => {
+        deps.lanes.set(input, context.origin);
         void deps.scheduler.tick();
         return deps.lanes.usage();
       }),
@@ -224,7 +224,7 @@ export function createRouter(deps: RouterDeps) {
         ),
       ),
       defaults: os.projects.defaults.handler(() => projects.defaults()),
-      setDefaults: os.projects.setDefaults.handler(({ input }) => projects.setDefaults(input)),
+      setDefaults: os.projects.setDefaults.handler(({ input, context }) => projects.setDefaults(input, context.origin)),
       update: os.projects.update.handler(async ({ input: { id, ...patch }, context }) => {
         const { tracker } = projectOrNotFound(id);
         const trackerRef = patch.trackerRef === undefined ? undefined : await deps.trackerProjects.resolve(tracker, patch.trackerRef);
@@ -278,8 +278,8 @@ export function createRouter(deps: RouterDeps) {
     repos: {
       list: os.repos.list.handler(() => repos.list()),
       overview: os.repos.overview.handler(() => repos.overview()),
-      add: os.repos.add.handler(async ({ input }) => {
-        const repo = await repos.register(input.path, input.name);
+      add: os.repos.add.handler(async ({ input, context }) => {
+        const repo = await repos.register(input.path, input.name, context.origin);
         // Quien registra el repo recibe de una vez lo que el repo trae en `.clanker/`.
         await deps.repoConfigSync.sync(repo.id);
         return repo;
@@ -361,7 +361,7 @@ export function createRouter(deps: RouterDeps) {
       update: os.defs.update.handler(({ input, context }) => defWriter.update(input, context.origin)),
       archive: os.defs.archive.handler(({ input, context }) => defWriter.archive(input.kind, input.id, context.origin)),
       agentOptions: os.defs.agentOptions.handler(() => deps.agentOptions()),
-      exportToRepo: os.defs.exportToRepo.handler(({ input }) => deps.repoConfigExport.exportDef(input)),
+      exportToRepo: os.defs.exportToRepo.handler(({ input, context }) => deps.repoConfigExport.exportDef(input, context.origin)),
       restore: os.defs.restore.handler(({ input, context }) => defWriter.restore(input.kind, input.id, context.origin)),
     },
     events: {

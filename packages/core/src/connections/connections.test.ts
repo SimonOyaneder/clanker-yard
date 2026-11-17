@@ -28,7 +28,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "clanker-connections-"));
   store = openStore({ path: join(dir, "clanker.db") });
   secrets = createFileSecrets({ dir: join(dir, "secrets") });
-  connections = createConnections(store, secrets, { now: () => NOW });
+  connections = createConnections({ store, secrets, now: () => NOW });
 });
 
 afterEach(() => {
@@ -86,7 +86,7 @@ describe("connect", () => {
 
   test("si el almacén de secretos falla no queda ni la cuenta ni el evento", async () => {
     const broken: Secrets = { ...secrets, set: () => Promise.reject(new Error("llavero bloqueado")) };
-    await expect(createConnections(store, broken).connect({ ...github, token: TOKEN }, "ui")).rejects.toThrow(
+    await expect(createConnections({ store, secrets: broken }).connect({ ...github, token: TOKEN }, "ui")).rejects.toThrow(
       "llavero bloqueado",
     );
     expect(connections.list()).toEqual([]);
@@ -113,7 +113,7 @@ describe("disconnect", () => {
     await connections.connect({ ...github, token: TOKEN }, "ui");
     const broken: Secrets = { ...secrets, delete: () => Promise.reject(new Error("llavero bloqueado")) };
 
-    await expect(createConnections(store, broken).disconnect("github", "simon", "ui")).rejects.toThrow(
+    await expect(createConnections({ store, secrets: broken }).disconnect("github", "simon", "ui")).rejects.toThrow(
       "llavero bloqueado",
     );
     expect(connections.list()).toHaveLength(1);
@@ -232,7 +232,7 @@ describe("claude", () => {
   }
 
   function connectionsWith(stubs: ReturnType<typeof withClaude>) {
-    return createConnections(store, secrets, { now: () => NOW, claude: stubs.claude });
+    return createConnections({ store, secrets, now: () => NOW, claude: stubs.claude });
   }
 
   test("probar con claude instalado y logueado conecta la suscripción, sin guardar ningún secreto", async () => {

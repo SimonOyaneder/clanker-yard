@@ -63,12 +63,12 @@ beforeEach(async () => {
   // Las branches de un PR existen en el remoto; una local con ese nombre sería "del usuario" para `acquire`.
   origin.git("branch", "-D", "one", "two");
   sim = await startGitHubSim({ origin, token: TOKEN });
-  const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
-  const repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  const repos = createRepos({ store, remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
-  const packs = createPacks({ defs: createDefs(store) });
+  const packs = createPacks({ defs: createDefs({ store }) });
   const prs = createPrs({ connections, packs });
   askpass = createAskpass();
   const remote = createGitRemote({ askpass, connections });
@@ -80,7 +80,7 @@ beforeEach(async () => {
     remote,
     now: () => clock,
   });
-  const errors = createErrorReporter(store);
+  const errors = createErrorReporter({ store });
   const cache = createPrCache({ store, repos, packs, prs, onChange: (_ref, state) => state.state === "merged" && cleaner?.request(), now: () => clock });
   watch = createWatch({ store, connections, repos, cache, remote, waitKeys: () => [], events: { flush: () => Promise.resolve() }, errors, now: () => clock });
 });
@@ -197,7 +197,7 @@ describe("archivar", () => {
   });
 
   test("al soltarse el worktree de un PR ya mergeado, la limpieza automática lo archiva", async () => {
-    cleaner = startCleanup({ workspaces, errors: createErrorReporter(store) });
+    cleaner = startCleanup({ workspaces, errors: createErrorReporter({ store }) });
     const lease = await workspaces.acquire({ repo: repoId(), branch: "one", base: "main", runId: run });
     const pr = sim.openPr({ head: "one" });
     await wake();
@@ -314,7 +314,7 @@ describe("startCleanup", () => {
         throw new Error("disco lleno");
       },
     };
-    const errors = createErrorReporter(store);
+    const errors = createErrorReporter({ store });
 
     const loop = startCleanup({ workspaces: failing, errors, everyMs: 3_600_000 });
     loop.request();

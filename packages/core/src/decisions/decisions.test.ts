@@ -24,9 +24,9 @@ describe("expireMergedReviewNotes", () => {
 
     expect(expireMergedReviewNotes(store)).toBe(1);
 
-    const status = (d: typeof stale) => createDecisions(store).get(d.id)?.status;
+    const status = (d: typeof stale) => createDecisions({ store }).get(d.id)?.status;
     expect([stale, live, noSubject, question, note].map(status)).toEqual(["expired", "pending", "pending", "pending", "pending"]);
-    expect(createDecisions(store).get(stale.id)).toMatchObject({ resolvedBy: "watch", resolution: { reason: "pr_merged" } });
+    expect(createDecisions({ store }).get(stale.id)).toMatchObject({ resolvedBy: "watch", resolution: { reason: "pr_merged" } });
     expect(store.events.since(0, { types: ["decision.resolved"] })).toMatchObject([{ origin: "core", payload: { decisionId: stale.id, status: "expired" } }]);
   });
 

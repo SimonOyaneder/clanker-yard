@@ -71,15 +71,15 @@ beforeEach(async () => {
     },
   });
   sim = await startGitHubSim({ origin, token: TOKEN });
-  const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
 
-  const repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  const repos = createRepos({ store, remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repoId = repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
   setMergeStrategy = (override) => repos.setMergeStrategy(repoId, override);
 
   // El pack de ejemplo, activado para la org del simulador y sin sus flujos, roles ni contextos (esos no son de este test).
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const packs = createPacks({ defs });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
@@ -96,7 +96,7 @@ beforeEach(async () => {
     roles: () => undefined,
     probeEverySec: 3600,
   });
-  const errors = createErrorReporter(store);
+  const errors = createErrorReporter({ store });
   const events = createPrEvents({ store, repos, workspaces: { fetch: async () => "ok" }, errors, now: () => clock });
   cache = createPrCache({ store, repos, packs, prs, onChange: (pr, state, row) => events.observe(pr, state, row), now: () => clock });
   reactions = startMergeReactions({ store, repos, packs, prs, connections, errors });

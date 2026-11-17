@@ -36,7 +36,7 @@ function team(script: AgentScript, options: { resumeKeepsSession?: boolean } = {
       fix: { type: "agent", role: "dev", mode: "plan", brief: {}, on: { ok: "review", changes: "@blocked" } },
     },
   });
-  const metrics = createMetrics(h.store);
+  const metrics = createMetrics({ store: h.store });
   const startIn = async (projectId: ProjectId, subject: string) => {
     const runId = h.flows.start("loop", { type: "issue", id: subject }, {}, { profile: "default", projectId });
     await h.finished(runId);

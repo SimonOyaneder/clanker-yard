@@ -10,7 +10,7 @@ export interface Decisions {
   get(id: DecisionId): Decision | undefined;
 }
 
-export function createDecisions(store: Store): Decisions {
+export function createDecisions({ store }: { store: Store }): Decisions {
   return {
     list: (filter = {}) =>
       store.db

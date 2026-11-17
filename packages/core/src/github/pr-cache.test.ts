@@ -35,7 +35,7 @@ const pull = (overrides: Partial<RestPull> = {}): RestPull => ({
 
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
-  repos = createRepos(store, { remote: (repo) => ({ url: `https://example.invalid/${repo}.git`, repo, account: ACCOUNT }) });
+  repos = createRepos({ store, remote: (repo) => ({ url: `https://example.invalid/${repo}.git`, repo, account: ACCOUNT }) });
   repoId = repos.add({ name: "api", path: "/tmp/api", remote: "acme/api" });
   state = stateOf();
   cache = createPrCache({ store, repos, packs, prs: { get: () => Promise.resolve(state) }, onChange, now: () => NOW });

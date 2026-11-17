@@ -48,7 +48,7 @@ const flowDef = async (slug: string) => ((await h.call("list", { kind: "flow", f
 
 /** Un proyecto local que lanza `flow` (por defecto el builtin `juguete`, que toma un worktree del repo temporal) y una issue suya. */
 async function projectWithIssue(flow = "juguete") {
-  const repoId = createRepos(h.store).add({ name: "demo", path: h.repo.dir });
+  const repoId = createRepos({ store: h.store }).add({ name: "demo", path: h.repo.dir });
   const flowParams = flow === "juguete" ? { repo: repoId } : {};
   const project = await h.api.projects.create({ slug: "demo", name: "Demo", tracker: "local", defaultFlowId: flow, defaultProfileId: "juguete", flowParams });
   const issue = await h.api.issues.createLocal({ projectId: project.id, title: "Saluda" });

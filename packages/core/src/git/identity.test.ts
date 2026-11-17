@@ -45,7 +45,7 @@ function checkout(config: Record<string, string> = {}): string {
 
 async function identities(path: string, remote?: RepoConfig["remote"]) {
   github = await startFakeGitHub(healthyGitHub());
-  const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: github.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: github.baseUrl } });
   await connections.setPat("github_pat_UNIQUE-0123456789", "ui");
   const repos = vi.fn((): RepoConfig => ({ path, defaultBranch: "main", remote }));
   return { identityOf: createGitIdentityOf({ repoConfig: repos, connections }), repos };

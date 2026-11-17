@@ -42,12 +42,12 @@ let repoId: RepoId;
 const ref = (number: number): PrRef => ({ account: ACCOUNT, repo: REPO, number });
 
 async function setup(pack: "example" | "none") {
-  const connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
-  const repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  const repos = createRepos({ store, remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repoId = repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
-  const packs = createPacks({ defs: createDefs(store) });
+  const packs = createPacks({ defs: createDefs({ store }) });
   if (pack === "example") {
     const packDir = join(dir, "pack");
     mkdirSync(packDir);

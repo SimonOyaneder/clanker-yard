@@ -20,7 +20,7 @@ beforeEach(async () => {
   home = seedDb("empty");
   store = openStore({ path: home.dbPath });
   repo = tempGitRepo({});
-  const connections = createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") }));
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }) });
   await connections.connect({ provider: "github", account: "octocat", scopes: [], token: "github_pat_demo" }, "core");
   core = await startCore({
     store,
@@ -33,7 +33,7 @@ beforeEach(async () => {
     onShutdown: () => {},
   });
   client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
-  const repoId = createRepos(store).add({ name: "demo", path: repo.dir, remote: "octocat/demo" });
+  const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir, remote: "octocat/demo" });
   await seedLanes({ client, store, repoId });
 });
 

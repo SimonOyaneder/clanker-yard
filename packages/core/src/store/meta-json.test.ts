@@ -28,5 +28,5 @@ test("devuelve lo guardado si cumple el esquema, y undefined si no hay nada, no 
 test("los carriles caen a los defaults si lo guardado ya no tiene la forma esperada", () => {
   save("lanes", JSON.stringify({ dev: "muchos" }));
 
-  expect(createLaneSettings(store).capacity()).toEqual({ dev: 4, maintenance: 2 });
+  expect(createLaneSettings({ store }).capacity()).toEqual({ dev: 4, maintenance: 2 });
 });

@@ -47,7 +47,7 @@ beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-remote-"));
   store = openStore({ path: ":memory:", now: () => clock });
   askpass = createAskpass({ now: () => clock });
-  connections = createConnections(store, createFileSecrets({ dir: join(dataDir, "secrets") }));
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dataDir, "secrets") }) });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
   leases = [];
 });

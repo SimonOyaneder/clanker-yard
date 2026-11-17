@@ -25,7 +25,7 @@ beforeEach(async () => {
   core = await startCore({
     store,
     dataDir: home.path,
-    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
+    connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }) }),
     runtimes: [createFakeRuntime({ fixtures: home.path, speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
     scheduler: false,
@@ -132,7 +132,7 @@ describe("el override de la estrategia de merge", () => {
   test("repos.list lo trae: null mientras no se fije, y vuelve a null al quitarlo", async () => {
     const repo = repoWith(undefined);
     const { id } = await client.repos.add({ path: repo.dir });
-    const repos = createRepos(store);
+    const repos = createRepos({ store });
     expect(await client.repos.list()).toMatchObject([{ id, mergeStrategy: null }]);
 
     repos.setMergeStrategy(id, "off");
@@ -143,7 +143,7 @@ describe("el override de la estrategia de merge", () => {
   });
 
   test("un repo que no existe lanza RepoNotFoundError", () => {
-    expect(() => createRepos(store).setMergeStrategy("repo_nope", "on")).toThrow(RepoNotFoundError);
+    expect(() => createRepos({ store }).setMergeStrategy("repo_nope", "on")).toThrow(RepoNotFoundError);
   });
 });
 

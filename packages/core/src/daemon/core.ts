@@ -95,7 +95,7 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
         .run();
     }
 
-    const connections = createConnections(store, secretsFor(opts), readCoreConfig(opts.dataDir));
+    const connections = createConnections({ store, secrets: secretsFor(opts), ...readCoreConfig(opts.dataDir) });
     // Los procesos de los agentes se registran en `procs` desde el runtime, que se arma antes que el core.
     const procs = createProcs({ store, bootId: newId("boot") });
     const core = await startCore({

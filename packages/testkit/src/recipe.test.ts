@@ -59,7 +59,7 @@ beforeEach(() => {
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
   slots = createSlots({ store });
-  recipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts, slots });
+  recipes = createRecipes({ store, defs: createDefs({ store }), workspaces, artifacts, slots });
 });
 
 afterEach(() => {
@@ -139,7 +139,7 @@ describe("leer la receta", () => {
   });
 
   test("el validador del kind recipe queda registrado en las defs", () => {
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     createRecipes({ store, defs, workspaces, artifacts, slots });
     expect(() => defs.save({ kind: "recipe", slug: "r", scope: "user", body: { version: 2 }, source: "ui" })).toThrow(DefValidationError);
     expect(defs.save({ kind: "recipe", slug: "r", scope: "user", body: { version: 1 }, source: "ui" }).version).toBe(1);
@@ -312,7 +312,7 @@ describe("recipe.check", () => {
     await expect(check()).rejects.toBeInstanceOf(PermanentActionError);
 
     write(".clanker/recipe.json", JSON.stringify({ version: 1, commands: { t: "echo {{slot}}" }, checks: ["t"] }));
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     const fixtures = mkdtempSync(join(tmpdir(), "clanker-recipe-none-"));
     const flows = createFlows({
       store,
@@ -473,7 +473,7 @@ describe("recipe.check con el runtime fake", () => {
 
   test("usa los run del guion de la sesión del agente: rojo con su extracto, y verde en la ronda siguiente", async () => {
     await worktree({}, { version: 1, commands: { test: "no se corre" }, checks: ["test"] });
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     const runtime = createFakeRuntime({ fixtures, speed: Infinity });
     const fakeRecipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: runtime });
     const flows = createFlows({
@@ -701,7 +701,7 @@ describe("recipe.check con requires", () => {
 
   test("con el runtime fake los requires también se prueban: son el entorno real del repo, no un check guionado", async () => {
     await worktree({}, withRequires([{ name: "Postgres", check: "exit 2" }]));
-    const fakeRecipes = createRecipes({ store, defs: createDefs(store), workspaces, artifacts, slots, fake: createFakeRuntime({ fixtures: [], speed: Infinity }) });
+    const fakeRecipes = createRecipes({ store, defs: createDefs({ store }), workspaces, artifacts, slots, fake: createFakeRuntime({ fixtures: [], speed: Infinity }) });
     const { workspaceId, path, branch, baseSha, fencingToken } = lease!;
 
     const error = await fakeRecipes.checkAction.run({ ws: { workspaceId, path, branch, baseSha, fencingToken }, scope: "changed" }, ctx()).catch((e: unknown) => e);

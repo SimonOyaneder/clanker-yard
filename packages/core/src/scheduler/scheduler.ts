@@ -105,7 +105,7 @@ export class IssueNotInProjectError extends BadRequestError {}
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
   const { store, projects, issues, repos, lanes, breakers } = deps;
-  const errors = deps.errors ?? createErrorReporter(store);
+  const errors = deps.errors ?? createErrorReporter({ store });
   /** Lo que el último tick no pudo lanzar de cada proyecto, con su motivo. */
   const skipped = new Map<ProjectId, Map<IssueId, string>>();
   let running: Promise<void> | undefined;

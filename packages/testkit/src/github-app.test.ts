@@ -63,8 +63,7 @@ beforeEach(async () => {
   gitServer = await startGitHttpServer(repo.remoteDir!, { user: ACCOUNT, password: () => oauth.latest().accessToken });
 
   askpass = createAskpass();
-  connections = createConnections(store, createFileSecrets({ dir: join(dataDir, "secrets") }), {
-    now: () => clock,
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dataDir, "secrets") }), now: () => clock,
     github: { baseUrl: github.baseUrl },
     githubApp: {
       clientId: CLIENT_ID,
@@ -74,8 +73,7 @@ beforeEach(async () => {
         oauth.approve();
         clock += ms;
       },
-    },
-  });
+    } });
   const connected = new Promise<void>((resolve) => store.events.subscribe(() => resolve(), { types: ["connection.changed"] }));
   await connections.startDeviceFlow("ui");
   await connected;
@@ -88,7 +86,7 @@ beforeEach(async () => {
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
   });
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const packs = createPacks({ defs });
   const packDir = join(dataDir, "pack");
   mkdirSync(packDir);

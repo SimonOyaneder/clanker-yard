@@ -152,9 +152,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const procs = opts.procs ?? createProcs({ store, bootId: newId("boot") });
   const { bootId } = procs;
   const runtimes = createRuntimeRegistry(opts.runtimes, opts.env);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const packs = createPacks({ defs, installedDir: opts.packsDir ?? join(dataDir, "packs"), factoryDir: opts.factoryPacksDir });
-  const repos = createRepos(store, { remote: githubRemote(opts.connections, opts.gitUrl) });
+  const repos = createRepos({ store, remote: githubRemote(opts.connections, opts.gitUrl) });
   const identityOf = createGitIdentityOf({ repoConfig: repos.config, connections: opts.connections });
   const agents = createAgents({ store, defs, runtimes, packs, remoteOf: (repoId) => repos.get(repoId)?.remote, identityOf });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
@@ -170,8 +170,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     remote: gitRemote,
     worktreeSetup: (dir) => readRecipe(dir)?.setup?.worktree ?? [],
   });
-  const local = createLocalTracker(store);
-  const issues = createIssues(store, local);
+  const local = createLocalTracker({ store });
+  const issues = createIssues({ store, local });
   const projects = createProjects({ store, defs });
   const trackers = createTrackers({
     local,
@@ -189,9 +189,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     linear: (account) => createLinearTracker({ connections: opts.connections, account, endpoint: opts.linearEndpoint }),
     projects,
   });
-  const lanes = createLaneSettings(store);
+  const lanes = createLaneSettings({ store });
   // Un solo dedupe para todo el core; lo de Watch (y los triggers y reacciones que cuelgan de sus eventos) va bajo `watch.`.
-  const reporter = createErrorReporter(store);
+  const reporter = createErrorReporter({ store });
   const breakers = createBreakers({
     store,
     errors: reporter,
@@ -357,7 +357,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     packs,
     repos,
     repoConfigSync,
-    repoConfigExport: createRepoConfigExporter({ defs, repos, config: repos.config, remote: gitRemote, connections: opts.connections, dataDir, identityOf }),
+    repoConfigExport: createRepoConfigExporter({ store, defs, repos, config: repos.config, remote: gitRemote, connections: opts.connections, dataDir, identityOf }),
     projectConfigs: createProjectConfigs({ projects, repos, defs }),
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
     runs,
@@ -371,7 +371,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     prs,
     prCache,
     artifacts,
-    decisions: createDecisions(store),
+    decisions: createDecisions({ store }),
     learnings,
     defs,
     agentOptions: () => describeRuntimes(runtimes),

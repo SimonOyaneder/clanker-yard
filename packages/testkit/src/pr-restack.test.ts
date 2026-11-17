@@ -56,7 +56,7 @@ beforeEach(async () => {
   github = await startGitHubSim({ origin: repo, repo: REPO, token: TOKEN });
 
   askpass = createAskpass();
-  const connections = createConnections(store, createFileSecrets({ dir: join(dataDir, "secrets") }), { github: { baseUrl: github.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dataDir, "secrets") }), github: { baseUrl: github.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
   const repos = () => ({
     path: repo.dir,
@@ -70,7 +70,7 @@ beforeEach(async () => {
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
     remote: createGitRemote({ askpass, connections }),
   });
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const packs = createPacks({ defs });
   const packDir = join(dataDir, "pack");
   mkdirSync(packDir);

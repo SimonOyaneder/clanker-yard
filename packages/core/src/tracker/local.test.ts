@@ -11,7 +11,7 @@ let clock: number;
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
   clock = 1_000;
-  tracker = createLocalTracker(store, { now: () => ++clock });
+  tracker = createLocalTracker({ store, now: () => ++clock });
 });
 
 afterEach(() => store.close());
@@ -156,7 +156,7 @@ describe("claim, setStatus y comment", () => {
     await tracker.claim(ref);
     await tracker.claim(ref);
 
-    const other = createLocalTracker(store, { me: { id: "ana", name: "Ana" } });
+    const other = createLocalTracker({ store, me: { id: "ana", name: "Ana" } });
     await expect(other.claim(ref)).rejects.toThrow(
       /DEMO-1 ya está asignada a Local/,
     );

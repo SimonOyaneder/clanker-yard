@@ -15,7 +15,7 @@ let connections: Connections;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "clanker-remote-config-"));
   store = openStore({ path: ":memory:" });
-  connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }));
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }) });
 });
 
 afterEach(() => {
@@ -46,7 +46,7 @@ test("sin una cuenta de GitHub conectada el repo no tiene remoto", () => {
 
 test("repos.config llena remote desde la columna repos.remote y lo deja vacío sin ella", async () => {
   await connect("simon");
-  const repos = createRepos(store, { remote: githubRemote(connections, (repo) => `file:///bares/${repo}`) });
+  const repos = createRepos({ store, remote: githubRemote(connections, (repo) => `file:///bares/${repo}`) });
   const withRemote = repos.add({ name: "web", path: "/a", remote: "acme/web" });
   const without = repos.add({ name: "solo", path: "/b" });
 

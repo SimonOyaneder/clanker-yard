@@ -28,9 +28,7 @@ let clankerProjects: Projects;
 
 async function connectWorkspace(workspace: string): Promise<FakeLinear> {
   const fake = await startFakeLinear({ clientId: CLIENT_ID, workspace });
-  const conns = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), {
-    linear: { clientId: CLIENT_ID, redirectPort: 0, endpoints: fake.endpoints },
-  });
+  const conns = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }), linear: { clientId: CLIENT_ID, redirectPort: 0, endpoints: fake.endpoints } });
   const { url, done } = await conns.linearAuth("ui");
   const authorize = await fetch(url, { redirect: "manual" });
   await fetch(authorize.headers.get("location")!);
@@ -43,7 +41,7 @@ beforeEach(() => {
   linear = undefined;
   dir = mkdtempSync(join(tmpdir(), "clanker-tracker-projects-"));
   store = openStore({ path: join(dir, "clanker.db") });
-  clankerProjects = createProjects({ store, defs: createDefs(store) });
+  clankerProjects = createProjects({ store, defs: createDefs({ store }) });
   projects = createTrackerProjects({
     connections: { list: () => connections.list() },
     linear: (account) => createLinearTracker({ connections, account, endpoint: linear!.endpoints.graphql }),
@@ -76,23 +74,23 @@ test("lista los proyectos de Linear con su workspace, los de la persona primero 
 });
 
 test("sin Linear conectado el error manda a Conexiones", async () => {
-  connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), {});
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }) });
 
   await expect(projects.list("linear")).rejects.toThrow(/conéctalo en Conexiones/);
 });
 
 test("un tracker sin adapter para listar dice que se escriba el id", async () => {
-  connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), {});
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }) });
 
   await expect(projects.list("jira")).rejects.toThrow(/jira/);
 });
 
 test("trackers.projects traduce esos errores a BAD_REQUEST", async () => {
-  connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), {});
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }) });
   const router = createRouter(withPrs({
     store,
     connections,
-    issues: createIssues(store),
+    issues: createIssues({ store }),
     ...apiDeps(store, "/tmp/clanker"),
     trackerProjects: projects,
     coreVersion: "0",
@@ -137,7 +135,7 @@ test("projects.create y projects.update guardan el UUID aunque se pida con el id
   const router = createRouter(withPrs({
     store,
     connections,
-    issues: createIssues(store),
+    issues: createIssues({ store }),
     ...apiDeps(store, "/tmp/clanker"),
     trackerProjects: projects,
     coreVersion: "0",
@@ -165,7 +163,7 @@ async function legacyProject(fake: FakeLinear, identifier: string) {
   w.addIssue({ team, title: "otra", project: linearProject });
   const created = clankerProjects.create(NewProject.parse({ slug: "facturacion", name: "Facturación", tracker: "linear", trackerRef: linearProject.id }), "ui");
   const tracker = createLinearTracker({ connections, endpoint: fake.endpoints.graphql });
-  const issues = createIssues(store);
+  const issues = createIssues({ store });
   await issues.sync(tracker, { projectId: created.id, project: { tracker: "linear", id: linearProject.id } });
   store.db.update(syncCursors).set({ key: `issues:linear:${identifier}` }).run();
   store.tx((tx) => tx.db.update(projectsTable).set({ trackerRef: identifier }).run());
@@ -198,7 +196,7 @@ test("normalize sin poder leer Linear dice qué hacer y no toca el proyecto", as
   const fake = await connectWorkspace("acme");
   linear = fake;
   const { id } = await legacyProject(fake, "P-ENG-1525");
-  connections = createConnections(store, createFileSecrets({ dir: join(dir, "secrets2") }), {});
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets2") }) });
 
   await expect(projects.normalize(id, "core")).rejects.toThrow(/guarda "P-ENG-1525".*no pude resolverlo.*Conexiones.*Ajustes/);
   expect(clankerProjects.get(id)!.trackerRef).toBe("P-ENG-1525");
@@ -212,7 +210,7 @@ test("projects.update permite elegir de nuevo el mismo proyecto de Linear aunque
   const router = createRouter(withPrs({
     store,
     connections,
-    issues: createIssues(store),
+    issues: createIssues({ store }),
     ...apiDeps(store, "/tmp/clanker"),
     trackerProjects: projects,
     coreVersion: "0",

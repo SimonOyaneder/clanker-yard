@@ -22,9 +22,7 @@ let connections: Connections;
 async function connect(urlKey: string) {
   const linear = await startFakeLinear({ clientId: CLIENT_ID, workspace: urlKey });
   fakes.set(urlKey, linear);
-  const own = createConnections(store, createFileSecrets({ dir: join(dir, "secrets") }), {
-    linear: { clientId: CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints },
-  });
+  const own = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }), linear: { clientId: CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints } });
   const { url, done } = await own.linearAuth("ui");
   const authorize = await fetch(url, { redirect: "manual" });
   await fetch(authorize.headers.get("location")!);

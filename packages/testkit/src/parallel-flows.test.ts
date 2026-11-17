@@ -72,7 +72,7 @@ const reviewsFlow = {
 function setup(): { flows: Flows; store: Store; startedRoles: string[]; prompts: Map<string, string[]> } {
   const store = openStore({ path: ":memory:" });
   const dir = mkdtempSync(join(tmpdir(), "clanker-parallel-"));
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const runtime = createFakeRuntime({ fixtures, speed: Infinity });
   // `createAgents` registra el validador de roles y perfiles: va antes de guardarlos.
   const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([runtime], {}) });

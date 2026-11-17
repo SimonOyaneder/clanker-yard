@@ -40,7 +40,7 @@ function breakers(runtime = "claude-sdk", onProbe?: (scope: string) => void): Br
 }
 
 const events = (type: "breaker.opened" | "breaker.closed") => store.events.since(0, { types: [type] });
-const alerts = () => createDecisions(store).list({ kind: ["alert"] });
+const alerts = () => createDecisions({ store }).list({ kind: ["alert"] });
 
 describe("abrir", () => {
   test("pausa su ámbito, deja la alerta en la bandeja y emite breaker.opened", () => {

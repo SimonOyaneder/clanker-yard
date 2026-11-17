@@ -19,7 +19,7 @@ type Step = [node: string, status: StepStatus, costMicros?: number, outcome?: st
 export async function seedLanes({ client, store, repoId, now = Date.now() }: { client: Client; store: Store; repoId: RepoId; now?: number }): Promise<void> {
   const sql = store.db.$client;
   // Otro `Defs` sobre la misma base, solo para leer las versiones de los flujos de la plantilla que el core instaló.
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   defs.register("flow", FlowBody);
   const template = (slug: string) => {
     const def = defs.resolve("flow", slug);

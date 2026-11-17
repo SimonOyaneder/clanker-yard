@@ -46,7 +46,7 @@ export function apiDeps(
   store: Store,
   dataDir: string,
 ): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher" | "agentOptions"> & { flows: Flows } {
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
     store,
@@ -56,11 +56,11 @@ export function apiDeps(
     roles: () => undefined,
   });
   const projects = createProjects({ store, defs });
-  const repos = createRepos(store);
-  const local = createLocalTracker(store);
-  const issues = createIssues(store, local);
+  const repos = createRepos({ store });
+  const local = createLocalTracker({ store });
+  const issues = createIssues({ store, local });
   const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers: trackersByKind({ local }) });
-  const lanes = createLaneSettings(store);
+  const lanes = createLaneSettings({ store });
   const scheduler = createScheduler({
     store,
     projects,
@@ -100,7 +100,7 @@ export function apiDeps(
     breakers: { list: () => [] },
     flows,
     artifacts,
-    decisions: createDecisions(store),
+    decisions: createDecisions({ store }),
     learnings: createLearnings({ store }),
     defs,
     legacyImport: createLegacyImporter({ store, defs, artifacts }),

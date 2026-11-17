@@ -49,7 +49,7 @@ const WAITS = { "pr.botReview": ["lgtm", "findings"], "pr.ci": ["ok", "fail"] };
 
 function setup() {
   store = openStore({ path: ":memory:" });
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const flows = createFlows({
     store,
     defs,

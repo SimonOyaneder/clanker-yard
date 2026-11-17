@@ -21,7 +21,7 @@ let projects: Projects;
 
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
-  defs = createDefs(store);
+  defs = createDefs({ store });
   defs.register("flow", z.unknown());
   defs.register("profile", z.unknown());
   projects = createProjects({ store, defs });
@@ -119,7 +119,7 @@ describe("defaults de proyectos nuevos", () => {
     defs.save({ kind: "profile", slug: "max", scope: "user", body: {}, source: "ui" });
     const before = create({ ...local, slug: "antes" }, "ui");
 
-    const saved = projects.setDefaults({ defaultFlowId: "techlead", defaultProfileId: "max", parallel: 3, maxCostUsd: 5 });
+    const saved = projects.setDefaults({ defaultFlowId: "techlead", defaultProfileId: "max", parallel: 3, maxCostUsd: 5 }, "ui");
     const inherits = create({ ...local, slug: "hereda" }, "ui");
     const overrides = create({ ...local, slug: "pide", parallel: 2, maxCostUsd: null }, "ui");
 
@@ -131,17 +131,17 @@ describe("defaults de proyectos nuevos", () => {
 
   test("lo que no se pasa no cambia, null quita el flujo y uno que no existe se rechaza sin guardar", () => {
     defs.save({ kind: "flow", slug: "techlead", scope: "builtin", body: {}, source: "builtin" });
-    projects.setDefaults({ defaultFlowId: "techlead", parallel: 2 });
+    projects.setDefaults({ defaultFlowId: "techlead", parallel: 2 }, "ui");
 
-    expect(projects.setDefaults({ maxCostUsd: 1 })).toEqual({ defaultFlowId: "techlead", defaultProfileId: null, parallel: 2, maxCostUsd: 1 });
-    expect(projects.setDefaults({ defaultFlowId: null }).defaultFlowId).toBeNull();
-    expect(() => projects.setDefaults({ defaultFlowId: "nope" })).toThrow(InvalidProjectError);
+    expect(projects.setDefaults({ maxCostUsd: 1 }, "ui")).toEqual({ defaultFlowId: "techlead", defaultProfileId: null, parallel: 2, maxCostUsd: 1 });
+    expect(projects.setDefaults({ defaultFlowId: null }, "ui").defaultFlowId).toBeNull();
+    expect(() => projects.setDefaults({ defaultFlowId: "nope" }, "ui")).toThrow(InvalidProjectError);
     expect(projects.defaults().parallel).toBe(2);
   });
 
   test("un flujo por defecto que ya no existe se ignora al crear en vez de impedirlo", () => {
     const flow = defs.save({ kind: "flow", slug: "techlead", scope: "user", body: {}, source: "ui" });
-    projects.setDefaults({ defaultFlowId: "techlead" });
+    projects.setDefaults({ defaultFlowId: "techlead" }, "ui");
     defs.archive("flow", flow.id, "ui");
 
     expect(create({ ...local, slug: "demo" }, "ui").defaultFlowId).toBeNull();
@@ -152,7 +152,7 @@ describe("defaults de proyectos nuevos", () => {
       createRouter(withPrs({
         store,
         connections: {} as never,
-        issues: createIssues(store),
+        issues: createIssues({ store }),
         ...apiDeps(store, "/tmp/clanker"),
         coreVersion: "0",
         bootId: "boot",
@@ -173,7 +173,7 @@ describe("repos, cola, convenciones y tope", () => {
   let api: RepoId;
   let web: RepoId;
   beforeEach(() => {
-    const repos = createRepos(store);
+    const repos = createRepos({ store });
     api = repos.add({ name: "api", path: "/tmp/api" });
     web = repos.add({ name: "web", path: "/tmp/web" });
   });
@@ -391,7 +391,7 @@ describe("API", () => {
     const router = createRouter(withPrs({
       store,
       connections: {} as never,
-      issues: createIssues(store),
+      issues: createIssues({ store }),
       ...apiDeps(store, "/tmp/clanker"),
       coreVersion: "0",
       bootId: "boot",

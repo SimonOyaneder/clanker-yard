@@ -40,7 +40,7 @@ let history: DefaultBranchCommit[];
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "clanker-merge-scope-"));
   store = openStore({ path: ":memory:" });
-  repos = createRepos(store);
+  repos = createRepos({ store });
   repoId = repos.add({ name: "api", path: dir, remote: "acme/api" });
   clock = Date.UTC(2026, 10, 15);
   history = [];
@@ -56,7 +56,7 @@ afterEach(async () => {
 async function scope() {
   const rest = healthyGitHub();
   github = await startFakeGitHub((request) => (request.path === "/graphql" ? prGraphql(prNode(), { defaultBranchChecks: history })(request) : rest(request)));
-  const connections: Connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: github.baseUrl } });
+  const connections: Connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: github.baseUrl } });
   await connections.setPat(TOKEN, "ui");
   return createMergeScope({ store, repos, connections, now: () => clock });
 }

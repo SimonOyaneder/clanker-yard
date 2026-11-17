@@ -115,7 +115,7 @@ const queryOf =
 function setup(query: QueryFn) {
   const store = openStore({ path: ":memory:" });
   open.push(store);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const runtime = createClaudeRuntime({
     credentials: async () => subscriptionCredentials({ executable: "/bin/claude" }),
     home,

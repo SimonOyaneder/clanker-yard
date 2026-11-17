@@ -50,7 +50,7 @@ function api(origin: "ui" | "cli" | "mcp" = "ui") {
   const router = createRouter(withPrs({
     store,
     connections: {} as never,
-    issues: createIssues(store),
+    issues: createIssues({ store }),
     ...deps,
     coreVersion: "0",
     bootId: "boot",

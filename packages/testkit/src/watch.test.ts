@@ -83,13 +83,13 @@ beforeEach(async () => {
     },
   });
   sim = await startGitHubSim({ origin, token: TOKEN });
-  connections = createConnections(store, createFileSecrets({ dir }), { github: { baseUrl: sim.baseUrl } });
+  connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
 
-  repos = createRepos(store, { remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
+  repos = createRepos({ store, remote: (repo) => ({ url: `file://${origin.remoteDir}`, repo, account: ACCOUNT }) });
   repos.add({ name: "secret-project", path: origin.dir, remote: REPO });
 
-  defs = createDefs(store);
+  defs = createDefs({ store });
   const packs = createPacks({ defs });
   const packDir = join(dir, "pack");
   mkdirSync(packDir);
@@ -122,7 +122,7 @@ beforeEach(async () => {
   for (const wait of Object.values(prWaits(prs))) flows.registerWait(wait);
   askpass = createAskpass();
   const gitRemote = createGitRemote({ askpass, connections });
-  const errors = createErrorReporter(store);
+  const errors = createErrorReporter({ store });
   const events = createPrEvents({
     store,
     repos,

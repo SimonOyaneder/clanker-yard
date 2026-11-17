@@ -121,13 +121,11 @@ const claude = createFakeClaude({ scenario: () => control().claude ?? "ready" })
 const core = await startCore({
   store,
   dataDir: home,
-  connections: createConnections(store, createFileSecrets({ dir: join(home, "secrets") }), {
-    github: { baseUrl: github.baseUrl },
+  connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home, "secrets") }), github: { baseUrl: github.baseUrl },
     githubApp: { clientId: "Iv23liDEMO", slug: "clanker-yard-demo", endpoints: githubOAuth.endpoints },
     linear: { clientId: "demo-client", redirectPort: 0, endpoints: linear.endpoints },
     claude: claude.options,
-    now: devKit.now,
-  }),
+    now: devKit.now }),
   runtimes: [createFakeRuntime({ fixtures, transcripts: join(home, "transcripts") })],
   env: { CORE_RUNTIME: "fake" },
   // La demo deja las issues en la cola para lanzarlas a mano desde la UI.
@@ -140,7 +138,7 @@ const core = await startCore({
 });
 
 const client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
-const repos = createRepos(store);
+const repos = createRepos({ store });
 const lanes = process.env.DEMO_SCENARIO === "lanes";
 // En los escenarios con PRs el repo tiene remoto, para que `prs.list` conozca los que deja sembrados.
 const repoId = repos.add({ name: "demo", path: repo.dir, remote: lanes || prsScenario ? "octocat/demo" : null });
@@ -163,7 +161,7 @@ for (const title of ["Saluda al mundo", "Saluda a la luna", "Saluda al sol"]) {
 // Con DEMO_INBOX=1, la bandeja: flujos de juguete que dejan una decisión de cada tipo. Se guardan directo en
 // `defs` (el core no tiene API para escribir flujos todavía); el motor los lee al lanzar cada corrida.
 if (process.env.DEMO_INBOX) {
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   defs.register("flow", FlowBody);
   const toy = (id: string, name: string, extra: Partial<FlowDef> & { nodes: FlowDef["nodes"] }) => {
     defs.save({ kind: "flow", slug: id, scope: "user", body: { ...JUGUETE_FLOW, id, name, ...extra }, source: "demo" });

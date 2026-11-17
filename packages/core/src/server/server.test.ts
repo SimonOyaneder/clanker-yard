@@ -35,7 +35,7 @@ const onShutdown = vi.fn();
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
   secretsDir = mkdtempSync(join(tmpdir(), "clanker-server-"));
-  connections = createConnections(store, createFileSecrets({ dir: secretsDir }));
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: secretsDir }) });
 });
 
 afterEach(async () => {
@@ -55,7 +55,7 @@ async function start(allowedOrigins?: string[], deps = apiDeps(store, dataDir)):
   server = await startServer(withPrs({
     store,
     connections,
-    issues: createIssues(store),
+    issues: createIssues({ store }),
     ...deps,
     coreVersion: "1.2.3",
     dataDir,
@@ -147,7 +147,7 @@ describe("auth", () => {
   });
 
   test("un core sin llave configurada rechaza cualquier ui, aunque traiga una", async () => {
-    server = await startServer(withPrs({ store, connections, issues: createIssues(store), ...apiDeps(store, dataDir), coreVersion: "1.2.3", dataDir, onShutdown }));
+    server = await startServer(withPrs({ store, connections, issues: createIssues({ store }), ...apiDeps(store, dataDir), coreVersion: "1.2.3", dataDir, onShutdown }));
     const headers = { ...valid(server), "x-clanker-origin": "ui", "x-clanker-ui-key": UI_KEY };
     expect((await rawHealth(server, headers)).status).toBe(403);
   });
@@ -206,8 +206,7 @@ describe("connections", () => {
     mkdirSync(join(dir, "bin"));
     writeFileSync(join(dir, "bin", "claude"), "#!/bin/sh\n", { mode: 0o755 });
     const message = (m: Record<string, unknown>) => ({ session_id: "s", ...m }) as unknown as SDKMessage;
-    connections = createConnections(store, createFileSecrets({ dir: secretsDir }), {
-      claude: {
+    connections = createConnections({ store, secrets: createFileSecrets({ dir: secretsDir }), claude: {
         baseEnv: { PATH: join(dir, "bin"), HOME: dir, USER: "x" },
         exec: async (_file, args) =>
           args[0] === "--version" ? "2.1.325 (Claude Code)" : JSON.stringify({ loggedIn: true, subscriptionType: "max" }),
@@ -220,8 +219,7 @@ describe("connections", () => {
             });
             yield message({ type: "result", subtype: "success", is_error: false, result: "pong" });
           })(),
-      },
-    });
+      } });
     try {
       const core = await start();
       const client = createClient({ url: core.url, token: core.token, origin: "cli" });
@@ -265,9 +263,7 @@ describe("connections", () => {
   test("startDeviceFlow devuelve el código del usuario y no conecta nada hasta que aprueba", async () => {
     const oauth = await startFakeGitHubOAuth({ clientId: "Iv23liTEST", now: Date.now });
     try {
-      connections = createConnections(store, createFileSecrets({ dir: secretsDir }), {
-        githubApp: { clientId: "Iv23liTEST", endpoints: oauth.endpoints, sleep: () => new Promise(() => undefined) },
-      });
+      connections = createConnections({ store, secrets: createFileSecrets({ dir: secretsDir }), githubApp: { clientId: "Iv23liTEST", endpoints: oauth.endpoints, sleep: () => new Promise(() => undefined) } });
       const core = await start();
       const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
@@ -285,9 +281,7 @@ describe("connections", () => {
   test("linearAuth devuelve el link y la cuenta aparece al aprobar", async () => {
     const linear = await startFakeLinear({ clientId: "test-client-id" });
     try {
-      connections = createConnections(store, createFileSecrets({ dir: secretsDir }), {
-        linear: { clientId: "test-client-id", redirectPort: 0, endpoints: linear.endpoints },
-      });
+      connections = createConnections({ store, secrets: createFileSecrets({ dir: secretsDir }), linear: { clientId: "test-client-id", redirectPort: 0, endpoints: linear.endpoints } });
       const core = await start();
       const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
@@ -376,7 +370,7 @@ describe("runs.transcript", () => {
   const sessionId = "ses_01J0000000000000000000000A";
 
   function seedSession(): void {
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     defs.register("role", Role);
     const role = defs.save({ kind: "role", slug: "dev", scope: "user", source: "ui", body: { prompt: "Eres dev.", context: [], modes: { plan: { instructions: "x", report: { type: "object" }, outcomes: ["ok"], session: "new" } } } });
     store.tx(({ db }) => {

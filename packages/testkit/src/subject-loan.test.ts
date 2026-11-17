@@ -47,7 +47,7 @@ beforeEach(() => {
     repoConfig: () => ({ path: repo.dir, defaultBranch: "main" }),
     identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
   });
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   flows = createFlows({
     store,
     defs,

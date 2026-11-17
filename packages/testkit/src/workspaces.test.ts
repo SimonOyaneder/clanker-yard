@@ -398,7 +398,7 @@ describe("heartbeat", () => {
 
 describe("workspace.acquire", () => {
   test("el motor de flujos acepta la acción registrada", () => {
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     const flows = createFlows({
       store,
       defs,

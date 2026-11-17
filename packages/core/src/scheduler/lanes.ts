@@ -1,4 +1,4 @@
-import type { Lanes, LanesPatch } from "@clanker/api";
+import type { Lanes, LanesPatch, Origin } from "@clanker/api";
 import { activeRuns } from "../flows/lanes";
 import type { LaneCapacity } from "../flows/lanes";
 import { meta } from "../store/schema";
@@ -18,12 +18,13 @@ export interface LaneSettings {
   /** La capacidad vigente. La leen el motor (cada admisión) y el Scheduler. */
   capacity(): LaneCapacity;
   /** Cambia la capacidad de los carriles presentes y la guarda; devuelve la vigente. */
-  set(patch: LanesPatch): LaneCapacity;
+  /** Emite `lanes.changed` con la capacidad nueva y quién la pidió. */
+  set(patch: LanesPatch, by: Origin): LaneCapacity;
   /** La capacidad de cada carril y cuántas corridas lo ocupan hoy. */
   usage(): Lanes;
 }
 
-export function createLaneSettings(store: Store): LaneSettings {
+export function createLaneSettings({ store }: { store: Store }): LaneSettings {
   let current: LaneCapacity | undefined;
 
   function capacity(): LaneCapacity {
@@ -35,10 +36,13 @@ export function createLaneSettings(store: Store): LaneSettings {
 
   return {
     capacity,
-    set(patch) {
+    set(patch, by) {
       const next: LaneCapacity = { ...capacity(), ...(patch.dev !== undefined && { dev: patch.dev }), ...(patch.maintenance !== undefined && { maintenance: patch.maintenance }) };
       const value = JSON.stringify(next);
-      store.tx((tx) => tx.db.insert(meta).values({ key: META_KEY, value }).onConflictDoUpdate({ target: meta.key, set: { value } }).run());
+      store.tx((tx) => {
+        tx.db.insert(meta).values({ key: META_KEY, value }).onConflictDoUpdate({ target: meta.key, set: { value } }).run();
+        tx.emit({ type: "lanes.changed", origin: by, payload: { ...next } });
+      });
       current = next;
       return next;
     },

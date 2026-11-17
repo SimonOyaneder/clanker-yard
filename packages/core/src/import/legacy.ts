@@ -702,7 +702,7 @@ function apply(
 
     // Paridad (`docs/design.html#d-data`): `projects.summary`, lo que muestra la app, suma lo mismo que el archivo de origen
     // (corridas, costo, costo por rol y rondas, las cifras del LoopSummary de Control).
-    const summaries = createMetrics(tx);
+    const summaries = createMetrics({ store: tx });
     for (const [slug, expected] of plan.expected) {
       const actual = summaries.summary(expected.projectId, { imported: true });
       const differences = [

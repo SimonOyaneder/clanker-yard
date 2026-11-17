@@ -45,7 +45,7 @@ async function boot({ scheduler = true }: { scheduler?: boolean } = {}): Promise
     store,
     scheduler,
     dataDir: home.path,
-    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
+    connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }) }),
     runtimes: [createFakeRuntime({ fixtures: juguete, speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
     coreVersion: "0.0.0",
@@ -55,7 +55,7 @@ async function boot({ scheduler = true }: { scheduler?: boolean } = {}): Promise
 }
 
 async function toyProject(client: Client, parallel = 2) {
-  const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+  const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
   return client.projects.create({
     slug: "demo",
     name: "Demo",
@@ -109,15 +109,15 @@ describe("el Scheduler del core", () => {
     const project = await toyProject(client, 2);
     // Pausado mientras se arma la cola: si no, la issue se lanzaría antes de que existan sus padres.
     await client.projects.update({ id: project.id, status: "paused" });
-    const local = createLocalTracker(store);
+    const local = createLocalTracker({ store });
     const [one, two] = [await local.createIssue(project.id, { title: "uno", status: "in_progress" }), await local.createIssue(project.id, { title: "dos", status: "in_progress" })];
     const child = await client.issues.createLocal({ projectId: project.id, title: "Con dos padres" });
     await local.relate(one.ref, "blocks", child.ref);
     await local.relate(two.ref, "blocks", child.ref);
-    await createIssues(store, local).sync(local, { projectId: project.id, project: { tracker: "local", id: project.id } }, "cli");
-    const repoId = createRepos(store).list()[0]!.id;
+    await createIssues({ store, local }).sync(local, { projectId: project.id, project: { tracker: "local", id: project.id } }, "cli");
+    const repoId = createRepos({ store }).list()[0]!.id;
     for (const [i, parent] of [one, two].entries()) {
-      const issueId = createIssues(store, local).list({ projectId: project.id }).find((issue) => issue.ref.id === parent.ref.id)!.id;
+      const issueId = createIssues({ store, local }).list({ projectId: project.id }).find((issue) => issue.ref.id === parent.ref.id)!.id;
       seedPr(store, { repoId, number: 20 + i, headRef: `cla-${i + 1}`, headSha: "abc", isDraft: true, issueId });
     }
 
@@ -192,7 +192,7 @@ describe("el repo de la issue", () => {
 
   /** Un proyecto con dos repos, `front` y `back`, cada uno con su label; el flujo por defecto es `juguete`. */
   async function twoRepoProject(client: Client, opts: { names?: [string, string]; flowParams?: (front: string) => Record<string, unknown> } = {}) {
-    const repos = createRepos(store);
+    const repos = createRepos({ store });
     const [frontName, backName] = opts.names ?? ["front", "back"];
     const front = repos.add({ name: frontName, path: repo.dir });
     const back = repos.add({ name: backName, path: other.dir });
@@ -239,13 +239,13 @@ describe("el repo de la issue", () => {
     const client = await boot();
     const { project, front, back } = await twoRepoProject(client);
     await client.projects.update({ id: project.id, status: "paused" });
-    const local = createLocalTracker(store);
+    const local = createLocalTracker({ store });
     const blockers = [];
     for (const title of ["uno", "dos", "tres", "cuatro"]) blockers.push(await local.createIssue(project.id, { title, status: "in_progress" }));
     const both = await client.issues.createLocal({ projectId: project.id, title: "Cruza con dos padres en cada repo", labels: ["backend", "frontend"] });
     const free = await client.issues.createLocal({ projectId: project.id, title: "Libre", labels: ["backend"] });
     for (const blocker of blockers) await local.relate(blocker.ref, "blocks", both.ref);
-    const cache = createIssues(store, local);
+    const cache = createIssues({ store, local });
     await cache.sync(local, { projectId: project.id, project: { tracker: "local", id: project.id } }, "cli");
     // Dos PRs abiertos de los bloqueantes en cada repo: la issue sale de una base combinada en los dos.
     for (const [i, blocker] of blockers.entries()) {
@@ -343,6 +343,6 @@ describe("el repo de la issue", () => {
 
 /** Una issue local que llega con el core apagado: nadie la lanza hasta el próximo arranque. */
 async function createIssueOffline(projectId: ProjectId): Promise<string> {
-  const issues = createIssues(store, createLocalTracker(store));
+  const issues = createIssues({ store, local: createLocalTracker({ store }) });
   return (await issues.createLocal({ projectId, title: "Pendiente" }, "cli")).id;
 }

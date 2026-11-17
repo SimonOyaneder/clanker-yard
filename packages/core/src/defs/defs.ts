@@ -95,7 +95,7 @@ export interface Defs {
   restore(kind: DefKind, id: string, origin: Origin): void;
 }
 
-export function createDefs(store: Store, now: () => number = Date.now): Defs {
+export function createDefs({ store, now = Date.now }: { store: Store; now?: () => number }): Defs {
   const schemas = new Map<DefKind, ZodType>();
 
   function load(kind: DefKind, id: string, version?: number): Def | undefined {

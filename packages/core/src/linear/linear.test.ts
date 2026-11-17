@@ -49,10 +49,8 @@ beforeEach(async () => {
   secrets = createFileSecrets({ dir: join(dir, "secrets") });
   linear = await startFakeLinear({ clientId: CLIENT_ID });
   clock = NOW;
-  connections = createConnections(store, secrets, {
-    now: () => clock,
-    linear: { clientId: CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints },
-  });
+  connections = createConnections({ store, secrets, now: () => clock,
+    linear: { clientId: CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints } });
 });
 
 afterEach(async () => {
@@ -137,9 +135,7 @@ describe("linearAuth", () => {
   });
 
   test("si el usuario no aprueba a tiempo, done falla", async () => {
-    const quick = createConnections(store, secrets, {
-      linear: { clientId: CLIENT_ID, redirectPort: 0, loginTimeoutMs: 1, endpoints: linear.endpoints },
-    });
+    const quick = createConnections({ store, secrets, linear: { clientId: CLIENT_ID, redirectPort: 0, loginTimeoutMs: 1, endpoints: linear.endpoints } });
     const { done } = await quick.linearAuth("ui");
 
     await expect(done).rejects.toThrow(/a tiempo/);
@@ -157,7 +153,7 @@ describe("linearAuth", () => {
   test("sin client_id configurado usa el que trae la app, y uno configurado lo pisa", async () => {
     const withDefault = await startFakeLinear({ clientId: LINEAR_DEFAULT_CLIENT_ID });
     try {
-      const bare = createConnections(store, secrets, { linear: { redirectPort: 0, endpoints: withDefault.endpoints } });
+      const bare = createConnections({ store, secrets, linear: { redirectPort: 0, endpoints: withDefault.endpoints } });
       const login = await bare.linearAuth("ui");
       expect(new URL(login.url).searchParams.get("client_id")).toBe(LINEAR_DEFAULT_CLIENT_ID);
       await approve(login.url);
@@ -175,9 +171,7 @@ describe("linearAuth", () => {
   test("con el puerto del redirect ocupado dice cuál es", async () => {
     const first = await login();
     const port = new URL(new URL(first.url).searchParams.get("redirect_uri")!).port;
-    const other = createConnections(store, secrets, {
-      linear: { clientId: CLIENT_ID, redirectPort: Number(port), endpoints: linear.endpoints },
-    });
+    const other = createConnections({ store, secrets, linear: { clientId: CLIENT_ID, redirectPort: Number(port), endpoints: linear.endpoints } });
 
     await expect(other.linearAuth("ui")).rejects.toThrow(new RegExp(`127.0.0.1:${port}`));
   });

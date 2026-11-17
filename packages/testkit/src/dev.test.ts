@@ -76,7 +76,7 @@ describe("un core de desarrollo", () => {
   test("injectStepResult rechaza el paso de un agente: ahí el resultado lo da el guion", async () => {
     // Con un speed casi nulo el agente se queda en su primer evento con tiempo y su paso sigue en marcha.
     h = await startMcpHarness({ fixtures: fileURLToPath(new URL("../fixtures/runs/juguete-lento", import.meta.url)), speed: 0.0001, dev: true });
-    const repoId = createRepos(h.store).add({ name: "demo", path: h.repo.dir });
+    const repoId = createRepos({ store: h.store }).add({ name: "demo", path: h.repo.dir });
     const project = await h.api.projects.create({ slug: "demo", name: "Demo", tracker: "local", defaultFlowId: "juguete", defaultProfileId: "juguete", flowParams: { repo: repoId } });
     const issue = await h.api.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const { id } = await h.api.runs.start({ projectId: project.id, issueId: issue.id });

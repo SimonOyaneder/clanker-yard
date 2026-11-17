@@ -156,7 +156,7 @@ function stubRuntime(steps: Step[], id: AgentRuntime["id"] = "fake") {
 function setup(steps: Step[], now?: () => number, prefixWaitMs?: number) {
   const store = openStore({ path: ":memory:" });
   open.push(store);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const stub = stubRuntime(steps);
   const agents: Agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([stub.runtime], {}), now, prefixWaitMs });
   defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });
@@ -984,7 +984,7 @@ describe("varios runtimes", () => {
   function setupBoth(claudeSteps: Step[], opencodeSteps: Step[]) {
     const store = openStore({ path: ":memory:" });
     open.push(store);
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     const claude = stubRuntime(claudeSteps, "claude-sdk");
     const opencode = stubRuntime(opencodeSteps, "opencode");
     const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([claude.runtime, opencode.runtime], {}) });
@@ -1047,7 +1047,7 @@ describe("varios runtimes", () => {
   test("una entrada que pide un runtime que el core no tiene falla antes de lanzar", async () => {
     const store = openStore({ path: ":memory:" });
     open.push(store);
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     const claude = stubRuntime([], "claude-sdk");
     const agents = createAgents({ store, defs, runtimes: createRuntimeRegistry([claude.runtime], {}) });
     defs.save({ kind: "role", slug: "analyst", scope: "user", body: role, source: "ui" });

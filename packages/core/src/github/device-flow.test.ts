@@ -66,11 +66,9 @@ afterEach(async () => {
 });
 
 function connectionsWith(githubApp: { clientId: string } | undefined) {
-  return createConnections(store, secrets, {
-    now: () => clock,
+  return createConnections({ store, secrets, now: () => clock,
     github: { baseUrl: api.baseUrl },
-    ...(githubApp ? { githubApp: { ...githubApp, endpoints: oauth.endpoints, sleep } } : {}),
-  });
+    ...(githubApp ? { githubApp: { ...githubApp, endpoints: oauth.endpoints, sleep } } : {}) });
 }
 
 /** Resuelve con el próximo evento de ese tipo; hay que pedirlo antes de la acción que lo emite. */
@@ -268,11 +266,9 @@ describe("githubInstallations", () => {
   });
 
   test("sin instalar el token conecta pero cuenta cero, y con slug da el link para instalarla", async () => {
-    connections = createConnections(store, secrets, {
-      now: () => clock,
+    connections = createConnections({ store, secrets, now: () => clock,
       github: { baseUrl: api.baseUrl },
-      githubApp: { clientId: CLIENT_ID, slug: "clanker-yard", endpoints: oauth.endpoints, sleep },
-    });
+      githubApp: { clientId: CLIENT_ID, slug: "clanker-yard", endpoints: oauth.endpoints, sleep } });
     installed = false;
     await connectApp();
 

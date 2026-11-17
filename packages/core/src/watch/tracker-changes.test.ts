@@ -18,7 +18,7 @@ function setup(projects: ClankerProject[], hasChanges: (id: string) => Promise<b
     trackers: trackersByKind({ linear: tracker }),
     issues: { hasChanges: (_, { project: ref }) => hasChanges(ref.id) },
     onChanges,
-    errors: createErrorReporter(store).within("watch"),
+    errors: createErrorReporter({ store }).within("watch"),
   });
   return { store, onChanges, changes, errors: () => store.events.since(0, { types: ["error"] }).map((e) => e.payload) };
 }

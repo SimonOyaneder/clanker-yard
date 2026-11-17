@@ -33,7 +33,7 @@ describe("guardar un rol", () => {
   test("un modo cuyo reporte Claude Code no compila se rechaza con su ruta", () => {
     const store = openStore({ path: ":memory:" });
     stores.push(store);
-    const defs = createDefs(store);
+    const defs = createDefs({ store });
     createAgents({ store, defs, runtimes: createRuntimeRegistry([{ id: "claude-sdk" } as AgentRuntime], {}) });
     const role = Role.parse(roles.dev);
     const [name, mode] = Object.entries(role.modes)[0]!;

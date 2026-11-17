@@ -15,10 +15,10 @@ afterEach(() => {
 function machine(registered: Record<string, string | null>, account = "acme") {
   const store = openStore({ path: ":memory:" });
   open.push(store);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   defs.register("profile", Profile);
   defs.save({ kind: "profile", slug: "barato", scope: "user", body: { roles: { dev: { model: "sonnet" } } }, source: "ui" });
-  const repos = createRepos(store);
+  const repos = createRepos({ store });
   const ids = Object.fromEntries(Object.entries(registered).map(([name, remote]) => [name, repos.add({ name, path: `/work/${name}`, remote })]));
   const projects = createProjects({ store, defs });
   const project = projects.create(NewProject.parse({ slug: "p", name: "P", tracker: "linear", trackerRef: "team-1", trackerAccount: account }), "ui");

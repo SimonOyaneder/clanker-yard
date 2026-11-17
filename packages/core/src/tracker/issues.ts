@@ -53,10 +53,8 @@ export interface Issues {
 /** La clave del cursor de `sync` de un proyecto del tracker (`ProjectRef.id`). */
 export const issuesCursorKey = (tracker: string, projectRef: string) => `issues:${tracker}:${projectRef}`;
 
-export function createIssues(
-  store: Store,
-  local: LocalTracker = createLocalTracker(store),
-): Issues {
+/** Sin `local`, el tracker local sobre el mismo store. */
+export function createIssues({ store, local = createLocalTracker({ store }) }: { store: Store; local?: LocalTracker }): Issues {
   const { db } = store;
 
   const cursorKeyOf = (tracker: Tracker, project: ProjectRef) => issuesCursorKey(tracker.id, project.id);

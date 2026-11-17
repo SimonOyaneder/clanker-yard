@@ -44,8 +44,8 @@ interface Options {
 function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsOn, workspaces, runtimesOf = () => ["fake"] }: Options = {}) {
   const h = createHarness({ persist: true, reopen, laneCapacity: () => lanes.capacity() });
   cleanups.push(h.cleanup);
-  const lanes = createLaneSettings(h.store);
-  if (initial) lanes.set(initial);
+  const lanes = createLaneSettings({ store: h.store });
+  if (initial) lanes.set(initial, "ui");
 
   const parkFirst = new Set<string>();
   const open = new Map<string, () => void>();
@@ -77,12 +77,12 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
     nodes: { work: { type: "action", action: "work", args: {}, on: { ok: "@done" } } },
   });
 
-  const local = createLocalTracker(h.store);
+  const local = createLocalTracker({ store: h.store });
   const tracker: Tracker = claim ? { ...local, claim } : local;
   const trackers = trackersByKind({ local: tracker });
-  const issues = createIssues(h.store, local);
+  const issues = createIssues({ store: h.store, local });
   const projects = createProjects({ store: h.store, defs: h.defs });
-  const repos = createRepos(h.store);
+  const repos = createRepos({ store: h.store });
   const realQueue = createProjectQueue({ store: h.store, projects, issues, repos, trackers, prs: { get: () => Promise.reject(new Error("no se esperaba leer un PR")) } });
   const queue: ProjectQueue = {
     async of(id) {
@@ -446,7 +446,7 @@ describe("bases combinadas", () => {
   /** Una issue bloqueada por dos issues en curso con un PR abierto cada una, en ramas distintas del mismo repo. */
   async function blockedByTwo(workspaces: Pick<Workspaces, "combineBase" | "dissolveBase">) {
     const h = setup({ parallel: 2, workspaces });
-    const repoId = createRepos(h.store).add({ name: "app", path: "/tmp/app", remote: "acme/app" });
+    const repoId = createRepos({ store: h.store }).add({ name: "app", path: "/tmp/app", remote: "acme/app" });
     h.projects.update(h.projectId, { repos: [{ repoId, labels: [] }], stackOn: "any_open" }, "cli");
     const [one, two] = [await h.local.createIssue(h.projectId, { title: "uno", status: "in_progress" }), await h.local.createIssue(h.projectId, { title: "dos", status: "in_progress" })];
     const child = await h.create("con dos padres");

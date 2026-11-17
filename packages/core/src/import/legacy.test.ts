@@ -41,13 +41,13 @@ afterEach(() => {
 function setup() {
   const store = openStore({ path: ":memory:" });
   cleanups.push(() => store.close());
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   defs.register("flow", FlowBody);
   defs.register("profile", Profile);
   const dataDir = mkdtempSync(join(tmpdir(), "legacy-data-"));
   cleanups.push(() => rmSync(dataDir, { recursive: true, force: true }));
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
-  const repos = createRepos(store);
+  const repos = createRepos({ store });
   const api = repos.add({ name: "api", path: "/home/demo/work/api" });
   // `dashboard` no trae ruta en la cabecera: se resuelve por nombre aunque su checkout esté en otra parte.
   const dashboard = repos.add({ name: "dashboard", path: "/elsewhere/dashboard" });
@@ -178,7 +178,7 @@ describe("clanker import legacy", () => {
   test("projects.summary de lo importado suma lo mismo que metrics.jsonl", () => {
     const { store, importer } = setup();
     importer.run({ from: FIXTURES, dryRun: false });
-    const metrics = createMetrics(store);
+    const metrics = createMetrics({ store });
     const projectA = store.db.select().from(projects).where(eq(projects.slug, slugA)).get()!;
 
     const summary = metrics.summary(projectA.id);
@@ -245,7 +245,7 @@ describe("clanker import legacy", () => {
   test("metrics.byRole distingue las corridas importadas de las nuevas", () => {
     const { store, importer } = setup();
     importer.run({ from: FIXTURES, dryRun: false });
-    const metrics = createMetrics(store);
+    const metrics = createMetrics({ store });
 
     const imported = metrics.byRole({ imported: true });
 

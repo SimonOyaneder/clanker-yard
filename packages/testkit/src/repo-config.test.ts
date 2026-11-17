@@ -51,9 +51,9 @@ afterEach(async () => {
 async function boot(checkout: TempGitRepo): Promise<Machine> {
   const home = seedDb("empty");
   const store = openStore({ path: home.dbPath });
-  const connections = createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") }), { github: { baseUrl: github.baseUrl } });
+  const connections = createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }), github: { baseUrl: github.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
-  const repoId = createRepos(store).add({ name: "secret-project", path: checkout.dir, remote: REPO });
+  const repoId = createRepos({ store }).add({ name: "secret-project", path: checkout.dir, remote: REPO });
   const core = await startCore({
     store,
     dataDir: home.path,

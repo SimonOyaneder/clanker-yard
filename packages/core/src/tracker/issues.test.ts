@@ -18,8 +18,8 @@ let projectId: ProjectId;
 
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
-  local = createLocalTracker(store);
-  issues = createIssues(store, local);
+  local = createLocalTracker({ store });
+  issues = createIssues({ store, local });
   projectId = newId("prj");
 });
 

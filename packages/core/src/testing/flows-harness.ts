@@ -94,7 +94,7 @@ export function harness(
   const dir = options.reopen?.dir ?? mkdtempSync(join(tmpdir(), "clanker-flows-"));
   const dbPath = options.reopen?.dbPath ?? (options.persist ? join(dir, "clanker.db") : ":memory:");
   const store = openStore({ path: dbPath });
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
 
   // Los ids de sesión del runtime no se repiten entre arranques de la misma base.
   const bootPrefix = options.bootId ? `${options.bootId}-` : "";
@@ -209,5 +209,5 @@ export function harness(
 
   const nodes = (runId: RunId) => flows.getRun(runId).steps.map((s) => s.nodeId);
 
-  return { store, defs, flows, artifacts, decisions: createDecisions(store), calls, home: { dbPath, dir } satisfies HarnessHome, crash, action, save, start, finished, eventTypes, nodes, cleanup };
+  return { store, defs, flows, artifacts, decisions: createDecisions({ store }), calls, home: { dbPath, dir } satisfies HarnessHome, crash, action, save, start, finished, eventTypes, nodes, cleanup };
 }

@@ -30,7 +30,7 @@ beforeEach(() => {
   repo = tempGitRepo({});
   scenario = "ready";
   claude = createFakeClaude({ scenario: () => scenario });
-  connections = createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") }), { claude: claude.options });
+  connections = createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }), claude: claude.options });
 });
 
 afterEach(async () => {
@@ -75,7 +75,7 @@ describe("login vencido en un run real", () => {
   test("deja la cuenta claude en rojo, pausa a los agentes con una alerta y se reanuda solo al reconectar", async () => {
     await connections.testClaude(undefined, "ui");
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await client.projects.create({
       slug: "demo",
       name: "Demo",

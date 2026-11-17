@@ -44,10 +44,8 @@ async function connectionsAgainst(
   respond: Parameters<typeof startFakeGitHub>[0],
 ): Promise<Connections> {
   github = await startFakeGitHub(respond);
-  return createConnections(store, createFileSecrets({ dir }), {
-    github: { baseUrl: github.baseUrl },
-    now: () => now,
-  });
+  return createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: github.baseUrl },
+    now: () => now });
 }
 
 describe("setPat", () => {
@@ -210,7 +208,7 @@ describe("API", () => {
     const router = createRouter(withPrs({
       store,
       connections,
-      issues: createIssues(store),
+      issues: createIssues({ store }),
       ...apiDeps(store, dir),
       coreVersion: "0",
       bootId: "boot",

@@ -21,7 +21,7 @@ beforeEach(async () => {
   core = await startCore({
     store,
     dataDir: home.path,
-    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
+    connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }) }),
     runtimes: [createFakeRuntime({ fixtures: join(import.meta.dirname, "../fixtures/runs/juguete"), speed: Infinity })],
     env: { CORE_RUNTIME: "fake" },
     scheduler: false,
@@ -29,7 +29,7 @@ beforeEach(async () => {
     onShutdown: () => {},
   });
   client = createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
-  const repoId = createRepos(store).add({ name: "demo", path: home.path, remote: null });
+  const repoId = createRepos({ store }).add({ name: "demo", path: home.path, remote: null });
   const project = await client.projects.create({ slug: "demo", name: "Demo", tracker: "local", defaultFlowId: "juguete", defaultProfileId: "juguete" });
   const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda al mundo" });
   const run = await client.runs.start({ projectId: project.id, issueId: issue.id, params: { repo: repoId } });

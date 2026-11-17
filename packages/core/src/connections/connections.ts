@@ -106,6 +106,9 @@ export interface GitHubAppOptions {
 }
 
 export interface ConnectionsOptions {
+  store: Store;
+  /** Donde viven los tokens; la base guarda solo su referencia. */
+  secrets: Secrets;
   /** Dónde está GitHub; en tests, un servidor local. */
   github?: GitHubApiOptions;
   githubApp?: GitHubAppOptions;
@@ -252,11 +255,7 @@ function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export function createConnections(
-  store: Store,
-  secrets: Secrets,
-  { github = {}, githubApp, linear = {}, claude = {}, now = Date.now }: ConnectionsOptions = {},
-): Connections {
+export function createConnections({ store, secrets, github = {}, githubApp, linear = {}, claude = {}, now = Date.now }: ConnectionsOptions): Connections {
   const githubClients = new Map<string, GitHubClient>();
   const endpoints = linear.endpoints ?? LINEAR_ENDPOINTS;
   const linearClientId = linear.clientId ?? LINEAR_DEFAULT_CLIENT_ID;

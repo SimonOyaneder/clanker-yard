@@ -102,7 +102,7 @@ export interface BreakersOptions {
   errors?: ErrorReporter;
 }
 
-export function createBreakers({ store, runtimes, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS, errors = createErrorReporter(store) }: BreakersOptions): Breakers {
+export function createBreakers({ store, runtimes, probe, label = (scope) => scope, now = Date.now, backoffMs = BACKOFF_MS, errors = createErrorReporter({ store }) }: BreakersOptions): Breakers {
   const entries = new Map<string, OpenBreaker>();
   const timers = new Map<string, NodeJS.Timeout>();
   const probing = new Set<string>();

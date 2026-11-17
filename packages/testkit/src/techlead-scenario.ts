@@ -159,10 +159,8 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
   const runtime = options.runtime ?? createFakeRuntime({ fixtures: [FIXTURES, ...(options.fixtures ?? [])], speed: Infinity });
 
   const newConnections = () =>
-    createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") }), {
-      github: { baseUrl: github.baseUrl },
-      ...(linear && { linear: { clientId: LINEAR_CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints } }),
-    });
+    createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }), github: { baseUrl: github.baseUrl },
+      ...(linear && { linear: { clientId: LINEAR_CLIENT_ID, redirectPort: 0, endpoints: linear.endpoints } }) });
   let connections = newConnections();
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
   if (linear) {
@@ -192,7 +190,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
   }
   let { core, client } = await bootCore();
 
-  const repoId = createRepos(store).add({ name: "web", path: repo.dir, remote: REPO });
+  const repoId = createRepos({ store }).add({ name: "web", path: repo.dir, remote: REPO });
   let team: FakeTeam | undefined;
   let linearProject: FakeProject | undefined;
   if (linear) {
@@ -255,7 +253,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
       if (linear && team && linearProject) {
         const created = linear.workspace.addIssue({ team, title, description: body, project: linearProject });
         // Con el Scheduler apagado nadie sincroniza el caché de un proyecto de Linear: se llena a mano.
-        await createIssues(store).sync(createLinearTracker({ connections, endpoint: linear.endpoints.graphql }), {
+        await createIssues({ store }).sync(createLinearTracker({ connections, endpoint: linear.endpoints.graphql }), {
           projectId: project.id,
           project: { tracker: "linear", id: linearProject.id },
         });

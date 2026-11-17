@@ -23,13 +23,13 @@ let readPr: (ref: PrRef) => Promise<PrState>;
 
 beforeEach(() => {
   store = openStore({ path: ":memory:" });
-  local = createLocalTracker(store);
-  issues = createIssues(store, local);
-  const defs = createDefs(store);
+  local = createLocalTracker({ store });
+  issues = createIssues({ store, local });
+  const defs = createDefs({ store });
   defs.register("flow", z.unknown());
   defs.register("profile", z.unknown());
   projects = createProjects({ store, defs });
-  repos = createRepos(store, { remote: (repo) => ({ url: `https://example.com/${repo}.git`, repo, account: "octocat" }) });
+  repos = createRepos({ store, remote: (repo) => ({ url: `https://example.com/${repo}.git`, repo, account: "octocat" }) });
   reads = [];
   readPr = () => Promise.reject(new Error("no se esperaba leer un PR"));
 });

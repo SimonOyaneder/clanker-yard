@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { isEventOf, RepoId, type DetectedRepo, type RecipeStatus, type Repo, type RepoOverview } from "@clanker/api";
+import { isEventOf, RepoId, type DetectedRepo, type Origin, type RecipeStatus, type Repo, type RepoOverview } from "@clanker/api";
 import { asc, eq } from "drizzle-orm";
 import { DefValidationError } from "../defs/defs";
 import { readRecipe, RecipeSyntaxError } from "../recipe/recipe";
@@ -47,7 +47,7 @@ export interface Repos {
    * Registra el repo de `path`, que debe ser la raíz de un checkout de git: la branch por defecto y el
    * remoto de GitHub salen de él. Lanza `NotAGitRepoError` si no lo es e `InvalidRepoError` si ya está registrado.
    */
-  register(path: string, name?: string): Promise<Repo>;
+  register(path: string, name: string | undefined, by: Origin): Promise<Repo>;
   get(id: RepoId): Repo | undefined;
   /**
    * Los registrados, por nombre, con el estado de su receta (`invalid` si la carpeta ya no existe) y cómo
@@ -71,24 +71,30 @@ export interface Repos {
 }
 
 export interface ReposOptions {
+  store: Store;
   /** `RepoConfig.remote` de un repo por su `owner/name` de GitHub (`githubRemote`); sin esto ningún repo se puede pushear. */
   remote?: (repo: string) => RepoConfig["remote"];
 }
 
-export function createRepos(store: Store, { remote: remoteOf }: ReposOptions = {}): Repos {
+export function createRepos({ store, remote: remoteOf }: ReposOptions): Repos {
   const byPath = (path: string) => store.db.select().from(repos).where(eq(repos.path, path)).get();
 
+  /** Con `by` (lo que registra una persona o un agente), en la misma tx emite `repo.added` con quién lo pidió. */
+  function insert({ name, path, defaultBranch = "main", remote = null }: Parameters<Repos["add"]>[0], by?: Origin): RepoId {
+    const id = newId("repo");
+    store.tx((tx) => {
+      tx.db.insert(repos).values({ id, name, path, defaultBranch, remote }).run();
+      if (by) tx.emit({ type: "repo.added", origin: by, payload: { repoId: id, name, path } });
+    });
+    return id;
+  }
+
   const self: Repos = {
-    add({ name, path, defaultBranch = "main", remote = null }) {
-      const id = newId("repo");
-      store.tx((tx) => tx.db.insert(repos).values({ id, name, path, defaultBranch, remote }).run());
-      return id;
-    },
-    async register(path, name) {
+    add: (repo) => insert(repo),
+    async register(path, name, by) {
       const info = await inspectRepo(path);
       if (byPath(info.path)) throw new InvalidRepoError(`${info.path} ya está registrado.`);
-      const id = self.add({ ...info, name: name ?? info.name });
-      return self.get(id)!;
+      return self.get(insert({ ...info, name: name ?? info.name }, by))!;
     },
     get: (id) => store.db.select().from(repos).where(eq(repos.id, id)).get(),
     list: () => store.db.select().from(repos).orderBy(asc(repos.name), asc(repos.id)).all(),

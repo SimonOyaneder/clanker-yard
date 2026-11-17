@@ -29,7 +29,7 @@ const okOnly = ["ok"];
 function setup(): { defs: Defs; flows: Flows } {
   const store = openStore({ path: ":memory:" });
   open.push(store);
-  const defs = createDefs(store);
+  const defs = createDefs({ store });
   const modes = (outcomes: string[], payload?: z.ZodType) => ({ outcomes, payload });
   const roles: Record<string, RoleInfo> = {
     dev: { modes: { plan: modes(okOnly), implement: modes(okOnly), fix: modes(okOnly) } },

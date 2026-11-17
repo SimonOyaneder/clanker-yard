@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { DefExported, DefExportToRepo } from "@clanker/api";
+import type { DefExported, DefExportToRepo, Origin } from "@clanker/api";
 import * as z from "zod";
 import type { Connections } from "../connections/connections";
 import type { Defs } from "../defs/defs";
@@ -10,6 +10,7 @@ import type { GitIdentityOf } from "../git/identity";
 import type { GitRemote } from "../git/remote";
 import type { Repos } from "../repos/repos";
 import { RepoNotFoundError } from "../repos/repos";
+import type { Store } from "../store/store";
 import { repoConfigPath, renderRepoFile } from "./files";
 import { messageOf } from "../errors/format";
 import { BadRequestError } from "../errors/domain";
@@ -23,12 +24,13 @@ export interface RepoConfigExporter {
    * escribe en un worktree desechable sobre `origin/<default>` (recién traído), se commitea, se pushea a una
    * branch nueva `clanker/export-<kind>-<slug>-<n>` con la cuenta de GitHub del repo y el PR sale con esa
    * misma cuenta, como el de `pr.publish`. El checkout del usuario no se toca. Lanza `RepoExportError`,
-   * `DefNotFoundError` o `RepoNotFoundError`.
+   * `DefNotFoundError` o `RepoNotFoundError`. Con el PR abierto emite `def.exported` con quién lo pidió.
    */
-  exportDef(input: DefExportToRepo): Promise<DefExported>;
+  exportDef(input: DefExportToRepo, by: Origin): Promise<DefExported>;
 }
 
 export interface RepoConfigExporterDeps {
+  store: Store;
   defs: Defs;
   repos: Repos;
   /** La config del repo (remoto y cuenta), la misma que usa Workspaces. */
@@ -43,12 +45,12 @@ export interface RepoConfigExporterDeps {
 
 const Pull = z.object({ number: z.int().positive(), html_url: z.string() });
 
-export function createRepoConfigExporter({ defs, repos, config, remote, connections, dataDir, identityOf }: RepoConfigExporterDeps): RepoConfigExporter {
+export function createRepoConfigExporter({ store, defs, repos, config, remote, connections, dataDir, identityOf }: RepoConfigExporterDeps): RepoConfigExporter {
   // Sin hooks: `pre-commit` y compañía son del repo del usuario, no de este commit.
   const NO_HOOKS = ["-c", "core.hooksPath=/dev/null"];
 
   return {
-    async exportDef({ kind, id, repoId }) {
+    async exportDef({ kind, id, repoId }, by) {
       const def = defs.get(kind, id);
       if (!def) throw new DefNotFoundError(kind, id);
       if (def.scope !== "user") {
@@ -115,6 +117,7 @@ export function createRepoConfigExporter({ defs, repos, config, remote, connecti
           body: prBody({ kind, slug: def.slug, path, verb }),
         });
         const pull = Pull.parse(data);
+        store.tx((tx) => tx.emit({ type: "def.exported", origin: by, payload: { kind, defId: def.id, repoId, number: pull.number, url: pull.html_url } }));
         return { url: pull.html_url, number: pull.number, branch, path };
       } finally {
         if (added) await git(repo.path, ["worktree", "remove", "--force", worktree]).catch(() => undefined);

@@ -440,7 +440,7 @@ export function createEngine(deps: EngineDeps): Engine {
   const maxAgents = deps.maxAgents ?? DEFAULT_MAX_AGENTS;
   const probeEveryMs = (deps.probeEverySec ?? DEFAULT_PROBE_EVERY_SEC) * 1000;
   const bootId = deps.bootId ?? newId("boot");
-  const errors = deps.errors ?? createErrorReporter(store);
+  const errors = deps.errors ?? createErrorReporter({ store });
   const { flowOf, workspaceFor, lineage, resolveRef, selectStep, readArtifact, parallelStepOf, itemsOf, latestStep, getRun, listRuns } =
     createRunReads({ store, defs, artifacts, workspaceOf });
   const inFlight = new Set<Promise<void>>();

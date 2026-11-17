@@ -47,7 +47,7 @@ async function boot(env: Record<string, string> = { CORE_RUNTIME: "fake" }, extr
     ...extra,
     store,
     dataDir: home.path,
-    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") })),
+    connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }) }),
     runtimes: [createFakeRuntime({ fixtures: juguete, speed: Infinity })],
     env,
     scheduler: false,
@@ -84,7 +84,7 @@ async function follow(client: Client, projectId: Event["projectId"], types: Even
 describe("runs sobre el runtime fake", () => {
   test("crea un proyecto y una issue local, lanza la corrida y recibe run.finished con outcome done", async () => {
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const nextFinished = await follow(client, project.id, ["run.finished"]);
@@ -107,7 +107,7 @@ describe("runs sobre el runtime fake", () => {
 
   test("runs.get devuelve los pasos con su outcome y el costo, y el worktree queda suelto", async () => {
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const nextFinished = await follow(client, project.id, ["run.finished"]);
@@ -285,7 +285,7 @@ describe("runs.start con los repos del proyecto", () => {
 describe("projects.queue", () => {
   test("una issue ya lanzada sale de la cola, también cuando su corrida termina, y la otra sigue lista", async () => {
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const first = await client.issues.createLocal({ projectId: project.id, title: "Una", priority: 1 });
     const second = await client.issues.createLocal({ projectId: project.id, title: "Otra" });
@@ -378,7 +378,7 @@ describe("arranque", () => {
 
   test("al arrancar despacha los pasos pending que dejó el core anterior", async () => {
     let client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const nextRetry = await follow(client, project.id, ["step.retrying"]);
@@ -462,7 +462,7 @@ describe("arranque", () => {
 describe("recuperación al arrancar", () => {
   test("un corte con el agente en curso: el core nuevo reabre el paso, conserva el worktree y termina la corrida", async () => {
     const client = await boot();
-    const repoId = createRepos(store).add({ name: "demo", path: repo.dir });
+    const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
     const project = await createToyProject(client, { repo: repoId });
     const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
     const nextFinished = await follow(client, project.id, ["run.finished"]);

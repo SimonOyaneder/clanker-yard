@@ -39,7 +39,7 @@ export async function startMcpHarness({ fixtures, speed, dev = false }: { fixtur
   const core = await startCore({
     store,
     dataDir: home.path,
-    connections: createConnections(store, createFileSecrets({ dir: join(home.path, "secrets") }), kit && { now: kit.now }),
+    connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }), ...kit && { now: kit.now } }),
     dev: kit?.dev,
     runtimes: [createFakeRuntime({ fixtures, speed })],
     env: { CORE_RUNTIME: "fake" },

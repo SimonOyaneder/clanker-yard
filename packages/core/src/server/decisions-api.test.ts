@@ -23,7 +23,7 @@ afterEach(async () => {
 
 function api(origin: "ui" | "cli" | "mcp") {
   const router = createRouter(
-    withPrs({ store, connections: {} as never, issues: createIssues(store), ...deps, coreVersion: "0", bootId: "boot", startedAt: 0, dataDir: "/tmp/clanker", onShutdown: () => {} }),
+    withPrs({ store, connections: {} as never, issues: createIssues({ store }), ...deps, coreVersion: "0", bootId: "boot", startedAt: 0, dataDir: "/tmp/clanker", onShutdown: () => {} }),
   );
   return createRouterClient(router, { context: { origin } });
 }
