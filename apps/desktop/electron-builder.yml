@@ -26,8 +26,9 @@ npmRebuild: false
 publish: null
 mac:
   category: public.app-category.developer-tools
-  # Sale de build/icon.svg con `npm run icon -w @clanker/desktop`.
-  icon: build/icon.icns
+  # Ícono de Icon Composer (macOS 26 enmarca un .icns plano en un borde claro): electron-builder lo compila con
+  # `actool` (Xcode 26) a Assets.car y saca de él el .icns. `build/icon.icon/Assets/glyph.svg` es el glifo de build/icon.svg.
+  icon: build/icon.icon
   identity: null
   target:
     - target: dir
