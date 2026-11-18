@@ -62,6 +62,9 @@ const router = os.router({
     testClaude: os.connections.testClaude.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    testCodex: os.connections.testCodex.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     setClaudeApiKey: os.connections.setClaudeApiKey.handler(() => {
       throw new Error("no se usa en este test");
     }),

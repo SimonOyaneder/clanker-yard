@@ -38,6 +38,9 @@ export interface FakeCodexOptions {
   holdAfterUsage?: boolean;
   interruptWithoutCompletion?: boolean;
   holdInterruptCompletion?: boolean;
+  account?: CodexMethods["account/read"]["result"]["account"];
+  rpcErrors?: Partial<Record<keyof CodexMethods, RpcError>>;
+  rateLimitUpdates?: RateLimitSnapshot[];
 }
 
 export async function createFakeCodex(dir: string, options: FakeCodexOptions = {}) {
@@ -46,19 +49,21 @@ export async function createFakeCodex(dir: string, options: FakeCodexOptions = {
   const childPid = join(dir, "child.pid");
   const pidFile = join(dir, "server.pid");
   const environment = join(dir, "environment.json");
+  const versionEnvironment = join(dir, "version-environment.json");
   const state = join(dir, "state.json");
   await writeFile(script, `import { createInterface } from "node:readline";
 import * as fs from "node:fs/promises";
 import { spawn } from "node:child_process";
-(${fakeProcess.toString()})(${JSON.stringify({ ...options, requests, childPid, pidFile, environment, state })}, { createInterface, fs, spawn });`);
-  return { executable: process.execPath, args: [script], requests, childPid, pidFile, environment };
+(${fakeProcess.toString()})(${JSON.stringify({ ...options, requests, childPid, pidFile, environment, versionEnvironment, state })}, { createInterface, fs, spawn });`);
+  return { executable: process.execPath, args: [script], requests, childPid, pidFile, environment, versionEnvironment };
 }
 
 async function fakeProcess(
-  options: FakeCodexOptions & { requests: string; childPid: string; pidFile: string; environment: string; state: string },
+  options: FakeCodexOptions & { requests: string; childPid: string; pidFile: string; environment: string; versionEnvironment: string; state: string },
   { createInterface, fs, spawn }: { createInterface: typeof import("node:readline").createInterface; fs: typeof import("node:fs/promises"); spawn: typeof import("node:child_process").spawn },
 ) {
   if (process.argv.includes("--version")) {
+    await fs.writeFile(options.versionEnvironment, JSON.stringify(process.env));
     process.stdout.write(`codex-cli ${options.version ?? "0.169.1"}\n`);
     return;
   }
@@ -123,6 +128,9 @@ async function fakeProcess(
       return;
     }
     if (message.id === undefined) return;
+    const method = message.method as keyof CodexMethods;
+    const rpcError = options.rpcErrors?.[method];
+    if (rpcError) return send({ id: message.id, error: rpcError });
     const ok = (result: unknown) => send({ id: message.id, result });
     const error = (code: number, text: string) => send({ id: message.id, error: { code, message: text } });
     const params = message.params as { cwd?: string; threadId?: string; model?: string; config?: Record<string, JsonValue>; clientInfo?: unknown; cursor?: string };
@@ -137,7 +145,7 @@ async function fakeProcess(
     }
     switch (message.method) {
       case "account/read":
-        accountReply = () => ok({ account: options.scenario === "login_expired" ? null : { type: "chatgpt", email: options.accountEmail ?? null, planType: "self_serve_business_prolite", workspaceName: null }, requiresOpenaiAuth: true });
+        accountReply = () => ok({ account: options.account !== undefined ? options.account : options.scenario === "login_expired" ? null : { type: "chatgpt", email: options.accountEmail ?? null, planType: "self_serve_business_prolite", workspaceName: null }, requiresOpenaiAuth: true });
         if (!options.reverseReplies) accountReply();
         return;
       case "account/rateLimits/read":

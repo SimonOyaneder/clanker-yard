@@ -1,9 +1,13 @@
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import type { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubAuth, GitHubDeviceFlow, GitHubInstallations, LoginFailure, Origin } from "@clanker/api";
+import { CodexStatus, type ClaudeMode, type ClaudeStatus, type Connection, type ConnectionProvider, type GitHubAuth, type GitHubDeviceFlow, type GitHubInstallations, type LoginFailure, type Origin } from "@clanker/api";
 import { and, asc, eq, ne } from "drizzle-orm";
+import * as z from "zod";
 import { apiKeyCredentials, subscriptionCredentials, type ClaudeCredentials } from "../agents/claude/credentials";
 import type { QueryFn } from "../agents/claude/claude-runtime";
 import { probeClaude, type ExecFn } from "../agents/claude/probe";
+import { probeCodex, type CodexProbeOptions } from "../agents/codex/probe";
+import type { RateLimitSnapshot } from "../agents/codex/api";
+import { CodexLimits, codexStatusWithLimits, mergeCodexLimits } from "../agents/codex/usage";
 import { createGitHubClient, type GitHubApiOptions, type GitHubClient } from "../github/client";
 import {
   GITHUB_OAUTH_ENDPOINTS,
@@ -27,7 +31,8 @@ import {
   type LinearTokens,
 } from "../linear/oauth";
 import type { Secrets } from "../secrets/secrets";
-import { connections } from "../store/schema";
+import { connections, meta } from "../store/schema";
+import { readMetaJson } from "../store/meta-json";
 import type { Store } from "../store/store";
 import { OAuthSession } from "./oauth-session";
 import { messageOf } from "../errors/format";
@@ -114,6 +119,7 @@ export interface ConnectionsOptions {
   githubApp?: GitHubAppOptions;
   linear?: LinearOptions;
   claude?: ClaudeOptions;
+  codex?: CodexProbeOptions;
   /** Reloj en ms epoch, para el vencimiento. */
   now?: () => number;
 }
@@ -169,6 +175,10 @@ export interface Connections {
    * si pide `api-key` sin tener una guardada.
    */
   testClaude(mode: ClaudeMode | undefined, origin: Origin): Promise<ClaudeStatus>;
+  testCodex(origin: Origin): Promise<CodexStatus>;
+  codexStatus(): CodexStatus | undefined;
+  updateCodexUsage(update: RateLimitSnapshot): void;
+  markCodexLoginLost(origin: Origin): void;
   /**
    * Guarda la API key de Anthropic en `Secrets` y deja la cuenta `claude/api-key` activa: desde entonces
    * `claudeCredentials` la usa. Antes la prueba; si Anthropic la rechaza o no se pudo probar lanza
@@ -256,7 +266,10 @@ function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export function createConnections({ store, secrets, github = {}, githubApp, linear = {}, claude = {}, now = Date.now }: ConnectionsOptions): Connections {
+const CODEX_STATUS_KEY = "codex_status";
+const CodexSnapshot = z.object({ status: CodexStatus, limits: CodexLimits.optional() });
+
+export function createConnections({ store, secrets, github = {}, githubApp, linear = {}, claude = {}, codex = {}, now = Date.now }: ConnectionsOptions): Connections {
   const githubClients = new Map<string, GitHubClient>();
   const endpoints = linear.endpoints ?? LINEAR_ENDPOINTS;
   const linearClientId = linear.clientId ?? LINEAR_DEFAULT_CLIENT_ID;
@@ -266,6 +279,19 @@ export function createConnections({ store, secrets, github = {}, githubApp, line
   const unsaved = new Map<string, OAuthSession>();
   let pendingLogin: { cancel(reason: string): Promise<void> } | undefined;
   let pendingDeviceFlow: AbortController | undefined;
+  let codexSnapshot = readMetaJson(store.db, CODEX_STATUS_KEY, CodexSnapshot);
+
+  function saveCodexSnapshot(next: z.infer<typeof CodexSnapshot>, origin: Origin): void {
+    next = CodexSnapshot.parse(next);
+    const value = JSON.stringify(next);
+    if (value === JSON.stringify(codexSnapshot)) return;
+    const changed = JSON.stringify(next.status) !== JSON.stringify(codexSnapshot?.status);
+    store.tx((tx) => {
+      tx.db.insert(meta).values({ key: CODEX_STATUS_KEY, value }).onConflictDoUpdate({ target: meta.key, set: { value } }).run();
+      codexSnapshot = next;
+      if (changed) tx.emit({ type: "connection.usage", origin, payload: { provider: "codex" } });
+    });
+  }
 
   function find(provider: ConnectionProvider, account: string) {
     return store.db
@@ -552,6 +578,9 @@ export function createConnections({ store, secrets, github = {}, githubApp, line
       if (provider === "claude") {
         throw new ConnectionError("Claude se conecta con testClaude (suscripción) o setClaudeApiKey (API key).");
       }
+      if (provider === "codex") {
+        throw new ConnectionError("Codex se conecta con testCodex usando el login de su suscripción.");
+      }
       return save({ provider, account, scopes, secret: token, expiresAt, auth: "pat" }, origin);
     },
 
@@ -637,6 +666,42 @@ export function createConnections({ store, secrets, github = {}, githubApp, line
         setStatus("claude", mode, "revoked", origin);
       }
       return status;
+    },
+
+    async testCodex(origin) {
+      const { status, limits } = await probeCodex(codex);
+      const savedLimits = limits ?? codexSnapshot?.limits;
+      saveCodexSnapshot({ status, ...(savedLimits && { limits: savedLimits }) }, origin);
+      if (status.state === "ready" || status.state === "quota_exhausted") {
+        writeActive({
+          provider: "codex",
+          account: "subscription",
+          scopes: status.plan === undefined ? [] : [`plan:${status.plan}`],
+          secretRef: "",
+        }, origin);
+      } else if (status.state === "login_required" || status.state === "login_expired") {
+        setStatus("codex", "subscription", "expired", origin);
+      }
+      return status;
+    },
+
+    codexStatus() {
+      return codexSnapshot?.status;
+    },
+
+    updateCodexUsage(update) {
+      const limits = mergeCodexLimits(codexSnapshot?.limits, update);
+      const status = codexStatusWithLimits(codexSnapshot?.status ?? { state: "ready" }, limits);
+      saveCodexSnapshot({ status, limits }, "core");
+    },
+
+    markCodexLoginLost(origin) {
+      if (codexSnapshot) {
+        const status: CodexStatus = { ...codexSnapshot.status, state: "login_expired", message: "El login de Codex venció: corre `codex login` y vuelve a probar." };
+        delete status.resetsAt;
+        saveCodexSnapshot({ ...codexSnapshot, status }, origin);
+      }
+      setStatus("codex", "subscription", "expired", origin);
     },
 
     async setClaudeApiKey(key, origin) {

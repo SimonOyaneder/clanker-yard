@@ -1,6 +1,6 @@
 import { eventIterator, oc } from "@orpc/contract";
 import * as z from "zod";
-import { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubDeviceFlow, GitHubInstallations, GitHubPatForm } from "./connections";
+import { ClaudeMode, ClaudeStatus, CodexStatus, Connection, ConnectionProvider, GitHubDeviceFlow, GitHubInstallations, GitHubPatForm } from "./connections";
 import {
   ArtifactHash,
   ArtifactKind,
@@ -178,6 +178,7 @@ const connections = {
    * tener una guardada. Sin `meta.mcp`: un agente no debe gastar la cuota de la persona.
    */
   testClaude: base.input(z.object({ mode: ClaudeMode.optional() }).default({})).output(ClaudeStatus),
+  testCodex: base.input(z.object({}).default({})).output(CodexStatus),
   /**
    * Guarda una API key de Anthropic como alternativa a la suscripción (en `Secrets`, nunca en la base) y
    * la deja activa: desde entonces los agentes la usan. Antes la prueba con una llamada mínima y no

@@ -4,7 +4,7 @@ import * as z from "zod";
  * Quién emite el token: GitHub (PAT en la fase 1, GitHub App después), Linear (OAuth) y Claude (el
  * login del `claude` instalado, o una API key). La cuenta de Claude es su modo (`ClaudeMode`).
  */
-export const ConnectionProvider = z.enum(["github", "linear", "claude"]);
+export const ConnectionProvider = z.enum(["github", "linear", "claude", "codex"]);
 export type ConnectionProvider = z.infer<typeof ConnectionProvider>;
 
 /** Cómo se conectó GitHub: con un PAT classic pegado a mano o con el device flow de la GitHub App. */

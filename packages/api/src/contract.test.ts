@@ -27,7 +27,7 @@ describe("contrato", () => {
       "system",
       "trackers",
     ]);
-    expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm", "startDeviceFlow", "githubInstallations", "linearAuth", "testClaude", "setClaudeApiKey", "disconnect"]);
+    expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm", "startDeviceFlow", "githubInstallations", "linearAuth", "testClaude", "testCodex", "setClaudeApiKey", "disconnect"]);
     expect(Object.keys(contract.system).sort()).toEqual(["breakers", "health", "info", "lanes", "retryBreaker", "setLanes", "shutdown"]);
     expect(Object.keys(contract.events).sort()).toEqual(["list", "stream"]);
     expect(Object.keys(contract.artifacts)).toEqual(["get"]);
