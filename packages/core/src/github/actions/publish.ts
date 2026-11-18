@@ -25,7 +25,8 @@ import { assignOrNote, findOpenPull, openPull, type Pull } from "./pulls";
 
 const PublishArgs = ApplyArgs.extend({
   /** El reporte del committer: de él lee los commits (como `commits.apply`) y el título y cuerpo del PR. */
-  plan: ApplyArgs.shape.plan.extend({ pr: z.object({ title: z.string().min(1), body: z.string() }) }),
+  // El título vacío no se rechaza aquí: sin commits es "nada que publicar" y vuelve al committer (`replan`), no un error de args.
+  plan: ApplyArgs.shape.plan.extend({ pr: z.object({ title: z.string(), body: z.string() }) }),
   /** El PR se abre en draft; solo `false` lo abre listo para review. */
   draft: z.boolean().default(true),
   /** PRs de los que este depende, como `repo#n` (un PR apilado): el cuerpo abre con "Depende de ...". */
@@ -64,7 +65,7 @@ export interface PrPublishDeps {
  *   emite `pr.opened`.
  *
  * Outcomes: `ok` (output `pr`: la `PrRef`, más `url` y `head`) y `replan` (`failures` va de vuelta al
- * committer: el plan no se puede aplicar, no trae commits, un hook rechazó un commit o los commits
+ * committer: el plan no se puede aplicar, no trae commits, trae commits sin título de PR, un hook rechazó un commit o los commits
  * del agente no cuadran). Con `stackMode: "local"` y base distinta de la branch por defecto, `local`
  * devuelve `{ prId, branch, base, head }` sin push ni PR remoto; el autosquash se prepara en un worktree
  * separado y su resultado se guarda antes de mover la branch, para poder retomar un corte.
@@ -79,6 +80,10 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     if (!row) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
     const { remote, defaultBranch } = deps.repoConfig(row.repoId);
     if (!remote) throw new PermanentActionError(`El repo ${row.repoId} no tiene remoto configurado: no se puede publicar.`);
+
+    // Sin commits no hace falta título: abajo es "nada que publicar".
+    const bareTitle = cleanMessage(plan.pr.title).split("\n")[0]!.trim();
+    if (bareTitle === "" && plan.commits.length > 0) return { outcome: "replan", output: { failures: "El plan no trae el título del PR (`pr.title`)." } };
 
     const applied = await apply.run(args, ctx);
     if (applied.outcome !== "ok") return { outcome: "replan", output: applied.output };
@@ -96,7 +101,7 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
 
     const [owner = "", name = ""] = remote.repo.split("/");
     const pack = packs.packFor({ githubOrg: owner });
-    const title = titleWithKey(cleanMessage(plan.pr.title).split("\n")[0]!.trim(), issueKey(store, ctx.runId));
+    const title = titleWithKey(bareTitle, issueKey(store, ctx.runId));
     const { baseRef, parents } = settled;
     const body = prBody(cleanMessage(plan.pr.body), pack.conventions.pr?.omitSections ?? [], args.dependsOn, parents);
     const run = store.db.select().from(runs).where(eq(runs.id, ctx.runId)).get();

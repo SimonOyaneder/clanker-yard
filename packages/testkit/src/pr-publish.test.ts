@@ -308,6 +308,24 @@ describe("pr.publish", () => {
     expect(github.pulls()).toEqual([]);
   });
 
+  test("sin cambios el committer deja el título vacío: también es replan, no un error de args que estaciona la corrida", async () => {
+    rmSync(join(lease.path, "feature.txt"));
+
+    const result = await publish.run(args({ plan: plan({ commits: [], pr: { title: "", body: "" } }) }), durableCtx());
+
+    expect(result).toMatchObject({ outcome: "replan", output: { failures: expect.stringContaining("nada que publicar") } });
+    expect(github.pulls()).toEqual([]);
+  });
+
+  test("con commits pero sin título vuelve al committer a pedirlo, sin pushear ni abrir el PR", async () => {
+    const result = await publish.run(args({ plan: plan({ pr: { title: " ", body: BODY } }) }), durableCtx());
+
+    expect(result).toMatchObject({ outcome: "replan", output: { failures: expect.stringContaining("pr.title") } });
+    expect(commitsOnBranch()).toEqual([]);
+    expect(() => remoteSha()).toThrow();
+    expect(github.pulls()).toEqual([]);
+  });
+
   test("si alguien más pusheó la branch, no se reintenta y no se abre el PR", async () => {
     repo.git("--git-dir", repo.remoteDir!, "update-ref", `refs/heads/${BRANCH}`, lease.baseSha);
 
