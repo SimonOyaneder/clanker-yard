@@ -1,6 +1,8 @@
 import { type ContextSource, type JsonSchema, Role, type RoleMode } from "@clanker/api";
 import * as z from "zod";
 import {
+  ChatTurnBrief,
+  ChatTurnReport,
   CommitBrief,
   CommitPlan,
   CommitRoute,
@@ -173,6 +175,20 @@ const planCheck = Role.parse({
   },
 });
 
+const chat = Role.parse({
+  prompt: prompts.CHAT_PROMPT,
+  context: [native, agentsMd],
+  modes: {
+    turn: mode({
+      instructions: prompts.CHAT_TURN,
+      brief: ChatTurnBrief,
+      report: ChatTurnReport,
+      outcomes: ["ok"],
+      session: "resume",
+    }),
+  },
+});
+
 /** Los roles de la plantilla por slug; son los body de las defs de kind `role`. */
 export const roles: Record<string, Role> = {
   dev,
@@ -183,4 +199,5 @@ export const roles: Record<string, Role> = {
   committer,
   triage,
   "plan-check": planCheck,
+  chat,
 };

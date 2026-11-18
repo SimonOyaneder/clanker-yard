@@ -2,6 +2,67 @@
 
 exports[`esquemas de reporte > snapshot 1`] = `
 {
+  "chat": {
+    "turn": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "items": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "change": {
+                        "type": "string",
+                      },
+                      "id": {
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "path": {
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "id",
+                      "change",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+                "summary": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "summary",
+                "items",
+              ],
+              "type": "object",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "Lo que cambiaste en el borrador en este turno; null si no tocaste archivos.",
+        },
+        "reply": {
+          "description": "Respuesta en markdown para la persona.",
+          "type": "string",
+        },
+      },
+      "required": [
+        "reply",
+        "proposal",
+      ],
+      "type": "object",
+    },
+  },
   "committer": {
     "plan": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
