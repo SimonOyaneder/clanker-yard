@@ -72,6 +72,9 @@ import { startTriggers } from "./watch/triggers";
 import { createWatch } from "./watch/watch";
 import { startCleanup } from "./workspaces/cleanup";
 import { createChatScratch } from "./workspaces/scratch";
+import { chatApplyProposalAction, chatPrStateAction, chatRevertAction } from "./chats/actions";
+import { createPrChats } from "./chats/chats";
+import { createPrDetails } from "./github/pr-detail";
 import { createRepos } from "./repos/repos";
 import {
   createWorkspaces,
@@ -306,6 +309,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const restackDeps = { store, workspaces, repoConfig: repos.config, prs, connections: opts.connections, ...gap };
   flows.registerAction(stackRestackAction(restackDeps));
   flows.registerAction(stackRestackRewrittenAction(restackDeps));
+  flows.registerAction(chatApplyProposalAction({ store, workspaces }));
+  flows.registerAction(chatRevertAction({ workspaces }));
+  flows.registerAction(chatPrStateAction({ store }));
   const feedback = { connections: opts.connections, packs, ...gap };
   for (const action of [ciFailureReportAction, councilThreadsAction, prBotThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction]) flows.registerAction(action(feedback));
   const headSeen = ({ repo, number }: PrRef) => {
@@ -338,6 +344,21 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     },
     { types: ["run.returned"] },
   );
+  const chats = createPrChats({
+    store,
+    agents,
+    runtimes,
+    scratch,
+    defs,
+    projects,
+    breakers,
+    artifacts,
+    details: createPrDetails({ store, repoConfig: repos.config, connections: opts.connections, workspaces }),
+    repoConfig: repos.config,
+    flows,
+    errors: reporter,
+  });
+  chats.recover();
   const runs = createRunStarter({ store, defs, projects, repos, issues, flows, trackers, binding: trackerProjects.binding });
   const scheduler = createScheduler({
     store,
@@ -401,6 +422,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     learnings,
     defs,
     agentOptions: () => describeRuntimes(runtimes),
+    chats,
     legacyImport: createLegacyImporter({ store, defs, artifacts }),
     republisher: createPrRepublisher({ store, repos, issues, projects, flows, connections: opts.connections, prs, fetchRepo: workspaces.fetch }),
     bootId,
@@ -425,6 +447,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       await scheduler.close();
       breakers.close();
       stopMarkingLogin();
+      await chats.close();
       const stopped = flows.close({ graceMs });
       // Con `drain`, hasta que las acciones terminen solas; sin él, el SIGTERM sale de inmediato.
       await Promise.race([stopped, delay(graceMs, undefined, { ref: false })]);

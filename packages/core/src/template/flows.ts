@@ -1160,6 +1160,144 @@ export const REPUBLISH_PR: FlowDef = {
   },
 };
 
+/**
+ * Lo que comparten `chat-aplicar` y `chat-aplicar-local` (`chats/chats.ts`): la propuesta del chat queda sin commitear
+ * en el worktree del PR (`chat.applyProposal`), pasa los checks de la receta (rojos, el dev los arregla), sale como
+ * `fixup!` de los commits del PR (`pr.pushFixups`, que squashea y pushea con lease, o deja los fixups visibles sin
+ * forzar si el PR tuvo council, o en un PR local commitea sin push) y los hijos del PR siguen su punta nueva
+ * (`restack-rewritten` como subflujo, que marca la reescritura para que Watch no la anuncie otra vez). Una propuesta
+ * que no calza (`stale`) o choca (`conflict`) termina sin tocar el PR.
+ */
+const CHAT_APPLY_PARAMS = {
+  prId: "string",
+  chatId: "string",
+  rev: "number",
+  repo: "RepoRef",
+  branch: "string",
+  base: "string",
+  checkRounds: { type: "number", default: 2 },
+  externalRounds: { type: "number", default: 3 },
+} as const;
+
+const chatApplyNodes = (next: string): Record<string, Node> => ({
+  apply: {
+    type: "action",
+    action: "chat.applyProposal",
+    args: { ws: "$ws", chatId: "$run.params.chatId", rev: "$run.params.rev" },
+    on: {
+      ok: "checks",
+      stale: { to: "@done", note: "La propuesta ya no calza con el PR: el chat la puede rehacer" },
+      conflict: { to: "@done", note: "La propuesta chocó con el worktree del PR: el PR quedó como estaba" },
+    },
+  },
+  checks: {
+    type: "action",
+    action: "recipe.check",
+    args: { ws: "$ws", scope: "changed" },
+    on: {
+      ok: "fixups",
+      fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: "revert" },
+    },
+  },
+  fix: {
+    type: "agent",
+    role: "dev",
+    mode: "fix",
+    brief: { failures: "$prev.failures" },
+    on: { ok: "checks" },
+  },
+  revert: {
+    type: "action",
+    action: "chat.revert",
+    args: { ws: "$ws" },
+    on: { ok: { to: "@failed", note: "Los checks siguieron rojos: la propuesta no se aplicó" } },
+  },
+  fixups: {
+    type: "action",
+    action: "pr.pushFixups",
+    args: { ws: "$ws", items: null, route: "$route" },
+    on: { ok: "restack", route: { to: "route", maxRounds: 1, exhausted: "@failed" } },
+  },
+  route: {
+    type: "agent",
+    role: "committer",
+    mode: "route",
+    brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits" },
+    on: { ok: "fixups" },
+  },
+  restack: {
+    type: "flow",
+    flow: "restack-rewritten",
+    params: {
+      pr: null,
+      prId: "$run.params.prId",
+      repo: "$run.params.repo",
+      from: "$fixups.from",
+      to: "$fixups.to",
+      externalRounds: "$run.params.externalRounds",
+    },
+    on: { done: next, blocked: next, failed: next },
+  },
+});
+
+/** "Aplicar la propuesta del chat" en un PR publicado: después del restack, un draft vuelve a pedir review al bot. */
+export const CHAT_APLICAR: FlowDef = {
+  schema: 1,
+  id: "chat-aplicar",
+  name: "Aplicar la propuesta del chat",
+  description: "Aplica al PR lo que propuso su chat y restackea los PRs que cuelgan de él.",
+  internal: true,
+  trigger: { type: "manual" },
+  lane: "maintenance",
+  params: { ...CHAT_APPLY_PARAMS, pr: "PrRef" },
+  limits: { maxCostUsd: null, maxSteps: 100 },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.attach",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "apply" },
+    },
+    ...chatApplyNodes("state"),
+    state: {
+      type: "action",
+      action: "chat.prState",
+      args: { prId: "$run.params.prId" },
+      on: { draft: "feedback", ready: { to: "@done", note: "Pide /review si hace falta" }, local: "@done" },
+    },
+    feedback: {
+      type: "flow",
+      flow: "pr-feedback",
+      params: { ws: "$ws", pr: "$run.params.pr", externalRounds: "$run.params.externalRounds" },
+      on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+    },
+  },
+};
+
+/** Lo mismo en un PR local: los fixups quedan commiteados en la máquina, sin push ni review del bot. */
+export const CHAT_APLICAR_LOCAL: FlowDef = {
+  schema: 1,
+  id: "chat-aplicar-local",
+  name: "Aplicar la propuesta del chat en un PR local",
+  description: "Aplica al PR local lo que propuso su chat y restackea los PRs locales que cuelgan de él, sin push.",
+  internal: true,
+  trigger: { type: "manual" },
+  lane: "maintenance",
+  params: CHAT_APPLY_PARAMS,
+  limits: { maxCostUsd: null, maxSteps: 100 },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.acquire",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base" },
+      on: { ok: "apply" },
+    },
+    ...chatApplyNodes("@done"),
+  },
+};
+
 export const flows: Record<string, FlowDef> = {
   "techlead-clasico": TECHLEAD_CLASICO,
   "pr-feedback": PR_FEEDBACK,
@@ -1172,4 +1310,6 @@ export const flows: Record<string, FlowDef> = {
   "restack-rewritten": RESTACK_REWRITTEN,
   council: COUNCIL,
   "republish-pr": REPUBLISH_PR,
+  "chat-aplicar": CHAT_APLICAR,
+  "chat-aplicar-local": CHAT_APLICAR_LOCAL,
 };

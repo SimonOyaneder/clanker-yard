@@ -204,6 +204,8 @@ export const CachedPr = z.object({
   state: PrState.nullable(),
   /** ms epoch de la última lectura de `state`. */
   readAt: z.number().nullable(),
+  /** La propuesta vigente del chat del PR, si está por aplicarse (`draft`) o aplicándose: lo que marcan la lista y el grafo. */
+  chatProposal: z.enum(["draft", "applying"]).optional(),
 });
 export type CachedPr = z.infer<typeof CachedPr>;
 

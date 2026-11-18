@@ -26,6 +26,8 @@ const TEMPLATES: BuiltinTemplate[] = [
       clankerLoopTemplate.flows["restack-rewritten"]!,
       clankerLoopTemplate.flows.council!,
       clankerLoopTemplate.flows["republish-pr"]!,
+      clankerLoopTemplate.flows["chat-aplicar"]!,
+      clankerLoopTemplate.flows["chat-aplicar-local"]!,
     ],
   },
 ];

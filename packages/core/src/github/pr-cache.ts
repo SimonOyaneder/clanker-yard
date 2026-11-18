@@ -133,6 +133,16 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
       for (const { childId, parentId } of store.db.select().from(prParents).orderBy(asc(prParents.parentId)).all()) {
         parents.set(childId, [...(parents.get(childId) ?? []), parentId]);
       }
+      // La propuesta vigente de cada chat activo, si todavía no se aplicó: una consulta para todos los PRs.
+      const proposals = new Map(
+        (store.db.$client
+          .prepare(
+            `SELECT c.pr_id AS prId, p.status AS status FROM pr_chats c JOIN pr_chat_proposals p ON p.chat_id = c.id
+             WHERE c.status = 'active' AND p.status IN ('draft', 'applying')
+               AND p.rev = (SELECT max(rev) FROM pr_chat_proposals WHERE chat_id = c.id)`,
+          )
+          .all() as { prId: string; status: "draft" | "applying" }[]).map(({ prId, status }) => [prId, status]),
+      );
       // El remoto y el pack se resuelven una vez por repo y por org, no por PR: cada uno lee y valida filas.
       const remoteOf = memoize((repoId: RepoId) => (repos.get(repoId) ? repos.config(repoId).remote : undefined));
       const packOf = memoize((org: string) => packs.packFor({ githubOrg: org }));
@@ -154,6 +164,7 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
             reviewBot: pack.reviewBot !== undefined,
             state: row.detail,
             readAt: row.detailAt,
+            ...(proposals.has(row.id) && { chatProposal: proposals.get(row.id)! }),
           },
         ];
       });

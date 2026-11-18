@@ -1,3 +1,4 @@
+import type { PrChats } from "../chats/chats";
 import { API_MAJOR, type AgentOptions, type ClientOrigin, contract, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { githubPatForm } from "../github/pat";
@@ -50,6 +51,8 @@ export interface CoreContext {
 
 export interface RouterDeps {
   store: Store;
+  /** El chat de cada PR (`chats/chats.ts`); sin él, `chats.*` responde que no está disponible. */
+  chats?: PrChats;
   connections: Connections;
   issues: Issues;
   projects: Projects;
@@ -108,6 +111,10 @@ export function createRouter(deps: RouterDeps) {
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
   const { prs, prCache } = deps;
+  const chatsOf = () => {
+    if (!deps.chats) throw new ORPCError("NOT_IMPLEMENTED", { message: "Este core no tiene el chat de PRs." });
+    return deps.chats;
+  };
   const prDetails = createPrDetails({ store, repoConfig: (id) => repos.config(id), connections: deps.connections, workspaces: deps.workspaces });
   const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache, flows, projects });
   const projectOrNotFound = (id: ProjectId) => {
@@ -272,13 +279,13 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     chats: {
-      get: os.chats.get.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
-      send: os.chats.send.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
-      interrupt: os.chats.interrupt.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
-      reset: os.chats.reset.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
-      proposal: os.chats.proposal.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
-      discard: os.chats.discard.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
-      apply: os.chats.apply.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
+      get: os.chats.get.handler(({ input }) => chatsOf().get(input.prId)),
+      send: os.chats.send.handler(({ input, context }) => chatsOf().send(input, context.origin)),
+      interrupt: os.chats.interrupt.handler(({ input, context }) => chatsOf().interrupt(input.chatId, context.origin)),
+      reset: os.chats.reset.handler(({ input, context }) => chatsOf().reset(input.chatId, context.origin)),
+      proposal: os.chats.proposal.handler(({ input }) => chatsOf().proposal(input.chatId, input.rev, input.since)),
+      discard: os.chats.discard.handler(({ input, context }) => chatsOf().discard(input.chatId, context.origin)),
+      apply: os.chats.apply.handler(({ input, context }) => chatsOf().apply(input, context.origin)),
     },
     prs: {
       get: os.prs.get.handler(({ input }) => prs.get(input)),

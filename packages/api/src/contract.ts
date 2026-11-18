@@ -17,7 +17,7 @@ import {
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
 import { AgentOptions, AgentRuntimeId, Effort } from "./agents";
-import { ChatMessage, ChatProposal, PrChat } from "./chats";
+import { ChatMessage, ChatProposal, ChatRef, PrChat } from "./chats";
 import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefExported, DefExportToRepo, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
 import { Learning, LearningFilter, LearningPatch, LearningVerdict, NewLearning } from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
@@ -435,13 +435,15 @@ const chats = {
   send: base.input(z.object({
     chatId: ChatId,
     text: z.string().min(1),
+    refs: z.array(ChatRef).max(20).optional(),
     runtime: AgentRuntimeId.optional(),
     model: z.string().min(1).optional(),
     effort: Effort.optional(),
   })).output(PrChat),
   interrupt: base.input(z.object({ chatId: ChatId })).output(PrChat),
   reset: base.input(z.object({ chatId: ChatId })).output(PrChat),
-  proposal: base.input(z.object({ chatId: ChatId, rev: z.int().positive() })).output(z.object({
+  /** El patch de la propuesta `rev` contra su base, o con `since` solo lo que cambió desde esa propuesta anterior. */
+  proposal: base.input(z.object({ chatId: ChatId, rev: z.int().positive(), since: z.int().positive().optional() })).output(z.object({
     patch: z.string(),
     files: z.array(LocalPrFile),
   })),

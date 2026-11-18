@@ -1,12 +1,17 @@
 import type {
+  AgentRuntimeId,
   ArtifactHash,
   ArtifactKind,
   ChatId,
+  ChatMessage,
+  ChatProposal,
+  ChatRef,
   ConnectionProvider,
   ConnectionStatus,
   Conventions,
   DecisionId,
   DefKind,
+  Effort,
   Event,
   EventType,
   GitHubAuth,
@@ -932,11 +937,72 @@ export const pullRequests = sqliteTable(
   ],
 );
 
-export const prChats = sqliteTable("pr_chats", {
-  id: text().$type<ChatId>().primaryKey(),
-  prId: text("pr_id").notNull().references(() => pullRequests.id),
-  status: text().$type<PrChat["status"]>().notNull(),
-});
+/**
+ * El chat de un PR (`chats/chats.ts`): una conversación con un agente que trabaja en un borrador propio
+ * (`chat_scratches`). Un solo chat `active` por PR; reiniciarlo lo archiva y abre otro. `runtime`, `model` y
+ * `effort` son los del próximo turno; `session_id` es la sesión del último turno, que el siguiente retoma.
+ * `turn_started_at` no nulo es un turno en curso (`busy`); `turn_session_id` es su sesión, para verlo en vivo.
+ */
+export const prChats = sqliteTable(
+  "pr_chats",
+  {
+    id: text().$type<ChatId>().primaryKey(),
+    prId: text("pr_id").notNull().references(() => pullRequests.id),
+    status: text().$type<PrChat["status"]>().notNull(),
+    runtime: text().$type<AgentRuntimeId>().notNull().default("claude-sdk"),
+    model: text().notNull().default(""),
+    effort: text().$type<Effort>(),
+    sessionId: text("session_id"),
+    turnStartedAt: integer("turn_started_at"),
+    turnSessionId: text("turn_session_id"),
+    costMicros: integer("cost_micros").notNull().default(0),
+    createdAt: integer("created_at").notNull().default(0),
+    updatedAt: integer("updated_at").notNull().default(0),
+  },
+  (t) => [uniqueIndex("pr_chats_active_pr").on(t.prId).where(sql`${t.status} = 'active'`)],
+);
+
+/** Los mensajes de un chat, en orden. `proposal_rev` es la propuesta que dejó ese turno. */
+export const prChatMessages = sqliteTable(
+  "pr_chat_messages",
+  {
+    id: text().primaryKey(),
+    chatId: text("chat_id").$type<ChatId>().notNull().references(() => prChats.id),
+    role: text().$type<ChatMessage["role"]>().notNull(),
+    text: text().notNull(),
+    sessionId: text("session_id"),
+    proposalRev: integer("proposal_rev"),
+    refs: text({ mode: "json" }).$type<ChatRef[]>(),
+    at: integer().notNull(),
+  },
+  (t) => [index("pr_chat_messages_chat_at").on(t.chatId, t.at)],
+);
+
+/**
+ * Cada propuesta de un chat: el árbol del borrador (`snapshot_ref`) contra la punta del PR (`base_sha`). La
+ * vigente es la de `rev` más alta; las anteriores quedan de historial y no se aplican.
+ */
+export const prChatProposals = sqliteTable(
+  "pr_chat_proposals",
+  {
+    chatId: text("chat_id").$type<ChatId>().notNull().references(() => prChats.id),
+    rev: integer().notNull(),
+    baseSha: text("base_sha").notNull(),
+    snapshotRef: text("snapshot_ref").notNull(),
+    snapshotSha: text("snapshot_sha").notNull(),
+    patchHash: text("patch_hash").notNull(),
+    summary: text().notNull(),
+    items: text({ mode: "json" }).$type<ChatProposal["items"]>().notNull(),
+    files: text({ mode: "json" }).$type<ChatProposal["files"]>().notNull(),
+    status: text().$type<ChatProposal["status"]>().notNull(),
+    runId: text("run_id").$type<RunId>(),
+    result: text({ mode: "json" }).$type<ChatProposal["result"]>(),
+    note: text(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.chatId, t.rev] }), index("pr_chat_proposals_run").on(t.runId)],
+);
 
 export const chatScratches = sqliteTable("chat_scratches", {
   chatId: text("chat_id").$type<ChatId>().primaryKey(),

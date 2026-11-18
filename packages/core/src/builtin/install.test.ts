@@ -45,6 +45,9 @@ const ACTIONS = {
   "review.requestBot": ["ok", "none"],
   "stack.restack": ["ok", "conflict"],
   "stack.restackRewritten": ["ok", "conflict"],
+  "chat.applyProposal": ["ok", "conflict", "stale"],
+  "chat.revert": ["ok"],
+  "chat.prState": ["draft", "ready", "local"],
   "pr.replay": ["ok"],
   "pr.supersede": ["draft", "ready"],
   "pr.promote": ["ok"],
@@ -104,7 +107,7 @@ test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-
   expect(defs.resolve("flow", "techlead-clasico")?.body).toMatchObject({ name: "Techlead clásico", description: expect.any(String) });
   expect(defs.resolve("flow", "techlead-clasico")?.body).not.toHaveProperty("internal");
   const internal = defs.list("flow").filter((d) => (d.body as { internal?: boolean }).internal === true).map((d) => d.slug).sort();
-  expect(internal).toEqual(["base-combinada-conflicto", "council", "pr-feedback", "promote-local", "rebase-conflicto", "rebase-conflicto-local", "republish-pr", "restack", "restack-feedback", "restack-rewritten"]);
+  expect(internal).toEqual(["base-combinada-conflicto", "chat-aplicar", "chat-aplicar-local", "council", "pr-feedback", "promote-local", "rebase-conflicto", "rebase-conflicto-local", "republish-pr", "restack", "restack-feedback", "restack-rewritten"]);
   expect(defs.resolve("role", "committer")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("profile", "eco")).toMatchObject({ scope: "builtin" });
   expect(store!.events.since(0, { types: ["def.versioned"] })).toHaveLength(versions);

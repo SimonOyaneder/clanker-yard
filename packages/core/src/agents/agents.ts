@@ -1,6 +1,7 @@
 import { Brief,
   compileJsonSchema,
   Profile,
+  type ProfileRole,
   type ProjectId,
   Report,
   Role,
@@ -84,6 +85,11 @@ export interface RunRequest extends Placement {
    * no se retoma: la nueva lleva un handoff con el reporte de la anterior y el `git diff --stat`.
    */
   resumeFrom?: string;
+  /**
+   * Pisa runtime, modelo y effort de la entrada del perfil (lo que un campo no trae lo pone el perfil): el chat de
+   * un PR deja elegirlos por conversación. Los topes y el TTL de caché siguen siendo los del perfil.
+   */
+  entry?: Partial<Pick<ProfileRole, "runtime" | "model" | "effort">>;
 }
 
 export interface ResumeRequest extends Placement {
@@ -360,7 +366,7 @@ export function createAgents({ store, defs, runtimes, now = Date.now, packs, rem
     const role = Role.parse(roleDef.body);
     const mode = pickMode(role, req.role, req.mode, req.brief);
     const proposes = mode.learnings === true;
-    const profileRole = resolveProfileRole(req, req.profileRole ?? req.role);
+    const profileRole = { ...resolveProfileRole(req, req.profileRole ?? req.role), ...definedOf(req.entry) };
     const settings = settingsOf(mode, profileRole);
     const runtime = runtimes.get(profileRole.runtime);
 
@@ -917,6 +923,11 @@ function untilOrAborted(promise: Promise<void>, signal: AbortSignal | undefined,
     signal?.addEventListener("abort", done, { once: true });
     void promise.then(done);
   });
+}
+
+/** Los campos con valor: un `undefined` explícito no pisa al perfil. */
+function definedOf<T extends object>(value: T | undefined): Partial<T> {
+  return Object.fromEntries(Object.entries(value ?? {}).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
 function clip(text: string, max: number): string {
