@@ -4,6 +4,8 @@ Investigación de CLA-128, 2026-11-17. Codex CLI **0.169.1**, Node 24.18.0, macO
 
 Convención: **[verificado]** es una prueba ejecutada contra ese binario; **[doc]** es documentación oficial o código del tag `rust-v0.169.1`, no una prueba contra el servicio; **[secundario]** sería una fuente no primaria. No hizo falta usar fuentes secundarias. Cada límite de la investigación se indica explícitamente.
 
+**Seguimiento:** las conclusiones iniciales describen CLA-128, antes del runtime. §11 y §12 registran su implementación; §13 registra las pruebas en vivo de CLA-140 y qué sigue pendiente. No se modifica el encuadre contractual de §1.
+
 ## Resumen
 
 - **[verificado]** `app-server` puede completar un turno con el login de ChatGPT del usuario, bajo `env -i`, sin que Yard lea o copie credenciales. El plan observado fue `self_serve_business_prolite`: no se probaron cuentas Plus ni Pro.
@@ -366,3 +368,25 @@ La carga nativa de instrucciones del proyecto queda habilitada con el presupuest
 El runtime emite uso sin costo reportado (`costPerTurn: false`); el core lo estima con `model_prices`. Para el transcript y los topes se consulta esa misma tabla y fórmula. `last` ya incluye el razonamiento en `outputTokens` y las cachés dentro de `inputTokens`: no se suman de nuevo. El equivalente USD no es una factura de la suscripción. Las tarifas Standard y el umbral de prompt largo (>272000 tokens) provienen de [OpenAI Pricing](https://developers.openai.com/api/docs/pricing), consultado el 2026-11-18. El protocolo no indica una duración de escritura de caché: se estima con la tarifa de 30 minutos, sin seleccionar ni afirmar soporte de la tarifa de 12 horas.
 
 El falso permite probar reporte válido/inválido, traducción, uso, reanudación, errores y cierre del proceso. Eso **no verifica refresh concurrente sobre el mismo login**, no cambia las limitaciones de evidencia de cuota/login de §8 y no resuelve el encuadre de distribución de §1. No se introduce un servidor compartido ni un flujo SIWC propio.
+
+## 13. Pruebas en vivo de CLA-140
+
+**[verificado, 2026-11-18]** Codex CLI 0.169.1, Node 24.18.0, macOS, con el login habitual de ChatGPT del binario:
+
+```sh
+CLANKER_LIVE_CODEX=1 npx vitest run \
+  packages/core/src/agents/codex/codex-live.test.ts \
+  packages/testkit/src/codex-live.test.ts
+```
+
+Los dos archivos se saltan sin `CLANKER_LIVE_CODEX=1`. Gastan cuota del plan. `CLANKER_LIVE_CODEX_MODEL` permite elegir un modelo del catálogo; por defecto usan el primer recomendado disponible de `describe()`, o el primero disponible si no hay recomendados. `model/list` no ofrece precio, tamaño ni un orden de ligereza: esa preferencia es del repo, no del proveedor.
+
+- El smoke del core lee un secreto aleatorio, reemplaza el archivo y hace un commit local en un worktree enlazado, cuyo gitdir está fuera del cwd. Verifica autor y committer contra la identidad git del usuario, árbol limpio, reporte válido con el adaptador estricto, eventos de herramientas, tokens y transcript. Un segundo proceso retoma el mismo hilo y recuerda el secreto original, ya borrado del archivo, sin otro commit.
+- `testCodex` y un segundo probe ejecutados concurrentemente devuelven `ready`, plan y al menos una ventana de uso. La conexión queda sin secreto. Son lecturas sin inferencia y con `refreshToken:false`: **no prueban renovación concurrente**, ni se afirma que haya ocurrido una rotación. No se leyó, copió ni alteró el login.
+- El testkit crea un core y proyecto reales con tracker local, perfil propio y `techlead-clasico`. Solo `review-lore` usa Codex real; dev, demás reviewers, committer y triage usan los guiones existentes para limitar cuota y variabilidad. Recorre checks rojos/arreglos, reviews, publicación y feedback hasta `done`, con PR draft en GitHub simulado y push a un remoto git HTTP local. Verifica la sesión Codex propia, su costo positivo estimado, el costo del paso y su transcript por `runs.step`/`runs.transcript`, no solo los totales de los otros roles.
+- Se abrió esa corrida en Electron sobre el mismo core aislado: el panel de `rv-lore` mostró sus llamadas shell, reporte y resultado `success`, con cuatro turnos y USD 0,0018 estimados. Se revisaron capturas en claro y oscuro (`screenshots/codex-live-{light,dark}.png`, ignoradas, no versionadas); la app y los servicios de prueba se cerraron al terminar.
+- Se reejecutó `app-server-live.test.ts`: MCP centinelas de usuario/proyecto deshabilitados, sin ejecución, archivos de configuración intactos y notify/hooks/plugins apagados en la configuración efectiva. Eso no es una captura de ejecución de hooks personales ni demuestra exclusión total de skills o del AGENTS global.
+
+No se observaron diferencias entre el falso y el real que exigieran corregir eventos, reporte, uso o reanudación en estos recorridos. No se provocaron errores de cuota/login ni se validan por esa ausencia de diferencias sus secuencias todavía no capturadas (§8 y §11). Tampoco se probaron otros sistemas operativos o planes. No se publicaron PRs en GitHub real ni se usaron proyectos existentes del usuario.
+
+El encuadre de autorización/distribución del login delegado sigue **pendiente de Simón** (§1), sin bloquear estas pruebas ni introducir SIWC propio. El refresh concurrente sigue pendiente: no se fuerza sobre las credenciales compartidas para fabricar el caso.
