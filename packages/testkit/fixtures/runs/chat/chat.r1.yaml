@@ -1,0 +1,17 @@
+match: { mode: turn }
+effects:
+  - write:
+      path: hello.txt
+      content: |
+        Hola mundo
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Saludo actualizado"
+    payload:
+      reply: "Actualicé el saludo en `hello.txt`."
+      proposal:
+        summary: "Ajusta el saludo"
+        items:
+          - { id: c1, change: "Actualiza el saludo", path: hello.txt }
