@@ -118,6 +118,7 @@ El comando `clanker` habla con el mismo core que la app (lo levanta si no está 
 ```bash
 clanker status
 clanker projects list
+clanker projects archive <proyecto>
 clanker runs start <proyecto> <issue> [--flow <slug>]
 clanker runs get <id>
 clanker events tail [--run <id>] [--project <slug>] [--follow]
@@ -133,7 +134,7 @@ clanker prs apply-local <id> --head <sha-de-show-local> --patch cambio.diff
 clanker prs publish-local <id>
 ```
 
-El patch agrega un commit local, sin push. `publish-local` solo solicita autorización: revisa y aprueba en la **Bandeja** de la app.
+El patch agrega un commit local, sin push. `publish-local` solo solicita autorización: revisa y aprueba en la **Bandeja** de la app. El archivado conserva el historial del proyecto y no detiene corridas en curso.
 
 `clanker` sin argumentos lista todos los comandos. Conecta el MCP para usar Clanker Yard desde Claude Code:
 

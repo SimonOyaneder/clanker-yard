@@ -20,6 +20,20 @@ export const projectsList: Command = {
   },
 };
 
+export const projectsArchive: Command = {
+  usage: "clanker projects archive <slug>",
+  async run(args, ctx) {
+    const { positionals } = parseArgs({ args, allowPositionals: true });
+    const [slug, ...extra] = positionals;
+    if (!slug?.trim() || extra.length > 0) throw new Error(`Indica un solo slug de proyecto.\nUso: ${projectsArchive.usage}`);
+
+    const client = await ctx.client();
+    const { id } = await projectBySlug(client, slug);
+    const project = await client.projects.archive({ id });
+    ctx.write(`Proyecto "${project.slug}" archivado. Se conserva su historial.`);
+  },
+};
+
 /** El proyecto con ese slug; falla con un mensaje claro si no existe. */
 export async function projectBySlug(client: Pick<Client, "projects">, slug: string): Promise<ClankerProject> {
   const project = (await client.projects.list()).find((p) => p.slug === slug);

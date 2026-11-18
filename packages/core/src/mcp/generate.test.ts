@@ -40,6 +40,7 @@ describe("generateMcp sobre el contrato real", () => {
       resolve_decision: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
       project_queue: readOnly,
       update_project: safeIdempotent,
+      archive_project: destructive,
       list_prs: readOnly,
       get_local_pr: readOnly,
       get_local_pr_commit_diff: readOnly,

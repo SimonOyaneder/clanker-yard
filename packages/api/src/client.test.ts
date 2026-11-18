@@ -109,6 +109,9 @@ const router = os.router({
     update: os.projects.update.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    archive: os.projects.archive.handler(() => {
+      throw new Error("no se usa en esta prueba");
+    }),
     exportConfig: os.projects.exportConfig.handler(() => {
       throw new Error("no se usa en este test");
     }),

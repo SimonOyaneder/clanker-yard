@@ -94,6 +94,7 @@ describe("clanker", () => {
     expect(out).toContain("clanker runs start <proyecto> <issue>");
     expect(out).toContain("clanker events tail");
     expect(out).toContain("clanker metrics compare");
+    expect(out).toContain("clanker projects archive <slug>");
     expect(out).toContain("clanker prs list-local");
     expect(out).toContain("clanker prs show-local");
     expect(out).toContain("clanker prs edit-local");
@@ -140,6 +141,28 @@ describe("clanker projects list", () => {
 
   test("sin proyectos lo dice", async () => {
     expect(await exec(["projects", "list"], { projects: { list: () => Promise.resolve([]) } })).toBe("No hay proyectos.");
+  });
+});
+
+describe("clanker projects archive", () => {
+  test("resuelve el slug y pide archivar el proyecto, conservando su historial", async () => {
+    const archive = vi.fn().mockResolvedValue({ ...project, status: "archived" });
+    const client = { projects: { ...projects, archive } };
+
+    const out = await exec(["projects", "archive", "demo"], client);
+
+    expect(archive).toHaveBeenCalledExactlyOnceWith({ id: projectId });
+    expect(out).toBe('Proyecto "demo" archivado. Se conserva su historial.');
+    await expect(exec(["projects", "archive", "nope"], client)).rejects.toThrow('No existe el proyecto "nope"');
+    expect(archive).toHaveBeenCalledTimes(1);
+  });
+
+  test("si falta el slug o sobran argumentos, no arranca el core", async () => {
+    const client = vi.fn();
+    for (const args of [[], [""], ["demo", "otro"]]) {
+      await expect(exec(["projects", "archive", ...args], {}, { client })).rejects.toThrow("Uso: clanker projects archive <slug>");
+    }
+    expect(client).not.toHaveBeenCalled();
   });
 });
 

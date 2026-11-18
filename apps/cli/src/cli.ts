@@ -3,7 +3,7 @@ import { events } from "./events";
 import { importLegacy } from "./import";
 import { mcp } from "./mcp";
 import { metricsCompareCommand } from "./metrics-compare";
-import { projectsList } from "./projects";
+import { projectsArchive, projectsList } from "./projects";
 import { prsRepublish } from "./prs";
 import { prsApplyLocal, prsEditLocal, prsListLocal, prsPublishLocal, prsShowLocal } from "./prs-local";
 import { runsGet, runsStart } from "./runs";
@@ -12,6 +12,7 @@ import { status } from "./status";
 const commands: Record<string, Command> = {
   status,
   "projects list": projectsList,
+  "projects archive": projectsArchive,
   "runs start": runsStart,
   "runs get": runsGet,
   "events tail": events,

@@ -270,12 +270,20 @@ const projects = {
       mcp: {
         action: "update_project",
         description:
-          "Cambia solo los campos presentes de un proyecto (repos, filtros, flujo, perfil, `parallel`, tope de gasto, `trackerRef`...), planos junto al `id`; las mismas validaciones que al crearlo. Un campo que no existe es `BAD_REQUEST`.",
+          "Cambia solo los campos presentes de un proyecto, planos junto al `id`. Para archivar usa `archive_project`; para desarchivar sin reanudar el loop, usa `status: \"paused\"`. Un campo que no existe es `BAD_REQUEST`.",
         annotations: SAFE_IDEMPOTENT,
       },
     })
     .input(ProjectUpdate)
     .output(ClankerProject),
+  /** Deja de lanzar issues automáticamente; no borra el proyecto ni detiene corridas. */
+  archive: base.meta({
+    mcp: {
+      action: "archive_project",
+      description: "Archiva un proyecto por su id: deja de lanzar issues automáticamente, sin detener corridas ni borrar su historial. Se revierte con `update_project` y `status: \"paused\"`.",
+      annotations: DESTRUCTIVE_IDEMPOTENT,
+    },
+  }).input(z.strictObject({ id: ProjectId })).output(ClankerProject),
   /**
    * La configuración del proyecto como archivo (`ProjectConfig`): repos por nombre y remoto, filtros, mapeo de estados,
    * flujo y perfil por defecto, parámetros, convenciones y límites. `NOT_FOUND` si no existe.

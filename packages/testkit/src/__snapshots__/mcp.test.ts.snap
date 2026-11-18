@@ -249,7 +249,7 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
       "idempotentHint": true,
       "openWorldHint": false,
     },
-    "description": "Cambia solo los campos presentes de un proyecto (repos, filtros, flujo, perfil, \`parallel\`, tope de gasto, \`trackerRef\`...), planos junto al \`id\`; las mismas validaciones que al crearlo. Un campo que no existe es \`BAD_REQUEST\`.",
+    "description": "Cambia solo los campos presentes de un proyecto, planos junto al \`id\`. Para archivar usa \`archive_project\`; para desarchivar sin reanudar el loop, usa \`status: "paused"\`. Un campo que no existe es \`BAD_REQUEST\`.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -472,6 +472,29 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
       "type": "object",
     },
     "name": "update_project",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Archiva un proyecto por su id: deja de lanzar issues automáticamente, sin detener corridas ni borrar su historial. Se revierte con \`update_project\` y \`status: "paused"\`.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "archive_project",
   },
   {
     "annotations": {

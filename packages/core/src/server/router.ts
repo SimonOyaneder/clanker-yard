@@ -253,6 +253,7 @@ export function createRouter(deps: RouterDeps) {
         }
         return projects.update(id, trackerRef === undefined ? patch : { ...patch, trackerRef }, context.origin);
       }),
+      archive: os.projects.archive.handler(({ input, context }) => projects.archive(input.id, context.origin)),
       exportConfig: os.projects.exportConfig.handler(({ input }) => deps.projectConfigs.export(input.id)),
       importConfig: os.projects.importConfig.handler(({ input, context }) =>
         deps.projectConfigs.import(input.id, input.config, context.origin, { dryRun: input.dryRun }),

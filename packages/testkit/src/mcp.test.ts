@@ -36,7 +36,7 @@ describe("tools", () => {
     expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name))
       .toEqual(expect.arrayContaining(["list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff"]));
     expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name))
-      .toEqual(expect.arrayContaining(["delete", "update_local_pr", "apply_local_pr_patch", "cancel_run", "interrupt_run", "resolve_decision"]));
+      .toEqual(expect.arrayContaining(["delete", "archive_project", "update_local_pr", "apply_local_pr_patch", "cancel_run", "interrupt_run", "resolve_decision"]));
   });
 
   test("list y get de los kinds de defs: los builtin del core", async () => {
@@ -89,6 +89,15 @@ describe("tools", () => {
     const remote = seedPr(h.store, { repoId, number: 1 });
     await expect(h.call("get_local_pr", { id: remote })).rejects.toThrow(/ya no es local/);
     await expect(h.call("update_local_pr", { id: remote, body: "" })).rejects.toThrow(/no es un PR local/);
+  });
+
+  test("archiva sin borrar el historial y conserva el actor", async () => {
+    const { project, runId } = await finishedRun();
+    for (let i = 0; i < 2; i++) {
+      expect(await h.call("archive_project", { id: project.id })).toMatchObject({ status: "archived" });
+    }
+    expect(await h.api.runs.get({ id: runId })).toMatchObject({ status: "done" });
+    expect(h.store.events.since(0, { types: ["project.archived"], projectId: project.id })).toMatchObject([{ origin: "mcp" }]);
   });
 });
 
