@@ -659,6 +659,39 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
   },
   {
     "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Encola una corrida que agrega un commit a un PR local a partir de un diff unificado. Requiere el SHA \`head\` de \`get_local_pr\` y un worktree limpio. No reescribe commits ni hace push. Consulta la corrida por su id.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string",
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "patch": {
+          "maxLength": 2000000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "head",
+        "patch",
+      ],
+      "type": "object",
+    },
+    "name": "apply_local_pr_patch",
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": true,

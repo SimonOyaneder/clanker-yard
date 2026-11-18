@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { LocalPrUpdate, RepoRemote, type LocalCommitDiff, type LocalPrDetail } from "@clanker/api";
+import { LocalPrPatch, LocalPrUpdate, RepoRemote, type LocalCommitDiff, type LocalPrDetail } from "@clanker/api";
 import type { Command } from "./command";
 import { formatTable } from "./format";
 
@@ -98,5 +98,29 @@ export const prsEditLocal: Command = {
     }
     const pr = await (await ctx.client()).prs.updateLocal({ id, ...(title === undefined ? {} : { title }), ...(body === undefined ? {} : { body }) });
     ctx.write(`PR local ${pr.id} actualizado: ${pr.title}`);
+  },
+};
+
+export const prsApplyLocal: Command = {
+  usage: "clanker prs apply-local <id> --head <sha> --patch <archivo>",
+  async run(args, ctx) {
+    const { values, positionals } = parseArgs({
+      args, allowPositionals: true, options: { head: { type: "string" }, patch: { type: "string" } },
+    });
+    const id = localId(positionals, prsApplyLocal.usage);
+    const head = LocalPrPatch.shape.head.safeParse(values.head);
+    if (!head.success) {
+      throw new Error(`--head pide el SHA completo del HEAD (40 caracteres hexadecimales en minúsculas).\nUso: ${prsApplyLocal.usage}`);
+    }
+    if (!values.patch) throw new Error(`Falta --patch <archivo>.\nUso: ${prsApplyLocal.usage}`);
+    const patch = ctx.readFile(values.patch);
+    if (!patch.trim()) throw new Error(`El archivo de --patch está vacío.\nUso: ${prsApplyLocal.usage}`);
+    if (!LocalPrPatch.shape.patch.safeParse(patch).success) {
+      throw new Error(`El archivo de --patch excede el tamaño admitido.\nUso: ${prsApplyLocal.usage}`);
+    }
+
+    const { runId } = await (await ctx.client()).prs.applyLocalPatch({ id, head: head.data, patch });
+    ctx.write(`Corrida encolada para aplicar el patch localmente, sin hacer push: ${runId}`);
+    ctx.write(`Sigue el progreso con: clanker events tail --run ${runId} --follow`);
   },
 };

@@ -61,6 +61,8 @@ export interface AcquireRequest {
   /** `main`, `origin/main` y `refs/heads/main` son la misma base. */
   base: string;
   runId: RunId;
+  /** Solo toma un worktree ya preparado: nunca lo crea, trae el remoto ni corre la receta. */
+  existingOnly?: boolean | undefined;
 }
 
 /** Lo que una corrida recibe al tomar el worktree. Toda operación con efecto devuelve el token. */
@@ -470,7 +472,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return join(root, repoId, branch);
   }
 
-  async function acquire({ repo, branch: rawBranch, base, runId }: AcquireRequest) {
+  async function acquire({ repo, branch: rawBranch, base, runId, existingOnly }: AcquireRequest) {
     const cfg = repoConfig(repo);
     const branch = rawBranch.replace(/^refs\/heads\//, "");
     await assertBranchAllowed(cfg, branch);
@@ -480,6 +482,9 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       // El vivo si lo hay; si no, el archivado de esa branch (todavía tiene su carpeta y sale de `archived` al tomarlo).
       const rows = db.select().from(workspaces).where(and(eq(workspaces.repoId, repo), eq(workspaces.branch, branch))).all();
       const existing = rows.find((r) => r.state !== "archived") ?? rows[0];
+      if (existingOnly && (!existing?.baseSha || existing.state === "creating" || !existsSync(existing.path))) {
+        throw new BranchNotAllowedError(`No hay un worktree preparado para ${branch}: no se puede tomar sin crearlo.`);
+      }
 
       let row: typeof workspaces.$inferSelect;
       if (existing) {
@@ -535,9 +540,12 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     const lost = startHeartbeat(row.id, runId, row.fencingToken);
     let baseSha: string;
     let remoteSha: string | undefined;
-    let head: string;
+    let head: string | undefined;
     try {
-      if (!claim.isNew && existsSync(row.path)) {
+      if (existingOnly) {
+        // No hay fallback a crear ni a correr setup si la carpeta desaparece tras tomar su lease.
+        baseSha = row.baseSha!;
+      } else if (!claim.isNew && existsSync(row.path)) {
         baseSha = row.baseSha ?? (await resolveBase(cfg, row.baseRef));
         // Un corte durante `setup.worktree` deja la fila en `creating` con la carpeta ya creada.
         if (row.state === "creating") await setupWorktree(cfg, row, false, runId, lost);
@@ -547,7 +555,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
         // Fuera del lock del repo: un `bundle install` largo no debe frenar el fetch ni los worktrees de otras corridas.
         await setupWorktree(cfg, row, claim.isNew, runId, lost);
       }
-      head = await git(row.path, ["rev-parse", "HEAD"]);
+      if (!existingOnly) head = await git(row.path, ["rev-parse", "HEAD"]);
     } catch (error) {
       stopHeartbeat(row.id, row.fencingToken);
       abandon(row, runId, claim.isNew);
@@ -556,7 +564,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     store.tx(({ db }) => {
       const updated = db
         .update(workspaces)
-        .set({ state: "leased", baseSha, headSha: head, ...(remoteSha && { remoteSha }) })
+        .set({ state: "leased", baseSha, ...(head && { headSha: head }), ...(remoteSha && { remoteSha }) })
         .where(
           and(eq(workspaces.id, row.id), eq(workspaces.fencingToken, row.fencingToken)),
         )
@@ -1495,6 +1503,8 @@ export const WorkspaceAcquireArgs = z.object({
   base: z.string(),
 });
 
+const WorkspaceAcquireOptions = WorkspaceAcquireArgs.extend({ existingOnly: z.boolean().optional() });
+
 /** El output de `workspace.acquire` (`$ws`), tal como lo reciben las acciones que operan sobre el worktree. */
 export const WorkspaceOutput = z.object({
   workspaceId: z.string(),
@@ -1513,10 +1523,10 @@ export const WorkspaceOutput = z.object({
 export function workspaceAcquireAction(workspaces: Workspaces) {
   return {
     name: "workspace.acquire",
-    args: WorkspaceAcquireArgs,
+    args: WorkspaceAcquireOptions,
     outcomes: ["ok"],
     effects: "local" as const,
-    async run(args: z.infer<typeof WorkspaceAcquireArgs>, ctx: { runId: RunId }) {
+    async run(args: z.infer<typeof WorkspaceAcquireOptions>, ctx: { runId: RunId }) {
       let lease: WorkspaceLease;
       try {
         lease = await workspaces.acquire({ ...args, runId: ctx.runId });

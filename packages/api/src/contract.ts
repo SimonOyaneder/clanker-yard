@@ -24,7 +24,7 @@ import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
 import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
-import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, LocalPrId, LocalPrMetadata, LocalPrUpdate, PrCommitDiff, PrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
+import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, LocalPrId, LocalPrMetadata, LocalPrPatch, LocalPrUpdate, PrCommitDiff, PrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync, RepoOverview } from "./repos";
@@ -431,6 +431,13 @@ const prs = {
       annotations: DESTRUCTIVE_IDEMPOTENT,
     },
   }).input(LocalPrUpdate).output(LocalPrMetadata),
+  applyLocalPatch: base.meta({
+    mcp: {
+      action: "apply_local_pr_patch",
+      description: "Encola una corrida que agrega un commit a un PR local a partir de un diff unificado. Requiere el SHA `head` de `get_local_pr` y un worktree limpio. No reescribe commits ni hace push. Consulta la corrida por su id.",
+      annotations: { destructiveHint: true, openWorldHint: false },
+    },
+  }).input(LocalPrPatch).output(z.object({ runId: RunId })),
   /**
    * Rehace los PRs abiertos del sistema con la branch (`eng-1234-slug`), el autor y los commits de las reglas de hoy, en
    * orden de stack (los padres antes que los hijos): el mismo cambio, abierto como PR nuevo ("Reemplaza a #n") y el

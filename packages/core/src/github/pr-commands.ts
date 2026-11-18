@@ -1,4 +1,4 @@
-import { mergeBlocker, rebaseBlocker, type ClientOrigin, type LocalPrMetadata, type LocalPrUpdate, type PrRef, type PrState, type RunId } from "@clanker/api";
+import { mergeBlocker, rebaseBlocker, type ClientOrigin, type LocalPrMetadata, type LocalPrPatch, type LocalPrUpdate, type PrRef, type PrState, type RunId } from "@clanker/api";
 import { eq } from "drizzle-orm";
 import { cleanMessage } from "../commits/apply";
 import type { Packs } from "../packs/packs";
@@ -64,6 +64,8 @@ export interface PrCommands {
   publishLocal(id: string, by: ClientOrigin): RunId;
   /** Edita solo título y descripción; nunca toca Git. */
   updateLocal(input: LocalPrUpdate, by: ClientOrigin): LocalPrMetadata;
+  /** Encola un commit local con un lease; no reutiliza una edición anterior con otro patch. */
+  applyLocalPatch(input: LocalPrPatch, by: ClientOrigin): RunId;
 }
 
 export function createPrCommands({ store, repos, connections, packs, prs, cache, flows, projects }: PrCommandsDeps): PrCommands {
@@ -161,6 +163,19 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache,
         }
         return { id, title: nextTitle, body: nextBody };
       });
+    },
+
+    applyLocalPatch({ id, head, patch }, by) {
+      const row = ownedLocalPr(prById(store.db, id), id);
+      const editing = livePrFlow(store.db, id, ["apply-local-patch"]);
+      if (editing) throw new PrCommandError(`Ya hay una edición en la corrida ${editing.id}: espera a que termine antes de aplicar otro patch.`);
+      const projectId = row.runId ? store.db.select({ id: runs.projectId }).from(runs).where(eq(runs.id, row.runId)).get()?.id : undefined;
+      return flows.start(
+        "apply-local-patch",
+        { type: "pr", id },
+        { prId: id, repo: row.repoId, branch: row.headRef, base: row.baseRef, head, patch },
+        { ...(projectId && { projectId }), repoId: row.repoId, by },
+      );
     },
   };
 }

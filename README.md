@@ -129,7 +129,10 @@ Para trabajar con un PR local:
 clanker prs list-local
 clanker prs show-local <id> [--commit <sha>] [--json]
 clanker prs edit-local <id> --title "Título" --body-file descripcion.md
+clanker prs apply-local <id> --head <sha-de-show-local> --patch cambio.diff
 ```
+
+El patch agrega un commit local, sin push.
 
 `clanker` sin argumentos lista todos los comandos. Conecta el MCP para usar Clanker Yard desde Claude Code:
 

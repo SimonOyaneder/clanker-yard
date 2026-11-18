@@ -331,6 +331,13 @@ export type LocalPrUpdate = z.infer<typeof LocalPrUpdate>;
 export const LocalPrMetadata = LocalPrId.extend({ title: z.string(), body: z.string() });
 export type LocalPrMetadata = z.infer<typeof LocalPrMetadata>;
 
+export const LocalPrPatch = LocalPrId.extend({
+  /** SHA completo devuelto por `prs.localDetail`: un patch nunca se aplica a una punta distinta. */
+  head: z.string().regex(/^[0-9a-f]{40}$/),
+  patch: z.string().min(1).max(2_000_000),
+});
+export type LocalPrPatch = z.infer<typeof LocalPrPatch>;
+
 /** `prs.localCommitDiff`: el diff de un solo commit de un PR local (contra su padre), para revisarlo commit por commit. */
 export const LocalCommitDiff = z.object({ sha: z.string(), files: z.array(LocalPrFile), patch: z.string(), truncated: z.boolean() });
 export type LocalCommitDiff = z.infer<typeof LocalCommitDiff>;

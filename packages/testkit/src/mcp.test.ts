@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { type Event, LocalPrDetail } from "@clanker/api";
+import { type Event, LocalPrDetail, RunId } from "@clanker/api";
 import { createRepos } from "@clanker/core";
 import { seedPr } from "@clanker/core/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -36,7 +36,7 @@ describe("tools", () => {
     expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name))
       .toEqual(expect.arrayContaining(["list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff"]));
     expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name))
-      .toEqual(expect.arrayContaining(["delete", "update_local_pr", "cancel_run", "interrupt_run", "resolve_decision"]));
+      .toEqual(expect.arrayContaining(["delete", "update_local_pr", "apply_local_pr_patch", "cancel_run", "interrupt_run", "resolve_decision"]));
   });
 
   test("list y get de los kinds de defs: los builtin del core", async () => {
@@ -83,6 +83,8 @@ describe("tools", () => {
     const detail = LocalPrDetail.parse(await h.call("get_local_pr", { id }));
     expect(detail).toMatchObject({ title: "Revisado", body: "Descripción", head, commits: [{ sha: head, subject: "feat: local" }] });
     expect(await h.call("get_local_pr_commit_diff", { id, sha: head.slice(0, 8) })).toMatchObject({ sha: head });
+    const { runId } = await h.call("apply_local_pr_patch", { id, head, patch: "patch" }) as { runId: unknown };
+    expect(await h.api.runs.get({ id: RunId.parse(runId) })).toMatchObject({ subject: { type: "pr", id }, lane: "maintenance" });
     const remote = seedPr(h.store, { repoId, number: 1 });
     await expect(h.call("get_local_pr", { id: remote })).rejects.toThrow(/ya no es local/);
     await expect(h.call("update_local_pr", { id: remote, body: "" })).rejects.toThrow(/no es un PR local/);

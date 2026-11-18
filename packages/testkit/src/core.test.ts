@@ -320,6 +320,7 @@ describe("arranque", () => {
 
     expect(store.events.since(0, { types: ["def.versioned"] })).toHaveLength(versions);
     expect(store.db.$client.prepare("SELECT slug FROM defs WHERE kind = 'flow' AND scope = 'builtin' ORDER BY slug").all()).toEqual([
+      { slug: "apply-local-patch" },
       { slug: "base-combinada-conflicto" },
       { slug: "chat-aplicar" },
       { slug: "chat-aplicar-local" },

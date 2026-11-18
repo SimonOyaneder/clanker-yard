@@ -21,6 +21,7 @@ import { createFlows } from "./flows/flows";
 import { createAskpass } from "./git/askpass";
 import { createLegacyImporter } from "./import/legacy";
 import { createGitRemote } from "./git/remote";
+import { prApplyLocalPatchAction } from "./github/actions/apply-local-patch";
 import { ciFailureReportAction, councilThreadsAction, prBotThreadsAction, prCommentAction, prReplyAction, prResolveThreadAction, reviewRequestBotAction } from "./github/actions/pr-feedback";
 import { createPrCache, type PrRow } from "./github/pr-cache";
 import { prWaits, signalPr } from "./github/pr-waits";
@@ -294,6 +295,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(prPublishAction({ store, workspaces, recipes, repoConfig: repos.config, connections: opts.connections, packs }));
   flows.registerAction(prPromoteAction({ store, workspaces, repoConfig: repos.config, connections: opts.connections }));
   flows.registerAction(prSaveLocalAction({ store, workspaces, repoConfig: repos.config }));
+  flows.registerAction(prApplyLocalPatchAction({ store }));
   flows.registerAction(workspaceCombinedBaseMergeAction({ store, workspaces, repoConfig: repos.config }));
   flows.registerAction(prRequestRebaseAction({ store, repoConfig: repos.config }));
   flows.registerAction(prPushFixupsAction({ store, workspaces, repoConfig: repos.config, prs }));

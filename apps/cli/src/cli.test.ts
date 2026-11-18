@@ -97,6 +97,7 @@ describe("clanker", () => {
     expect(out).toContain("clanker prs list-local");
     expect(out).toContain("clanker prs show-local");
     expect(out).toContain("clanker prs edit-local");
+    expect(out).toContain("clanker prs apply-local");
     await expect(exec(["--help"], {})).resolves.toBe(out);
   });
 
@@ -502,6 +503,18 @@ describe("clanker prs locales", () => {
     expect(updateLocal).toHaveBeenNthCalledWith(3, { id, title: "Título nuevo", body: detail.body });
   });
 
+  test("apply-local encola el contenido del patch con el HEAD esperado, sin push", async () => {
+    const applyLocalPatch = vi.fn().mockResolvedValue({ runId });
+    const readFile = vi.fn().mockReturnValue(patch);
+
+    const out = await exec(["prs", "apply-local", id, "--head", head, "--patch", "cambio.diff"], { prs: { applyLocalPatch } }, { readFile });
+
+    expect(readFile).toHaveBeenCalledExactlyOnceWith("cambio.diff");
+    expect(applyLocalPatch).toHaveBeenCalledExactlyOnceWith({ id, head, patch });
+    expect(out).toContain(`sin hacer push: ${runId}`);
+    expect(out).toContain(`clanker events tail --run ${runId} --follow`);
+  });
+
   test.each([
     [["list-local", "--repo", "demo"], "--repo pide"],
     [["show-local"], "Indica un solo id"],
@@ -510,6 +523,10 @@ describe("clanker prs locales", () => {
     [["edit-local", id, "--title", ""], "--title pide un título no vacío"],
     [["edit-local", id, "--title", "Dos\nlíneas"], "--title pide un título no vacío"],
     [["edit-local", id, "--body-file", ""], "--body-file pide la ruta"],
+    [["apply-local", id, "--patch", "cambio.diff"], "--head pide el SHA completo"],
+    [["apply-local", id, "--head", head.slice(0, 7), "--patch", "cambio.diff"], "--head pide el SHA completo"],
+    [["apply-local", id, "--head", head], "Falta --patch"],
+    [["apply-local", id, "--head", head, "--patch", "vacio.diff"], "El archivo de --patch está vacío"],
   ])("valida %j antes de arrancar el core", async (args, message) => {
     const client = vi.fn();
     await expect(exec(["prs", ...args], {}, { client })).rejects.toThrow(message);
@@ -519,11 +536,14 @@ describe("clanker prs locales", () => {
   test("valida los archivos antes de arrancar el core", async () => {
     const client = vi.fn();
     const readFile = vi.fn().mockImplementationOnce(() => { throw new Error("ENOENT"); })
-      .mockReturnValueOnce("x".repeat(65_537));
+      .mockReturnValueOnce("x".repeat(65_537))
+      .mockReturnValueOnce("x".repeat(2_000_001));
     const edit = ["prs", "edit-local", id, "--body-file", "cuerpo.md"];
+    const apply = ["prs", "apply-local", id, "--head", head, "--patch", "cambio.diff"];
 
     await expect(exec(edit, {}, { client, readFile })).rejects.toThrow("ENOENT");
     await expect(exec(edit, {}, { client, readFile })).rejects.toThrow("excede el tamaño de descripción");
+    await expect(exec(apply, {}, { client, readFile })).rejects.toThrow("excede el tamaño admitido");
     expect(client).not.toHaveBeenCalled();
   });
 });
