@@ -27,7 +27,7 @@ npm run lint           # eslint desde la raíz, más `npm run depcheck`
 npm test               # vitest desde la raíz (un proyecto por app y paquete)
 ```
 
-Los tres deben pasar antes de dar algo por listo; la CI corre los mismos en cada PR y en `main`. Un test de un paquete va junto a su código como `src/**/*.test.ts`.
+Los tres deben pasar antes de dar algo por listo, y nadie más los corre por ti: la CI (`.github/workflows/ci.yml`) está pausada y solo corre a mano desde Actions. Un test de un paquete va junto a su código como `src/**/*.test.ts`.
 
 La suite completa corre en paralelo y bajo carga: un `vi.waitFor` sobre un core, una corrida o un proceso real lleva `timeout` explícito (el default de 1 s no alcanza), un test no cuenta lo que hay en el `tmpdir()` compartido (usa su propia carpeta) y no espera un solo evento de `fs.watch` justo después de empezar a observar (en macOS se pierde; reescribe hasta verlo).
 
