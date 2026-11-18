@@ -628,6 +628,77 @@ export const REBASE_CONFLICTO_LOCAL: FlowDef = {
 };
 
 /**
+ * "Base combinada en conflicto" (`pr.baseConflict`, carril maintenance): al restackear un PR que sale de una base
+ * combinada, sus padres chocan entre sí. El core junta los padres con un merge real en un worktree propio
+ * (`resolveBranch`) con `rerere`; el dev resuelve lo que choca (modo conflict) y el core sigue con los demás padres.
+ * Con todos juntos, `workspace.combinedBaseMerge` rearma la base por el camino de siempre (que con `rerere` ya no choca)
+ * y `pr.requestRebase` pide el rebase del PR sobre ella (`rebase-conflicto` o `rebase-conflicto-local`). La misma
+ * resolución se reaplica sola la próxima vez que esos padres se muevan.
+ */
+export const BASE_COMBINADA_CONFLICTO: FlowDef = {
+  schema: 1,
+  id: "base-combinada-conflicto",
+  name: "Base combinada en conflicto",
+  internal: true,
+  trigger: { type: "pr.baseConflict" },
+  lane: "maintenance",
+  params: {
+    prId: "string",
+    repo: "RepoRef",
+    base: "string",
+    resolveBranch: "string",
+    defaultBranch: "string",
+    conflictRounds: { type: "number", default: 20 },
+  },
+  limits: { maxCostUsd: null, maxSteps: 200 },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.acquire",
+      args: { repo: "$run.params.repo", branch: "$run.params.resolveBranch", base: "$run.params.defaultBranch" },
+      on: { ok: "merge" },
+    },
+    merge: {
+      type: "action",
+      action: "workspace.combinedBaseMerge",
+      args: { ws: "$ws", base: "$run.params.base" },
+      on: {
+        clean: "rebase",
+        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: { to: "@blocked", note: "La base combinada sigue en conflicto tras las rondas del agente" } },
+        error: { to: "@blocked", note: "La base combinada no se pudo rearmar con la resolución" },
+      },
+    },
+    resolve: {
+      type: "agent",
+      role: "dev",
+      mode: "conflict",
+      brief: { failures: "$prev.failures" },
+      on: {
+        resolved: "continue",
+        behavior: { to: "continue", note: "Juntar los padres exigía decidir comportamiento: se aplicó la resolución más conservadora, revísala" },
+      },
+    },
+    continue: {
+      type: "action",
+      action: "workspace.combinedBaseMerge",
+      args: { ws: "$ws", base: "$run.params.base", continue: true },
+      on: {
+        clean: "rebase",
+        conflict: { to: "resolve", counter: "conflict", maxRounds: "$run.params.conflictRounds", exhausted: { to: "@blocked", note: "La base combinada sigue en conflicto tras las rondas del agente" } },
+        error: { to: "@blocked", note: "La base combinada no se pudo rearmar con la resolución" },
+      },
+    },
+    rebase: {
+      type: "action",
+      action: "pr.requestRebase",
+      args: { prId: "$run.params.prId", base: "$run.params.base" },
+      on: { ok: "@done" },
+    },
+  },
+};
+
+/**
  * Le pide `/review` a cada draft que el restack pusheó (`stack.restack` y `stack.restackRewritten` dejan
  * `changedDrafts` en el nodo `restack` de quien lo llama): una corrida de `restack-feedback` por PR, en
  * paralelo, cada una con su propio worktree. Sin drafts cambiados la lista es vacía, no corre ninguna rama y no
@@ -714,7 +785,8 @@ const PROMOTE_LOCALS: Node = {
 
 /**
  * Subflujo (stacks locales): un PR que vivía solo en la máquina sale a GitHub. Su base cambió desde que pasó los
- * checks (el restack o una persona que pidió publicarlo ya), así que corren todos otra vez; rojos, el dev los arregla
+ * checks (el restack o una persona que pidió publicarlo ya), así que corren otra vez sobre sus archivos contra la base
+ * nueva (los que no usan `{{files}}`, enteros); rojos, el dev los arregla
  * y el core commitea lo que dejó. `pr.promote` pushea y abre el PR draft en la misma fila, y `pr-feedback` sigue como
  * con cualquier PR nuevo.
  */
@@ -745,7 +817,8 @@ export const PROMOTE_LOCAL: FlowDef = {
     checks: {
       type: "action",
       action: "recipe.check",
-      args: { ws: "$ws", scope: "all" },
+      // `changed`: los archivos del PR contra su base nueva; los checks que no usan `{{files}}` corren igual.
+      args: { ws: "$ws", scope: "changed" },
       on: {
         ok: "commit",
         fail: { to: "fix", maxRounds: "$run.params.checkRounds", exhausted: { to: "commit", note: "Tests o lint siguen rojos antes de publicar el PR local" } },
@@ -1087,6 +1160,7 @@ export const flows: Record<string, FlowDef> = {
   "rebase-conflicto-local": REBASE_CONFLICTO_LOCAL,
   "restack-feedback": RESTACK_FEEDBACK,
   "promote-local": PROMOTE_LOCAL,
+  "base-combinada-conflicto": BASE_COMBINADA_CONFLICTO,
   restack: RESTACK,
   "restack-rewritten": RESTACK_REWRITTEN,
   council: COUNCIL,

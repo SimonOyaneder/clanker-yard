@@ -152,6 +152,7 @@ export const FLOW_TRIGGERS = [
   "issue.queued",
   "pr.comment",
   "pr.conflict",
+  "pr.baseConflict",
   "pr.merged",
   "pr.base_rewritten",
   "manual",

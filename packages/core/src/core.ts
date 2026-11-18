@@ -37,6 +37,7 @@ import {
   workspaceRebaseAction,
 } from "./github/actions/rebase-pr";
 import { workspaceCommitAfterRebaseAction, workspaceRebaseAbortAction } from "./workspaces/rebase-actions";
+import { prRequestRebaseAction, workspaceCombinedBaseMergeAction } from "./workspaces/combined-base-actions";
 import { createGitIdentityOf } from "./git/identity";
 import { githubRemote } from "./github/remote-config";
 import { createPacks } from "./packs/packs";
@@ -275,6 +276,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(prPublishAction({ store, workspaces, recipes, repoConfig: repos.config, connections: opts.connections, packs }));
   flows.registerAction(prPromoteAction({ store, workspaces, repoConfig: repos.config, connections: opts.connections }));
   flows.registerAction(prSaveLocalAction({ store, workspaces, repoConfig: repos.config }));
+  flows.registerAction(workspaceCombinedBaseMergeAction({ store, workspaces, repoConfig: repos.config }));
+  flows.registerAction(prRequestRebaseAction({ store, repoConfig: repos.config }));
   flows.registerAction(prPushFixupsAction({ store, workspaces, repoConfig: repos.config, prs }));
   flows.registerAction(prReplayAction({ workspaces }));
   flows.registerAction(prSupersedeAction({ store, connections: opts.connections }));

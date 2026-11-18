@@ -22,6 +22,7 @@ import {
   openStore,
   prPublishAction,
   stackRestackAction,
+  workspaceCombinedBaseMergeAction,
   type ActionCtx,
   type Askpass,
   type Store,
@@ -52,6 +53,7 @@ let restack: ReturnType<typeof stackRestackAction>;
 let publish: ReturnType<typeof prPublishAction>;
 let issues: ReturnType<typeof createIssues>;
 let projectId: CachedIssue["projectId"];
+let combinedMerge: ReturnType<typeof workspaceCombinedBaseMergeAction>;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-combined-"));
@@ -78,6 +80,7 @@ beforeEach(async () => {
   const packs = createPacks({ defs });
   const recipes = createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) });
   publish = prPublishAction({ store, workspaces, recipes, repoConfig: repos, connections, packs });
+  combinedMerge = workspaceCombinedBaseMergeAction({ store, workspaces, repoConfig: repos });
   restack = stackRestackAction({ store, workspaces, repoConfig: repos, prs: createPrs({ connections, packs }), connections, pause: () => Promise.resolve() });
 
   issues = createIssues({ store, local: createLocalTracker({ store }) });
@@ -221,6 +224,50 @@ describe("workspaces.combineBase", () => {
     expect(again).toMatchObject({ outcome: "base-conflict", changed: false });
     expect(() => localRef(branch)).toThrow();
     expect(row(branch)).toMatchObject({ status: "conflict", head_sha: null });
+  });
+
+  test("padres que chocan: el flujo enseña la resolución, la base queda registrada y rerere la reaplica aunque un padre se mueva", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nuno\na3\n" });
+    await openPr("cla-2", "main", { "a.txt": "a1\ndos\na3\n" });
+    const issue = await newIssue();
+    const branch = combinedBaseBranch(issue.ref.key);
+    const parents = [
+      { key: "r1#1", branch: "cla-1" },
+      { key: "r1#2", branch: "cla-2" },
+    ];
+    expect(await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents })).toMatchObject({ outcome: "base-conflict" });
+
+    // Lo que hace `base-combinada-conflicto`: un worktree propio, el merge real, el dev resuelve y el core sigue.
+    const lease = await workspaces.acquire({ repo: "repo_r1", branch: branch.replace("clanker/base/", "clanker/resolve/"), base: "main", runId: newId("run") });
+    const { workspaceId, path, baseSha, fencingToken } = lease;
+    const ws = { workspaceId, path, branch: lease.branch, baseSha, fencingToken };
+    const first = await combinedMerge.run(combinedMerge.args.parse({ ws, base: branch }), ctx());
+    expect(first).toMatchObject({ outcome: "conflict", output: { conflicts: ["a.txt"] } });
+    writeFileSync(join(path, "a.txt"), "a1\nuno\ndos\na3\n");
+    const done = await combinedMerge.run(combinedMerge.args.parse({ ws, base: branch, continue: true }), ctx());
+    workspaces.release(lease);
+
+    expect(done).toMatchObject({ outcome: "clean" });
+    const head = (done.output as { head: string }).head;
+    expect(row(branch)).toMatchObject({ status: "active", head_sha: head });
+    expect(localRef(branch)).toBe(head);
+    expect(repo.git("show", `${head}:a.txt`)).toBe("a1\nuno\ndos\na3");
+    // Rearmarla da la misma base, sin el agente.
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
+    expect(localRef(branch)).toBe(head);
+
+    // Un padre se mueve con algo que no choca: `rerere` reaplica la misma resolución y la base se rearma sola.
+    elsewhere((g, dir) => {
+      g("checkout", "--quiet", "cla-2");
+      writeFileSync(join(dir, "c.txt"), "c1\notro\n");
+      g("commit", "--quiet", "--all", "--message", "feat: c en cla-2");
+      g("push", "--quiet", "origin", "cla-2");
+    });
+    const moved = await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
+
+    expect(moved).toMatchObject({ outcome: "combined" });
+    expect(repo.git("show", `${localRef(branch)}:a.txt`)).toBe("a1\nuno\ndos\na3");
+    expect(repo.git("show", `${localRef(branch)}:c.txt`)).toBe("c1\notro");
   });
 
   test("dissolveBase borra la branch sintética y la marca disuelta", async () => {
@@ -504,7 +551,7 @@ describe("stack.restack con una base combinada", () => {
     expect(github.requests.filter((r) => r.method === "PATCH")).toEqual([]);
   });
 
-  test("si los padres que quedan chocan con la base nueva: nada se mueve y queda una alerta", async () => {
+  test("si los padres que quedan chocan con la base nueva: nada se mueve y se pide resolver la base (pr.baseConflict)", async () => {
     const { branch, child } = await combinedPr();
     const head = remoteSha("cla-3");
     // Alguien deja en main un cambio de b.txt distinto del de `cla-2`, y mergea `cla-1`.
@@ -524,8 +571,10 @@ describe("stack.restack con una base combinada", () => {
     expect(remoteSha("cla-3")).toBe(head);
     expect(prBase(child)).toBe("cla-1");
     expect(row(branch)?.status).toBe("conflict");
-    expect(sql(`SELECT kind, title FROM decisions`)).toEqual([{ kind: "alert", title: expect.stringContaining(`#${child}`) }]);
+    expect(sql(`SELECT kind FROM decisions WHERE kind = 'alert'`)).toEqual([]);
     expect(sql(`SELECT * FROM events WHERE type = 'pr.conflict'`)).toEqual([]);
+    const asked = sql<{ payload: string }>(`SELECT payload FROM events WHERE type = 'pr.baseConflict'`).map((e) => JSON.parse(e.payload) as Record<string, unknown>);
+    expect(asked).toMatchObject([{ number: child, base: branch, resolveBranch: branch.replace("clanker/base/", "clanker/resolve/"), defaultBranch: "main", files: ["b.txt"] }]);
   });
 
   test("si otro rearmó la base y rehízo el PR por fuera, sale del último merge hacia la base que trae su historia", async () => {

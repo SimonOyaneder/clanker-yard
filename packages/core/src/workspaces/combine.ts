@@ -4,6 +4,9 @@ import { isAncestorIn, mergeTree, type Git } from "./restack";
 // de la branch por defecto con un merge --no-ff de cada padre encima, sin tocar ningún worktree. Solo crea
 // objetos; mover la branch sintética y registrarla es de `workspaces.combineBase`.
 
+/** El mensaje del merge de un padre en la base combinada `into`: así lo reconoce `lastMergeInto` en la historia de un PR. */
+export const combinedMergeMessage = (branch: string, into: string) => `Merge branch '${branch}' into ${into}`;
+
 /** Un PR padre de una base combinada: su branch en el remoto y la punta que se juntó. */
 export interface CombinedParent {
   /** `repo#número`, como lo nombra la cola. */
@@ -29,7 +32,23 @@ export type CombinedPlan =
  */
 export async function planCombinedBase(
   git: Git,
-  { onto, parents, into, identity }: { onto: string; parents: readonly CombinedParent[]; into: string; identity: { name: string; email: string } },
+  {
+    onto,
+    parents,
+    into,
+    identity,
+    resolve,
+  }: {
+    onto: string;
+    parents: readonly CombinedParent[];
+    into: string;
+    identity: { name: string; email: string };
+    /**
+     * Un conflicto que ya se resolvió una vez (`rerere`, ver `workspaces.combinedBaseMerge`): el árbol resuelto de juntar
+     * `parent` sobre `tip`, o `undefined` si no hay resolución guardada para todo el conflicto.
+     */
+    resolve?: (tip: string, parent: string) => Promise<string | undefined>;
+  },
 ): Promise<CombinedPlan> {
   const date = await git(["log", "-1", "--format=%cI", onto]);
   const env = {
@@ -45,9 +64,14 @@ export async function planCombinedBase(
   for (const parent of parents) {
     if (!(await isAncestorIn(git, parent.sha, tip))) {
       const result = await mergeTree(git, tip, parent.sha);
-      if (!result.ok) return { status: "conflict", parent, merged, conflicts: result.conflicts, failures: result.failures };
+      const tree = result.ok ? result.tree : await resolve?.(tip, parent.sha);
+      if (tree === undefined) {
+        // `result` solo puede ser un conflicto aquí: un merge limpio siempre trae su árbol.
+        const conflict = result as { conflicts: string[]; failures: string };
+        return { status: "conflict", parent, merged, conflicts: conflict.conflicts, failures: conflict.failures };
+      }
       tip = await git(
-        ["-c", "commit.gpgsign=false", "commit-tree", result.tree, "-p", tip, "-p", parent.sha, "-m", `Merge branch '${parent.branch}' into ${into}`],
+        ["-c", "commit.gpgsign=false", "commit-tree", tree, "-p", tip, "-p", parent.sha, "-m", combinedMergeMessage(parent.branch, into)],
         env,
       );
     }

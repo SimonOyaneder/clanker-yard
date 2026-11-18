@@ -124,6 +124,7 @@ export { prPublishAction } from "./github/actions/publish";
 export { prPromoteAction, prSaveLocalAction } from "./github/actions/promote";
 export { createLocalPrDetails, type LocalPrDetails } from "./github/local-detail";
 export { landedCommit } from "./github/landed";
+export { prRequestRebaseAction, workspaceCombinedBaseMergeAction } from "./workspaces/combined-base-actions";
 
 export type { PrPublishDeps } from "./github/actions/publish";
 export { prPushFixupsAction } from "./github/actions/push-fixups";

@@ -376,6 +376,7 @@ export const LANE_BY_TRIGGER: Partial<Record<FlowDef["trigger"]["type"], "dev" |
   manual: "dev",
   "pr.comment": "maintenance",
   "pr.conflict": "maintenance",
+  "pr.baseConflict": "maintenance",
   "pr.merged": "maintenance",
   "pr.base_rewritten": "maintenance",
 };

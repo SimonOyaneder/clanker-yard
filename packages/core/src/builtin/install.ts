@@ -19,6 +19,7 @@ const TEMPLATES: BuiltinTemplate[] = [
       clankerLoopTemplate.flows["techlead-clasico"]!,
       clankerLoopTemplate.flows["rebase-conflicto"]!,
       clankerLoopTemplate.flows["rebase-conflicto-local"]!,
+      clankerLoopTemplate.flows["base-combinada-conflicto"]!,
       clankerLoopTemplate.flows["restack-feedback"]!,
       clankerLoopTemplate.flows["promote-local"]!,
       clankerLoopTemplate.flows["restack"]!,

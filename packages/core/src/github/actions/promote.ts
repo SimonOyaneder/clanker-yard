@@ -3,7 +3,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
 import { PermanentActionError, type ActionDef } from "../../flows/catalog";
-import { prParents, pullRequests, runs, workspaces as workspacesTable } from "../../store/schema";
+import { combinedBases, prParents, pullRequests, runs, workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
 import type { RepoConfig } from "../../repos/repos";
 import { WorkspaceOutput, type Workspaces } from "../../workspaces/workspaces";
@@ -125,17 +125,25 @@ export function prSaveLocalAction(deps: Pick<PrPromoteDeps, "store" | "workspace
       if (!row || row.state !== "local") throw new PermanentActionError(`El PR ${prId} no es un PR local: no hay nada que guardar.`);
       const workspace = store.db.select({ baseRef: workspacesTable.baseRef }).from(workspacesTable).where(eq(workspacesTable.id, ws.workspaceId)).get();
       if (!workspace) throw new PermanentActionError(`No existe el workspace ${ws.workspaceId}.`);
-      const base = workspace.baseRef;
+      // Sobre una base combinada, el PR cuelga de sus padres que siguen vivos y su base es el primero.
+      const combined = store.db
+        .select({ parents: combinedBases.parents })
+        .from(combinedBases)
+        .where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, workspace.baseRef), ne(combinedBases.status, "dissolved")))
+        .get();
       const head = await workspaces.git(ws, "rev-parse", "HEAD");
-      store.tx(({ db }) => {
+      const base = store.tx(({ db }) => {
+        const branches = combined ? combined.parents.map((p) => p.branch) : [workspace.baseRef];
+        const parents = db
+          .select({ id: pullRequests.id, headRef: pullRequests.headRef })
+          .from(pullRequests)
+          .where(and(eq(pullRequests.repoId, row.repoId), inArray(pullRequests.headRef, branches), inArray(pullRequests.state, ["open", "local"])))
+          .all();
+        const base = combined ? (branches.find((b) => parents.some((p) => p.headRef === b)) ?? deps.repoConfig(row.repoId).defaultBranch) : workspace.baseRef;
         db.update(pullRequests).set({ baseRef: base, headSha: head, headChangedAt: Date.now() }).where(eq(pullRequests.id, prId)).run();
         db.delete(prParents).where(eq(prParents.childId, prId)).run();
-        const parents = db
-          .select({ id: pullRequests.id })
-          .from(pullRequests)
-          .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, base), inArray(pullRequests.state, ["open", "local"])))
-          .all();
         for (const parent of parents) db.insert(prParents).values({ childId: prId, parentId: parent.id }).run();
+        return base;
       });
       const promotable = base === deps.repoConfig(row.repoId).defaultBranch;
       return { outcome: promotable ? "promotable" : "local", output: { prId, branch: row.headRef, base, head } };

@@ -24,6 +24,8 @@ import type { Store, Tx } from "../store/store";
 import type { RepoConfig } from "../repos/repos";
 
 const REMOTE = "origin";
+/** `rerere` encendido para un merge: reaplica las resoluciones guardadas y deja staged lo que resolvió. */
+export const RERERE = ["-c", "rerere.enabled=true", "-c", "rerere.autoUpdate=true"];
 const WORKTREE_LOCK_REASON = "clanker-yard";
 
 /** 2 min; el core renueva cada ttl/3. */
@@ -1150,6 +1152,15 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     // La base se reescribió por fuera después de que la branch salió de ella (o ya no queda rastro de su punta):
     // la branch sigue saliendo del commit de la base sobre el que se apiló la última vez.
     if (row.baseSha && (await isAncestor(path, row.baseSha, "HEAD"))) return row.baseSha;
+    // La branch ya no sale de su base registrada: alguien la rebaseó por fuera (por ejemplo, sobre la branch por defecto
+    // cuando una cola mergeó su base sin que el core restackeara). Si ninguno de los commits que un rebase común
+    // reaplicaría es de la base vieja, ese rebase es el correcto; si alguno lo es, el PR quedaría con commits ajenos.
+    const oldTips = [
+      from,
+      await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE}/${row.baseRef}`]),
+      await tryGit(cfg.path, ["rev-parse", "--verify", "--quiet", `refs/heads/${row.baseRef}`]),
+    ].filter((sha): sha is string => sha !== undefined);
+    if (oldTips.length > 0 && (await ownCommitsOnly(path, await resolveBase(cfg, target), oldTips))) return undefined;
     if (!from) {
       throw new RebaseError(
         `${row.branch} cambió de base (${row.baseRef} -> ${target}) y no se sabe cuál fue la última punta de ${row.baseRef}: ` +
@@ -1160,6 +1171,14 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
       `Ni la última punta de ${row.baseRef} (${from.slice(0, 9)}) ni la base registrada de ${row.branch}` +
         `${row.baseSha ? ` (${row.baseSha.slice(0, 9)})` : ""} están en su historia: ya no está apilada sobre ellas.`,
     );
+  }
+
+  /** Ningún commit de `onto..HEAD` (lo que un rebase común reaplicaría) está en la base vieja (`onto..<punta>` de cada una). */
+  async function ownCommitsOnly(path: string, onto: string, oldTips: string[]): Promise<boolean> {
+    const list = async (range: string) => (await git(path, ["rev-list", range])).split("\n").filter(Boolean);
+    const own = new Set(await list(`${onto}..HEAD`));
+    for (const tip of oldTips) for (const sha of await list(`${onto}..${tip}`)) if (own.has(sha)) return false;
+    return true;
   }
 
   function release(lease: Pick<WorkspaceLease, "workspaceId" | "runId" | "fencingToken">): void {
@@ -1284,6 +1303,28 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
 
   const gitAt = (cfg: RepoConfig): Git => (args, env, input) => git(cfg.path, args, env, input);
 
+  /**
+   * Lo que `rerere` ya sabe resolver al juntar `parent` sobre `tip`: un merge real en un worktree desechable con
+   * `rerere` encendido (su caché vive en el repo y la comparten todos los worktrees). Devuelve el árbol si no quedó
+   * ningún archivo sin resolver, o `undefined` si falta una resolución (la enseña `workspace.combinedBaseMerge`).
+   */
+  function rerereResolver(cfg: RepoConfig): (tip: string, parent: string) => Promise<string | undefined> {
+    return async (tip, parent) => {
+      const dir = mkdtempSync(join(tmpdir(), "clanker-rerere-"));
+      const path = join(dir, "worktree");
+      try {
+        await git(cfg.path, ["worktree", "add", "--detach", "--quiet", path, tip]);
+        if ((await tryGit(path, [...RERERE, "merge", "--no-ff", "--no-commit", "--quiet", parent])) !== undefined) return await git(path, ["write-tree"]);
+        if ((await git(path, ["diff", "--name-only", "--diff-filter=U"])) !== "") return undefined;
+        return await git(path, ["write-tree"]);
+      } finally {
+        await tryGit(cfg.path, ["worktree", "remove", "--force", path]);
+        rmSync(dir, { recursive: true, force: true });
+        await tryGit(cfg.path, ["worktree", "prune"]);
+      }
+    };
+  }
+
   /** La punta de cada padre (la de `origin` si hay, si no la local). */
   async function tipsOf(cfg: RepoConfig, parents: RestackCombinedOptions["parents"]): Promise<CombinedParent[]> {
     return Promise.all(parents.map(async ({ key, branch }) => ({ key, branch, sha: await resolveBase(cfg, branch) })));
@@ -1302,7 +1343,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return withRepoLock(repo, async () => {
       const defaultSha = await resolveBase(cfg, cfg.defaultBranch);
       const tips = await tipsOf(cfg, parents);
-      const plan = await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity: await identityOf(repo) });
+      const plan = await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity: await identityOf(repo), resolve: rerereResolver(cfg) });
       const previous = combinedRow(repo, branch);
       const values = { repoId: repo, branch, issueId, defaultSha, parents: tips };
       const save = (row: { headSha: string | null; status: "active" | "conflict" }) =>
@@ -1340,7 +1381,10 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     if (combined.headSha === null) throw new StaleCombinedBaseError(`La base combinada ${branch} nunca se armó: ${row.branch} no salió de ella.`);
     const defaultSha = await resolveBase(cfg, cfg.defaultBranch);
     const tips = await tipsOf(cfg, parents);
-    const plan = tips.length === 0 ? { status: "ok" as const, head: defaultSha } : await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity: await identityOf(row.repoId) });
+    const plan =
+      tips.length === 0
+        ? { status: "ok" as const, head: defaultSha }
+        : await planCombinedBase(gitAt(cfg), { onto: defaultSha, parents: tips, into: branch, identity: await identityOf(row.repoId), resolve: rerereResolver(cfg) });
     // El PR sale de esta base si su historia trae la última punta registrada o, si un corte llegó entre el push y el registro, la que ya se recalculó.
     const head = await gitIn(lease, "rev-parse", "HEAD");
     let from = combined.headSha;

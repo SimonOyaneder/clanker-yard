@@ -8,7 +8,7 @@ import type { ErrorReporter } from "../errors/reporter";
 import { prById, prRefOf } from "../github/pr-rows";
 
 /** Los eventos de un PR que arrancan flujos (`trigger.type` del flujo es el mismo texto). */
-const TRIGGERS = ["pr.comment", "pr.conflict", "pr.merged", "pr.base_rewritten"] as const satisfies readonly EventType[];
+const TRIGGERS = ["pr.comment", "pr.conflict", "pr.baseConflict", "pr.merged", "pr.base_rewritten"] as const satisfies readonly EventType[];
 
 export interface TriggersDeps {
   store: Store;

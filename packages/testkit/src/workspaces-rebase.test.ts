@@ -280,6 +280,23 @@ describe("workspaces.rebase", () => {
     expect(wt(lease, "status", "--porcelain")).toBe("");
   });
 
+  test("con la base registrada vieja (ninguna punta suya en la historia) rebasea sobre la base nueva en vez de rendirse", async () => {
+    // Como #4337: el worktree quedó registrado sobre un padre que una cola mergeó y alguien ya movió el PR a main.
+    pushBranch("cla-1", [{ "c.txt": "c\n" }]);
+    const lease = await attach("cla-1", "main");
+    // Su base registrada es un padre que ya no está en su historia: la branch ya se paró sobre main.
+    pushBranch("padre-viejo", [{ "d.txt": "d\n" }]);
+    await workspaces.attach({ repo: "repo_r1", branch: "padre-viejo", base: "main", runId: run }).then((l) => leases.push(l));
+    store.db.$client.prepare("UPDATE workspaces SET base_ref = 'padre-viejo', base_sha = ? WHERE id = ?").run("0".repeat(40), lease.workspaceId);
+    const moved = await advance("main", { "b.txt": "b-main\n" });
+
+    const result = await workspaces.rebase(lease, { council: false, base: "main" });
+
+    expect(result).toMatchObject({ outcome: "clean", baseSha: moved });
+    expect(subjects(lease, `${moved}..HEAD`)).toEqual(["feat: cla-1 1"]);
+    expect(row(lease)).toMatchObject({ baseRef: "main" });
+  });
+
   test("con cambios sin commitear los guarda en refs/clanker/uncommitted/<branch>, limpia el árbol y rebasea", async () => {
     pushBranch("cla-1", [{ "a.txt": "a1\na2\nmine\n" }]);
     const lease = await attach("cla-1");

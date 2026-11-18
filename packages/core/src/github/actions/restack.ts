@@ -222,8 +222,10 @@ async function restackChain(
   interface Attempt {
     result: RestackResult | BaseConflict;
     base: string;
-    /** Los datos del `pr.conflict` para el flujo de rebase; una base combinada no lo tiene (ver `restackCombined`). */
+    /** Los datos del `pr.conflict` para el flujo de rebase; una base combinada no los tiene: rebasea sobre su branch (ver `restackCombined`). */
     conflict?: { from: string; onto: string };
+    /** La branch sintética, si el hijo sale de una base combinada: ahí se rebasea, y su conflicto lo resuelve `base-combinada-conflicto`. */
+    combinedBranch?: string;
   }
 
   /**
@@ -250,7 +252,7 @@ async function restackChain(
       throw error;
     }
     try {
-      const { result, base: toBase, conflict } = await restackAttempt(lease, child, start, merged);
+      const { result, base: toBase, conflict, combinedBranch } = await restackAttempt(lease, child, start, merged);
       switch (result.outcome) {
         case "restacked":
           return {
@@ -263,8 +265,35 @@ async function restackChain(
         case "conflict":
         case "base-conflict": {
           const files = result.outcome === "conflict" ? result.conflicts : result.files;
-          if (conflict) {
-            // La misma clave que usa Watch (el sha de la punta): si ya vio el conflicto, el flujo de rebase ya salió.
+          const who = local ? { prId: child.id, local: true } : { number: child.number };
+          if (result.outcome === "base-conflict" && combinedBranch) {
+            // Los padres de la base combinada chocan entre sí: la resuelve `base-combinada-conflicto` (un merge real con el
+            // dev y `rerere`), una vez por punta del hijo y padre que choca, y después rebasea el hijo sobre ella.
+            store.tx((tx) =>
+              emitOnce(
+                tx,
+                child,
+                {
+                  type: "pr.baseConflict",
+                  keys: [`${headSha}:${result.parent}`],
+                  runId: ctx.runId,
+                  payload: () => ({
+                    repo: remote.repo,
+                    ...who,
+                    sha: headSha,
+                    base: combinedBranch,
+                    resolveBranch: combinedBranch.replace(/^clanker\/base\//, "clanker/resolve/"),
+                    defaultBranch: deps.repoConfig(repoId).defaultBranch,
+                    parent: result.parent,
+                    files,
+                  }),
+                },
+                Date.now(),
+              ),
+            );
+          } else {
+            // La misma clave que usa Watch (el sha de la punta): si ya vio el conflicto, el flujo de rebase ya salió. Sobre
+            // una base combinada el rebase es sobre su branch sintética, que ya trae a todos los padres.
             store.tx((tx) =>
               emitOnce(
                 tx,
@@ -273,24 +302,10 @@ async function restackChain(
                   type: "pr.conflict",
                   keys: [headSha],
                   runId: ctx.runId,
-                  payload: () =>
-                    local
-                      ? { repo: remote.repo, prId: child.id, local: true, sha: headSha, base: toBase, ...conflict, files }
-                      : { repo: remote.repo, number: child.number, sha: headSha, base: toBase, ...conflict, files },
+                  payload: () => ({ repo: remote.repo, ...who, sha: headSha, base: combinedBranch ?? toBase, ...conflict, files }),
                 },
                 Date.now(),
               ),
-            );
-          } else {
-            store.tx((tx) =>
-              // Hay que resolverlo a mano: es una alerta de la Bandeja, no una nota (las notas no llegan a la Bandeja).
-              openDecision(tx, {
-                kind: "alert",
-                title: `Base combinada en conflicto en ${child.number === null ? child.headRef : `${remote.repo}#${child.number}`}`,
-                body: `No se pudo recalcular la base combinada de ${child.headRef} tras mergearse ${merged}: conflicto en ${files.join(", ")}. El PR quedó como estaba; el flujo de rebase por conflicto no sabe rehacer una base combinada, así que hay que resolverlo a mano.`,
-                runId: ctx.runId,
-                subject: { type: "pr", id: child.id },
-              }),
             );
           }
           return { report: { ...base, status: "conflict", files, failures: result.failures }, base: toBase };
@@ -357,7 +372,7 @@ async function restackChain(
     );
     const parents = combined.parents.filter((parent) => parent.branch !== merged && open.has(parent.branch));
     const result = await workspaces.restackCombined(lease, { council: false, branch: combined.branch, parents });
-    return { result, base: parents[0]?.branch ?? deps.repoConfig(repoId).defaultBranch };
+    return { result, base: parents[0]?.branch ?? deps.repoConfig(repoId).defaultBranch, ...(parents.length > 0 && { combinedBranch: combined.branch }) };
   }
 
   /** La base combinada vigente de la issue del hijo, si su PR se abrió sobre una. */
