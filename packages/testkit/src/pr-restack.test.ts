@@ -502,6 +502,10 @@ describe("stack.restack con PRs locales", () => {
       { id: c, base_ref: "cla-2", state: "local", head_sha: repo.git("rev-parse", "cla-3") },
     ]);
     expect(sql("SELECT child_id, parent_id FROM pr_parents")).toEqual([{ child_id: c, parent_id: b }]);
+    expect(store.events.since(0, { types: ["pr.changed"] }).map((event) => event.subject)).toEqual([
+      { type: "pr", id: b },
+      { type: "pr", id: c },
+    ]);
   });
 
   test("un corte después del restack de un hijo local no lo repite al reintentar", async () => {
@@ -543,6 +547,7 @@ describe("stack.restack con PRs locales", () => {
     expect(store.events.since(0, { types: ["pr.conflict"] })).toMatchObject([
       { subject: { type: "pr", id: b }, payload: { prId: b, local: true, sha: before, base: "main", files: ["a.txt"] } },
     ]);
+    expect(store.events.since(0, { types: ["pr.changed"] })).toEqual([]);
   });
 });
 
