@@ -11,3 +11,4 @@ export { defaultBranchChecksData, graphqlNotFound, prGraphql } from "./testing/g
 export type { DefaultBranchCommit } from "./testing/github/fake-pr-graphql";
 export { JUGUETE_FLOW, JUGUETE_PROFILE, JUGUETE_ROLE, JUGUETE_TEMPLATE } from "./testing/juguete";
 export { seedPr, type SeedPr } from "./testing/pull-requests";
+export { createFakeCodex } from "./testing/codex/fake-codex";
