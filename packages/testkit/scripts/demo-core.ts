@@ -1,10 +1,11 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_MAJOR, createClient, type FlowDef, FlowBody } from "@clanker/api";
 import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanker/api/node";
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, openDecision, openStore } from "@clanker/core";
-import { JUGUETE_FLOW, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core/testing";
+import { createFakeCodex, JUGUETE_FLOW, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core/testing";
 import { startCore } from "../src/start-core";
 import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedLocalPrBranches, seedLearnings, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
@@ -21,9 +22,11 @@ import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScena
 // (`summary-scenario.ts`): el proyecto de las capturas del Resumen.
 //
 // Las conexiones nunca salen a internet: GitHub es el simulador (`startGitHubSim`, acepta el PAT
-// `ghp_demo` y el token del device flow del OAuth falso), Linear es el falso del core y Claude un `query` falso. Para ver una conexión vencida sin
+// `ghp_demo` y el token del device flow del OAuth falso), Linear es el falso del core, Claude un `query` falso y Codex
+// el app-server falso del core (plan `plus` con ventanas de 5 h y 7 días). Para ver una conexión vencida sin
 // esperar, escribe `<CLANKER_HOME>/demo-control.json` con `{ "clockDays": 40, "claude": "login_expired" }`: el
-// reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario.
+// reloj de las conexiones se adelanta esos días y la próxima prueba de Claude responde ese escenario. `codex`
+// (`ready`, `login_expired` o `quota_exhausted`) hace lo mismo con la próxima prueba de Codex.
 // Un agente que desarrolla la app hace lo mismo por MCP con el router `dev` (`inject_step_result`, `load_fixture`,
 // `advance_clock`): el demo es el único core que lo monta (`createDevKit`).
 // Lo que GitHub haría del otro lado del device flow también sale de ese archivo, mientras la clave esté puesta:
@@ -88,6 +91,7 @@ const linear = await startFakeLinear({ clientId: "demo-client" });
 const control = (): {
   clockDays?: number;
   claude?: FakeClaudeScenario;
+  codex?: DemoCodexScenario;
   closeAlert?: boolean;
   githubDeny?: boolean;
   githubRefresh?: "rejected";
@@ -120,6 +124,39 @@ const devKit = createDevKit({ store, api: () => client, clockStart: CLOCK_START,
 const githubDoubles = setInterval(applyControl, 200);
 githubDoubles.unref();
 const claude = createFakeClaude({ scenario: () => control().claude ?? "ready" });
+// Un app-server falso por escenario; `args` se lee en cada prueba, así `demo-control.json` cambia la próxima.
+type DemoCodexScenario = "ready" | "login_expired" | "quota_exhausted";
+const codexDir = mkdtempSync(join(tmpdir(), "demo-codex-"));
+const codexAt = (hours: number) => Math.floor(Date.now() / 1000) + hours * 3600;
+const codexFakes = Object.fromEntries(
+  await Promise.all((["ready", "login_expired", "quota_exhausted"] as const).map(async (scenario) => {
+    const dir = join(codexDir, scenario);
+    mkdirSync(dir);
+    const fake = await createFakeCodex(dir, {
+      scenario,
+      account: { type: "chatgpt", email: null, planType: "plus", workspaceName: null },
+      rateLimits: {
+        limitId: "codex",
+        limitName: null,
+        planType: "plus",
+        rateLimitReachedType: null,
+        primary: { usedPercent: scenario === "quota_exhausted" ? 100 : 23, windowDurationMins: 300, resetsAt: codexAt(3) },
+        secondary: { usedPercent: 61, windowDurationMins: 10_080, resetsAt: codexAt(96) },
+        credits: null,
+        spendControlReached: false,
+      },
+    });
+    return [scenario, fake] as const;
+  })),
+);
+const codex = {
+  executable: process.execPath,
+  cwd: codexDir,
+  baseEnv: { HOME: codexDir, PATH: process.env.PATH },
+  get args() {
+    return codexFakes[control().codex ?? "ready"]!.args;
+  },
+};
 const core = await startCore({
   store,
   dataDir: home,
@@ -127,6 +164,7 @@ const core = await startCore({
     githubApp: { clientId: "Iv23liDEMO", slug: "clanker-yard-demo", endpoints: githubOAuth.endpoints },
     linear: { clientId: "demo-client", redirectPort: 0, endpoints: linear.endpoints },
     claude: claude.options,
+    codex,
     now: devKit.now }),
   runtimes: [createFakeRuntime({ fixtures, transcripts: join(home, "transcripts") })],
   env: { CORE_RUNTIME: "fake" },
@@ -265,6 +303,7 @@ function stop(): Promise<void> {
     store.close();
     await Promise.all([github.close(), githubOAuth.close(), linear.close()]);
     claude.cleanup();
+    rmSync(codexDir, { recursive: true, force: true });
     for (const r of [repo, withRecipe, withBrokenRecipe]) r.cleanup();
     process.exit(0);
   })();

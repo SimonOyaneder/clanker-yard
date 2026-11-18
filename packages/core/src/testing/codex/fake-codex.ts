@@ -51,9 +51,11 @@ export async function createFakeCodex(dir: string, options: FakeCodexOptions = {
   const environment = join(dir, "environment.json");
   const versionEnvironment = join(dir, "version-environment.json");
   const state = join(dir, "state.json");
+  // `__name`: bajo tsx (el core de demo) esbuild envuelve las funciones con nombre en ese helper, y aquí la función viaja como texto.
   await writeFile(script, `import { createInterface } from "node:readline";
 import * as fs from "node:fs/promises";
 import { spawn } from "node:child_process";
+const __name = (target) => target;
 (${fakeProcess.toString()})(${JSON.stringify({ ...options, requests, childPid, pidFile, environment, versionEnvironment, state })}, { createInterface, fs, spawn });`);
   return { executable: process.execPath, args: [script], requests, childPid, pidFile, environment, versionEnvironment };
 }
