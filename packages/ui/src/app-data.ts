@@ -147,7 +147,7 @@ export interface AppData extends Partial<ChatData> {
   prsByIds(ids: string[]): Promise<CachedPr[]>
   prDetail(id: string): Promise<PrDetail>
   prCommitDiff(input: { id: string; sha: string; head: string; base: string }): Promise<PrCommitDiff>
-  /** Las issues del caché del proyecto. */
+  /** Las issues del caché de un proyecto, sin su `body` (va vacío): ninguna lista lo muestra. */
   issues(projectId: ProjectId): Promise<CachedIssue[]>
   /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */
   queue(projectId: ProjectId): Promise<QueueEntry[]>

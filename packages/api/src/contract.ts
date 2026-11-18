@@ -208,9 +208,12 @@ const artifacts = {
 };
 
 const issues = {
-  /** Del caché, no del tracker. Orden: prioridad (urgente primero, sin prioridad al final) y luego la creación. */
+  /**
+   * Del caché, no del tracker. Orden: prioridad (urgente primero, sin prioridad al final) y luego la creación. Con
+   * `withBody: false` cada `body` va vacío: la descripción es lo más pesado y una lista no la muestra (`get` la trae).
+   */
   list: base
-    .input(IssueFilter.extend({ projectId: ProjectId.optional() }))
+    .input(IssueFilter.extend({ projectId: ProjectId.optional(), withBody: z.boolean().default(true) }))
     .output(z.array(CachedIssue)),
   /** Del caché, con sus relaciones. */
   get: base.input(z.object({ id: IssueId })).output(CachedIssue),

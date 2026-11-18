@@ -198,7 +198,10 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     issues: {
-      list: os.issues.list.handler(({ input }) => deps.issues.list(input)),
+      list: os.issues.list.handler(({ input: { withBody, ...filter } }) => {
+        const list = deps.issues.list(filter);
+        return withBody ? list : list.map((issue) => ({ ...issue, body: "" }));
+      }),
       get: os.issues.get.handler(({ input }) => {
         const issue = deps.issues.get(input.id);
         if (!issue) throw new ORPCError("NOT_FOUND", { message: `No hay una issue ${input.id} en el caché.` });
