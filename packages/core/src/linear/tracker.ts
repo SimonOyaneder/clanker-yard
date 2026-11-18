@@ -184,6 +184,9 @@ function projectToken(ref: string): string {
   return slug === undefined ? text : (slug.split("-").at(-1) ?? slug);
 }
 
+/** Cuánto se recuerda la persona de la conexión (`viewer`). */
+const VIEWER_TTL_MS = 10 * 60_000;
+
 export function createLinearTracker({
   connections,
   account,
@@ -306,8 +309,19 @@ export function createLinearTracker({
     if (!issueUpdate.success) throw new LinearApiError(`Linear no aplicó el cambio en ${ref.key} (success: false).`);
   }
 
-  async function viewer(): Promise<Person> {
-    return (await gql<{ viewer: Person }>(QUERIES.viewer)).viewer;
+  // La persona del token no cambia mientras la cuenta siga conectada, y `viewer` lo pide la cola en cada lectura (la UI la
+  // relee con cada cambio): se recuerda por cuenta un rato, y un fallo no se recuerda.
+  const viewers = new Map<string, { at: number; person: Promise<Person> }>();
+  function viewer(): Promise<Person> {
+    const key = accountName();
+    const cached = viewers.get(key);
+    if (cached && Date.now() - cached.at < VIEWER_TTL_MS) return cached.person;
+    const person = gql<{ viewer: Person }>(QUERIES.viewer).then((d) => d.viewer);
+    viewers.set(key, { at: Date.now(), person });
+    person.catch(() => {
+      if (viewers.get(key)?.person === person) viewers.delete(key);
+    });
+    return person;
   }
 
   return {

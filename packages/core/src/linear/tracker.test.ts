@@ -187,6 +187,15 @@ describe("claim", () => {
     expect(await tracker().viewer()).toEqual({ id: w.viewer.id, name: w.viewer.name });
   });
 
+  test("viewer se recuerda: la cola lo pide en cada lectura y no puede ser un request a Linear cada vez", async () => {
+    const t = tracker();
+    const viewerQueries = () => w.operations.filter((o) => o.query.includes("viewer")).length;
+    await t.viewer();
+    await t.viewer();
+    await t.viewer();
+    expect(viewerQueries()).toBe(1);
+  });
+
   test("asigna a la persona del token y pasa la issue a in_progress", async () => {
     const issue = w.addIssue({ team, title: "x" });
 
