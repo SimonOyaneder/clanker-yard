@@ -1,0 +1,21 @@
+# El tercer turno rehace una propuesta que quedó atrás (el PR avanzó): escribe el archivo de nuevo sobre la punta nueva.
+match: { mode: turn }
+events:
+  - { at: 0, text: "El PR cambió: rehago la propuesta sobre su punta actual" }
+  - { at: 1500, tool: Write, input: { file_path: "docs/chat.md" } }
+  - { at: 2000, usage: { model: sonnet, in: 1000, out: 200, costUsd: 0.008 } }
+effects:
+  - write:
+      path: docs/chat.md
+      content: "# Notas del chat\n\nLo que pediste revisar en este PR, sobre su punta actual.\n"
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Rehice la propuesta"
+    payload:
+      reply: "Rehice la propuesta sobre la punta actual del PR."
+      proposal:
+        summary: "Agrega las notas pedidas, sobre la punta actual"
+        items:
+          - { id: notas, change: "Agrega las notas del chat", path: docs/chat.md }

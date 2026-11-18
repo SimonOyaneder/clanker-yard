@@ -7,7 +7,7 @@ import { hashUiKey, isolatedUiKey, removeCoreJson, writeCoreJson } from "@clanke
 import { createConnections, createDefs, createFileSecrets, createRepos, closeDecision, openDecision, openStore } from "@clanker/core";
 import { createFakeCodex, JUGUETE_FLOW, startFakeGitHubOAuth, startFakeLinear } from "@clanker/core/testing";
 import { startCore } from "../src/start-core";
-import { createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedLocalPrBranches, seedLearnings, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
+import { adoptPrBranches, createDevKit, createFakeClaude, createFakeRuntime, type FakeClaudeScenario, PR_BRANCHES, seedLanes, seedLocalPrBranches, seedLearnings, seedPrs, seedSummary, startGitHubSim, tempGitRepo } from "../src/index";
 
 // Un core de demostración con el runtime fake y la plantilla `juguete`: un proyecto local con tres issues
 // y tres repos git temporales (sin receta, con una válida y con una inválida). Publica `core.json` en
@@ -51,6 +51,8 @@ if (!home) {
 }
 
 const fixtures = fileURLToPath(new URL("../fixtures/runs/juguete-lento", import.meta.url));
+// El chat de un PR: un turno que propone, uno que solo responde y uno que rehace una propuesta que quedó atrás.
+const chatFixtures = fileURLToPath(new URL("../fixtures/runs/chat-demo", import.meta.url));
 const store = openStore({ path: join(home, "clanker.db") });
 const prsScenario = process.env.DEMO_SCENARIO === "prs";
 const repo = tempGitRepo({ remote: true, ...(prsScenario && { branches: PR_BRANCHES }) });
@@ -81,6 +83,13 @@ const github = await startGitHubSim({
   ...(prsScenario && { repo: "octocat/demo" }),
 });
 if (prsScenario) {
+  // El bot de review del pack contesta cada `/review` con LGTM y el CI de ese head queda verde: así un draft que el chat
+  // restackea pasa por `pr-feedback` en segundos, como en el escenario techlead.
+  github.onComment((pr, body) => {
+    if (body.split("\n")[0] !== "/review") return;
+    pr.botLgtm();
+    pr.ci("green");
+  });
   // El pack de ejemplo tal cual, activado para la org del simulador y sin sus flujos, roles ni contextos (el escenario no los corre).
   const packDir = join(home, "packs", "example");
   mkdirSync(packDir, { recursive: true });
@@ -166,7 +175,9 @@ const core = await startCore({
     claude: claude.options,
     codex,
     now: devKit.now }),
-  runtimes: [createFakeRuntime({ fixtures, transcripts: join(home, "transcripts") })],
+  runtimes: [createFakeRuntime({ fixtures: [fixtures, chatFixtures], transcripts: join(home, "transcripts") })],
+  // El remoto es el bare del repo de la demo: el borrador del chat y aplicar traen y pushean ahí, nunca a github.com.
+  gitUrl: () => `file://${repo.remoteDir!}`,
   env: { CORE_RUNTIME: "fake" },
   // La demo deja las issues en la cola para lanzarlas a mano desde la UI.
   scheduler: false,
@@ -277,6 +288,7 @@ if (prsScenario) {
   // El PR de la base del stack lo "abrió" esta corrida: es la que abre "Ver corrida".
   const run = await client.runs.start({ projectId: project.id, issueId: demoIssues[0]!.id, params: { repo: repoId } });
   await seedPrs({ client, store, sim: github, repoId, origin: { issueId: demoIssues[0]!.id, runId: run.id } });
+  adoptPrBranches({ store, repo, repoId, dataDir: home });
 }
 
 if (process.env.DEMO_SCENARIO === "learnings") {

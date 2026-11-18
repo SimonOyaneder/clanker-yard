@@ -1,0 +1,12 @@
+# Desde el cuarto turno el agente solo responde.
+match: { mode: turn, round: "*" }
+events:
+  - { at: 0, text: "Pienso la respuesta" }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Respondí"
+    payload:
+      reply: "Entendido: dime qué más quieres cambiar."
+      proposal: null

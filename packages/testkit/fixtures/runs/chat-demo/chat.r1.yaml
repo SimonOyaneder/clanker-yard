@@ -1,0 +1,24 @@
+# El chat del core de demo (`DEMO_SCENARIO=prs`): el primer turno propone un cambio, con tiempos reales para verlo en vivo.
+match: { mode: turn }
+events:
+  - { at: 0, text: "Leo la descripción y el diff del PR" }
+  - { at: 800, tool: Read, input: { file_path: ".clanker-run/diff.patch" }, output: "diff --git ..." }
+  - { at: 1600, usage: { model: sonnet, in: 900, out: 120, costUsd: 0.006 } }
+  - { at: 2200, text: "Agrego las notas que pediste" }
+  - { at: 3000, tool: Write, input: { file_path: "docs/chat.md" } }
+  - { at: 3600, usage: { model: sonnet, in: 1100, out: 260, costUsd: 0.009 } }
+effects:
+  - write:
+      path: docs/chat.md
+      content: "# Notas del chat\n\nLo que pediste revisar en este PR.\n"
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Agregué docs/chat.md"
+    payload:
+      reply: "Agregué `docs/chat.md` con las notas que pediste. Revisa la propuesta antes de aplicarla."
+      proposal:
+        summary: "Agrega las notas pedidas en docs/chat.md"
+        items:
+          - { id: notas, change: "Agrega las notas del chat", path: docs/chat.md }

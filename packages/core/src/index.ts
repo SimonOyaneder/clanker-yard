@@ -28,6 +28,7 @@ export type { Briefs } from "./agents/brief";
 export { listHunks } from "./git/tree";
 
 export { createClaudeRuntime } from "./agents/claude/claude-runtime";
+export { createOpencodeRuntime } from "./agents/opencode/opencode-runtime";
 export { createCodexRuntime } from "./agents/codex/codex-runtime";
 
 export type { QueryFn } from "./agents/claude/claude-runtime";

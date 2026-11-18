@@ -6,9 +6,10 @@ const testkitDir = join(import.meta.dirname, "../../../packages/testkit");
 
 /**
  * `lanes` siembra el proyecto de la vista de Operación, `summary` el del Resumen (lo importado del clanker-loop y corridas de Yard),
- * `prs` los PRs de Stacks de PR, con el pack de ejemplo y `learnings` los de la revisión de learnings (`DEMO_SCENARIO` de `packages/testkit/scripts/demo-core.ts`).
+ * `prs` los PRs de Stacks de PR, con el pack de ejemplo (`prs-chat` es el mismo, en su propio worker: el E2E del chat aplica
+ * propuestas y cambia los PRs que los demás archivos de `prs` esperan intactos) y `learnings` los de la revisión de learnings (`DEMO_SCENARIO` de `packages/testkit/scripts/demo-core.ts`).
  */
-export type DemoScenario = "default" | "lanes" | "summary" | "prs" | "learnings";
+export type DemoScenario = "default" | "lanes" | "summary" | "prs" | "prs-chat" | "learnings";
 
 export interface DemoCore {
   stop(): Promise<void>;
@@ -24,7 +25,7 @@ export async function startDemoCore(home: string, scenario: DemoScenario = "defa
   const child = spawn(process.execPath, ["--import", "tsx", "scripts/demo-core.ts"], {
     cwd: testkitDir,
     // La bandeja de prueba (`DEMO_INBOX`) solo va en el escenario por defecto: en los demás sumaría corridas y decisiones.
-    env: { ...process.env, CLANKER_HOME: home, CORE_RUNTIME: "fake", DEMO_SCENARIO: scenario, ...(scenario === "default" ? { DEMO_INBOX: "1" } : {}) },
+    env: { ...process.env, CLANKER_HOME: home, CORE_RUNTIME: "fake", DEMO_SCENARIO: scenario === "prs-chat" ? "prs" : scenario, ...(scenario === "default" ? { DEMO_INBOX: "1" } : {}) },
   });
   const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
   for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk: Buffer) => (log += chunk));

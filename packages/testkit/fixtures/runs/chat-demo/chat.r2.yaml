@@ -1,0 +1,13 @@
+# El segundo turno solo responde: no toca el borrador.
+match: { mode: turn }
+events:
+  - { at: 0, text: "Reviso lo que propuse" }
+  - { at: 1200, usage: { model: sonnet, in: 700, out: 90, costUsd: 0.004 } }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Expliqué la propuesta"
+    payload:
+      reply: "La propuesta solo agrega `docs/chat.md`: no cambia código del PR."
+      proposal: null

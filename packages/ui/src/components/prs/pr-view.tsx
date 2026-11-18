@@ -15,7 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useLive, useLiveQuery } from "@/hooks/use-live"
 import { ago } from "@/lib/format"
 import { isTypingTarget } from "@/lib/keys"
-import { takeChatFocus } from "@/lib/chat-focus"
+import { chatFocusDone, wantsChatFocus } from "@/lib/chat-focus"
 import { readPref, writePref } from "@/lib/prefs"
 import { fileFingerprint, parsePatch } from "@/lib/prs/diff"
 import { baseOf, branchOf, type OpenPr, titleOf } from "@/lib/prs/prs"
@@ -76,7 +76,7 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
   // "Chatear sobre este PR" (C en la lista, menú contextual, paleta) abre la vista con el composer enfocado.
   const { focusComposer } = chat
   useEffect(() => {
-    if (takeChatFocus(pr.id)) focusComposer()
+    if (wantsChatFocus(pr.id)) focusComposer(() => chatFocusDone(pr.id))
   }, [pr.id, focusComposer])
   usePrShortcuts()
   const { select } = commands
@@ -173,16 +173,18 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
           <div className="flex items-center gap-2">
             {pr.local ? <LocalChip base={pr.local.base} /> : <PrStateIcon pr={pr} />}
             <h1 className="truncate text-lg font-semibold">{detail?.title ?? titleOf(pr)}</h1>
-            {chatSupported ? (
-              <Hint label={chatOpen ? "Plegar chat" : "Abrir chat"} keys={CHAT_KEYS.toggle}>
-                <Button size="sm" variant="outline" className="ml-auto" aria-expanded={chatOpen} onClick={toggleChat}>{chatOpen ? "Plegar chat" : "Abrir chat"}</Button>
-              </Hint>
-            ) : null}
-            {!pr.local ? (
-              <Button variant="outline" size="sm" className="ml-auto flex-none" onClick={() => commands.openGithub(pr)} title={`Abrir en GitHub (${PR_KEYS.openGithub})`}>
-                <ExternalLink /> Abrir en GitHub
-              </Button>
-            ) : null}
+            <div className="ml-auto flex flex-none items-center gap-2">
+              {chatSupported ? (
+                <Hint label={chatOpen ? "Plegar chat" : "Abrir chat"} keys={CHAT_KEYS.toggle}>
+                  <Button size="sm" variant="outline" aria-expanded={chatOpen} onClick={toggleChat}>{chatOpen ? "Plegar chat" : "Abrir chat"}</Button>
+                </Hint>
+              ) : null}
+              {!pr.local ? (
+                <Button variant="outline" size="sm" onClick={() => commands.openGithub(pr)} title={`Abrir en GitHub (${PR_KEYS.openGithub})`}>
+                  <ExternalLink /> Abrir en GitHub
+                </Button>
+              ) : null}
+            </div>
           </div>
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[12px] text-muted-foreground">
             <span>{detail?.base ?? baseOf(pr)}</span>

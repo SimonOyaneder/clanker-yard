@@ -12,6 +12,7 @@ import {
   type Origin,
   type PrChat,
   type PrState,
+  type ProfileRole,
   type RunId,
   ChatId,
   DEFAULT_AGENT_RUNTIME,
@@ -137,21 +138,26 @@ export function createPrChats(deps: PrChatsDeps): PrChats {
     return projectId ? deps.projects.get(projectId) : undefined;
   }
 
-  /** El perfil de los turnos: el del proyecto del PR, el de los proyectos nuevos o, sin ninguno, el primero que exista. */
-  function profileOf(pr: PrRow): string {
-    const slug = projectOf(pr)?.defaultProfileId ?? deps.projects.defaults().defaultProfileId;
-    if (slug && deps.defs.resolve("profile", slug, { repoId: pr.repoId })) return slug;
-    const first = deps.defs.list("profile").map((def) => def.slug).sort()[0];
-    if (!first) throw new BadRequestError("No hay ningún perfil de agentes: crea uno en Ajustes > Perfiles para chatear.");
-    return first;
+  /**
+   * El perfil de los turnos y su entrada `chat`: el del proyecto del PR, el de los proyectos nuevos o, si ninguno define el
+   * rol `chat` (un perfil propio o importado que no lo conoce), el primero que lo defina.
+   */
+  function chatProfile(pr: PrRow): { profile: string; entry: ProfileRole } {
+    const preferred = [projectOf(pr)?.defaultProfileId, deps.projects.defaults().defaultProfileId].filter((slug): slug is string => !!slug);
+    const rest = deps.defs.list("profile").map((def) => def.slug).sort();
+    for (const slug of [...preferred, ...rest]) {
+      const def = deps.defs.resolve("profile", slug, { repoId: pr.repoId });
+      const entry = def ? Profile.safeParse(def.body).data?.roles[CHAT_ROLE] : undefined;
+      if (entry) return { profile: slug, entry };
+    }
+    throw new BadRequestError(`Ningún perfil define el rol ${CHAT_ROLE}: agrégalo a un perfil en Ajustes > Perfiles para chatear.`);
   }
+
+  const profileOf = (pr: PrRow) => chatProfile(pr).profile;
 
   /** La entrada `chat` del perfil: el runtime y el modelo con que abre un chat nuevo. */
   function chatEntry(pr: PrRow) {
-    const profile = profileOf(pr);
-    const def = deps.defs.resolve("profile", profile, { repoId: pr.repoId });
-    const entry = def ? Profile.safeParse(def.body).data?.roles[CHAT_ROLE] : undefined;
-    if (!entry) throw new BadRequestError(`El perfil "${profile}" no define el rol ${CHAT_ROLE}: agrégalo en Ajustes > Perfiles.`);
+    const { profile, entry } = chatProfile(pr);
     return { profile, runtime: entry.runtime ?? DEFAULT_AGENT_RUNTIME, model: entry.model, effort: entry.effort };
   }
 
@@ -315,8 +321,11 @@ export function createPrChats(deps: PrChatsDeps): PrChats {
 
   async function runTurn(chatId: ChatId, text: string, refs: ChatRef[] | undefined, signal: AbortSignal): Promise<{ result: AgentResult; head: string; path: string }> {
     let chat = chatRow(chatId);
-    const pr = prOf(chat);
-    if (!pr.headSha) throw new BadRequestError("El PR todavía no tiene una punta conocida: actualízalo y vuelve a enviar el mensaje.");
+    const found = prOf(chat);
+    // Un PR local guarda su punta al publicarse en la máquina; si la fila no la tiene, manda la branch.
+    const tip = found.headSha || (found.state === "local" ? await git(deps.repoConfig(found.repoId).path, ["rev-parse", `refs/heads/${found.headRef}`]).catch(() => "") : "");
+    if (!tip) throw new BadRequestError("El PR todavía no tiene una punta conocida: actualízalo y vuelve a enviar el mensaje.");
+    const pr = { ...found, headSha: tip };
     const path = await scratch.create(pr.repoId, chatId, pr.headSha);
     const synced = await scratch.sync(chatId, pr.headSha);
     const artifacts = await writeBrief(path, pr, text, refs);
@@ -496,10 +505,15 @@ export function createPrChats(deps: PrChatsDeps): PrChats {
     const next: ChatProposal["status"] = outcome === "done" && summary.applied ? "applied" : summary.stale ? "stale" : "failed";
     const result = summary.applied ? { sha: summary.sha ?? pr.headSha ?? "", children: summary.children } : undefined;
     store.tx((tx) => {
-      const note = next === "applied" ? summary.note ?? null : applyMessage(next, summary, outcome);
+      const nameOf = (prId: string) => {
+        const child = prById(store.db, prId);
+        return child ? (child.number !== null ? `#${child.number}` : child.headRef) : prId;
+      };
+      const message = applyMessage(next, summary, outcome, nameOf);
+      const note = next === "applied" ? summary.note ?? null : message;
       tx.db.update(prChatProposals).set({ status: next, ...(result && { result }), note, updatedAt: now() })
         .where(and(eq(prChatProposals.chatId, proposal.chatId), eq(prChatProposals.rev, proposal.rev))).run();
-      addMessage(tx, chat, { role: "system", text: applyMessage(next, summary, outcome), proposalRev: proposal.rev });
+      addMessage(tx, chat, { role: "system", text: message, proposalRev: proposal.rev });
       tx.emit({ type: "chat.apply_finished", origin: "core", subject: { type: "pr", id: chat.prId }, payload: { chatId: chat.id, prId: chat.prId } });
     });
     // Aplicada, el borrador sigue a la punta nueva: la próxima propuesta parte de ahí.

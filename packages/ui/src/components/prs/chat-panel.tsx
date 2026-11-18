@@ -55,7 +55,10 @@ export function ChatPanel({ controller, pr, prChildren = [], onOpenRun }: { cont
   const appData = useAppData()
   const { snapshot, actions, text, setText, pending, confirmation, refs } = controller
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [snapshot])
+  // Con llaves: en Chromium `scrollIntoView` devuelve una promesa, y un efecto que devuelve algo que no es una función tumba React al desmontar.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" })
+  }, [snapshot])
   const proposal = snapshot?.proposal
   const childIds = proposal?.result?.children.map((child) => child.prId) ?? []
   const children = useLiveQuery(`chat-children:${childIds.join(":")}`, () => childIds.length ? appData.prsByIds(childIds) : Promise.resolve([]), { live: false })

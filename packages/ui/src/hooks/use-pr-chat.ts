@@ -54,10 +54,17 @@ export function usePrChat(prId: string, appData: AppData) {
   const [diffOpen, setDiffOpen] = useState(false)
   const composer = useRef<HTMLTextAreaElement | null>(null)
   const toggle = useCallback(() => setOpen((value) => !value), [])
-  const focusComposer = useCallback(() => {
+  const focusComposer = useCallback((onFocused?: () => void) => {
     setOpen(true)
-    // El panel puede estar montándose: el foco espera al siguiente frame.
-    requestAnimationFrame(() => composer.current?.focus())
+    // El panel puede estar montándose, y la vista que se abre enfoca lo suyo al montar: se reintenta hasta que el
+    // composer exista y se quede con el foco.
+    let tries = 0
+    const attempt = () => {
+      composer.current?.focus()
+      if (composer.current && document.activeElement === composer.current) onFocused?.()
+      else if (++tries < 20) setTimeout(attempt, 50)
+    }
+    setTimeout(attempt, 0)
   }, [])
 
   const perform = useCallback(async (operation: () => Promise<unknown>) => {

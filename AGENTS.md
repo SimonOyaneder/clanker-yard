@@ -337,6 +337,8 @@ Carril maintenance (`docs/design.html#d-ops`, rebasePr, y la plantilla de rebase
 - Aplicar (`chats.apply`, solo `ui`) lanza `chat-aplicar` o `chat-aplicar-local` (carril maintenance, PR como sujeto): `chat.applyProposal` → checks → `pr.pushFixups` → subflujo `restack-rewritten` con `prId`. El restack marca `pr.base_rewritten` (`from>to`) antes de restackear, así Watch no lo relanza. El chat escucha `run.finished` de esas corridas y deja el resultado como mensaje `system`.
 - Un turno cortado por un reinicio queda como mensaje `system` (`recover`). Con el runtime `fake`, `recipe.check` pide una sesión de agente previa en la corrida: los tests de aplicar usan `labeledFake` (el fake con el id de un runtime real) y una receta real.
 - Se prueba en `packages/testkit/src/pr-chat.test.ts` (turnos, propuestas, sync, interrumpir, cambio de runtime) y `pr-chat-apply.test.ts` (remoto con hijo apilado, local sin push, `stale`, checks rojos).
+- En el core de demo (`DEMO_SCENARIO=prs`) el chat funciona de verdad: `C` sobre un PR de la lista abre su chat; el fake sigue `fixtures/runs/chat-demo` (el primer turno propone `docs/chat.md`, el segundo solo responde, el tercero rehace una propuesta que quedó atrás) y aplicar pushea al bare del demo (`gitUrl`), con un bot que contesta `/review` con LGTM. `adoptPrBranches` registra los worktrees de los PRs sembrados: sin eso `workspace.attach` toma sus branches por del usuario. E2E en `apps/desktop/e2e/pr-chat.e2e.ts`.
+- Smoke en vivo de un turno por runtime (gasta cuota): `CLANKER_LIVE_CLAUDE=1` (haiku) o `CLANKER_LIVE_OPENCODE=1` (Zen gratis) con `npx vitest run packages/testkit/src/pr-chat-live.test.ts`.
 
 ## Stacks locales
 

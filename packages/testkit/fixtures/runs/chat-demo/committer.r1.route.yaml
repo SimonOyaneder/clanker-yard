@@ -1,0 +1,10 @@
+# Aplicar una propuesta del chat: lo que no es de ningún commit del PR (un archivo nuevo) sale en un commit propio.
+match: { mode: route, round: "*" }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Un commit con los cambios del chat"
+    payload:
+      commits:
+        - { message: "docs: notas pedidas en el chat", hunks: "$brief.payload.hunks", tests: [], whyAtomic: "Solo agrega las notas que pidió la persona en el chat." }

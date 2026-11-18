@@ -62,14 +62,15 @@ export function applySummaryOf(store: Store, artifacts: Pick<Artifacts, "get">, 
 }
 
 /** El mensaje `system` que deja en el chat el fin de una corrida de aplicar. */
-export function applyMessage(status: ChatProposal["status"], summary: ApplySummary, runStatus: string): string {
+export function applyMessage(status: ChatProposal["status"], summary: ApplySummary, runStatus: string, nameOf: (prId: string) => string = (prId) => prId): string {
   if (status === "applied") {
     const lines = [`Apliqué la propuesta: el PR quedó en \`${(summary.sha ?? "").slice(0, 7)}\`.`];
     for (const child of summary.children) {
-      if (child.status === "restacked") lines.push(`- ${child.prId}: restackeado sobre la punta nueva (\`${child.head.slice(0, 7)}\`).`);
-      else if (child.status === "uptodate") lines.push(`- ${child.prId}: ya estaba al día.`);
-      else if (child.status === "conflict") lines.push(`- ${child.prId}: quedó en conflicto en ${child.files.join(", ")}; el flujo de rebase por conflicto lo toma.`);
-      else lines.push(`- ${child.prId}: no se restackeó (${child.reason}).`);
+      const name = nameOf(child.prId);
+      if (child.status === "restacked") lines.push(`- ${name}: restackeado sobre la punta nueva (\`${child.head.slice(0, 7)}\`).`);
+      else if (child.status === "uptodate") lines.push(`- ${name}: ya estaba al día.`);
+      else if (child.status === "conflict") lines.push(`- ${name}: quedó en conflicto${child.files.length ? ` en ${child.files.join(", ")}` : ""}; el flujo de rebase por conflicto lo toma.`);
+      else lines.push(`- ${name}: no se restackeó (${child.reason}).`);
     }
     if (summary.note) lines.push("", summary.note);
     return lines.join("\n");

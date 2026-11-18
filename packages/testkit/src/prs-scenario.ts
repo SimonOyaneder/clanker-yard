@@ -1,5 +1,5 @@
 import type { Client, IssueId, RepoId, RunId } from "@clanker/api";
-import { type Store } from "@clanker/core";
+import { newId, type Store } from "@clanker/core";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CommitSpec, TempGitRepo } from "./git";
@@ -92,6 +92,7 @@ export async function seedPrs({
       base: "lint-imports",
       title: "Agregar checks de boundaries a CI",
       owned: true,
+      parents: ["lint-imports"],
       setup(pr) {
         pr.ci("green");
         pr.review("marta", "CHANGES_REQUESTED");
@@ -106,6 +107,7 @@ export async function seedPrs({
       title: "Reglas de boundaries para engines nuevas",
       draft: true,
       owned: true,
+      parents: ["boundary-checks"],
       setup: (pr) => (pr.ci("pending"), pr.label("risk:low")),
     },
     {
@@ -220,4 +222,23 @@ export function seedLocalPrBranches(repo: TempGitRepo): void {
   repo.git("checkout", "--quiet", "-b", "engine-rules-rollout");
   commit({ "config/rollout.yml": "boundaries:\n  enabled: true\n  engines:\n    - core\n    - payments\n" }, "chore(boundaries): rollout de las reglas");
   repo.git("checkout", "--quiet", "main");
+}
+
+/**
+ * Registra el worktree de cada PR del escenario (sin carpeta: se crea al tomarlo), como lo dejan `pr.publish` y los
+ * stacks locales. Sin esto `workspace.attach` y `workspace.acquire` toman sus branches por del usuario (existen en el repo
+ * y Clanker Yard no las creó) y el chat no podría aplicar una propuesta en el demo. Va después de `seedPrs`.
+ */
+export function adoptPrBranches({ store, repo, repoId, dataDir }: { store: Store; repo: TempGitRepo; repoId: RepoId; dataDir: string }): void {
+  const rows = store.db.$client.prepare("SELECT head_ref AS branch, base_ref AS base, state FROM pull_requests WHERE repo_id = ?").all(repoId) as { branch: string; base: string; state: string }[];
+  const insert = store.db.$client.prepare(
+    "INSERT INTO workspaces (id, repo_id, path, branch, base_ref, base_sha, head_sha, remote_sha, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle')",
+  );
+  const setHead = store.db.$client.prepare("UPDATE pull_requests SET head_sha = ? WHERE repo_id = ? AND head_ref = ? AND (head_sha IS NULL OR head_sha = '')");
+  for (const { branch, base, state } of rows) {
+    const head = repo.git("rev-parse", `refs/heads/${branch}`);
+    setHead.run(head, repoId, branch);
+    const baseSha = repo.git("merge-base", `refs/heads/${base}`, head);
+    insert.run(newId("ws"), repoId, join(dataDir, "worktrees", repoId, branch), branch, base, baseSha, head, state === "local" ? null : head);
+  }
 }
