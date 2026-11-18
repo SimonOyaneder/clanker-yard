@@ -681,6 +681,8 @@ describe("limpieza con lector de chats", () => {
         runtimes: [createFakeRuntime({ fixtures: dir, speed: Infinity })],
         scheduler: false,
         gitUrl: () => repo.remoteDir!,
+        coreVersion: "0.0.0",
+        onShutdown: () => {},
       });
       await vi.waitFor(() => {
         expect(existsSync(orphanPath)).toBe(false);
