@@ -79,6 +79,7 @@ const router = os.router({
       size: 2,
       content: new Blob(["ok"]),
     })),
+    text: os.artifacts.text.handler(() => { throw new Error("no se usa en este test"); }),
   },
   issues: {
     list: os.issues.list.handler(() => []),
@@ -108,6 +109,9 @@ const router = os.router({
     }),
     update: os.projects.update.handler(() => {
       throw new Error("no se usa en este test");
+    }),
+    archive: os.projects.archive.handler(() => {
+      throw new Error("no se usa en esta prueba");
     }),
     exportConfig: os.projects.exportConfig.handler(() => {
       throw new Error("no se usa en este test");
@@ -185,6 +189,9 @@ const router = os.router({
     localCommitDiff: os.prs.localCommitDiff.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    updateLocal: os.prs.updateLocal.handler(() => { throw new Error("no se usa en este test"); }),
+    applyLocalPatch: os.prs.applyLocalPatch.handler(() => { throw new Error("no se usa en este test"); }),
+    requestLocalPublish: os.prs.requestLocalPublish.handler(() => { throw new Error("no se usa en este test"); }),
     republish: os.prs.republish.handler(() => ({ id: "rep_1", done: true, results: [] })),
     republishProgress: os.prs.republishProgress.handler(() => ({ id: "rep_1", done: true, results: [] })),
   },

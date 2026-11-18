@@ -63,6 +63,8 @@ export interface Projects {
   pause(id: ProjectId, origin: Origin): ClankerProject;
   /** Lo contrario de `pause`: emite `project.resumed`. Los mismos errores. */
   resume(id: ProjectId, origin: Origin): ClankerProject;
+  /** Detiene lanzamientos automáticos sin borrar el historial ni detener corridas. */
+  archive(id: ProjectId, origin: Origin): ClankerProject;
 }
 
 const STATUS_EVENT = {
@@ -282,6 +284,7 @@ export function createProjects({ store, defs }: { store: Store; defs: Defs }): P
 
     pause: (id, origin) => setStatus(id, "paused", origin),
     resume: (id, origin) => setStatus(id, "active", origin),
+    archive: (id, origin) => projectsApi.update(id, { status: "archived" }, origin),
   };
 
   /** Pausar o retomar no desarchiva: `update` con `status` lo permitiría sin querer. */
@@ -293,4 +296,3 @@ export function createProjects({ store, defs }: { store: Store; defs: Defs }): P
   }
   return projectsApi;
 }
-

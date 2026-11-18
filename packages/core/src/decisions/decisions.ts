@@ -1,4 +1,4 @@
-import type { Decision, DecisionFilter, DecisionId, DecisionResolution } from "@clanker/api";
+import type { Decision, DecisionFilter, DecisionId, DecisionResolution, Origin, RunId } from "@clanker/api";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { newId } from "../store/conventions";
 import { decisions, pullRequests } from "../store/schema";
@@ -39,12 +39,12 @@ export type NewDecision = Pick<Decision, "kind" | "title" | "body"> &
  * abre: nace junto con lo que la causó o no nace. No toca la corrida: quien abre un `gate` o un
  * `needs_human` es quien la estaciona.
  */
-export function openDecision(tx: Tx, decision: NewDecision): Decision {
+export function openDecision(tx: Tx, decision: NewDecision, origin: Origin = "core"): Decision {
   const { kind, title, body } = decision;
   const id = newId("dec");
   const opened = tx.emit({
     type: "decision.opened",
-    origin: "core",
+    origin,
     projectId: decision.projectId ?? undefined,
     runId: decision.runId ?? undefined,
     stepRunId: decision.stepRunId ?? undefined,
@@ -78,7 +78,7 @@ export function openDecision(tx: Tx, decision: NewDecision): Decision {
 export function closeDecision(
   tx: Tx,
   id: DecisionId,
-  closing: { status: "answered" | "expired" | "superseded"; resolution?: DecisionResolution; by: string },
+  closing: { status: "answered" | "expired" | "superseded"; resolution?: DecisionResolution; by: string; runId?: RunId },
 ): Decision | undefined {
   const open = tx.db
     .select()
@@ -90,14 +90,14 @@ export function closeDecision(
     type: "decision.resolved",
     origin: "core",
     projectId: open.projectId ?? undefined,
-    runId: open.runId ?? undefined,
+    runId: closing.runId ?? open.runId ?? undefined,
     stepRunId: open.stepRunId ?? undefined,
     subject: open.subject ?? undefined,
     payload: { decisionId: id, status: closing.status },
   });
   return tx.db
     .update(decisions)
-    .set({ status: closing.status, resolution: closing.resolution ?? null, resolvedBy: closing.by, resolvedAt: resolved.ts })
+    .set({ status: closing.status, resolution: closing.resolution ?? null, resolvedBy: closing.by, resolvedAt: resolved.ts, ...(closing.runId && { runId: closing.runId }) })
     .where(eq(decisions.id, id))
     .returning()
     .get();

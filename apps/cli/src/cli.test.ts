@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
-import { CachedIssue, type Client, ClankerProject, type Event, type RunDetail } from "@clanker/api";
-import { describe, expect, test } from "vitest";
+import { CachedIssue, type CachedPr, type Client, ClankerProject, contract, type Event, type LocalCommitDiff, type LocalPrDetail, type RunDetail } from "@clanker/api";
+import { describe, expect, test, vi } from "vitest";
 import type { CliContext } from "./command";
 import { runCli } from "./cli";
+import { rpcCommands } from "./rpc";
 
 const projectId = "prj_00000000000000000000000001" as const;
 const issueId = "iss_00000000000000000000000001" as const;
@@ -70,7 +71,7 @@ const run: RunDetail = {
 const event = (seq: number, overrides: Partial<Event> = {}): Event => ({ seq, ts: Date.UTC(2026, 10, 15, 12, 0, seq), type: "run.status", origin: "core", payload: {}, ...overrides });
 
 /** Corre un comando contra un cliente de mentira: devuelve lo impreso y lo que le pidió al cliente. */
-async function exec(argv: string[], client: Record<string, unknown>, signal = new AbortController().signal) {
+async function exec(argv: string[], client: Record<string, unknown>, overrides?: Partial<Pick<CliContext, "client" | "readFile" | "signal">>) {
   const out: string[] = [];
   const ctx: CliContext = {
     client: () => Promise.resolve(client as Client),
@@ -78,7 +79,8 @@ async function exec(argv: string[], client: Record<string, unknown>, signal = ne
     write: (line) => out.push(line),
     readFile: () => "",
     sleep: () => Promise.resolve(),
-    signal,
+    signal: new AbortController().signal,
+    ...overrides,
   };
   await runCli(argv, ctx);
   return out.join("\n");
@@ -93,6 +95,12 @@ describe("clanker", () => {
     expect(out).toContain("clanker runs start <proyecto> <issue>");
     expect(out).toContain("clanker events tail");
     expect(out).toContain("clanker metrics compare");
+    expect(out).toContain("clanker projects archive <slug>");
+    expect(out).toContain("clanker prs list-local");
+    expect(out).toContain("clanker prs show-local");
+    expect(out).toContain("clanker prs edit-local");
+    expect(out).toContain("clanker prs apply-local");
+    expect(out).toContain("clanker prs publish-local");
     await expect(exec(["--help"], {})).resolves.toBe(out);
   });
 
@@ -100,6 +108,92 @@ describe("clanker", () => {
     await expect(exec(["constructor"], {})).rejects.toThrow(/Comando desconocido: clanker constructor\nUso:/);
     await expect(exec(["runs", "stop"], {})).rejects.toThrow(/Comando desconocido: clanker runs stop/);
     await expect(exec(["projects", "list", "--nope"], {})).rejects.toThrow(/Unknown option '--nope'\.\nUso: clanker projects list/);
+  });
+});
+
+describe("comandos generados desde el contrato", () => {
+  test("cada procedimiento marcado sale por su ruta, independientemente del nombre MCP", async () => {
+    const routes = Object.entries(contract).flatMap(([zone, namespace]) => Object.entries(namespace)
+      .filter(([, procedure]) => procedure["~orpc"].meta.mcp)
+      .map(([procedure]) => `${zone} ${procedure.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`));
+    expect([...rpcCommands().keys()]).toEqual(routes);
+
+    const out = await exec(["--help"], {});
+    expect(out).toContain("clanker artifacts text");
+    expect(out).toContain("clanker events list");
+    expect(out).toContain("clanker runs retry-step");
+    expect(out.match(/clanker runs get\b/g)).toHaveLength(1);
+    expect(out.match(/clanker projects list\b/g)).toHaveLength(1);
+  });
+
+  test("la ayuda por zona y por comando no toca el core ni abre archivos", async () => {
+    const client = vi.fn();
+    const readFile = vi.fn();
+    const ctx = { client, readFile };
+    const area = await exec(["events", "--help"], {}, ctx);
+    expect(area).toContain("clanker events list");
+    expect(area).toContain("clanker events tail");
+    expect(area).not.toContain("clanker artifacts");
+    expect(await exec(["events"], {}, ctx)).toBe(area);
+
+    const help = await exec(["runs", "retry-step", "--help"], {}, ctx);
+    expect(help).toContain("clanker runs retry-step [--input");
+    const schema = JSON.parse(help.split("Esquema de entrada (JSON Schema):\n")[1]!);
+    expect(schema).toMatchObject({ type: "object", required: ["stepId"] });
+    expect(client).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  test("envía el objeto al RPC con input y por archivo; imprime un resultado JSON", async () => {
+    const list = vi.fn().mockResolvedValue([event(11)]);
+    const readFile = vi.fn().mockReturnValue(JSON.stringify({ after: 10 }));
+    const client = { events: { list } };
+    const signal = new AbortController().signal;
+    const commands = [
+      ["events", "list", "--input", '{"after":10}'],
+      ["events", "list", "--input-file", "entrada.json"],
+      ["events", "list"],
+    ];
+    for (const args of commands) {
+      const out = await exec(args, client, { readFile, signal });
+      expect(JSON.parse(out)).toEqual([event(11)]);
+    }
+    expect(list.mock.calls).toEqual([[{ after: 10 }, { signal }], [{ after: 10 }, { signal }], [{}, { signal }]]);
+    expect(readFile).toHaveBeenCalledExactlyOnceWith("entrada.json");
+  });
+
+  test("llama al RPC de texto, al de lectura sin entrada y propaga los errores del core", async () => {
+    const hash = "a".repeat(64);
+    const page = { hash, kind: "log", mime: "text/plain", size: 6, text: "hola!\n", nextOffset: null };
+    const text = vi.fn().mockResolvedValueOnce(page).mockRejectedValueOnce(new Error("No existe ese artefacto."));
+    const args = ["artifacts", "text", "--input", JSON.stringify({ hash })];
+    const client = { artifacts: { text }, events: { latest: vi.fn().mockResolvedValue({ seq: 37 }) } };
+
+    expect(JSON.parse(await exec(args, client))).toEqual(page);
+    await expect(exec(args, client)).rejects.toThrow("No existe ese artefacto.");
+    expect(JSON.parse(await exec(["events", "latest"], client))).toEqual({ seq: 37 });
+    expect(client.events.latest).toHaveBeenCalledExactlyOnceWith(undefined, { signal: expect.any(AbortSignal) });
+  });
+
+  test.each([
+    [["events", "list", "--input", "{"], "no contiene JSON válido"],
+    [["events", "list", "--input", "[]"], "debe contener un objeto JSON"],
+    [["events", "list", "--input", "null"], "debe contener un objeto JSON"],
+    [["events", "list", "--input", "{}", "--input-file", "entrada.json"], "Usa solo uno"],
+    [["events", "list", "--input-file", "no-existe.json"], 'No se pudo leer --input-file "no-existe.json": ENOENT'],
+    [["events", "list", "--input", '{"limit":501}'], "limit:"],
+    [["runs", "retry-step"], "stepId:"],
+    [["events", "latest", "--input", '{"after":10}'], "no recibe campos"],
+    [["defs", "list", "--input", '{"kind":"context"}'], "Valores de kind en la CLI: flow, role, profile, recipe, pack"],
+    [["connections", "set-pat"], "Comando desconocido"],
+    [["runs", "force-outcome"], "Comando desconocido"],
+    [["defs", "export-to-repo"], "Comando desconocido"],
+    [["artifacts", "get"], "Comando desconocido"],
+  ])("rechaza %j sin tocar el core", async (args, message) => {
+    const client = vi.fn();
+    const readFile = () => { throw new Error("ENOENT"); };
+    await expect(exec(args, {}, { client, readFile })).rejects.toThrow(message);
+    expect(client).not.toHaveBeenCalled();
   });
 });
 
@@ -137,6 +231,28 @@ describe("clanker projects list", () => {
   });
 });
 
+describe("clanker projects archive", () => {
+  test("resuelve el slug y pide archivar el proyecto, conservando su historial", async () => {
+    const archive = vi.fn().mockResolvedValue({ ...project, status: "archived" });
+    const client = { projects: { ...projects, archive } };
+
+    const out = await exec(["projects", "archive", "demo"], client);
+
+    expect(archive).toHaveBeenCalledExactlyOnceWith({ id: projectId });
+    expect(out).toBe('Proyecto "demo" archivado. Se conserva su historial.');
+    await expect(exec(["projects", "archive", "nope"], client)).rejects.toThrow('No existe el proyecto "nope"');
+    expect(archive).toHaveBeenCalledTimes(1);
+  });
+
+  test("si falta el slug o sobran argumentos, no arranca el core", async () => {
+    const client = vi.fn();
+    for (const args of [[], [""], ["demo", "otro"]]) {
+      await expect(exec(["projects", "archive", ...args], {}, { client })).rejects.toThrow("Uso: clanker projects archive <slug>");
+    }
+    expect(client).not.toHaveBeenCalled();
+  });
+});
+
 describe("clanker runs", () => {
   function fakeRuns() {
     const starts: unknown[] = [];
@@ -167,6 +283,26 @@ describe("clanker runs", () => {
     const out = await exec(["runs", "start", "demo", issueId, "--json"], client);
 
     expect(JSON.parse(out)).toMatchObject({ id: runId, status: "parked" });
+  });
+
+  test("start acepta el input RPC, incluidos params, sin resolver slugs y devuelve JSON", async () => {
+    const input = { projectId, issueId, flow: "otro", params: { base: "rama-padre", dependsOn: ["repo#32"] } };
+    const start = vi.fn().mockResolvedValue(run);
+    const client = { runs: { start } };
+    const readFile = vi.fn().mockReturnValue(JSON.stringify(input));
+
+    expect(JSON.parse(await exec(["runs", "start", "--input", JSON.stringify(input)], client))).toEqual(run);
+    expect(JSON.parse(await exec(["runs", "start", "--input-file", "corrida.json"], client, { readFile }))).toEqual(run);
+    expect(start.mock.calls).toEqual([[input, { signal: expect.any(AbortSignal) }], [input, { signal: expect.any(AbortSignal) }]]);
+    expect(readFile).toHaveBeenCalledExactlyOnceWith("corrida.json");
+  });
+
+  test("start valida el modo JSON antes de arrancar el core", async () => {
+    const client = vi.fn();
+    await expect(exec(["runs", "start", "--input", "{}"], {}, { client })).rejects.toThrow("projectId:");
+    await expect(exec(["runs", "start", "demo", "DEMO-1", "--input", "{}"], {}, { client })).rejects.toThrow("No combines");
+    await expect(exec(["runs", "start", "--flow", "otro", "--input", "{}"], {}, { client })).rejects.toThrow("No combines");
+    expect(client).not.toHaveBeenCalled();
   });
 
   test("start falla con un mensaje claro si falta algo o no existe el proyecto o la issue", async () => {
@@ -409,7 +545,7 @@ describe("clanker prs republish", () => {
     const interrupted = new AbortController();
     interrupted.abort();
     const stuck = clientFor([[{ repo: "r1", number: 1, status: "pending" }], [{ repo: "r1", number: 1, status: "pending" }]]);
-    await expect(exec(["prs", "republish"], stuck, interrupted.signal)).rejects.toThrow(/Interrumpido/);
+    await expect(exec(["prs", "republish"], stuck, { signal: interrupted.signal })).rejects.toThrow(/Interrumpido/);
   });
 
   test("sin opciones rehace todo y un --pr que no es número falla con el uso, sin tocar el core", async () => {
@@ -419,5 +555,139 @@ describe("clanker prs republish", () => {
 
     await expect(exec(["prs", "republish", "--pr", "abc"], client)).rejects.toThrow(/--pr pide un número de PR, no "abc"\.\nUso: clanker prs republish/);
     expect(client.calls).toHaveLength(1);
+  });
+});
+
+describe("clanker prs locales", () => {
+  const id = "pr_00000000000000000000000001";
+  const decisionId = "dec_00000000000000000000000001";
+  const head = "a".repeat(40);
+  const repo = "octocat/demo";
+  const patch = "diff --git a/README.md b/README.md\n+hola\n";
+  const local = { branch: "rama-hija", base: "rama-padre", title: "Saluda al mundo" };
+  const cached: CachedPr = {
+    id, repo, ref: null, local, owned: true, issueId, runId, parents: [], signals: [], reviewBot: false, state: null, readAt: null,
+  };
+  const detail: LocalPrDetail = {
+    id, repo, ...local, baseSha: "b".repeat(40), head, body: "Primera línea\n\nSegunda línea",
+    commits: [{ sha: head, subject: "feat: agrega saludo", body: "", author: "Octocat", date: "2026-11-15T12:00:00Z" }],
+    files: [{ path: "README.md", additions: 1, deletions: 0 }],
+    patch, truncated: false,
+  };
+
+  test("list-local pide solo PRs locales, filtra por repo y muestra una tabla o JSON", async () => {
+    const list = vi.fn().mockResolvedValue([cached]);
+    const client = { prs: { list } };
+
+    const out = await exec(["prs", "list-local", "--repo", repo], client);
+
+    expect(list).toHaveBeenCalledExactlyOnceWith({ state: "local", repo });
+    expect(out).toContain("Título");
+    for (const value of [id, repo, local.branch, local.base, local.title]) expect(out).toContain(value);
+    expect(JSON.parse(await exec(["prs", "list-local", "--json"], client))).toEqual([cached]);
+    expect(list).toHaveBeenLastCalledWith({ state: "local", repo: undefined });
+
+    list.mockResolvedValueOnce([]);
+    await expect(exec(["prs", "list-local"], client)).resolves.toBe("No hay PRs locales.");
+  });
+
+  test("show-local muestra título, descripción, commits, archivos y patch (o el detalle JSON)", async () => {
+    const localDetail = vi.fn().mockResolvedValue(detail);
+    const client = { prs: { localDetail } };
+
+    const out = await exec(["prs", "show-local", id], client);
+
+    expect(localDetail).toHaveBeenCalledExactlyOnceWith({ id });
+    for (const text of [local.title, detail.body, head, "feat: agrega saludo", "README.md", "+1", patch]) expect(out).toContain(text);
+    expect(JSON.parse(await exec(["prs", "show-local", id, "--json"], client))).toEqual(detail);
+  });
+
+  test("show-local --commit pide el diff de ese commit y avisa si se truncó", async () => {
+    const diff: LocalCommitDiff = { sha: head, files: detail.files, patch, truncated: true };
+    const localCommitDiff = vi.fn().mockResolvedValue(diff);
+    const client = { prs: { localCommitDiff } };
+    const sha = head.slice(0, 7);
+    const args = ["prs", "show-local", id, "--commit", sha];
+
+    const out = await exec(args, client);
+
+    expect(localCommitDiff).toHaveBeenCalledExactlyOnceWith({ id, sha });
+    for (const text of [head, "README.md", patch, "Patch truncado"]) expect(out).toContain(text);
+    expect(JSON.parse(await exec([...args, "--json"], client))).toEqual(diff);
+  });
+
+  test("edit-local envía solo los campos pedidos; un archivo vacío borra la descripción", async () => {
+    const updateLocal = vi.fn().mockResolvedValue({ id, title: "Título nuevo", body: "" });
+    const client = { prs: { updateLocal } };
+    const readFile = vi.fn().mockReturnValueOnce("").mockReturnValueOnce(detail.body);
+    const args = ["prs", "edit-local", id];
+
+    const out = await exec([...args, "--title", "Título nuevo"], client, { readFile });
+    expect(updateLocal).toHaveBeenNthCalledWith(1, { id, title: "Título nuevo" });
+    expect(readFile).not.toHaveBeenCalled();
+    expect(out).toContain(`PR local ${id} actualizado: Título nuevo`);
+
+    await exec([...args, "--body-file", "vacio.md"], client, { readFile });
+    expect(readFile).toHaveBeenCalledExactlyOnceWith("vacio.md");
+    expect(updateLocal).toHaveBeenNthCalledWith(2, { id, body: "" });
+
+    await exec([...args, "--title", "Título nuevo", "--body-file", "cuerpo.md"], client, { readFile });
+    expect(updateLocal).toHaveBeenNthCalledWith(3, { id, title: "Título nuevo", body: detail.body });
+  });
+
+  test("apply-local encola el contenido del patch con el HEAD esperado, sin push", async () => {
+    const applyLocalPatch = vi.fn().mockResolvedValue({ runId });
+    const readFile = vi.fn().mockReturnValue(patch);
+
+    const out = await exec(["prs", "apply-local", id, "--head", head, "--patch", "cambio.diff"], { prs: { applyLocalPatch } }, { readFile });
+
+    expect(readFile).toHaveBeenCalledExactlyOnceWith("cambio.diff");
+    expect(applyLocalPatch).toHaveBeenCalledExactlyOnceWith({ id, head, patch });
+    expect(out).toContain(`sin hacer push: ${runId}`);
+    expect(out).toContain(`clanker events tail --run ${runId} --follow`);
+  });
+
+  test("publish-local solo solicita la publicación y manda a Bandeja con el id de decisión", async () => {
+    const requestLocalPublish = vi.fn().mockResolvedValue({ decisionId });
+    const publishLocal = vi.fn();
+
+    const out = await exec(["prs", "publish-local", id], { prs: { requestLocalPublish, publishLocal } });
+
+    expect(requestLocalPublish).toHaveBeenCalledExactlyOnceWith({ id });
+    expect(publishLocal).not.toHaveBeenCalled();
+    for (const text of [decisionId, "aún no se publicó", "Clanker Yard > Bandeja"]) expect(out).toContain(text);
+  });
+
+  test.each([
+    [["list-local", "--repo", "demo"], "--repo pide"],
+    [["show-local"], "Indica un solo id"],
+    [["show-local", id, "--commit", "main"], "--commit pide un SHA"],
+    [["edit-local", id], "Indica --title o --body-file"],
+    [["edit-local", id, "--title", ""], "--title pide un título no vacío"],
+    [["edit-local", id, "--title", "Dos\nlíneas"], "--title pide un título no vacío"],
+    [["edit-local", id, "--body-file", ""], "--body-file pide la ruta"],
+    [["apply-local", id, "--patch", "cambio.diff"], "--head pide el SHA completo"],
+    [["apply-local", id, "--head", head.slice(0, 7), "--patch", "cambio.diff"], "--head pide el SHA completo"],
+    [["apply-local", id, "--head", head], "Falta --patch"],
+    [["apply-local", id, "--head", head, "--patch", "vacio.diff"], "El archivo de --patch está vacío"],
+    [["publish-local", id, "otro"], "Indica un solo id"],
+  ])("valida %j antes de arrancar el core", async (args, message) => {
+    const client = vi.fn();
+    await expect(exec(["prs", ...args], {}, { client })).rejects.toThrow(message);
+    expect(client).not.toHaveBeenCalled();
+  });
+
+  test("valida los archivos antes de arrancar el core", async () => {
+    const client = vi.fn();
+    const readFile = vi.fn().mockImplementationOnce(() => { throw new Error("ENOENT"); })
+      .mockReturnValueOnce("x".repeat(65_537))
+      .mockReturnValueOnce("x".repeat(2_000_001));
+    const edit = ["prs", "edit-local", id, "--body-file", "cuerpo.md"];
+    const apply = ["prs", "apply-local", id, "--head", head, "--patch", "cambio.diff"];
+
+    await expect(exec(edit, {}, { client, readFile })).rejects.toThrow("ENOENT");
+    await expect(exec(edit, {}, { client, readFile })).rejects.toThrow("excede el tamaño de descripción");
+    await expect(exec(apply, {}, { client, readFile })).rejects.toThrow("excede el tamaño admitido");
+    expect(client).not.toHaveBeenCalled();
   });
 });

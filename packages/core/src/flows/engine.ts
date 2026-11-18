@@ -110,6 +110,8 @@ export interface StartOptions {
   profile?: string;
   /** Quién la lanzó, para `run.started`; por defecto el core (un trigger, el Scheduler). */
   by?: Origin;
+  /** Para una aprobación que debe quedar confirmada junto con la corrida que autoriza. */
+  tx?: Tx;
 }
 
 export interface StepView {
@@ -366,7 +368,7 @@ export function createEngine(deps: EngineDeps): Engine {
   // --- start -----------------------------------------------------------------------------------
 
   function start(flowSlug: string, subject: SubjectRef, given: Record<string, unknown> = {}, opts: StartOptions = {}): RunId {
-    const id = store.tx((tx) => {
+    const startIn = (tx: Tx) => {
       const def = defs.resolve("flow", flowSlug, { repoId: opts.repoId });
       if (!def) throw new RunStartError(`No existe el flujo "${flowSlug}".`);
       const live = tx.db
@@ -432,8 +434,10 @@ export function createEngine(deps: EngineDeps): Engine {
         writes: flow.effects !== "local",
         by: opts.by,
       }).id;
-    });
-    wake();
+    };
+    const id = opts.tx ? startIn(opts.tx) : store.tx(startIn);
+    if (opts.tx) queueMicrotask(wake);
+    else wake();
     return id;
   }
 
@@ -1865,4 +1869,3 @@ function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
   return Promise.race([work, aborted]);
 }
-

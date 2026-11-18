@@ -1,7 +1,7 @@
-import type { IssueId, PrRef, RepoId } from "@clanker/api";
-import { and, asc, eq, exists, inArray, isNotNull, ne, notExists, type SQL } from "drizzle-orm";
+import { LIVE_RUN_STATUSES, type IssueId, type PrRef, type RepoId } from "@clanker/api";
+import { and, asc, eq, exists, inArray, isNotNull, isNull, ne, notExists, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { prParents, pullRequests, watchMarks } from "../store/schema";
+import { defs, prParents, pullRequests, runs, watchMarks } from "../store/schema";
 import type { Repos } from "../repos/repos";
 import type { Store } from "../store/store";
 import type { PrRow } from "./pr-cache";
@@ -37,6 +37,12 @@ export function prRefOf(repos: Pick<Repos, "get" | "config">, { repoId, number }
 /** El PR por su id interno (`pr_...`), sea del sistema o no. */
 export function prById(db: Db, id: string): PrRow | undefined {
   return db.select().from(pullRequests).where(eq(pullRequests.id, id)).get();
+}
+
+/** Una corrida raíz vigente de cualquiera de estos flujos sobre el PR. */
+export function livePrFlow(db: Db, id: string, slugs: string[]) {
+  return db.select({ id: runs.id }).from(runs).innerJoin(defs, eq(defs.id, runs.flowDefId))
+    .where(and(eq(runs.subjectType, "pr"), eq(runs.subjectId, id), isNull(runs.parentRunId), inArray(runs.status, LIVE_RUN_STATUSES), inArray(defs.slug, slugs))).get();
 }
 
 /** El PR abierto de una branch del repo, si hay uno. */

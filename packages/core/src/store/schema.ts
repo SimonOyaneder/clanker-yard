@@ -1048,6 +1048,17 @@ export const mergeOffers = sqliteTable(
   (t) => [index("merge_offers_pr").on(t.prId)],
 );
 
+/** Aprobación de la Bandeja para publicar una revisión concreta de un PR local. */
+export const localPublishRequests = sqliteTable(
+  "local_publish_requests",
+  {
+    decisionId: text("decision_id").$type<DecisionId>().primaryKey().references(() => decisions.id),
+    prId: text("pr_id").notNull().references(() => pullRequests.id),
+    fingerprint: text().notNull(),
+  },
+  (t) => [index("local_publish_requests_pr").on(t.prId)],
+);
+
 /**
  * De qué PRs cuelga un PR del sistema: su base es la branch de cada padre (`docs/design.html#d-ops`,
  * restack). `pr.publish` la escribe al abrir un PR sobre la branch de otro PR abierto; `stack.restack`

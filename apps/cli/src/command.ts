@@ -20,5 +20,7 @@ export interface CliContext {
 export interface Command {
   /** `clanker <comando> <args>`, tal como se muestra en la ayuda y en los errores de uso. */
   usage: string;
+  /** Ayuda adicional al uso, por ejemplo el JSON Schema de la entrada. */
+  help?(): string;
   run(args: string[], ctx: CliContext): Promise<void>;
 }

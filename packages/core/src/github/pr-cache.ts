@@ -31,8 +31,7 @@ export type PrRow = typeof pullRequests.$inferSelect;
 export interface PrCache {
   /**
    * Los PRs del caché, sin ir a GitHub: los que abrió el sistema, los que descubrió Watch y los `local`
-   * (con `ref: null`). Omite los de repos sin remoto de GitHub con una cuenta conectada (`RepoConfig.remote`):
-   * sin cuenta no hay `PrRef` ni pack.
+   * (con `ref: null`). Sin cuenta conectada omite los remotos, no los PRs locales.
    */
   list(filter?: PrFilter): CachedPr[];
   /**
@@ -144,24 +143,32 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
           .all() as { prId: string; status: "draft" | "applying" }[]).map(({ prId, status }) => [prId, status]),
       );
       // El remoto y el pack se resuelven una vez por repo y por org, no por PR: cada uno lee y valida filas.
-      const remoteOf = memoize((repoId: RepoId) => (repos.get(repoId) ? repos.config(repoId).remote : undefined));
+      const repoOf = memoize((repoId: RepoId) => {
+        const registered = repos.get(repoId);
+        return registered && { registered, remote: repos.config(repoId).remote };
+      });
       const packOf = memoize((org: string) => packs.packFor({ githubOrg: org }));
       return rows.flatMap((row) => {
-        const remote = remoteOf(row.repoId);
-        if (!remote || (repo !== undefined && remote.repo !== repo)) return [];
-        const pack = packOf(remote.repo.split("/")[0]!);
+        const found = repoOf(row.repoId);
+        if (!found) return [];
+        const { registered, remote } = found;
+        if (!remote && row.state !== "local") return [];
+        const githubRepo = remote?.repo ?? registered.remote;
+        const name = githubRepo ?? row.repoId;
+        if (repo !== undefined && name !== repo) return [];
+        const pack = githubRepo ? packOf(githubRepo.split("/")[0]!) : undefined;
         return [
           {
             id: row.id,
-            repo: remote.repo,
-            ref: row.number === null ? null : { account: remote.account, repo: remote.repo, number: row.number },
+            repo: name,
+            ref: remote && row.number !== null ? { account: remote.account, repo: remote.repo, number: row.number } : null,
             local: row.state === "local" ? { branch: row.headRef, base: row.baseRef, title: row.title! } : null,
             owned: row.owned,
             issueId: row.issueId,
             runId: row.runId,
             parents: parents.get(row.id) ?? [],
-            signals: pack.signals.map(({ id, match, flags, empty, levels }) => ({ id, match, ...(flags !== undefined && { flags }), ...(empty !== undefined && { empty }), levels })),
-            reviewBot: pack.reviewBot !== undefined,
+            signals: pack?.signals.map(({ id, match, flags, empty, levels }) => ({ id, match, ...(flags !== undefined && { flags }), ...(empty !== undefined && { empty }), levels })) ?? [],
+            reviewBot: pack?.reviewBot !== undefined,
             state: row.detail,
             readAt: row.detailAt,
             ...(proposals.has(row.id) && { chatProposal: proposals.get(row.id)! }),

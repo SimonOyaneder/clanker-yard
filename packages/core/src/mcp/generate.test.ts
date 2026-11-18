@@ -21,7 +21,7 @@ describe("generateMcp sobre el contrato real", () => {
     const safe = { destructiveHint: false, openWorldHint: false };
     const safeIdempotent = { ...safe, idempotentHint: true };
     const destructive = { destructiveHint: true, idempotentHint: true, openWorldHint: false };
-    expect(Object.fromEntries(plan.tools.map((t) => [t.name, t.annotations]))).toEqual({
+    expect(Object.fromEntries(plan.tools.map((t) => [t.name, t.annotations]))).toMatchObject({
       list: readOnly,
       get: readOnly,
       create: safe,
@@ -40,6 +40,14 @@ describe("generateMcp sobre el contrato real", () => {
       resolve_decision: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
       project_queue: readOnly,
       update_project: safeIdempotent,
+      archive_project: destructive,
+      list_prs: readOnly,
+      get_local_pr: readOnly,
+      get_local_pr_commit_diff: readOnly,
+      update_local_pr: destructive,
+      apply_local_pr_patch: { destructiveHint: true, openWorldHint: false },
+      request_local_pr_publish: safeIdempotent,
+      read_artifact: readOnly,
       propose_learning: safeIdempotent,
     });
   });
@@ -62,6 +70,16 @@ describe("generateMcp sobre el contrato real", () => {
     expect(run.description).toContain("Lanza el flujo");
     expect(run.routes.get("")).toEqual({ path: ["runs", "start"], shared: false, hasInput: true });
     expect(plan.tools.find((t) => t.name === "start_loop")!.routes.get("")!.path).toEqual(["projects", "resume"]);
+  });
+
+  test("no expone operaciones reservadas ni rutas de desarrollo en producción", () => {
+    const paths = plan.tools.flatMap((tool) => [...tool.routes.values()].map((route) => route.path.join(".")));
+    for (const reserved of [
+      "connections.setPat", "connections.setClaudeApiKey", "connections.disconnect", "connections.startDeviceFlow",
+      "connections.linearAuth", "connections.testClaude", "prs.merge", "prs.requestReview", "prs.rebase", "prs.publishLocal",
+      "chats.apply", "defs.exportToRepo", "learnings.approve", "runs.forceOutcome",
+    ]) expect(paths).not.toContain(reserved);
+    expect(paths.some((path) => path.startsWith("dev."))).toBe(false);
   });
 
   test("cada kind que una tool sirve tiene esquema, y los procedimientos van a su ruta", () => {
@@ -98,6 +116,27 @@ describe("generateMcp rechaza un contrato mal marcado", () => {
     const tool = generateMcp(contract).tools.find((t) => t.name === "retry_step");
     expect(tool).toMatchObject({ description: "Reintenta.", annotations: { idempotentHint: true } });
     expect(tool!.inputSchema.safeParse({ id: "stp_1" }).success).toBe(true);
+  });
+
+  test("una acción sin input expone un objeto vacío estricto y puede servir también un resource", () => {
+    const plan = generateMcp({
+      ...resources,
+      events: {
+        ...resources.events,
+        list: marked({ action: "events", resource: "run_timeline", description: "Eventos.", annotations: { readOnlyHint: true } }).output(z.array(z.string())),
+      },
+    });
+    const [tool] = plan.tools;
+    const route = { path: ["events", "list"], shared: false, hasInput: false };
+    expect(tool!.inputSchema.safeParse({}).success).toBe(true);
+    expect(tool!.inputSchema.safeParse({ invalid: true }).success).toBe(false);
+    expect(tool!.routes.get("")).toEqual(route);
+    expect(plan.resources.run_timeline).toEqual(route);
+  });
+
+  test("dos acciones no pueden usar el mismo nombre", () => {
+    const action = marked({ action: "duplicate", description: "Duplicada.", annotations: {} }).input(Id);
+    expect(() => generateMcp({ ...resources, a: { action }, b: { action } })).toThrow('tool llamada "duplicate"');
   });
 
   test("un kind sin esquema", () => {

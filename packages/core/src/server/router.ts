@@ -5,6 +5,7 @@ import { githubPatForm } from "../github/pat";
 import type { PrCache } from "../github/pr-cache";
 import { createPrCommands} from "../github/pr-commands";
 import { createPrDetails } from "../github/pr-detail";
+import { createLocalPublish } from "../github/local-publish";
 import type { Workspaces } from "../workspaces/workspaces";
 import type { Prs } from "../github/prs";
 import type { PrRepublisher } from "../github/republisher";
@@ -12,6 +13,7 @@ import { type Connections } from "../connections/connections";
 import { createTranscripts} from "../agents/transcripts";
 import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
+import { artifactTextPage } from "../artifacts/text";
 import type { Decisions } from "../decisions/decisions";
 import { LearningNotFoundError, type Learnings } from "../learnings/learnings";
 import type { Engine } from "../flows/engine";
@@ -117,6 +119,7 @@ export function createRouter(deps: RouterDeps) {
   };
   const prDetails = createPrDetails({ store, repoConfig: (id) => repos.config(id), connections: deps.connections, workspaces: deps.workspaces });
   const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache, flows, projects });
+  const localPublish = createLocalPublish({ store, repos, flows });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
     if (!project) throw new ProjectNotFoundError(id);
@@ -204,6 +207,11 @@ export function createRouter(deps: RouterDeps) {
         const { content, ...meta } = artifact;
         return { ...meta, content: new Blob([content], { type: artifact.mime }) };
       }),
+      text: os.artifacts.text.handler(({ input }) => {
+        const artifact = artifacts.get(input.hash);
+        if (!artifact) throw new ORPCError("NOT_FOUND", { message: `No existe el artefacto ${input.hash}.` });
+        return artifactTextPage(artifact, input.offset, input.limit);
+      }),
     },
     issues: {
       list: os.issues.list.handler(({ input: { withBody, ...filter } }) => {
@@ -251,6 +259,7 @@ export function createRouter(deps: RouterDeps) {
         }
         return projects.update(id, trackerRef === undefined ? patch : { ...patch, trackerRef }, context.origin);
       }),
+      archive: os.projects.archive.handler(({ input, context }) => projects.archive(input.id, context.origin)),
       exportConfig: os.projects.exportConfig.handler(({ input }) => deps.projectConfigs.export(input.id)),
       importConfig: os.projects.importConfig.handler(({ input, context }) =>
         deps.projectConfigs.import(input.id, input.config, context.origin, { dryRun: input.dryRun }),
@@ -298,8 +307,11 @@ export function createRouter(deps: RouterDeps) {
       publishLocal: os.prs.publishLocal.handler(({ input, context }) => ({ runId: prCommands.publishLocal(input.id, context.origin) })),
       detail: os.prs.detail.handler(({ input }) => prDetails.get(input.id)),
       commitDiff: os.prs.commitDiff.handler(({ input }) => prDetails.commit(input.id, input.sha, { head: input.head, base: input.base })),
-      localDetail: os.prs.localDetail.handler(({ input }) => prDetails.get(input.id)),
-      localCommitDiff: os.prs.localCommitDiff.handler(({ input }) => prDetails.commit(input.id, input.sha)),
+      localDetail: os.prs.localDetail.handler(({ input }) => prDetails.get(input.id, true)),
+      localCommitDiff: os.prs.localCommitDiff.handler(({ input }) => prDetails.commit(input.id, input.sha, undefined, true)),
+      updateLocal: os.prs.updateLocal.handler(({ input, context }) => prCommands.updateLocal(input, context.origin)),
+      applyLocalPatch: os.prs.applyLocalPatch.handler(({ input, context }) => ({ runId: prCommands.applyLocalPatch(input, context.origin) })),
+      requestLocalPublish: os.prs.requestLocalPublish.handler(async ({ input, context }) => ({ decisionId: await localPublish.request(input.id, context.origin) })),
       republish: os.prs.republish.handler(({ input, context }) => deps.republisher.republish(input, context.origin)),
       republishProgress: os.prs.republishProgress.handler(({ input }) => deps.republisher.progress(input.id)),
     },
@@ -349,7 +361,9 @@ export function createRouter(deps: RouterDeps) {
         if (!decision) throw new DecisionNotFoundError(input.id);
         return decision;
       }),
-      resolve: os.decisions.resolve.handler(({ input, context }) => {
+      resolve: os.decisions.resolve.handler(async ({ input, context }) => {
+        const publication = await localPublish.resolve(input.id, input.option, context.origin);
+        if (publication) return publication;
         if (isMergeOffer(store, input.id)) {
           requireUiOrigin(context.origin, "Una oferta de merge la aprueba una persona desde la app: comenta el comando de merge con tu identidad.");
         }

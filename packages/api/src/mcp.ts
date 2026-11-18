@@ -18,7 +18,8 @@ import { RunDetail } from "./runs";
  *   procedimiento que sirve a varios kinds (`defs.list`) declara `kind` como lista y recibe además
  *   `kind` en su input.
  * - Acción: `.meta({ mcp: { action: "retry_step", description, annotations } })`. Una tool por acción, con el
- *   input zod del procedimiento tal cual y `description` como su descripción para el modelo.
+ *   input zod del procedimiento tal cual (o un objeto vacío estricto si no tiene input) y `description`
+ *   para el modelo. Puede declarar también `resource` si el mismo procedimiento alimenta uno.
  * - Resource de lectura: `.meta({ mcp: { resource: "run_timeline" } })`; qué URI sirve cada uno lo
  *   decide el generador.
  *
@@ -33,7 +34,7 @@ export type McpMeta =
       tool: "list" | "get" | "create" | "update" | "delete";
       kind: McpKind | readonly McpKind[];
     }
-  | { action: string; description: string; annotations?: McpAnnotations }
+  | { action: string; description: string; annotations?: McpAnnotations; resource?: McpResourceName }
   | { resource: McpResourceName };
 
 /** Los kinds que `list` y `get` entienden: los de `defs` que ya tienen esquema, más las entidades. */

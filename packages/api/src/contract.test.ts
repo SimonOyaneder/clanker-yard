@@ -30,12 +30,12 @@ describe("contrato", () => {
     expect(Object.keys(contract.connections)).toEqual(["list", "setPat", "githubPatForm", "startDeviceFlow", "githubInstallations", "linearAuth", "testClaude", "testCodex", "codexStatus", "setClaudeApiKey", "disconnect"]);
     expect(Object.keys(contract.system).sort()).toEqual(["breakers", "health", "info", "lanes", "retryBreaker", "setLanes", "shutdown"]);
     expect(Object.keys(contract.events).sort()).toEqual(["latest", "list", "stream"]);
-    expect(Object.keys(contract.artifacts)).toEqual(["get"]);
+    expect(Object.keys(contract.artifacts)).toEqual(["get", "text"]);
     expect(Object.keys(contract.issues).sort()).toEqual(["createLocal", "get", "list"]);
     expect(Object.keys(contract.trackers)).toEqual(["projects"]);
-    expect(Object.keys(contract.projects).sort()).toEqual(["boostIssue", "create", "defaults", "exportConfig", "get", "importConfig", "list", "pause", "queue", "resume", "setDefaults", "skipIssue", "summary", "update"]);
+    expect(Object.keys(contract.projects).sort()).toEqual(["archive", "boostIssue", "create", "defaults", "exportConfig", "get", "importConfig", "list", "pause", "queue", "resume", "setDefaults", "skipIssue", "summary", "update"]);
     expect(Object.keys(contract.packs)).toEqual(["list", "install", "remove"]);
-    expect(Object.keys(contract.prs)).toEqual(["get", "list", "refresh", "setHold", "merge", "requestReview", "rebase", "publishLocal", "detail", "commitDiff", "localDetail", "localCommitDiff", "republish", "republishProgress"]);
+    expect(Object.keys(contract.prs)).toEqual(["get", "list", "refresh", "setHold", "merge", "requestReview", "rebase", "publishLocal", "detail", "commitDiff", "localDetail", "localCommitDiff", "updateLocal", "applyLocalPatch", "requestLocalPublish", "republish", "republishProgress"]);
     expect(Object.keys(contract.chats)).toEqual(["get", "send", "interrupt", "reset", "proposal", "discard", "apply"]);
     expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "overview", "syncConfig", "testRecipe"]);
     expect(Object.keys(contract.runs).sort()).toEqual(["cancel", "forceOutcome", "get", "interrupt", "list", "pause", "resume", "retryStep", "start", "steerStep", "step", "transcript"]);
@@ -186,7 +186,7 @@ describe("chats", () => {
     }
   });
 
-  test("valida las entradas de los siete procedimientos sin exponerlos por MCP", async () => {
+  test("valida las entradas del chat y reserva aplicar la propuesta a la app", async () => {
     for (const [procedure, input] of [
       [contract.chats.get, { prId: chat.prId }],
       [contract.chats.send, { chatId: chat.id, text: message.text }],
@@ -198,7 +198,8 @@ describe("chats", () => {
       [contract.chats.apply, { chatId: chat.id, rev: 1 }],
     ] as const) {
       expect(await procedure["~orpc"].inputSchema!["~standard"].validate(input)).toEqual({ value: input });
-      expect(procedure["~orpc"].meta.mcp).toBeUndefined();
+      if (procedure === contract.chats.apply) expect(procedure["~orpc"].meta.mcp).toBeUndefined();
+      else expect(procedure["~orpc"].meta.mcp).toHaveProperty("action");
     }
     for (const procedure of Object.values(contract.chats)) {
       expect(await procedure["~orpc"].inputSchema!["~standard"].validate({})).toHaveProperty("issues");

@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
-import { type Event } from "@clanker/api";
-import { createRepos } from "@clanker/core";
+import { CachedIssue, ClankerProject, type Event, LocalPrDetail, RunId } from "@clanker/api";
+import { createArtifacts, createRepos } from "@clanker/core";
+import { seedPr } from "@clanker/core/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { startMcpHarness, type McpHarness } from "./mcp-harness";
 
@@ -32,8 +33,10 @@ describe("tools", () => {
     const { tools } = await h.mcp.listTools();
 
     expect(tools.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations }))).toMatchSnapshot();
-    expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name)).toEqual(["list", "get", "project_queue"]);
-    expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name)).toEqual(["delete", "cancel_run", "interrupt_run", "resolve_decision"]);
+    expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name))
+      .toEqual(expect.arrayContaining(["list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff", "read_artifact"]));
+    expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name))
+      .toEqual(expect.arrayContaining(["delete", "archive_project", "update_local_pr", "apply_local_pr_patch", "cancel_run", "interrupt_run", "resolve_decision"]));
   });
 
   test("list y get de los kinds de defs: los builtin del core", async () => {
@@ -65,6 +68,61 @@ describe("tools", () => {
     await expect(h.call("get", { kind: "run", id: "run_00000000000000000000000001" })).rejects.toThrow(/NOT_FOUND: .*run_00000000000000000000000001/);
     await expect(h.call("get", { kind: "flow", id: "def_nope" })).rejects.toThrow(/NOT_FOUND: No existe flow def_nope/);
     await expect(h.call("list", { kind: "run", filter: { status: ["nope"] } })).rejects.toThrow(/BAD_REQUEST/);
+  });
+
+  test("lee y edita los PRs locales aun sin cuenta de GitHub", async () => {
+    const repoId = createRepos({ store: h.store }).add({ name: "demo", path: h.repo.dir, remote: "octocat/demo" });
+    h.repo.git("switch", "-c", "local");
+    h.repo.git("commit", "--allow-empty", "-m", "feat: local");
+    h.repo.git("switch", "main");
+    const head = h.repo.git("rev-parse", "local");
+    const id = seedPr(h.store, { repoId, number: null, state: "local", headRef: "local", headSha: head, title: "Local" });
+    expect(await h.call("list_prs", { state: "local" })).toMatchObject([{ id, repo: "octocat/demo", local: { title: "Local" }, ref: null }]);
+    expect(await h.call("update_local_pr", { id, title: "Revisado", body: "Descripción" })).toEqual({ id, title: "Revisado", body: "Descripción" });
+    expect(h.store.events.since(0, { types: ["pr.changed"] })).toMatchObject([{ origin: "mcp", subject: { id } }]);
+    const detail = LocalPrDetail.parse(await h.call("get_local_pr", { id }));
+    expect(detail).toMatchObject({ title: "Revisado", body: "Descripción", head, commits: [{ sha: head, subject: "feat: local" }] });
+    expect(await h.call("get_local_pr_commit_diff", { id, sha: head.slice(0, 8) })).toMatchObject({ sha: head });
+    const { runId } = await h.call("apply_local_pr_patch", { id, head, patch: "patch" }) as { runId: unknown };
+    expect(await h.api.runs.get({ id: RunId.parse(runId) })).toMatchObject({ subject: { type: "pr", id }, lane: "maintenance" });
+    await expect(h.call("request_local_pr_publish", { id })).rejects.toThrow(/Conecta GitHub/);
+    const remote = seedPr(h.store, { repoId, number: 1 });
+    await expect(h.call("get_local_pr", { id: remote })).rejects.toThrow(/ya no es local/);
+    await expect(h.call("update_local_pr", { id: remote, body: "" })).rejects.toThrow(/no es un PR local/);
+  });
+
+  test("archiva sin borrar el historial y conserva el actor", async () => {
+    const { project, runId } = await finishedRun();
+    for (let i = 0; i < 2; i++) {
+      expect(await h.call("archive_project", { id: project.id })).toMatchObject({ status: "archived" });
+    }
+    expect(await h.api.runs.get({ id: runId })).toMatchObject({ status: "done" });
+    expect(h.store.events.since(0, { types: ["project.archived"], projectId: project.id })).toMatchObject([{ origin: "mcp" }]);
+  });
+
+  test("lee artefactos de texto en páginas y rechaza binarios", async () => {
+    const artifacts = createArtifacts({ store: h.store, dir: h.repo.dir });
+    const hash = artifacts.put("ab🙂z", "report");
+    expect(await h.call("read_artifact", { hash, limit: 4 })).toMatchObject({ text: "ab", nextOffset: 2 });
+    expect(await h.call("read_artifact", { hash, offset: 2 })).toMatchObject({ text: "🙂z", nextOffset: null });
+    const binary = artifacts.put(Uint8Array.of(0xff), "snapshot");
+    await expect(h.call("read_artifact", { hash: binary })).rejects.toThrow("BAD_REQUEST: El artefacto no es de texto");
+  });
+
+  test("opera la cola y consulta su historial desde las tools de paridad", async () => {
+    expect(await h.call("list_breakers", {})).toEqual([]);
+    expect(await h.call("retry_breaker", { scope: "github" })).toBeNull();
+    expect(await h.call("get_lanes", {})).toHaveProperty("dev");
+    const project = ClankerProject.parse(await h.call("create_project", { slug: "cola", name: "Cola", tracker: "local" }));
+    const issue = CachedIssue.parse(await h.call("create_local_issue", { projectId: project.id, title: "Saluda" }));
+    expect(await h.call("list_issues", { projectId: project.id })).toMatchObject([{ id: issue.id }]);
+    expect(await h.call("skip_issue", { id: project.id, issueId: issue.id })).toBeNull();
+    expect(await h.call("project_queue", { id: project.id })).toMatchObject([{ issue: { id: issue.id }, state: "blocked", skipped: true }]);
+    expect(await h.call("skip_issue", { id: project.id, issueId: issue.id, skipped: false })).toBeNull();
+    expect(await h.call("boost_issue", { id: project.id, issueId: issue.id })).toBeNull();
+    expect(await h.call("list_events", { filter: { projectId: project.id, types: ["issue.skipped"] } })).toMatchObject([{ origin: "mcp", projectId: project.id }]);
+    expect(await h.call("export_project_config", { id: project.id })).toMatchObject({ name: "Cola" });
+    expect(await h.call("project_summary", { id: project.id })).toBeTypeOf("object");
   });
 });
 

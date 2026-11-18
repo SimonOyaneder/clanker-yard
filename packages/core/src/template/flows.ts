@@ -1298,6 +1298,76 @@ export const CHAT_APLICAR_LOCAL: FlowDef = {
   },
 };
 
+/** Aplica un diff al head exacto de un PR local, sin preparar otro worktree, publicar ni restackear sus hijos. */
+export const APPLY_LOCAL_PATCH: FlowDef = {
+  schema: 1,
+  id: "apply-local-patch",
+  name: "Aplicar un patch a un PR local",
+  description: "Agrega un commit a un PR local sin publicarlo.",
+  internal: true,
+  trigger: { type: "manual" },
+  lane: "maintenance",
+  // `effects: "local"` declara una corrida sin escritura al motor. Esta toma el sujeto del PR
+  // como las demás que modifican su branch, aunque sus dos acciones no publican.
+  params: { prId: "string", repo: "RepoRef", branch: "string", base: "string", head: "string", patch: "string" },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.acquire",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base", existingOnly: true },
+      on: { ok: "apply", error: "@failed" },
+    },
+    apply: {
+      type: "action",
+      action: "pr.applyLocalPatch",
+      args: {
+        ws: "$ws", prId: "$run.params.prId", repo: "$run.params.repo", branch: "$run.params.branch",
+        base: "$run.params.base", head: "$run.params.head", patch: "$run.params.patch",
+      },
+      on: { ok: "@done", error: "@failed" },
+    },
+  },
+};
+
+/** Aprobación explícita: comprueba la receta sin arreglos automáticos y publica solo la revisión aprobada. */
+const PROMOTE_APPROVED_LOCAL: FlowDef = {
+  schema: 1,
+  id: "promote-approved-local",
+  name: "Publicar PR local aprobado",
+  internal: true,
+  trigger: { type: "manual" },
+  lane: "maintenance",
+  params: { prId: "string", repo: "RepoRef", branch: "string", base: "string", approval: "string" },
+  start: "ws",
+  nodes: {
+    ws: {
+      type: "action",
+      action: "workspace.acquire",
+      args: { repo: "$run.params.repo", branch: "$run.params.branch", base: "$run.params.base", existingOnly: true },
+      on: { ok: "validate", error: "@failed" },
+    },
+    validate: {
+      type: "action",
+      action: "pr.validateLocalPublish",
+      args: { ws: "$ws", prId: "$run.params.prId", base: "$run.params.base", approval: "$run.params.approval" },
+      on: { ok: "checks", error: "@failed" },
+    },
+    checks: {
+      type: "action",
+      action: "recipe.check",
+      args: { ws: "$ws", scope: "changed" },
+      on: { ok: "publish", fail: { to: "@failed", note: "No se publicó el PR: fallaron los checks del repo" }, error: "@failed" },
+    },
+    publish: {
+      type: "action",
+      action: "pr.promote",
+      args: { ws: "$ws", prId: "$run.params.prId", base: "$run.params.base", approval: "$run.params.approval" },
+      on: { ok: "@done", error: "@failed" },
+    },
+  },
+};
+
 export const flows: Record<string, FlowDef> = {
   "techlead-clasico": TECHLEAD_CLASICO,
   "pr-feedback": PR_FEEDBACK,
@@ -1305,6 +1375,7 @@ export const flows: Record<string, FlowDef> = {
   "rebase-conflicto-local": REBASE_CONFLICTO_LOCAL,
   "restack-feedback": RESTACK_FEEDBACK,
   "promote-local": PROMOTE_LOCAL,
+  "promote-approved-local": PROMOTE_APPROVED_LOCAL,
   "base-combinada-conflicto": BASE_COMBINADA_CONFLICTO,
   restack: RESTACK,
   "restack-rewritten": RESTACK_REWRITTEN,
@@ -1312,4 +1383,5 @@ export const flows: Record<string, FlowDef> = {
   "republish-pr": REPUBLISH_PR,
   "chat-aplicar": CHAT_APLICAR,
   "chat-aplicar-local": CHAT_APLICAR_LOCAL,
+  "apply-local-patch": APPLY_LOCAL_PATCH,
 };

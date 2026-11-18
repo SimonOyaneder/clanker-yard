@@ -1,4 +1,4 @@
-import type { Decision, DecisionKind, ProjectId } from "@clanker/api"
+import { APPROVE_LOCAL_PUBLISH, type Decision, type DecisionKind, type ProjectId } from "@clanker/api"
 
 /** Un `gate` y un `needs_human` estacionan su corrida; el resto no detiene nada (`docs/design.html#d-ui`, Bandeja de decisiones). */
 export const isBlocking = (d: Pick<Decision, "kind">) => d.kind === "gate" || d.kind === "needs_human"
@@ -55,8 +55,8 @@ export function optionLabel(decision: Pick<Decision, "kind" | "body">, option: s
   return option === SEEN ? "Marcar como vista" : option
 }
 
-/** Una opción que termina la corrida: se pinta aparte y su atajo es el mismo, pero se puede deshacer. */
-export const isDestructive = (option: string) => option === "cancel"
+/** Una opción con efectos que requieren atención: se pinta aparte y conserva su atajo. */
+export const isDestructive = (option: string) => option === "cancel" || option === APPROVE_LOCAL_PUBLISH
 
 /**
  * Lo que se puede elegir con 1 a 9: las opciones de la decisión o, si no hay ninguna que elegir, marcarla vista.
@@ -68,7 +68,8 @@ export function optionsOf(decision: Pick<Decision, "kind" | "options">): string[
 }
 
 /** "Responder…" con texto libre: lo que no bloquea y no se cierra solo. */
-export const takesText = (decision: Pick<Decision, "kind" | "status">) => decision.status === "pending" && !isBlocking(decision) && decision.kind !== "alert"
+export const takesText = (decision: Pick<Decision, "kind" | "status" | "options">) =>
+  decision.status === "pending" && !isBlocking(decision) && decision.kind !== "alert" && !decision.options.includes(APPROVE_LOCAL_PUBLISH)
 
 /** Lo que se eligió o respondió, para leerlo en las resueltas. */
 export function resolutionText(decision: Decision): string | null {

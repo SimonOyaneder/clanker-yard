@@ -1,8 +1,9 @@
 import { parseArgs } from "node:util";
-import { RunId, type RunDetail } from "@clanker/api";
+import { contract, RunId, type RunDetail } from "@clanker/api";
 import type { Command } from "./command";
 import { formatTable, usd } from "./format";
 import { projectBySlug } from "./projects";
+import { inputHelp, JSON_INPUT_USAGE, jsonInputOptions, readJsonInput, validateInput } from "./rpc";
 
 const iso = (ms: number) => `${new Date(ms).toISOString().slice(0, 19)}Z`;
 
@@ -34,17 +35,30 @@ function formatRun(run: RunDetail): string {
   return lines.join("\n");
 }
 
+const START_USAGE = `clanker runs start <proyecto> <issue> [--flow <slug>] [--json]\n  clanker runs start (${JSON_INPUT_USAGE})`;
+const startInput = contract.runs.start["~orpc"].inputSchema!;
+
 export const runsStart: Command = {
-  usage: "clanker runs start <proyecto> <issue> [--flow <slug>] [--json]",
+  usage: START_USAGE,
+  help: () => `Con --input o --input-file devuelve JSON y recibe los ids del proyecto y la issue.\n\n${inputHelp(startInput)}`,
   async run(args, ctx) {
     const { values, positionals } = parseArgs({
       args,
       allowPositionals: true,
-      options: { flow: { type: "string" }, json: { type: "boolean" } },
+      options: { flow: { type: "string" }, json: { type: "boolean" }, ...jsonInputOptions },
     });
+    if (values.input !== undefined || values["input-file"] !== undefined) {
+      if (positionals.length || values.flow !== undefined) {
+        throw new Error("No combines --input ni --input-file con argumentos posicionales o --flow.");
+      }
+      const input = await validateInput(startInput, readJsonInput(values, ctx)!);
+      const run = await (await ctx.client()).runs.start(input, { signal: ctx.signal });
+      return ctx.write(JSON.stringify(run, null, 2));
+    }
+
     const [projectSlug, issueKey, ...extra] = positionals;
     if (projectSlug === undefined || issueKey === undefined || extra.length > 0) {
-      throw new Error("Faltan el proyecto y la issue (o sobran argumentos).\nUso: clanker runs start <proyecto> <issue> [--flow <slug>] [--json]");
+      throw new Error(`Faltan el proyecto y la issue (o sobran argumentos).\nUso: ${START_USAGE}`);
     }
 
     const client = await ctx.client();

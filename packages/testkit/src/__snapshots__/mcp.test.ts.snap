@@ -220,6 +220,54 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
   },
   {
     "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee los datos del proceso del core: PID, hora de arranque, carpeta de datos, plataforma y configuración pública de las apps de Linear y GitHub.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "core_info",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Pide apagar el core y detiene el despacho de pasos. Interrumpe los agentes; con \`drain: true\` da hasta 60 segundos a las acciones en curso para terminar, y con \`false\` las interrumpe de inmediato. Los pasos interrumpidos quedan pendientes para el próximo arranque.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "drain": {
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "drain",
+      ],
+      "type": "object",
+    },
+    "name": "shutdown_core",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee la capacidad y el uso actual de los carriles \`dev\` y \`maintenance\` de esta máquina.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "get_lanes",
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false,
@@ -245,11 +293,779 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
   },
   {
     "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista los circuit breakers abiertos: qué ámbito está en pausa (\`scope\`), por qué y cuándo se vuelve a probar.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_breakers",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": true,
+    },
+    "description": "Repite ahora la prueba del breaker indicado por \`scope\`. Puede ejecutar los requisitos de la receta del repo o consultar un proveedor; en Claude puede gastar cuota. Si la causa desaparece, cierra el breaker y el trabajo en pausa puede seguir. Devuelve \`null\` si ya no está abierto.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "scope": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "scope",
+      ],
+      "type": "object",
+    },
+    "name": "retry_breaker",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista eventos confirmados en orden de \`seq\`, después de \`after\`. Usa \`filter\` para acotar y el último \`seq\` devuelto para pedir la página siguiente (\`limit\`: 100 por defecto, máximo 500). No abre un stream.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "after": {
+          "default": 0,
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "filter": {
+          "default": {},
+          "properties": {
+            "projectId": {
+              "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+              "type": "string",
+            },
+            "runId": {
+              "pattern": "^run_[0-9A-HJKMNP-TV-Z]{26}$",
+              "type": "string",
+            },
+            "types": {
+              "items": {
+                "enum": [
+                  "core.started",
+                  "core.stopping",
+                  "core.recovered",
+                  "project.created",
+                  "project.updated",
+                  "project.paused",
+                  "project.resumed",
+                  "project.archived",
+                  "project.defaults_changed",
+                  "lanes.changed",
+                  "repo.added",
+                  "def.versioned",
+                  "def.archived",
+                  "def.restored",
+                  "def.exported",
+                  "pack.installed",
+                  "pack.removed",
+                  "recipe.test_started",
+                  "recipe.test_output",
+                  "recipe.test_finished",
+                  "issue.synced",
+                  "issue.queued",
+                  "issue.claimed",
+                  "issue.skipped",
+                  "run.started",
+                  "run.status",
+                  "run.parked",
+                  "run.requeued",
+                  "run.borrowed",
+                  "run.returned",
+                  "run.finished",
+                  "step.started",
+                  "step.waiting",
+                  "step.finished",
+                  "step.retrying",
+                  "step.commanded",
+                  "agent.started",
+                  "agent.activity",
+                  "agent.usage",
+                  "agent.ended",
+                  "lease.acquired",
+                  "lease.released",
+                  "lease.expired",
+                  "pr.opened",
+                  "pr.saved_local",
+                  "pr.changed",
+                  "pr.botReview",
+                  "pr.ci",
+                  "pr.conflict",
+                  "pr.baseConflict",
+                  "pr.comment",
+                  "pr.merged",
+                  "pr.base_rewritten",
+                  "pr.human",
+                  "pr.approvedWithComments",
+                  "pr.mergeReady",
+                  "pr.mergeFailed",
+                  "pr.commented",
+                  "pr.thread_resolved",
+                  "pr.hold_changed",
+                  "pr.overlap",
+                  "chat.message",
+                  "chat.turn_started",
+                  "chat.turn_finished",
+                  "chat.proposal",
+                  "chat.apply_started",
+                  "chat.apply_finished",
+                  "decision.opened",
+                  "decision.resolved",
+                  "learning.proposed",
+                  "learning.approved",
+                  "learning.rejected",
+                  "learning.updated",
+                  "connection.changed",
+                  "connection.usage",
+                  "connection.login_failed",
+                  "sync.rate_limited",
+                  "breaker.opened",
+                  "breaker.closed",
+                  "import.completed",
+                  "error",
+                ],
+                "type": "string",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "type": "object",
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "list_events",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee el \`seq\` del último evento confirmado, o 0 si no hay eventos. Úsalo como \`after\` en \`list_events\` para consultar solo los eventos nuevos.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "latest_event_seq",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista las cuentas conectadas y su estado según el core, sin tokens ni pruebas contra los proveedores.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_connections",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Consulta cuántas instalaciones de la GitHub App ve la cuenta conectada con la App. Con cero, la cuenta no ve repos; si el core conoce la URL de instalación, también la devuelve.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "github_installations",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+    },
+    "description": "Prueba el login existente del binario de Codex y consulta el plan y sus límites, sin inferencia ni gasto de tokens del modelo. Actualiza el estado de la conexión y el uso guardado; no inicia un login interactivo.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {},
+      "type": "object",
+    },
+    "name": "test_codex",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee el último estado y uso de Codex conocidos por el core, sin lanzar Codex ni consultar al proveedor. Devuelve \`null\` si el core no tiene datos.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "codex_status",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee un artefacto de texto por hash (parches, reportes y logs). Si \`nextOffset\` no es null, pásalo como \`offset\` para seguir. Los offsets están en bytes UTF-8.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+        },
+        "limit": {
+          "default": 16384,
+          "maximum": 65536,
+          "minimum": 4,
+          "type": "integer",
+        },
+        "offset": {
+          "default": 0,
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "hash",
+      ],
+      "type": "object",
+    },
+    "name": "read_artifact",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista issues del caché local, sin consultar al tracker. Filtra por proyecto, estados o labels. Con \`withBody: false\`, omite las descripciones; usa \`get_issue\` para leer una en detalle.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "excludeLabels": {
+          "items": {
+            "type": "string",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+        "labels": {
+          "items": {
+            "type": "string",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "status": {
+          "items": {
+            "enum": [
+              "backlog",
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "canceled",
+            ],
+            "type": "string",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+        "withBody": {
+          "default": true,
+          "type": "boolean",
+        },
+      },
+      "type": "object",
+    },
+    "name": "list_issues",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee una issue por su id interno (\`list_issues\` lo muestra), con descripción y relaciones. Lee del caché, no del tracker.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^iss_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "get_issue",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+    },
+    "description": "Crea una issue para un proyecto con tracker \`local\` y la guarda en el caché. No crea issues en Linear ni GitHub.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "body": {
+          "default": "",
+          "type": "string",
+        },
+        "estimate": {
+          "minimum": 0,
+          "type": "number",
+        },
+        "labels": {
+          "default": [],
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "milestone": {
+          "properties": {
+            "due": {
+              "type": "string",
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          "required": [
+            "name",
+          ],
+          "type": "object",
+        },
+        "parent": {
+          "properties": {
+            "id": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "key": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "tracker": {
+              "enum": [
+                "linear",
+                "github-issues",
+                "jira",
+                "local",
+              ],
+              "type": "string",
+            },
+            "url": {
+              "format": "uri",
+              "type": "string",
+            },
+          },
+          "required": [
+            "tracker",
+            "id",
+            "key",
+            "url",
+          ],
+          "type": "object",
+        },
+        "priority": {
+          "default": 0,
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4,
+          ],
+          "type": "number",
+        },
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "status": {
+          "default": "todo",
+          "enum": [
+            "backlog",
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "canceled",
+          ],
+          "type": "string",
+        },
+        "title": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "title",
+        "projectId",
+      ],
+      "type": "object",
+    },
+    "name": "create_local_issue",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Consulta los proyectos de los workspaces conectados al tracker (hoy, Linear). Para crear un proyecto de Yard, usa \`ref.id\` como \`trackerRef\` y \`account\` como \`trackerAccount\`.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "tracker": {
+          "enum": [
+            "linear",
+            "github-issues",
+            "jira",
+            "local",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "tracker",
+      ],
+      "type": "object",
+    },
+    "name": "list_tracker_projects",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+    },
+    "description": "Crea un proyecto activo en Yard; el Scheduler puede empezar a trabajar su cola de inmediato. Con \`tracker: "local"\` no pases \`trackerRef\` ni \`trackerAccount\`. Para Linear, busca el proyecto con \`list_tracker_projects\` y pasa su \`trackerRef\`.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "conventions": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "commentPrefix": {
+              "type": "string",
+            },
+            "commits": {
+              "enum": [
+                "conventional",
+              ],
+              "type": "string",
+            },
+            "context": {
+              "additionalProperties": {
+                "items": {
+                  "pattern": "^(skill|rule|repo|file):\\S",
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "propertyNames": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "object",
+            },
+            "councilPrefix": {
+              "type": "string",
+            },
+            "noAiAttribution": {
+              "type": "boolean",
+            },
+            "pr": {
+              "additionalProperties": false,
+              "properties": {
+                "omitSections": {
+                  "items": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "template": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "type": "object",
+            },
+          },
+          "type": "object",
+        },
+        "defaultFlowId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "defaultProfileId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "flowParams": {
+          "additionalProperties": {},
+          "default": {},
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "maxCostUsd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "parallel": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "queueFilter": {
+          "default": {},
+          "properties": {
+            "excludeLabels": {
+              "items": {
+                "type": "string",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+            "labels": {
+              "items": {
+                "type": "string",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+            "status": {
+              "items": {
+                "enum": [
+                  "backlog",
+                  "todo",
+                  "in_progress",
+                  "in_review",
+                  "done",
+                  "canceled",
+                ],
+                "type": "string",
+              },
+              "minItems": 1,
+              "type": "array",
+            },
+          },
+          "type": "object",
+        },
+        "repos": {
+          "default": [],
+          "items": {
+            "properties": {
+              "labels": {
+                "default": [],
+                "items": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "repoId": {
+                "pattern": "^repo_[0-9A-HJKMNP-TV-Z]{26}$",
+                "type": "string",
+              },
+            },
+            "required": [
+              "repoId",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "slug": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "type": "string",
+        },
+        "stackMode": {
+          "default": "local",
+          "enum": [
+            "local",
+            "remote",
+          ],
+          "type": "string",
+        },
+        "stackOn": {
+          "default": "ci_green",
+          "enum": [
+            "ready",
+            "ci_green",
+            "any_open",
+          ],
+          "type": "string",
+        },
+        "statusMapping": {
+          "additionalProperties": {
+            "enum": [
+              "backlog",
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "canceled",
+            ],
+            "type": "string",
+          },
+          "default": {},
+          "propertyNames": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "tracker": {
+          "enum": [
+            "linear",
+            "github-issues",
+            "jira",
+            "local",
+          ],
+          "type": "string",
+        },
+        "trackerAccount": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "trackerRef": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "slug",
+        "name",
+        "tracker",
+      ],
+      "type": "object",
+    },
+    "name": "create_project",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee los valores por defecto de un proyecto nuevo: flujo, perfil, cupo de corridas en paralelo y tope de gasto por corrida.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "get_project_defaults",
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false,
     },
-    "description": "Cambia solo los campos presentes de un proyecto (repos, filtros, flujo, perfil, \`parallel\`, tope de gasto, \`trackerRef\`...), planos junto al \`id\`; las mismas validaciones que al crearlo. Un campo que no existe es \`BAD_REQUEST\`.",
+    "description": "Cambia los valores por defecto de proyectos nuevos. Solo se guardan los campos presentes; los proyectos existentes no cambian.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "defaultFlowId": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "defaultProfileId": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "maxCostUsd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "parallel": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "set_project_defaults",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Cambia solo los campos presentes de un proyecto, planos junto al \`id\`. Para archivar usa \`archive_project\`; para desarchivar sin reanudar el loop, usa \`status: "paused"\`. Un campo que no existe es \`BAD_REQUEST\`.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -475,6 +1291,78 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
   },
   {
     "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Archiva un proyecto por su id: deja de lanzar issues automáticamente, sin detener corridas ni borrar su historial. Se revierte con \`update_project\` y \`status: "paused"\`.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "archive_project",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Devuelve la configuración de un proyecto por su id para llevarla a otra máquina, identificando los repos por nombre y remoto, no por id local. No escribe archivos.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "export_project_config",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Aplica \`config\` de \`export_project_config\` a un proyecto existente, reemplazando sus ajustes sin cambiar el nombre ni el tracker. Usa \`dryRun: true\` para ver \`changes\`, \`unmapped\` y \`errors\` antes de guardar.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "config": {},
+        "dryRun": {
+          "default": false,
+          "type": "boolean",
+        },
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "config",
+      ],
+      "type": "object",
+    },
+    "name": "import_project_config",
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false,
@@ -519,6 +1407,67 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Impide que el Scheduler lance una issue del proyecto: queda bloqueada en la cola. Con \`skipped: false\` vuelve a ser elegible. No cancela una corrida ni modifica la issue en su tracker.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "issueId": {
+          "pattern": "^iss_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "skipped": {
+          "default": true,
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "id",
+        "issueId",
+      ],
+      "type": "object",
+    },
+    "name": "skip_issue",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+    },
+    "description": "Sube una issue al principio de las elegibles de su proyecto sin saltarse bloqueos. La última subida va primero, incluso al repetir la llamada. Con \`boosted: false\`, recupera su prioridad normal.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "boosted": {
+          "default": true,
+          "type": "boolean",
+        },
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "issueId": {
+          "pattern": "^iss_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "issueId",
+      ],
+      "type": "object",
+    },
+    "name": "boost_issue",
+  },
+  {
+    "annotations": {
       "openWorldHint": false,
       "readOnlyHint": true,
     },
@@ -537,6 +1486,849 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
       "type": "object",
     },
     "name": "project_queue",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Resume las corridas cerradas de un proyecto: conteos, resultados, tiempo, rondas y costo (en millonésimas de USD). Filtra por fecha de cierre (\`from\` inclusivo y \`to\` exclusivo, en ms epoch) y por origen (\`imported\`).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "from": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "id": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "imported": {
+          "type": "boolean",
+        },
+        "to": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "project_summary",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista los packs activos por id, con su versión, alcance y si vienen con la app o están instalados.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_packs",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Valida, copia y activa un pack desde la carpeta local que contiene su \`pack.json\`. Puede reemplazar el pack instalado y cambiar las reglas y defs activas sin reiniciar el core.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "install_pack",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Desinstala un pack por id y borra su copia instalada. Si hay una versión incluida con la app, vuelve a regir; si no, se archivan las defs del pack.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "remove_pack",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Consulta en GitHub el estado actual de un PR por \`account\`, \`repo\` y \`number\`, con CI, reviews y reglas de merge del pack. No actualiza el caché de PRs ni despierta corridas.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "account": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "number": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "repo": {
+          "pattern": "^[^/\\s]+\\/[^/\\s]+$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "account",
+        "repo",
+        "number",
+      ],
+      "type": "object",
+    },
+    "name": "get_pr",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista PRs del caché sin contactar a GitHub. Usa \`state: "local"\` para obtener ids, ramas, bases y padres de PRs todavía no publicados.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 200,
+          "type": "array",
+        },
+        "owned": {
+          "type": "boolean",
+        },
+        "repo": {
+          "type": "string",
+        },
+        "state": {
+          "enum": [
+            "open",
+            "closed",
+            "merged",
+            "local",
+          ],
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "list_prs",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+    },
+    "description": "Relee un PR en GitHub y actualiza su caché si el core ya lo conoce. Un cambio puede despertar corridas o disparar las reacciones automáticas del pack. Para solo consultar el estado, usa \`get_pr\`.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "account": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "number": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "repo": {
+          "pattern": "^[^/\\s]+\\/[^/\\s]+$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "account",
+        "repo",
+        "number",
+      ],
+      "type": "object",
+    },
+    "name": "refresh_pr",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": true,
+    },
+    "description": "Marca un PR conocido para impedir su merge desde Yard. Con \`hold: false\` vuelve a permitir ofertas y merge automático según el pack. Guarda el cambio local y relee el PR en GitHub; no ordena un merge directo.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "hold": {
+          "type": "boolean",
+        },
+        "ref": {
+          "properties": {
+            "account": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "number": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "repo": {
+              "pattern": "^[^/\\s]+\\/[^/\\s]+$",
+              "type": "string",
+            },
+          },
+          "required": [
+            "account",
+            "repo",
+            "number",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "ref",
+        "hold",
+      ],
+      "type": "object",
+    },
+    "name": "set_pr_hold",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Lee el título, cuerpo, puntas, commits, archivos y diff de un PR por su id interno (\`list_prs\`). Sirve a PRs locales y publicados; si está publicado, consulta GitHub y trae los commits faltantes. \`truncated\` indica si se recortó el diff.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "get_pr_detail",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Lee el diff de un commit de un PR por su id interno y SHA. Pasa \`head\` y \`base\` (el \`baseSha\` de \`get_pr_detail\`) para comprobar que el PR no cambió. En PRs publicados puede consultar GitHub y traer los commits faltantes.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "base": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string",
+        },
+        "head": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string",
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "sha": {
+          "pattern": "^[0-9a-f]{7,40}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "sha",
+        "head",
+        "base",
+      ],
+      "type": "object",
+    },
+    "name": "get_pr_commit_diff",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee título, descripción, ramas, SHA, commits, archivos y diff de un PR local por su id interno. \`truncated\` indica si el diff supera el límite; se puede consultar por commit.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "get_local_pr",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee el diff de un commit de un PR local por id interno y SHA. Rechaza commits ajenos al PR.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "sha": {
+          "pattern": "^[0-9a-f]{7,40}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "sha",
+      ],
+      "type": "object",
+    },
+    "name": "get_local_pr_commit_diff",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Edita el título y/o la descripción de un PR local por id interno. Una descripción vacía la borra. No cambia commits ni publica.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "maxLength": 65536,
+          "type": "string",
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\r\\n]+$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "update_local_pr",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Encola una corrida que agrega un commit a un PR local a partir de un diff unificado. Requiere el SHA \`head\` de \`get_local_pr\` y un worktree limpio. No reescribe commits ni hace push. Consulta la corrida por su id.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string",
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "patch": {
+          "maxLength": 2000000,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "head",
+        "patch",
+      ],
+      "type": "object",
+    },
+    "name": "apply_local_pr_patch",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Solicita publicar un PR local por id interno. Devuelve una decisión que una persona debe aprobar en la Bandeja de la app. La solicitud no hace push ni crea un PR en GitHub.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "request_local_pr_publish",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Abre el chat vigente por id interno del PR y devuelve sus mensajes y última propuesta. Si aún no hay chat, crea uno vacío sin iniciar un turno.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "prId": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "prId",
+      ],
+      "type": "object",
+    },
+    "name": "get_pr_chat",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+    },
+    "description": "Envía un mensaje al chat y lanza un turno del agente. El turno usa cuota del proveedor y puede modificar el borrador aislado, pero no aplica la propuesta al PR. Consulta \`get_pr_chat\` para ver la respuesta y la propuesta.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "chatId": {
+          "pattern": "^chat_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "effort": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+          ],
+          "type": "string",
+        },
+        "model": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "refs": {
+          "items": {
+            "oneOf": [
+              {
+                "properties": {
+                  "end": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer",
+                  },
+                  "kind": {
+                    "const": "lines",
+                    "type": "string",
+                  },
+                  "path": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "start": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer",
+                  },
+                  "text": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "kind",
+                  "path",
+                  "start",
+                  "end",
+                  "text",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "author": {
+                    "type": "string",
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "kind": {
+                    "const": "thread",
+                    "type": "string",
+                  },
+                  "line": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer",
+                  },
+                  "path": {
+                    "type": "string",
+                  },
+                  "text": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "kind",
+                  "id",
+                  "text",
+                ],
+                "type": "object",
+              },
+            ],
+          },
+          "maxItems": 20,
+          "type": "array",
+        },
+        "runtime": {
+          "enum": [
+            "claude-sdk",
+            "opencode",
+            "codex",
+          ],
+          "type": "string",
+        },
+        "text": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "chatId",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "send_pr_chat_message",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Interrumpe el turno en curso del chat sin aplicar su propuesta al PR. Devuelve un error si no hay un turno en curso.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "chatId": {
+          "pattern": "^chat_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "chatId",
+      ],
+      "type": "object",
+    },
+    "name": "interrupt_pr_chat",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Archiva el chat vigente, elimina su espacio de borrador y abre un chat nuevo para el mismo PR. No modifica el PR. No se puede reiniciar durante un turno o mientras se aplica una propuesta.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "chatId": {
+          "pattern": "^chat_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "chatId",
+      ],
+      "type": "object",
+    },
+    "name": "reset_pr_chat",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee los archivos y el patch de la propuesta \`rev\` del chat. Por defecto compara con la base de la propuesta; con \`since\`, compara con esa revisión anterior del mismo chat.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "chatId": {
+          "pattern": "^chat_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "rev": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "since": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "chatId",
+        "rev",
+      ],
+      "type": "object",
+    },
+    "name": "get_pr_chat_proposal",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Descarta la propuesta pendiente y reinicia el borrador del chat a la punta conocida del PR, sin tocar el PR. No se puede descartar durante un turno o mientras se aplica una propuesta.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "chatId": {
+          "pattern": "^chat_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "chatId",
+      ],
+      "type": "object",
+    },
+    "name": "discard_pr_chat_proposal",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista los repos registrados en este core, por nombre, con sus ids, rutas, ramas por defecto y remotos.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_repos",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lista los repos registrados con el estado de sus recetas y el resultado de la última prueba de cada uno. No ejecuta las recetas.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "repos_overview",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+    },
+    "description": "Registra la raíz de un checkout de Git. Detecta su rama por defecto y su remoto de GitHub, si lo tiene, y carga las defs válidas de \`.clanker/\`.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "add_repo",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Busca un repositorio Git en \`folder\` o, si no es un repo, en sus subcarpetas directas. Indica si encontró una receta válida, ausente o inválida. No registra repos ni ejecuta recetas.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "folder": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "folder",
+      ],
+      "type": "object",
+    },
+    "name": "detect_repos",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": true,
+    },
+    "description": "Ejecuta los comandos de requisitos y preparación de la receta en un worktree desechable, con un slot de mantenimiento si hace falta. Los comandos del repo pueden usar servicios externos o modificar el entorno de ese slot. Devuelve el resultado al terminar.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "repoId": {
+          "pattern": "^repo_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "repoId",
+      ],
+      "type": "object",
+    },
+    "name": "test_repo_recipe",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Recarga los flujos, roles y perfiles de \`.clanker/\` desde la rama por defecto que este core ya tiene. Actualiza las defs válidas, archiva las que se quitaron y devuelve errores por archivo sin hacer fetch ni push.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "repoId": {
+          "pattern": "^repo_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "repoId",
+      ],
+      "type": "object",
+    },
+    "name": "sync_repo_config",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee el detalle de un paso por id (\`get\` de kind \`run\` lista los pasos): sesiones y reportes, referencias a artefactos y comandos con su salida y código de salida.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^stp_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "get_step",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee una página del transcript de una sesión de agente (\`get_step\` devuelve los ids de sesión). Usa el \`next\` devuelto como \`cursor\` para continuar; es un offset, no un número de página.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "cursor": {
+          "default": 0,
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "limit": {
+          "default": 200,
+          "maximum": 500,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "sessionId": {
+          "pattern": "^ses_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "sessionId",
+      ],
+      "type": "object",
+    },
+    "name": "get_transcript",
   },
   {
     "annotations": {
@@ -790,6 +2582,318 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
       "type": "object",
     },
     "name": "propose_learning",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Rechaza un learning propuesto. Si ya estaba aprobado, lo retira (\`archived\`) y deja de entrar en los briefs. Conserva el historial.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^lrn_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "reject_learning",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Cambia el texto, roles o tags de un learning sin cambiar su alcance ni su estado. Solo se cambian los campos presentes. Los learnings aprobados solo se editan desde la app.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "pattern": "^lrn_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "roles": {
+          "items": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "tags": {
+          "items": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "text": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "update_learning",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": true,
+    },
+    "description": "Envía a Claude Haiku el texto de los learnings propuestos por agentes y devuelve un veredicto y motivo por cada uno. Gasta tokens (cuota de la suscripción o costo de API). Usa \`projectId\` para acotar el gasto. No archiva ni modifica learnings.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "screen_learnings",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Archiva por id los learnings que sigan propuestos. No modifica los que ya están en otro estado y no borra su historial. Confirma qué propuestas archivar antes de llamar.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ids": {
+          "items": {
+            "pattern": "^lrn_[0-9A-HJKMNP-TV-Z]{26}$",
+            "type": "string",
+          },
+          "minItems": 1,
+          "type": "array",
+        },
+      },
+      "required": [
+        "ids",
+      ],
+      "type": "object",
+    },
+    "name": "archive_learnings",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Agrupa por rol el costo (en millonésimas de USD), tokens y corridas cerradas en que actuó, de mayor a menor costo. Filtra por proyecto, fechas de cierre y origen (\`imported\`).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "from": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "imported": {
+          "type": "boolean",
+        },
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "to": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "metrics_by_role",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Agrupa por día de cierre el conteo de corridas raíz y costo (en millonésimas de USD). \`utcOffsetMinutes\` define el desfase para agrupar (UTC por defecto). Filtra por proyecto, fechas de cierre y origen (\`imported\`).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "from": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "imported": {
+          "type": "boolean",
+        },
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "to": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "utcOffsetMinutes": {
+          "default": 0,
+          "maximum": 840,
+          "minimum": -840,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "metrics_by_day",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Agrupa por modelo el costo (en millonésimas de USD) y tokens de corridas cerradas, de mayor a menor costo. Filtra por proyecto, fechas de cierre y origen (\`imported\`).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "from": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "imported": {
+          "type": "boolean",
+        },
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "to": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "metrics_by_model",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Agrupa por flujo y nodo las visitas con costo y su costo (en millonésimas de USD). No incluye corridas importadas porque no tienen pasos. Filtra por proyecto y fechas de cierre.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "from": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "imported": {
+          "type": "boolean",
+        },
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "to": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "metrics_by_step",
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Agrupa por issue las corridas raíz cerradas, su costo (en millonésimas de USD) y las rondas por contador, de mayor a menor costo. Filtra por proyecto, fechas de cierre y origen (\`imported\`).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "from": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "imported": {
+          "type": "boolean",
+        },
+        "projectId": {
+          "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
+        },
+        "to": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "metrics_by_issue",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Restaura una def archivada por \`kind\` e \`id\`, sin crear una versión nueva. Si ya está vigente, no cambia. No restaura defs \`builtin\` ni de packs.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "kind": {
+          "enum": [
+            "flow",
+            "role",
+            "profile",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "kind",
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "restore_def",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Consulta qué runtimes están disponibles y qué modelos y niveles de esfuerzo ofrecen para los perfiles. Puede consultar los catálogos de runtimes conectados; no inicia turnos de agente.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "agent_options",
   },
 ]
 `;

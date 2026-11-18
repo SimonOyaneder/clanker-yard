@@ -1,6 +1,6 @@
-import type { Decision } from "@clanker/api"
+import { APPROVE_LOCAL_PUBLISH, DECLINE_LOCAL_PUBLISH, type Decision } from "@clanker/api"
 import { expect, test } from "vitest"
-import { optionLabel, optionsOf, parksRun, resolutionText, resolvedToday, SEEN, takesText, visibleDecisions } from "@/lib/decisions"
+import { isDestructive, optionLabel, optionsOf, parksRun, resolutionText, resolvedToday, SEEN, takesText, visibleDecisions } from "@/lib/decisions"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 
@@ -50,6 +50,13 @@ test("solo un gate o needs_human pendiente estaciona su corrida", () => {
   expect(parksRun(decision(1, { kind: "gate" }))).toBe(true)
   expect(parksRun(decision(2, { kind: "needs_human", status: "answered" }))).toBe(false)
   expect(parksRun(decision(3, { kind: "alert" }))).toBe(false)
+})
+
+test("una publicación de PR local ofrece dos opciones y no admite texto libre", () => {
+  const request = decision(1, { kind: "question", options: [APPROVE_LOCAL_PUBLISH, DECLINE_LOCAL_PUBLISH] })
+  expect(optionsOf(request)).toEqual([APPROVE_LOCAL_PUBLISH, DECLINE_LOCAL_PUBLISH])
+  expect(takesText(request)).toBe(false)
+  expect(isDestructive(APPROVE_LOCAL_PUBLISH)).toBe(true)
 })
 
 test("las pendientes ponen primero las que estacionan una corrida, y las resueltas por cuándo se cerraron", () => {
