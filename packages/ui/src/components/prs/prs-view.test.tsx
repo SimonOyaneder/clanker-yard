@@ -7,7 +7,7 @@ import { PrsView } from "@/components/prs/prs-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { HostProvider, type Host } from "@/host"
-import { openPrsOf, type LocalPr, type OpenPr } from "@/lib/prs/prs"
+import { openPrsOf, titleOf, type LocalPr, type OpenPr } from "@/lib/prs/prs"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
@@ -39,19 +39,19 @@ async function setup(override?: OpenPr[]) {
     rebasePr: vi.spyOn(data, "rebasePr"),
   } satisfies Partial<Record<keyof AppData, unknown>>
   const host = { openExternal: vi.fn() } as unknown as Host
-  const openLocal = vi.fn()
+  const openPr = vi.fn()
   render(
     <AppDataProvider value={data}>
       <HostProvider value={host}>
         <TooltipProvider>
-          <PrCommandsProvider prs={prs} projects={[]} onOpenRun={() => {}} onOpenLocal={openLocal}>
+          <PrCommandsProvider prs={prs} projects={[]} onOpenRun={() => {}} onOpenPr={openPr}>
             <PrsView prs={prs} unread={0} issueKeys={new Map()} loaded error={null} registered={[]} onOpenConnections={() => {}} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>
       </HostProvider>
     </AppDataProvider>,
   )
-  return { data, host, spies, prs, openLocal }
+  return { data, host, spies, prs, openPr }
 }
 
 const rowOf = (title: string) => screen.getByText(title).closest("li")!
@@ -139,7 +139,7 @@ test.each(["list", "graph"])("el modo %s muestra locales sin número, link ni ac
   expect(card.textContent).not.toMatch(/#|Sin checks|Sin riesgo|Listo para/)
   if (mode === "list") fireEvent.focus(within(card).getByRole("button"))
   else fireEvent.focus(card)
-  for (const key of ["m", "b", "r", "h"]) fireEvent.keyDown(card, { key })
+  for (const key of ["m", "b", "r", "h", "o"]) fireEvent.keyDown(card, { key })
   expect(host.openExternal).not.toHaveBeenCalled()
   for (const spy of Object.values(spies)) expect(spy).not.toHaveBeenCalled()
 
@@ -148,18 +148,55 @@ test.each(["list", "graph"])("el modo %s muestra locales sin número, link ni ac
   expect(screen.queryByRole("menuitem", { name: /GitHub|Mergear|hold|review del bot|Rebasear|Copiar link/ })).toBeNull()
 })
 
-test.each(["list", "graph"])("en el modo %s, el click, Enter y el menú contextual abren la vista del PR local", async (mode) => {
+test.each([
+  ["list", true],
+  ["graph", true],
+  ["list", false],
+  ["graph", false],
+] as const)("en el modo %s, local=%s, el click, Enter y el menú abren la vista interna", async (mode, isLocal) => {
   localStorage.setItem("clanker.prs.mode", JSON.stringify(mode))
-  const { prs, openLocal } = await setup()
-  const local = prs.find((p): p is LocalPr => p.local !== null)!
-  const card = mode === "list" ? rowOf(local.local.title) : screen.getByText(local.local.title).closest<HTMLDivElement>("[role='group']")!
+  const { prs, openPr, host } = await setup()
+  const pr = prs.find((p) => (p.local !== null) === isLocal)!
+  const title = titleOf(pr)
+  const card = mode === "list" ? within(rowOf(title)).getByRole("button") : screen.getByText(title).closest<HTMLDivElement>("[role='group']")!
 
-  if (mode === "list") fireEvent.click(screen.getByText(local.local.title))
-  else fireEvent.keyDown(card, { key: "Enter" })
-  fireEvent.contextMenu(screen.getByText(local.local.title))
-  fireEvent.click(await screen.findByRole("menuitem", { name: /Ver PR local/ }))
+  fireEvent.click(screen.getByText(title))
+  fireEvent.keyDown(card, { key: "Enter" })
+  fireEvent.contextMenu(screen.getByText(title))
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Ver PR/ }))
 
-  expect(openLocal.mock.calls).toEqual([[local.id], [local.id]])
+  expect(openPr.mock.calls).toEqual([[pr.id], [pr.id], [pr.id]])
+  expect(host.openExternal).not.toHaveBeenCalled()
+})
+
+test.each(["list", "graph"])("en el modo %s, O y el menú abren un PR remoto en GitHub", async (mode) => {
+  localStorage.setItem("clanker.prs.mode", JSON.stringify(mode))
+  const { prs, host, openPr } = await setup()
+  const pr = prs.find((p) => p.state !== null)!
+  const title = titleOf(pr)
+  const card = mode === "list" ? within(rowOf(title)).getByRole("button") : screen.getByText(title).closest<HTMLDivElement>("[role='group']")!
+
+  fireEvent.focus(card)
+  fireEvent.keyDown(card, { key: "o" })
+  expect(host.openExternal).toHaveBeenCalledWith(pr.state!.url)
+  fireEvent.contextMenu(screen.getByText(title))
+  const item = await screen.findByRole("menuitem", { name: /Abrir PR en GitHub/ })
+  expect(item.textContent).toContain("O")
+  fireEvent.click(item)
+
+  expect(host.openExternal).toHaveBeenCalledTimes(2)
+  expect(openPr).not.toHaveBeenCalled()
+})
+
+test("O no abre GitHub mientras se escribe ni con modificadores", async () => {
+  const { prs, host } = await setup()
+  const pr = prs.find((p) => p.state !== null)!
+  fireEvent.focus(within(rowOf(titleOf(pr))).getByRole("button"))
+  fireEvent.keyDown(screen.getByPlaceholderText("Filtrar por título, #, branch…"), { key: "o" })
+  for (const modifier of ["metaKey", "ctrlKey", "altKey", "repeat"]) {
+    fireEvent.keyDown(document.body, { key: "o", [modifier]: true })
+  }
+  expect(host.openExternal).not.toHaveBeenCalled()
 })
 
 test("P y el menú contextual publican ya un PR local del sistema", async () => {
@@ -210,7 +247,7 @@ test("sin PRs abiertos el estado vacío dice qué esperar", async () => {
     <AppDataProvider value={createMemoryAppData(NOW)}>
       <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
         <TooltipProvider>
-          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}} onOpenLocal={() => {}}>
+          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}} onOpenPr={() => {}}>
             <PrsView prs={[]} unread={2} issueKeys={new Map()} loaded error={null} registered={[]} onOpenConnections={() => {}} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>
@@ -226,7 +263,7 @@ function renderEmpty(repos: Repo[], onOpenConnections = () => {}) {
     <AppDataProvider value={createMemoryAppData(NOW)}>
       <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
         <TooltipProvider>
-          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}} onOpenLocal={() => {}}>
+          <PrCommandsProvider prs={[]} projects={[]} onOpenRun={() => {}} onOpenPr={() => {}}>
             <PrsView prs={[]} unread={0} issueKeys={new Map()} loaded error={null} registered={repos} onOpenConnections={onOpenConnections} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>

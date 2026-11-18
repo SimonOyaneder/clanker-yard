@@ -298,15 +298,16 @@ export const LocalPrFile = z.object({ path: z.string(), additions: z.int().nulla
 export type LocalPrFile = z.infer<typeof LocalPrFile>;
 
 /**
- * `prs.localDetail`: lo que se ve de un PR local (stacks locales) sin GitHub, leído del repo en cada pedido. El diff es
+ * `prs.detail`: descripción, commits y diff de un PR local o remoto. El diff es
  * contra el punto donde la branch sale de su base (`git diff base...branch`, como GitHub), y `patch` se corta en
  * `LOCAL_PR_PATCH_MAX` caracteres (`truncated`).
  */
-export const LocalPrDetail = z.object({
+export const PrDetail = z.object({
   id: z.string(),
   repo: z.string(),
   branch: z.string(),
   base: z.string(),
+  baseSha: z.string(),
   title: z.string(),
   body: z.string(),
   head: z.string(),
@@ -315,11 +316,15 @@ export const LocalPrDetail = z.object({
   patch: z.string(),
   truncated: z.boolean(),
 });
-export type LocalPrDetail = z.infer<typeof LocalPrDetail>;
+export type PrDetail = z.infer<typeof PrDetail>;
+export const LocalPrDetail = PrDetail;
+export type LocalPrDetail = PrDetail;
 
 /** `prs.localCommitDiff`: el diff de un solo commit de un PR local (contra su padre), para revisarlo commit por commit. */
 export const LocalCommitDiff = z.object({ sha: z.string(), files: z.array(LocalPrFile), patch: z.string(), truncated: z.boolean() });
 export type LocalCommitDiff = z.infer<typeof LocalCommitDiff>;
+export const PrCommitDiff = LocalCommitDiff;
+export type PrCommitDiff = LocalCommitDiff;
 
 /** Hasta dónde llega el `patch` de `prs.localDetail`: más que esto no se lee en pantalla y congela la vista. */
 export const LOCAL_PR_PATCH_MAX = 2_000_000;

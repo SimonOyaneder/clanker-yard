@@ -3,8 +3,8 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 import { API_MAJOR, ChatId, ChatMessage, ChatProposal, type Contract, type Event, EventType, type PayloadOf, PrChat, type RunId, contract } from "./index";
 
 describe("contrato", () => {
-  test("CachedPr con repo exige reemplazar los cores de API 1", () => {
-    expect(API_MAJOR).toBeGreaterThan(1);
+  test("el detalle de PR exige reemplazar los cores de API 2 o anterior", () => {
+    expect(API_MAJOR).toBeGreaterThan(2);
   });
 
   test("exporta los routers system, events, connections, artifacts, issues, trackers, projects, packs, prs, chats, repos, runs, decisions, learnings, defs, metrics e imports con sus procedimientos", () => {
@@ -35,7 +35,7 @@ describe("contrato", () => {
     expect(Object.keys(contract.trackers)).toEqual(["projects"]);
     expect(Object.keys(contract.projects).sort()).toEqual(["boostIssue", "create", "defaults", "exportConfig", "get", "importConfig", "list", "pause", "queue", "resume", "setDefaults", "skipIssue", "summary", "update"]);
     expect(Object.keys(contract.packs)).toEqual(["list", "install", "remove"]);
-    expect(Object.keys(contract.prs)).toEqual(["get", "list", "refresh", "setHold", "merge", "requestReview", "rebase", "publishLocal", "localDetail", "localCommitDiff", "republish", "republishProgress"]);
+    expect(Object.keys(contract.prs)).toEqual(["get", "list", "refresh", "setHold", "merge", "requestReview", "rebase", "publishLocal", "detail", "commitDiff", "localDetail", "localCommitDiff", "republish", "republishProgress"]);
     expect(Object.keys(contract.chats)).toEqual(["get", "send", "interrupt", "reset", "proposal", "discard", "apply"]);
     expect(Object.keys(contract.repos).sort()).toEqual(["add", "detect", "list", "overview", "syncConfig", "testRecipe"]);
     expect(Object.keys(contract.runs).sort()).toEqual(["cancel", "forceOutcome", "get", "interrupt", "list", "pause", "resume", "retryStep", "start", "steerStep", "step", "transcript"]);
@@ -70,6 +70,14 @@ describe("contrato", () => {
     const schema = contract.events.list["~orpc"].inputSchema!["~standard"];
     expect(await schema.validate({})).toMatchObject({ value: { after: 0, limit: 100, filter: {} } });
     expect(await schema.validate({ limit: 501 })).toHaveProperty("issues");
+  });
+
+  test("prs.commitDiff exige los dos extremos del detalle y un SHA de commit válido", async () => {
+    const schema = contract.prs.commitDiff["~orpc"].inputSchema!["~standard"];
+    const input = { id: "pr_test", sha: "a".repeat(40), head: "b".repeat(40), base: "c".repeat(40) };
+    expect(await schema.validate(input)).toEqual({ value: input });
+    expect(await schema.validate({ id: input.id, sha: input.sha })).toHaveProperty("issues");
+    expect(await schema.validate({ ...input, sha: "--all" })).toHaveProperty("issues");
   });
 
   test("projects.create: un proyecto local no lleva trackerRef y uno de otro tracker lo necesita", async () => {

@@ -45,7 +45,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher" | "agentOptions"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher" | "agentOptions" | "workspaces"> & { flows: Flows } {
   const defs = createDefs({ store });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -86,6 +86,10 @@ export function apiDeps(
     projects,
     packs: createPacks({ defs }),
     repos,
+    workspaces: {
+      fetch: () => Promise.reject(new Error("este test no trae commits del remoto")),
+      fetchPr: () => Promise.reject(new Error("este test no trae commits del PR")),
+    },
     repoConfigSync: createRepoConfigSyncer({ defs, flows, repos }),
     // Sin remoto ni cuenta de GitHub: este core de pruebas no exporta.
     repoConfigExport: { exportDef: () => Promise.reject(new Error("este core de pruebas no exporta al repo")) },
