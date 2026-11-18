@@ -1,0 +1,22 @@
+<svg viewBox="0 0 1024 1024" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ícono de la app (Visor en loop, flecha sólida). Fuente de build/icon.icns: `npm run icon -w @clanker/desktop` lo regenera. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2b33"/>
+      <stop offset="1" stop-color="#101014"/>
+    </linearGradient>
+    <linearGradient id="glyph" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#cfcbe8"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity=".3"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" filter="url(#shadow)"/>
+  <rect x="104" y="104" width="816" height="816" rx="181" fill="none" stroke="#ffffff" stroke-opacity=".14" stroke-width="8"/>
+  <path d="M548 352 L422 352 A160 160 0 0 0 422 672 L602 672 A160 160 0 0 0 724.6 409.2" fill="none" stroke="url(#glyph)" stroke-width="56" stroke-linecap="round"/>
+  <path d="M670.6 344.9 L777.7 369.8 L676.6 454.7 Z" fill="url(#glyph)" stroke="url(#glyph)" stroke-width="18" stroke-linejoin="round"/>
+  <rect x="414" y="468" width="56" height="88" rx="28" fill="url(#glyph)"/>
+  <rect x="554" y="468" width="56" height="88" rx="28" fill="url(#glyph)"/>
+</svg>

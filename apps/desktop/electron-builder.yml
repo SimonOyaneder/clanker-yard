@@ -26,6 +26,8 @@ npmRebuild: false
 publish: null
 mac:
   category: public.app-category.developer-tools
+  # Sale de build/icon.svg con `npm run icon -w @clanker/desktop`.
+  icon: build/icon.icns
   identity: null
   target:
     - target: dir

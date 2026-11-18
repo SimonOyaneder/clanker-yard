@@ -114,6 +114,8 @@ function openMainWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  // La app empaquetada trae su ícono en el bundle (`build/icon.icns`); en desarrollo el Dock mostraría el de Electron.
+  if (!app.isPackaged && !isE2E && process.platform === "darwin") app.dock?.setIcon(path.join(app.getAppPath(), "build/icon.png"));
   // Con `CLANKER_HOME` no se toca el llavero.
   uiKey = process.env.CLANKER_HOME ? isolatedUiKey(process.env.CLANKER_HOME) : loadUiKey(path.join(app.getPath("userData"), "ui-key"), safeStorage);
   // El core se lanza como proceso (nunca se importa).

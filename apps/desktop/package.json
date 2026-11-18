@@ -8,6 +8,7 @@
     "dev": "npm run build -w @clanker/core && electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
+    "icon": "scripts/build-icon.sh",
     "e2e": "npm run build -w @clanker/core && electron-vite build && playwright test",
     "build:mac": "npm run build -w @clanker/core && npm run build -w @clanker/cli && electron-vite build && electron-builder --mac -c.electronVersion=$(node -p \"require('electron/package.json').version\")"
   },
