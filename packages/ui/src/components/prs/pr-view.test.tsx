@@ -2,8 +2,8 @@
 import type { Event } from "@clanker/api"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
-import { afterEach, beforeAll, expect, test, vi } from "vitest"
-import { AppDataProvider } from "@/app-data"
+import { afterEach, beforeEach, expect, test, vi } from "vitest"
+import { AppDataProvider, type AppData } from "@/app-data"
 import { type PrControls, PrView } from "@/components/prs/pr-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -13,6 +13,7 @@ import { HostProvider, type Host } from "@/host"
 import { LiveProvider } from "@/hooks/use-live"
 
 const NOW = Date.parse("2026-11-17T12:00:00Z")
+const scrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")
 let emit: (event: Event) => void
 
 vi.mock("@/hooks/use-events", () => ({
@@ -22,12 +23,20 @@ vi.mock("@/hooks/use-events", () => ({
   },
 }))
 
-beforeAll(() => {
+beforeEach(() => {
   Element.prototype.scrollIntoView = () => {}
+  vi.stubGlobal("ResizeObserver", class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  })
 })
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  vi.unstubAllGlobals()
+  if (scrollIntoView) Object.defineProperty(Element.prototype, "scrollIntoView", scrollIntoView)
+  else Reflect.deleteProperty(Element.prototype, "scrollIntoView")
 })
 
 async function setup(remote = false, error?: string, body?: string) {
@@ -98,15 +107,15 @@ test("abrir un commit muestra solo lo que cambió ese commit, y ] [ y A se mueve
   await openTab(/Commits 2/)
   fireEvent.click(await screen.findByText("test(entries): cubrir el caso sin entradas"))
 
-  expect(await screen.findByText("spec/models/entry_index_spec.rb")).toBeTruthy()
-  expect(screen.queryByText("app/models/entry_index.rb")).toBeNull()
+  expect(await screen.findByRole("button", { name: "spec/models/entry_index_spec.rb" })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "app/models/entry_index.rb" })).toBeNull()
 
   fireEvent.keyDown(window, { key: "[" })
-  expect(await screen.findByText("app/models/entry_index.rb")).toBeTruthy()
+  expect(await screen.findByRole("button", { name: "app/models/entry_index.rb" })).toBeTruthy()
   expect(screen.queryByText("spec/models/entry_index_spec.rb")).toBeNull()
 
   fireEvent.keyDown(window, { key: "a" })
-  expect(await screen.findByText("spec/models/entry_index_spec.rb")).toBeTruthy()
+  expect(await screen.findByRole("button", { name: "spec/models/entry_index_spec.rb" })).toBeTruthy()
   expect(screen.getByText("app/models/entry_index.rb")).toBeTruthy()
 })
 
@@ -196,12 +205,12 @@ test("un remoto muestra descripción, commits y diff con CI, review, merge y acc
 
   await openTab(/Commits 2/)
   fireEvent.click(await screen.findByText("test(entries): cubrir el caso sin entradas"))
-  expect(await screen.findByText("spec/models/entry_index_spec.rb")).toBeTruthy()
-  expect(screen.queryByText("app/models/entry_index.rb")).toBeNull()
+  expect(await screen.findByRole("button", { name: "spec/models/entry_index_spec.rb" })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "app/models/entry_index.rb" })).toBeNull()
   const detail = await data.prDetail(github.id)
   expect(diff).toHaveBeenCalledWith({ id: github.id, sha: detail.commits[1]!.sha, head: detail.head, base: detail.baseSha })
   fireEvent.keyDown(window, { key: "a" })
-  expect(await screen.findByText("app/models/entry_index.rb")).toBeTruthy()
+  expect(await screen.findByRole("button", { name: "app/models/entry_index.rb" })).toBeTruthy()
   expect(rowWith("return if entries.none?")?.dataset.kind).toBe("add")
   fireEvent.keyDown(screen.getByRole("combobox", { name: "Qué commits ver" }), { key: "Enter" })
   const listbox = await screen.findByRole("listbox")
@@ -227,7 +236,7 @@ test("solo relee el detalle por cambios del PR abierto o actualización explíci
   const { pr, github, detail, diff, onControls } = await setup(true)
   await openTab(/Commits 2/)
   fireEvent.click(await screen.findByText("test(entries): cubrir el caso sin entradas"))
-  expect(await screen.findByText("spec/models/entry_index_spec.rb")).toBeTruthy()
+  expect(await screen.findByRole("button", { name: "spec/models/entry_index_spec.rb" })).toBeTruthy()
   expect(detail).toHaveBeenCalledTimes(1)
   expect(diff).toHaveBeenCalledTimes(1)
   vi.useFakeTimers()
@@ -272,7 +281,7 @@ test("un diff de commit que falla permite reintentar sin recargar el detalle", a
 
   fireEvent.click(screen.getByRole("button", { name: "Reintentar" }))
 
-  expect(await screen.findByText("spec/models/entry_index_spec.rb")).toBeTruthy()
+  expect(await screen.findByRole("button", { name: "spec/models/entry_index_spec.rb" })).toBeTruthy()
   expect(screen.queryByRole("alert")).toBeNull()
   expect(detail).toHaveBeenCalledTimes(1)
   expect(diff).toHaveBeenCalledTimes(2)
@@ -283,4 +292,39 @@ test("un remoto sin descripción invita a agregarla en GitHub, no dice que falta
   await setup(true, undefined, "")
   expect(await screen.findByText("El PR no tiene descripción. Puedes agregarla en GitHub.")).toBeTruthy()
   expect(screen.queryByText(/se publicará con el título solo/)).toBeNull()
+})
+
+test("plegar el chat conserva la conversación, el composer y el detalle del PR", async () => {
+  const { detail } = await setup()
+  const input = await screen.findByRole("textbox", { name: "Mensaje para el chat" })
+  fireEvent.change(input, { target: { value: "Revisa los tests" } })
+  fireEvent.click(screen.getAllByRole("button", { name: "Plegar chat" })[0]!)
+  expect(screen.queryByRole("region", { name: "Chat del PR" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Abrir chat" }))
+  expect(screen.getByRole("textbox", { name: "Mensaje para el chat" })).toHaveProperty("value", "Revisa los tests")
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Mensaje para el chat" }), { key: "C", metaKey: true, shiftKey: true })
+  expect(screen.queryByRole("region", { name: "Chat del PR" })).toBeNull()
+  fireEvent.keyDown(window, { key: "C", metaKey: true, shiftKey: true })
+  expect(screen.getByRole("textbox", { name: "Mensaje para el chat" })).toHaveProperty("value", "Revisa los tests")
+  expect(detail).toHaveBeenCalledTimes(1)
+})
+
+test("un AppData sin capacidad de chat conserva el detalle sin ofrecer el prototipo", async () => {
+  const memory = createMemoryAppData(NOW)
+  const data: AppData = { ...memory }
+  for (const key of ["chat", "sendChat", "interruptChat", "resetChat", "chatProposal", "discardProposal", "applyProposal"] as const) delete data[key]
+  const pr = openPrsOf(await data.openPrs())[0]!
+  render(
+    <AppDataProvider value={data}>
+      <HostProvider value={{ openExternal: vi.fn() } as unknown as Host}>
+        <TooltipProvider>
+          <PrCommandsProvider prs={[pr]} projects={[]} onOpenRun={() => {}} onOpenPr={() => {}}>
+            <PrView pr={pr} onBack={() => {}} />
+          </PrCommandsProvider>
+        </TooltipProvider>
+      </HostProvider>
+    </AppDataProvider>,
+  )
+  expect(await screen.findByRole("heading", { name: "Qué cambia" })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: /Abrir chat|Plegar chat/ })).toBeNull()
 })

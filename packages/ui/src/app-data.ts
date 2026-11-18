@@ -259,6 +259,11 @@ export interface AppData extends Partial<ChatData> {
 const AppDataContext = createContext<AppData | null>(null)
 export const AppDataProvider = AppDataContext.Provider
 
+export function supportsChat(data: AppData): data is AppData & ChatData {
+  return !!(data.chat && data.sendChat && data.interruptChat && data.resetChat &&
+    data.chatProposal && data.discardProposal && data.applyProposal)
+}
+
 export function useAppData(): AppData {
   const data = useContext(AppDataContext)
   if (!data) throw new Error("useAppData fuera de AppDataProvider")
