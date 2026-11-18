@@ -42,7 +42,7 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
     { issue: a!, state: "ready", reason: "lista", base: { kind: "default" }, dependsOn: [] },
     { issue: b!, state: "blocked", skipped: true, reason: "saltada a mano" },
   ]
-  const actions = { setParallel: vi.fn(), setLanes: vi.fn(), boostIssue: vi.fn(), skipIssue: vi.fn(), goModule: vi.fn() }
+  const actions = { setParallel: vi.fn(), setLanes: vi.fn(), boostIssue: vi.fn(), skipIssue: vi.fn(), goModule: vi.fn(), startRun: vi.fn() }
   const host = { openExternal: vi.fn() } as unknown as Host
   const openPr = vi.fn()
   const prs = extra.prs ?? []
@@ -83,6 +83,15 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
   )
   return { actions, host, data, project: project!, a: a!, b: b!, openPr }
 }
+
+test("solo ofrece correr las issues ready de la cola, no las todo que esperan o se saltaron", async () => {
+  const { actions, project, a, b } = await setup()
+  const group = screen.getByRole("group", { name: `Correr en ${project.name}` })
+
+  expect(within(group).queryByText(b.title)).toBeNull()
+  fireEvent.click(within(group).getByText(a.title))
+  expect(actions.startRun).toHaveBeenCalledWith(project, a)
+})
 
 test("un local se busca por branch y título, abre el detalle y no ofrece acciones de GitHub", async () => {
   const local = openPrsOf(await createMemoryAppData(NOW).openPrs()).find((p) => p.local !== null)!

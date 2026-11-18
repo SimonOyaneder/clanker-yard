@@ -12,7 +12,7 @@ import type { StepTab } from "@/components/run/step-panel"
 import { KindIcon } from "@/components/inbox/decision-parts"
 import { LanesPage, ParallelPage, QueueCommands } from "@/components/project/project-palette"
 import { useRunCommands } from "@/components/run/run-commands"
-import { RunStatusIcon, isLive } from "@/components/project/status"
+import { RunStatusIcon } from "@/components/project/status"
 import {
   CommandDialog,
   CommandEmpty,
@@ -94,8 +94,8 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
   }
 
   const byId = new Map<string, CachedIssue>(issues.map((i) => [i.id, i]))
-  const live = new Set(runs.filter((r) => isLive(r.status)).map((r) => r.subject.id))
-  const runnable = current?.status === "active" ? issues.filter((i) => i.status === "todo" && !live.has(i.id)) : []
+  // Solo las que la cola lanzaría: una issue que espera a sus padres correría sobre la branch por defecto.
+  const runnable = current?.status === "active" && queue ? queue.flatMap((e) => (e.state === "ready" ? [e.issue] : [])) : []
   const ordered = [...barProjects(projects), ...projects.filter((p) => p.status === "archived")]
 
   if (lanesPage) return <LanesPage open={open} onOpenChange={close} onBack={() => setLanesPage(false)} />
