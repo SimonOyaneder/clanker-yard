@@ -458,6 +458,7 @@ describe("arranque", () => {
     expect(runtimes.map((r) => [r.id, r.available])).toEqual([
       ["claude-sdk", false],
       ["opencode", false],
+      ["codex", false],
     ]);
   });
 });

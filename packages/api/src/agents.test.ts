@@ -88,10 +88,11 @@ describe("Profile, Brief y Report", () => {
   });
 
   test("cada entrada del perfil elige su runtime, y solo uno de los conocidos", () => {
-    const profile = Profile.parse({ roles: { dev: { model: "opus" }, review: { runtime: "opencode", model: "openai/gpt-6.1-terra" } } });
+    const profile = Profile.parse({ roles: { dev: { model: "opus" }, review: { runtime: "opencode", model: "openai/gpt-6.1-terra" }, codex: { runtime: "codex", model: "gpt-5.4" } } });
     expect(profile.roles.dev?.runtime).toBeUndefined();
     expect(profile.roles.review?.runtime).toBe("opencode");
-    expect(Profile.safeParse({ roles: { x: { runtime: "codex", model: "o3" } } }).success).toBe(false);
+    expect(profile.roles.codex?.runtime).toBe("codex");
+    expect(Profile.safeParse({ roles: { x: { runtime: "unknown", model: "o3" } } }).success).toBe(false);
   });
 
   test("el brief exige el id de la corrida con prefijo", () => {

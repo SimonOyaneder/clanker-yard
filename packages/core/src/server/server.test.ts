@@ -378,10 +378,11 @@ describe("defs.agentOptions", () => {
     const client = createClient({ url: core.url, token: core.token, origin: "cli" });
 
     const { runtimes } = await client.defs.agentOptions();
-    expect(runtimes.map((r) => r.id)).toEqual(["claude-sdk", "opencode"]);
+    expect(runtimes.map((r) => r.id)).toEqual(["claude-sdk", "opencode", "codex"]);
     expect(runtimes[0]!.models.map((m) => m.id)).toContain("opus");
     expect(runtimes[0]!.efforts.map((e) => e.id)).toContain("xhigh");
     expect(runtimes[1]).toMatchObject({ available: false, models: [], message: "Este core no tiene el runtime opencode." });
+    expect(runtimes[2]).toMatchObject({ label: "Codex", available: false, models: [], message: "Este core no tiene el runtime codex." });
   });
 });
 
