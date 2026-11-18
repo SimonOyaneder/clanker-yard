@@ -1,13 +1,14 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { CodexMethods, CodexNotification, JsonValue, RateLimitSnapshot, RpcMessage, ThreadItem, Turn, TurnError } from "../../agents/codex/api";
+import type { CodexMethods, CodexNotification, JsonValue, RateLimitSnapshot, RpcError, RpcMessage, ThreadItem, Turn, TurnError } from "../../agents/codex/api";
 
 export const CODEX_FAKE_EVIDENCE = {
   version: "0.169.1",
   modelNotFound: "docs/codex-subscription.md §8: captura real",
   quota_exhausted: "según tipos, sin captura real",
-  login_expired: "según tipos, sin captura real",
+  login_expired: "account/read sin sesión y rechazo RPC de rateLimits/read: account_processor.rs, tag rust-v0.169.1",
   ordinaryUsageAllowed: "false: según tipos, sin captura real",
+  providerRetries: "error.willRetry: según tipos, sin captura real",
 };
 
 export interface FakeCodexOptions {
@@ -27,6 +28,16 @@ export interface FakeCodexOptions {
   models?: CodexMethods["model/list"]["result"]["data"];
   modelPageSize?: number;
   duplicateUsage?: boolean;
+  ordinaryUsageAllowed?: boolean | null;
+  rateLimits?: RateLimitSnapshot;
+  rateLimitsByLimitId?: Record<string, RateLimitSnapshot> | null;
+  providerRetries?: { error: TurnError; count: number };
+  turnStatus?: "completed" | "failed" | "interrupted";
+  turnError?: TurnError;
+  requestError?: { method: string; error: RpcError; after?: number };
+  holdAfterUsage?: boolean;
+  interruptWithoutCompletion?: boolean;
+  holdInterruptCompletion?: boolean;
 }
 
 export async function createFakeCodex(dir: string, options: FakeCodexOptions = {}) {
@@ -91,7 +102,8 @@ async function fakeProcess(
   let currentModel: string | undefined;
   let active: { threadId: string; turn: Turn } | undefined;
   let accountReply: (() => void) | undefined;
-  const limits: RateLimitSnapshot = {
+  let errorRequests = 0;
+  const limits: RateLimitSnapshot = options.rateLimits ?? {
     limitId: "codex",
     primary: { usedPercent: options.scenario === "quota_exhausted" ? 100 : 4, windowDurationMins: 10080, resetsAt: 1795542935 },
     secondary: null, credits: null, spendControlReached: false,
@@ -100,6 +112,7 @@ async function fakeProcess(
     const { threadId, turn } = active!;
     emit({ method: "turn/completed", params: { threadId, turn: { ...turn, status, error } } });
   };
+  if (options.holdInterruptCompletion) process.on("SIGUSR1", () => finish("interrupted"));
   const usage = { totalTokens: 112, inputTokens: 100, cachedInputTokens: 80, cacheWriteInputTokens: 0, outputTokens: 12, reasoningOutputTokens: 2 };
   const handle = async (message: RpcMessage) => {
     await fs.appendFile(options.requests, `${JSON.stringify(message)}\n`);
@@ -119,13 +132,21 @@ async function fakeProcess(
       return ok({ userAgent: "codex/0.169.1" });
     }
     if (!initialized) return error(-32600, "Not initialized");
+    if (options.requestError?.method === message.method && errorRequests++ >= (options.requestError.after ?? 0)) {
+      return send({ id: message.id, error: options.requestError.error });
+    }
     switch (message.method) {
       case "account/read":
         accountReply = () => ok({ account: options.scenario === "login_expired" ? null : { type: "chatgpt", email: options.accountEmail ?? null, planType: "self_serve_business_prolite", workspaceName: null }, requiresOpenaiAuth: true });
         if (!options.reverseReplies) accountReply();
         return;
       case "account/rateLimits/read":
-        return ok({ ordinaryUsageAllowed: options.scenario !== "quota_exhausted", rateLimits: limits, rateLimitsByLimitId: { codex: limits } });
+        if (options.scenario === "login_expired") return error(-32600, "codex account authentication required to read rate limits");
+        return ok({
+          ordinaryUsageAllowed: options.ordinaryUsageAllowed === undefined ? options.scenario !== "quota_exhausted" : options.ordinaryUsageAllowed,
+          rateLimits: limits,
+          rateLimitsByLimitId: options.rateLimitsByLimitId === undefined ? { codex: limits } : options.rateLimitsByLimitId,
+        });
       case "model/list":
         if (options.malformed) {
           process.stdout.write("{invalid\n");
@@ -157,7 +178,7 @@ async function fakeProcess(
         return ok({ thread: threads.get(params.threadId!) });
       case "turn/interrupt":
         ok({});
-        finish("interrupted");
+        if (!options.interruptWithoutCompletion && !options.holdInterruptCompletion) finish("interrupted");
         return;
       case "turn/start": {
         const responseIndex = state.turns++;
@@ -179,6 +200,11 @@ async function fakeProcess(
           finish("failed", failure);
           return;
         }
+        if (options.providerRetries) {
+          for (let i = 0; i < options.providerRetries.count; i++) {
+            emit({ method: "error", params: { threadId, turnId: turn.id, error: options.providerRetries.error, willRetry: true } });
+          }
+        }
         for (const tool of options.items ?? []) {
           emit({ method: "item/started", params: { threadId, turnId: turn.id, item: tool } });
           emit({ method: "item/completed", params: { threadId, turnId: turn.id, item: tool } });
@@ -190,7 +216,7 @@ async function fakeProcess(
         emit({ method: "thread/tokenUsage/updated", params: { threadId, turnId: turn.id, tokenUsage: { total: usage, last: usage, modelContextWindow: 200000 } } });
         if (options.duplicateUsage) emit({ method: "thread/tokenUsage/updated", params: { threadId, turnId: turn.id, tokenUsage: { total: usage, last: usage, modelContextWindow: 200000 } } });
         emit({ method: "account/rateLimits/updated", params: { rateLimits: { ...limits, spendControlReached: null } } });
-        finish("completed");
+        if (!options.holdAfterUsage) finish(options.turnStatus ?? "completed", options.turnError ?? null);
         return;
       }
       default:

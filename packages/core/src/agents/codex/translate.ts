@@ -15,6 +15,7 @@ export interface CodexTranslated {
   usage?: Usage;
   end?: Turn;
   error?: CodexFailure;
+  retry?: CodexFailure;
 }
 
 export function statusOfCodexError(error: TurnError): CodexFailure {
@@ -106,7 +107,10 @@ export function createCodexTranslator(threadId: string) {
 
   function fail(out: CodexTranslated, error: TurnError, turnId: string, willRetry: boolean): void {
     const failure = statusOfCodexError(error);
-    if (willRetry && failure.status === "error") return;
+    if (willRetry && failure.status === "error") {
+      out.retry = failure;
+      return;
+    }
     const key = JSON.stringify([turnId, error]);
     if (errors.has(key)) return;
     errors.add(key);

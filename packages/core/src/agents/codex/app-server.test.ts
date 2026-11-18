@@ -159,7 +159,12 @@ test.each([
   expect(events).toContainEqual(expect.objectContaining({ method: "error", params: expect.objectContaining({ willRetry: false, error: expect.objectContaining({ codexErrorInfo: kind }) }) }));
   expect(events.at(-1)).toMatchObject({ params: { turn: { status: "failed", error: { codexErrorInfo: kind } } } });
   if (scenario === "quota_exhausted") expect((await server.request("account/rateLimits/read", {})).ordinaryUsageAllowed).toBe(false);
-  if (scenario === "login_expired") expect((await server.request("account/read", {})).account).toBeNull();
+  if (scenario === "login_expired") {
+    expect((await server.request("account/read", {})).account).toBeNull();
+    await expect(server.request("account/rateLimits/read", {})).rejects.toMatchObject({
+      rpc: { code: -32600, message: "codex account authentication required to read rate limits" },
+    });
+  }
 });
 
 test("interrumpe un turno pendiente", async () => {

@@ -255,7 +255,7 @@ describe("cierre y errores de Codex", () => {
   test("errores transitorios reintentados no terminan el run, los finales sí", () => {
     const t = createCodexTranslator(THREAD);
     const failure = error("serverOverloaded");
-    expect(t.translate(failed(failure, true))).toEqual(empty);
+    expect(t.translate(failed(failure, true))).toMatchObject({ ...empty, retry: { status: "error", message: expect.stringContaining("falló") } });
     expect(t.translate(finished({ status: "failed", error: failure }))).toMatchObject({
       error: { status: "error" }, end: { status: "failed" },
     });
