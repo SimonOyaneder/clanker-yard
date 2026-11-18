@@ -227,9 +227,10 @@ describe("cierre y errores de Codex", () => {
   test.each([
     ["unauthorized", "login_expired"],
     ["usageLimitExceeded", "quota_exhausted"],
-    ["rateLimitExceeded", "quota_exhausted"],
+    ["rateLimitExceeded", "error"],
     [{ httpConnectionFailed: { httpStatusCode: 401 } }, "login_expired"],
-    [{ responseStreamConnectionFailed: { httpStatusCode: 429 } }, "quota_exhausted"],
+    [{ responseStreamConnectionFailed: { httpStatusCode: 429 } }, "error"],
+    [{ httpConnectionFailed: { httpStatusCode: 403 } }, "error"],
     ["modelNotFound", "error"],
     ["other", "error"],
   ])("%j se clasifica como %s", (info, status) => {
