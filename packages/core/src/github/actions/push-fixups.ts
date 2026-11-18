@@ -6,7 +6,7 @@ import { join } from "node:path";
 import * as z from "zod";
 import { ApplyArgs, cleanMessage, CONVENTIONAL_COMMIT, patchOf } from "../../commits/apply";
 import { preparePush } from "../../commits/prepare-push";
-import { branchCommits, fixupMessage, FIXUP_PREFIX, oldRange, routeHunks, type BranchCommit } from "../../commits/route";
+import { branchCommits, fixupMessage, FIXUP_PREFIX, hunkOwners, oldRange, routeHunks, type BranchCommit } from "../../commits/route";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
 import { diffBetween, listHunks, snapshotTree, type Hunk } from "../../git/tree";
 import { pullRequests, workspaces as workspacesTable } from "../../store/schema";
@@ -171,7 +171,7 @@ export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof Pus
     const planned: { message: string; hunks: Hunk[] }[] = [];
     if (unrouted.length > 0) {
       const targets = commits.filter((c) => !c.subject.startsWith(FIXUP_PREFIX));
-      const problems = route === undefined ? [] : routeProblems(route.commits, unrouted, targets, messagePattern);
+      const problems = route === undefined ? [] : await routeProblems(route.commits, unrouted, { targets, commits, messagePattern, owners: hunkOwners(workspaces, ws, commits) });
       if (route === undefined || problems.length > 0) {
         return {
           route: {
@@ -250,30 +250,50 @@ function intoTarget(targets: BranchCommit[], into: string): BranchCommit | undef
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-/** Lo que impide aplicar el reporte del committer, una línea por problema. Vacío: cubre cada hunk sin destino una vez. */
-function routeProblems(
-  commits: { message: string; hunks: string[]; into?: string }[],
+/**
+ * Lo que impide aplicar el reporte del committer, una línea por problema. Vacío: cubre cada hunk sin destino una vez.
+ * Un `into` anterior a un commit del que depende el hunk (el que creó su archivo, o el dueño de líneas que quita o
+ * que quedan pegadas) se rechaza aquí: el autosquash pondría el `fixup!` donde esas líneas aún no existen y chocaría.
+ */
+async function routeProblems(
+  route: { message: string; hunks: string[]; into?: string }[],
   unrouted: Hunk[],
-  targets: BranchCommit[],
-  messagePattern: string | undefined,
-): string[] {
+  { targets, commits, messagePattern, owners }: {
+    targets: BranchCommit[];
+    commits: BranchCommit[];
+    messagePattern: string | undefined;
+    owners: ReturnType<typeof hunkOwners>;
+  },
+): Promise<string[]> {
   const problems: string[] = [];
   const pattern = messagePattern === undefined ? CONVENTIONAL_COMMIT : new RegExp(messagePattern);
   const subjects = new Set(targets.map((c) => c.subject));
   const assigned = new Set<string>();
-  for (const [i, commit] of commits.entries()) {
+  for (const [i, commit] of route.entries()) {
     const subject = cleanMessage(commit.message).split("\n")[0]!;
     const label = commit.into === undefined ? `commit ${i + 1} "${subject}"` : `commit ${i + 1} (into ${commit.into})`;
+    const target = commit.into === undefined ? undefined : intoTarget(targets, commit.into);
     if (commit.into !== undefined) {
-      if (intoTarget(targets, commit.into) === undefined) problems.push(`[${label}] ${commit.into} no es el sha de un único commit del PR`);
+      if (target === undefined) problems.push(`[${label}] ${commit.into} no es el sha de un único commit del PR`);
     } else {
       if (!pattern.test(subject)) problems.push(`[${label}] el mensaje no cumple ${pattern}`);
       if (subjects.has(subject)) problems.push(`[${label}] repite el título de un commit del PR: si sus hunks son de ese commit, usa \`into\` con su sha`);
     }
     if (commit.hunks.length === 0) problems.push(`[${label}] no tiene hunks`);
     for (const id of commit.hunks) {
-      if (!unrouted.some((h) => h.id === id)) problems.push(`[${label}] usa el hunk ${id}, que no está entre los hunks sin destino`);
+      const hunk = unrouted.find((h) => h.id === id);
+      if (hunk === undefined) problems.push(`[${label}] usa el hunk ${id}, que no está entre los hunks sin destino`);
       else if (assigned.has(id)) problems.push(`[${label}] usa el hunk ${id}, que ya es de otro commit`);
+      else if (target !== undefined) {
+        const { removed, adjacent, born } = await owners(hunk);
+        const needed = commits[Math.max(removed ?? -1, adjacent, born)];
+        if (needed !== undefined && commits.indexOf(target) < commits.indexOf(needed)) {
+          problems.push(
+            `[${label}] el hunk ${id} (${hunk.path}) depende de ${needed.sha.slice(0, 9)} "${needed.subject}", posterior a ${commit.into}: ` +
+              `ahí su archivo o sus líneas todavía no existen y el autosquash chocaría. Usa \`into\` con ese commit o uno posterior`,
+          );
+        }
+      }
       assigned.add(id);
     }
   }

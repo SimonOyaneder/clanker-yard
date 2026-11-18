@@ -386,6 +386,50 @@ describe("pr.pushFixups", () => {
     expect(local("rev-parse", "HEAD")).toBe(head);
   });
 
+  test("un hunk que solo agrega líneas a un archivo que nació en la branch va a su creador o al dueño de sus líneas pegadas", async () => {
+    // `feat: mx` crea mx.txt, `feat: tail` le agrega líneas al final y `feat: later` toca otro archivo:
+    // antes de `feat: mx` el archivo no existe, y el autosquash chocaría con un modify/delete.
+    const mx = file(lines(20, "m"));
+    write("mx.txt", mx);
+    local("add", "mx.txt");
+    local("commit", "--quiet", "--message", "feat: mx");
+    write("mx.txt", mx + file(lines(5, "t")));
+    local("add", "mx.txt");
+    local("commit", "--quiet", "--message", "feat: tail");
+    await commitAndPush(file(lines(30)).replace("l2\n", "top\n").replace("l28\n", "bottom\n").replace("l15\n", "later\n"), "feat: later");
+    write("mx.txt", mx.replace("m1\n", "m1\nm added\n") + file(lines(5, "t")).replace("t3\n", "t3\nt added\n"));
+
+    const result = await pushFixups.run(args(), durableCtx());
+
+    expect(result.outcome).toBe("ok");
+    expect(subjects(remoteSha())).toEqual(["feat: top", "feat: bottom", "feat: mx", "feat: tail", "feat: later"]);
+    expect(inCommit(shaOf("feat: mx"))).toContain("+m added");
+    expect(inCommit(shaOf("feat: tail"))).toContain("+t added");
+    expect(inCommit(shaOf("feat: tail"))).not.toContain("m added");
+  });
+
+  test("un into anterior a un commit del que depende el hunk vuelve a route con el commit que sirve", async () => {
+    // Como el anterior: arreglar la línea 2 choca con la 3, de `feat: three`, si el fixup va a `feat: top`.
+    const three = file(lines(30)).replace("l2\n", "top\n").replace("l28\n", "bottom\n").replace("l3\n", "three\n");
+    await commitAndPush(three, "feat: three");
+    const head = local("rev-parse", "HEAD");
+    write("c.txt", three.replace("top\n", "top fixed\n"));
+    const into = (subject: string) => ({ commits: [{ message: "", hunks: ["h1"], into: shaOf(subject).slice(0, 9) }] });
+
+    const rejected = await pushFixups.run(args({ route: into("feat: top") }), durableCtx());
+
+    expect(rejected).toMatchObject({
+      outcome: "route",
+      output: { unrouted: ["h1"], failures: expect.stringContaining(`depende de ${shaOf("feat: three").slice(0, 9)} "feat: three"`) },
+    });
+    expect(local("rev-parse", "HEAD")).toBe(head);
+
+    const accepted = await pushFixups.run(args({ route: into("feat: three") }), durableCtx());
+
+    expect(accepted.outcome).toBe("ok");
+    expect(inCommit(shaOf("feat: three"))).toContain("+top fixed");
+  });
+
   test("sin cambios no hay nada que commitear y el push es noop", async () => {
     const head = local("rev-parse", "HEAD");
 
