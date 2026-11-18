@@ -1,5 +1,5 @@
 import type { CachedIssue, ClankerProject, Decision, QueueEntry, Run, RunId } from "@clanker/api"
-import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, ExternalLink, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, RotateCw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, Upload, X, Eye, Rows2, Columns2, ChevronLeft, ChevronRight, GitCommitHorizontal } from "lucide-react"
+import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, ExternalLink, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, RotateCw, Save, ScrollText, Settings2, Square, SquareCheck, SquareTerminal, Table2, Undo2, Unplug, Upload, X, Eye, Rows2, Columns2, ChevronLeft, ChevronRight, GitCommitHorizontal } from "lucide-react"
 import { PR_VIEW_KEYS, type PrControls } from "@/components/prs/pr-view"
 import { CHAT_KEYS } from "@/hooks/use-pr-chat"
 import type { ProjectTab } from "@/components/project/project-view"
@@ -497,6 +497,13 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
           <CommandItem onSelect={run(() => void actions.testClaude())}>
             <Bot /> Probar Claude
             <CommandShortcut>⇧⌘T</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={run(() => void actions.testCodex())}>
+            <SquareTerminal /> Conectar o probar Codex
+            <CommandShortcut>⇧⌘X</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={run(actions.disconnectCodex)}>
+            <Unplug /> Desconectar Codex
           </CommandItem>
           <CommandItem onSelect={run(actions.openNewProject)}>
             <Plus /> Nuevo proyecto

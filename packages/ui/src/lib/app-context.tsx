@@ -40,6 +40,10 @@ export interface AppActions {
   connectLinear: () => void
   /** Va a Conexiones, prueba Claude y avisa el resultado con un toast. */
   testClaude: () => Promise<void>
+  /** Va a Conexiones, prueba Codex (lo conecta si responde) y avisa el resultado con un toast. */
+  testCodex: () => Promise<void>
+  /** Va a Conexiones y pide confirmar la desconexión de Codex. */
+  disconnectCodex: () => void
   /**
    * Prueba ya, sin esperar al próximo reintento, los breakers abiertos que frenan al proyecto (todos sin proyecto, o
    * solo el de `scope`) y avisa con un toast cuáles se reanudaron y cuáles siguen en pausa.

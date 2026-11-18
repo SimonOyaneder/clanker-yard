@@ -1,11 +1,12 @@
-import type { ClaudeStatus, Connection } from "@clanker/api"
+import type { ClaudeStatus, CodexStatus, Connection } from "@clanker/api"
 import { describe, expect, test } from "vitest"
-import { claudeLook, codeCountdown, connectionOf, expiryLabel, needsAttention, statusLook, untilReset, usagePercent, usageTone } from "./connections"
+import { claudeLook, codeCountdown, codexLook, connectionOf, expiryLabel, needsAttention, statusLook, untilReset, usagePercent, usageTone, windowLabel } from "./connections"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 const DAY = 86_400_000
 const conn = (fields: Partial<Connection> = {}): Connection => ({ provider: "github", account: "octocat", scopes: [], status: "active", ...fields })
 const claude = (state: ClaudeStatus["state"]): ClaudeStatus => ({ mode: "subscription", state })
+const codex = (state: CodexStatus["state"]): CodexStatus => ({ state })
 
 describe("statusLook", () => {
   test("sin cuenta es sin configurar; activa, por vencer, vencida y revocada se distinguen", () => {
@@ -62,6 +63,33 @@ describe("needsAttention", () => {
     expect(needsAttention([conn({ expiresSoon: true })], null)).toBe(false)
     expect(needsAttention([], claude("quota_exhausted"))).toBe(false)
     expect(needsAttention([], claude("error"))).toBe(false)
+  })
+
+  test("Codex enciende con el login vencido o la cuota agotada, no con un error pasajero", () => {
+    expect(needsAttention([], null, codex("ready"))).toBe(false)
+    expect(needsAttention([], null, codex("login_expired"))).toBe(true)
+    expect(needsAttention([], null, codex("quota_exhausted"))).toBe(true)
+    expect(needsAttention([], null, codex("error"))).toBe(false)
+  })
+})
+
+describe("codexLook", () => {
+  test("sin cuenta es sin configurar aunque el core recuerde una prueba; con cuenta manda el estado", () => {
+    const account = conn({ provider: "codex", account: "subscription" })
+    expect(codexLook(undefined, codex("ready")).label).toBe("sin configurar")
+    expect(codexLook(account, codex("login_expired")).label).toBe("sesión vencida")
+    expect(codexLook(account, null).label).toBe("conectada")
+  })
+})
+
+describe("windowLabel", () => {
+  test("sale de la duración, no de una lista fija; sin duración usa su nombre", () => {
+    expect(windowLabel({ id: "codex:primary", windowMins: 300 })).toBe("5 h")
+    expect(windowLabel({ id: "codex:secondary", windowMins: 10_080 })).toBe("7 días")
+    expect(windowLabel({ id: "x", windowMins: 1440 })).toBe("1 día")
+    expect(windowLabel({ id: "x", windowMins: 90 })).toBe("90 min")
+    expect(windowLabel({ id: "codex:primary", label: "GPT-5", windowMins: null })).toBe("GPT-5")
+    expect(windowLabel({ id: "codex:primary", windowMins: null })).toBe("codex:primary")
   })
 })
 

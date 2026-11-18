@@ -8,6 +8,7 @@ import type {
   ClankerProject,
   ClaudeMode,
   ClaudeStatus,
+  CodexStatus,
   Connection,
   ConnectionProvider,
   AgentOptions,
@@ -224,6 +225,10 @@ export interface AppData extends Partial<ChatData> {
   testClaude(mode?: ClaudeMode): Promise<ClaudeStatus>
   /** La prueba antes de guardar: una key rechazada no queda guardada. */
   setClaudeApiKey(key: string): Promise<Connection>
+  /** Prueba Codex y lee el plan y su uso: no gasta cuota (no llama al modelo), así que el refresco puede ser seguido. Deja la cuenta `codex` conectada. */
+  testCodex(): Promise<CodexStatus>
+  /** Lo último que el core sabe de Codex, sin lanzar nada: la última prueba más el uso que trajeron las corridas. `null` si nunca se probó. */
+  codexStatus(): Promise<CodexStatus | null>
   disconnect(input: { provider: ConnectionProvider; account: string }): Promise<void>
   /** Las defs vigentes del kind, cada una con su versión vigente (de ahí salen los parámetros con default y las opciones de Ajustes); con `includeArchived` también las archivadas. Puede haber varias con el mismo slug: una por scope. */
   defs(kind: DefKind, opts?: { includeArchived?: boolean }): Promise<DefRecord[]>

@@ -1,4 +1,4 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ChatId, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, type Event, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type NewLearning, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
+import { type Breaker, type CachedIssue, type CachedPr, type ChatId, type ClankerProject, type ClaudeStatus, type CodexStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, type Event, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type NewLearning, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, ChatData, RepoRow } from "@/app-data"
 import { seedPrChats, type SeedPrChat } from "@/demo/seed-chats"
 import { SEED_REBASE, SEED_TECHLEAD } from "@/demo/seed-flows"
@@ -320,7 +320,20 @@ export function createMemoryAppData(now = Date.now()): AppData & ChatData {
   const connections: Connection[] = [
     { provider: "github", account: "octocat", scopes: ["repo"], status: "active", expiresAt: now + 60 * day, expiresSoon: false, auth: "pat" },
     { provider: "linear", account: "clanker-yard", scopes: ["read", "write"], status: "expired", expiresAt: now - 2 * day },
+    { provider: "codex", account: "subscription", scopes: ["plan:plus"], status: "active" },
   ]
+  // Codex conectado con las dos ventanas del plan Plus: 5 h y 7 días.
+  let codexStatus: CodexStatus | null = {
+    state: "ready",
+    version: "0.169.1",
+    plan: "plus",
+    usage: {
+      windows: [
+        { id: "codex:primary", windowMins: 300, usedPercent: 23, resetsAt: now + 3 * 3_600_000 },
+        { id: "codex:secondary", windowMins: 10_080, usedPercent: 61, resetsAt: now + 4 * day },
+      ],
+    },
+  }
   const connect = (c: Connection) => {
     const at = connections.findIndex((x) => x.provider === c.provider && x.account === c.account)
     if (at >= 0) connections[at] = c
@@ -904,9 +917,16 @@ export function createMemoryAppData(now = Date.now()): AppData & ChatData {
       if (key.startsWith("bad")) throw new Error("Anthropic rechazó la API key de Claude: revisa que sea válida y esté activa, y guárdala de nuevo.")
       return connect({ provider: "claude", account: "api-key", scopes: [], status: "active" })
     },
+    testCodex: async () => {
+      codexStatus ??= { state: "ready", version: "0.169.1", plan: "plus", usage: { windows: [{ id: "codex:primary", windowMins: 300, usedPercent: 0, resetsAt: Date.now() + 5 * 3_600_000 }] } }
+      connect({ provider: "codex", account: "subscription", scopes: ["plan:plus"], status: "active" })
+      return codexStatus
+    },
+    codexStatus: async () => codexStatus,
     disconnect: async ({ provider, account }) => {
       const at = connections.findIndex((c) => c.provider === provider && c.account === account)
       if (at >= 0) connections.splice(at, 1)
+      if (provider === "codex") codexStatus = null
     },
     defs: async (kind, opts) => defsStore.filter((d) => d.kind === kind && (opts?.includeArchived || d.archivedAt === null)).map((d) => ({ ...d })),
     defVersions: async (kind, defId) => {

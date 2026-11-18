@@ -1,4 +1,4 @@
-import type { ClaudeState, ClaudeStatus, Connection, ConnectionProvider } from "@clanker/api"
+import type { ClaudeState, ClaudeStatus, CodexState, CodexStatus, Connection, ConnectionProvider } from "@clanker/api"
 import { tone } from "@/lib/format"
 
 const DAY_MS = 86_400_000
@@ -63,9 +63,36 @@ export function claudeLook(connection: Connection | undefined, status: ClaudeSta
   return statusLook(connection)
 }
 
-/** `true` si algo está vencido o caído: lo que enciende el punto rojo de Conexiones en la barra lateral. */
-export function needsAttention(connections: Connection[], claude: ClaudeStatus | null): boolean {
-  return connections.some((c) => c.status !== "active") || (claude !== null && CLAUDE[claude.state].down)
+const CODEX: Record<CodexState, { label: string; tone: string; hint: string; down: boolean }> = {
+  ready: { label: "lista", tone: tone.green, hint: "Codex respondió con su sesión y su plan.", down: false },
+  not_installed: { label: "no instalado", tone: tone.red, hint: "No encuentro Codex en el PATH del core.", down: true },
+  outdated: { label: "versión antigua", tone: tone.amber, hint: "El Codex instalado es anterior a la versión mínima.", down: false },
+  login_required: { label: "sin sesión", tone: tone.red, hint: "Codex no tiene una sesión de ChatGPT iniciada.", down: true },
+  login_expired: { label: "sesión vencida", tone: tone.red, hint: "El login de Codex venció: hay que iniciar sesión de nuevo con `codex login`.", down: true },
+  quota_exhausted: { label: "cuota agotada", tone: tone.amber, hint: "Se agotó la cuota del plan; los pasos de agente con Codex esperan a que se renueve.", down: true },
+  error: { label: "con error", tone: tone.amber, hint: "La prueba falló por algo que no es el login ni la cuota; el detalle está en la tarjeta.", down: false },
+}
+
+/** El chip de Codex: lo último que dijo el core manda; sin eso, lo que sabe la base. */
+export function codexLook(connection: Connection | undefined, status: CodexStatus | null): ChipLook {
+  if (connection && status) return CODEX[status.state]
+  return statusLook(connection)
+}
+
+/** `true` si algo está vencido o caído: lo que enciende el punto rojo de Conexiones en la barra lateral. Codex cuenta también con la cuota agotada. */
+export function needsAttention(connections: Connection[], claude: ClaudeStatus | null, codex: CodexStatus | null = null): boolean {
+  return connections.some((c) => c.status !== "active") || (claude !== null && CLAUDE[claude.state].down) || (codex !== null && CODEX[codex.state].down)
+}
+
+const MINUTES_PER_DAY = 1440
+
+/** El rótulo de una ventana de uso de Codex por su duración: "5 h", "7 días", "1 día", "90 min"; sin duración, su nombre. */
+export function windowLabel(window: { id: string; label?: string; windowMins: number | null }): string {
+  const mins = window.windowMins
+  if (mins === null || mins <= 0) return window.label ?? window.id
+  if (mins % MINUTES_PER_DAY === 0) return mins === MINUTES_PER_DAY ? "1 día" : `${mins / MINUTES_PER_DAY} días`
+  if (mins % 60 === 0) return `${mins / 60} h`
+  return `${mins} min`
 }
 
 /** Porcentaje entero de 0 a 100 de una ventana de uso (`utilization` va de 0 a 1 y puede pasarse de 1). */

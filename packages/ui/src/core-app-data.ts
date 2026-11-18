@@ -55,6 +55,7 @@ const LIVE_EVENTS = [
   "pack.removed",
   "connection.changed",
   "connection.login_failed",
+  "connection.usage",
   "recipe.test_started",
   "recipe.test_output",
   "recipe.test_finished",
@@ -147,6 +148,8 @@ export function createCoreAppData(client: CoreClient): AppData {
     linearAuth: async () => (await client.connections.linearAuth()).url,
     testClaude: (mode) => client.connections.testClaude(mode ? { mode } : {}),
     setClaudeApiKey: (key) => client.connections.setClaudeApiKey({ key }),
+    testCodex: () => client.connections.testCodex({}),
+    codexStatus: () => client.connections.codexStatus(),
     disconnect: (input) => client.connections.disconnect(input),
     defs: (kind, opts) => client.defs.list({ kind, includeArchived: opts?.includeArchived ?? false }),
     defVersions: async (kind, id) => {

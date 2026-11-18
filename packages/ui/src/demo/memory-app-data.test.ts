@@ -50,13 +50,27 @@ test("marcar hold apaga la oferta de merge y quitarlo la devuelve; mergear un PR
   expect(openPrsOf(await data.openPrs()).find((p) => p.id === ready.id)!.state?.merge.offer).toBe(true)
 })
 
-test("las conexiones de ejemplo traen GitHub en regla, Linear vencida y Claude sin configurar", async () => {
-  const connections = await createMemoryAppData(NOW).connections()
+test("las conexiones de ejemplo traen GitHub en regla, Linear vencida, Claude sin configurar y Codex con dos ventanas", async () => {
+  const data = createMemoryAppData(NOW)
+  const connections = await data.connections()
 
   expect(connections.map((c) => [c.provider, c.status])).toEqual([
     ["github", "active"],
     ["linear", "expired"],
+    ["codex", "active"],
   ])
+  expect((await data.codexStatus())?.usage?.windows.map((w) => w.windowMins)).toEqual([300, 10_080])
+})
+
+test("desconectar Codex olvida su estado; probarlo lo vuelve a conectar", async () => {
+  const data = createMemoryAppData(NOW)
+
+  await data.disconnect({ provider: "codex", account: "subscription" })
+  expect(await data.codexStatus()).toBeNull()
+  expect((await data.connections()).some((c) => c.provider === "codex")).toBe(false)
+
+  expect((await data.testCodex()).state).toBe("ready")
+  expect((await data.connections()).some((c) => c.provider === "codex" && c.status === "active")).toBe(true)
 })
 
 test("pegar un PAT conecta GitHub, un PAT rechazado dice por qué y no cambia nada", async () => {

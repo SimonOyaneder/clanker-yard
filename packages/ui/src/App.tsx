@@ -29,6 +29,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useClaudePlan } from "@/hooks/use-claude-plan"
+import { useCodexPlan } from "@/hooks/use-codex-plan"
 import { useDecisionResolver } from "@/hooks/use-decision-resolver"
 import { useHostBridge } from "@/hooks/use-host-bridge"
 import { useNavHistory } from "@/hooks/use-nav-history"
@@ -139,8 +140,11 @@ function Shell() {
   const linearLogin = useLinearLogin(linearConnections, connectionsQuery.reload)
   const startLinearLogin = linearLogin.start
   const testClaude = claudePlan.test
+  const codexPlan = useCodexPlan(connectionsQuery.data, connectionsQuery.reload)
+  const testCodex = codexPlan.test
+  const [codexDisconnect, setCodexDisconnect] = useState(false)
   // El punto rojo de Conexiones: algo vencido, revocado o caído.
-  const connectionsAlert = needsAttention(connections, claudePlan.status)
+  const connectionsAlert = needsAttention(connections, claudePlan.status, codexPlan.status)
 
   const [slug, setSlug] = useState<string | null>(() => readPref<string | null>("slug", null))
   const [runId, setRunId] = useState<RunId | null>(null)
@@ -253,6 +257,15 @@ function Shell() {
     const status = await testClaude()
     if (status) toast(`Claude: ${status.state === "ready" ? "lista" : (status.message ?? status.state)}`)
   }, [goConnections, testClaude])
+  const probeCodex = useCallback(async () => {
+    goConnections()
+    const status = await testCodex()
+    if (status) toast(`Codex: ${status.state === "ready" ? "lista" : (status.message ?? status.state)}`)
+  }, [goConnections, testCodex])
+  const disconnectCodex = useCallback(() => {
+    goConnections()
+    setCodexDisconnect(true)
+  }, [goConnections])
 
   const goTab = useCallback((to: ProjectTab) => go({ module: "projects", runId: null, tab: to }), [go])
   // Cada paso de la configuración lleva a donde se hace: Linear y Claude además arrancan el login o la prueba.
@@ -292,6 +305,8 @@ function Shell() {
       goConnections,
       connectLinear,
       testClaude: probeClaude,
+      testCodex: probeCodex,
+      disconnectCodex,
       ...projectActions,
       editQueueFilters: () => {
         setSettingsFocus("queue")
@@ -308,7 +323,7 @@ function Shell() {
       openExternal: host.openExternal,
       refresh,
     }),
-    [selectProject, go, goInbox, host, refresh, goConnections, connectLinear, probeClaude, openDecision, setSidebarOpen, sidebarOpen, projectActions],
+    [selectProject, go, goInbox, host, refresh, goConnections, connectLinear, probeClaude, probeCodex, disconnectCodex, openDecision, setSidebarOpen, sidebarOpen, projectActions],
   )
 
   useHostBridge({
@@ -346,6 +361,7 @@ function Shell() {
     goTab,
     connectLinear,
     probeClaude,
+    probeCodex,
     retryBreakers: () => void actions.retryBreakers(module === "projects" ? project : null),
     undoDecision: undo,
     undoLearnings,
@@ -379,6 +395,7 @@ function Shell() {
           learningsBadge={toReview}
           connectionsAlert={connectionsAlert}
           plan={claudePlan}
+          codexPlan={codexPlan}
           setup={setup ? { steps: setup, onStep: runSetupStep } : null}
           prsBadge={prsQuery.data ? (prsNeedingAction ? { count: prsNeedingAction, tone: "red" } : prsReady ? { count: prsReady, tone: "green" } : { count: openPrs.length, tone: "muted" }) : null}
           connected={live.connected}
@@ -480,7 +497,7 @@ function Shell() {
             <main className={cn("min-h-0 flex-1 overflow-y-auto transition-opacity", stale && "pointer-events-none opacity-50")}>
               <div className="px-6 pt-5 pb-10">
                 <QueryGate query={connectionsQuery}>
-                  {() => <ConnectionsView connections={connections} projects={projects} plan={claudePlan} linearLogin={linearLogin} onChanged={connectionsQuery.reload} />}
+                  {() => <ConnectionsView connections={connections} projects={projects} plan={claudePlan} codexPlan={codexPlan} codexDisconnect={codexDisconnect} onCodexDisconnectChange={setCodexDisconnect} linearLogin={linearLogin} onChanged={connectionsQuery.reload} />}
                 </QueryGate>
               </div>
             </main>

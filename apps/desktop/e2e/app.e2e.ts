@@ -193,7 +193,7 @@ test("screenshots de cada vista en claro y oscuro", async ({ window: page }) => 
 // El estado de las conexiones del core de demo cambia con este archivo (ver `packages/testkit/scripts/demo-core.ts`).
 function setDemoControl(
   home: string,
-  control: { clockDays?: number; claude?: string; closeAlert?: boolean; githubDeny?: boolean; githubRefresh?: "rejected"; githubInstalled?: boolean },
+  control: { clockDays?: number; claude?: string; codex?: string; closeAlert?: boolean; githubDeny?: boolean; githubRefresh?: "rejected"; githubInstalled?: boolean },
 ): void {
   writeFileSync(join(home, "demo-control.json"), JSON.stringify(control));
 }
@@ -213,7 +213,7 @@ test("conexiones sin configurar: cada tarjeta dice qué hacer", async ({ window:
   await sidebar(page).getByRole("button", { name: "Conexiones" }).click();
   await expect(page.getByRole("heading", { name: "Conexiones" })).toBeVisible();
 
-  for (const name of ["GitHub", "Linear", "Claude"]) await expect(card(page, name).getByText("sin configurar")).toBeVisible();
+  for (const name of ["GitHub", "Linear", "Claude", "Codex"]) await expect(card(page, name).getByText("sin configurar")).toBeVisible();
   await expect(card(page, "Linear").getByRole("button", { name: "Conectar con Linear" })).toBeVisible();
   // El repo sin receta no se puede probar; la tabla trae los tres repos de la demo.
   await expect(page.getByRole("row", { name: /demo-rota/ }).getByText("inválida")).toBeVisible();
@@ -270,9 +270,40 @@ test("probar Claude muestra el plan y su uso, y la barra vuelve al pie de la bar
   await expect(claude.getByText("Claude Code 2.1.325 · plan max")).toBeVisible();
   await expect(claude.getByRole("meter", { name: /ventana de 5 h/ })).toHaveAttribute("aria-valuenow", "15");
   await expect(claude.getByRole("meter", { name: /ventana de 7 días/ })).toHaveAttribute("aria-valuenow", "42");
-  await expect(sidebar(page).getByRole("meter", { name: /ventana de 5 h/ })).toHaveAttribute("aria-valuenow", "15");
+  await expect(sidebar(page).getByRole("meter", { name: /de Claude, ventana de 5 h/ })).toHaveAttribute("aria-valuenow", "15");
   await expect(sidebar(page).getByLabel("Algo está vencido o caído")).toBeHidden();
   await snapBoth(page, "conexiones-ok");
+});
+
+test("conectar Codex muestra el plan y sus ventanas en la tarjeta y debajo del plan de Claude en la barra lateral", async ({ window: page }) => {
+  const codex = card(page, "Codex");
+  await codex.getByRole("button", { name: "Conectar", exact: true }).click();
+
+  await expect(codex.getByText("lista", { exact: true })).toBeVisible();
+  await expect(codex.getByText("Codex 0.169.1 · plan plus")).toBeVisible();
+  await expect(codex.getByRole("button", { name: "Probar", exact: true })).toBeVisible();
+  // Los rótulos salen de la duración de cada ventana que trae el app-server falso (300 y 10 080 min).
+  await expect(codex.getByRole("meter", { name: "Uso del plan de Codex, ventana de 5 h" })).toHaveAttribute("aria-valuenow", "23");
+  await expect(codex.getByRole("meter", { name: "Uso del plan de Codex, ventana de 7 días" })).toHaveAttribute("aria-valuenow", "61");
+  const usage = sidebar(page).getByRole("region", { name: "Uso del plan de Codex" });
+  await expect(usage.getByRole("meter", { name: /ventana de 7 días/ })).toHaveAttribute("aria-valuenow", "61");
+  await expect(sidebar(page).getByRole("region", { name: "Uso del plan de Claude" })).toBeVisible();
+  await expect(sidebar(page).getByLabel("Algo está vencido o caído")).toBeHidden();
+  await snapBoth(page, "conexiones-codex");
+});
+
+test("con la cuota de Codex agotada, la barra lateral dice cuándo se renueva y se enciende el punto rojo", async ({ home, window: page }) => {
+  setDemoControl(home, { codex: "quota_exhausted" });
+  const codex = card(page, "Codex");
+  await codex.getByRole("button", { name: "Probar", exact: true }).click();
+
+  await expect(codex.getByText("cuota agotada", { exact: true })).toBeVisible();
+  await expect(sidebar(page).getByRole("region", { name: "Uso del plan de Codex" }).getByText(/^Cuota agotada · se renueva /)).toBeVisible();
+  await expect(sidebar(page).getByLabel("Algo está vencido o caído")).toBeVisible();
+  await snapBoth(page, "conexiones-codex-cuota");
+  setDemoControl(home, {});
+  await codex.getByRole("button", { name: "Probar", exact: true }).click();
+  await expect(codex.getByText("lista", { exact: true })).toBeVisible();
 });
 
 test("probar la receta de un repo muestra su log en vivo en un Sheet", async ({ window: page }) => {

@@ -1,8 +1,9 @@
 import type { ClankerProject, Run } from "@clanker/api"
 import { BookCheck, ChevronRight, Copy, GitPullRequest, Inbox, Keyboard, Plug, Plus, RefreshCw, Search, Settings, Workflow } from "lucide-react"
-import { PlanUsage } from "@/components/connections/plan-usage"
+import { CodexPlanUsage, PlanUsage } from "@/components/connections/plan-usage"
 import { SetupProgress } from "@/components/setup-checklist"
 import type { ClaudePlan } from "@/hooks/use-claude-plan"
+import type { CodexPlan } from "@/hooks/use-codex-plan"
 import type { CoreState } from "@/host"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -42,6 +43,7 @@ interface Props {
   /** Algo está vencido o caído: enciende el punto rojo de Conexiones. */
   connectionsAlert: boolean
   plan: ClaudePlan
+  codexPlan: CodexPlan
   /** La configuración inicial; `null` mientras no llegan las conexiones, los repos y los proyectos. */
   setup: { steps: SetupStep[]; onStep: (id: SetupStepId) => void } | null
   prsBadge: { count: number; tone: "red" | "green" | "muted" } | null
@@ -96,7 +98,7 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ projects, module, inboxBadge, learningsBadge, liveRuns, selected, connectionsAlert, plan, setup, prsBadge, connected, error, core }: Props) {
+export function AppSidebar({ projects, module, inboxBadge, learningsBadge, liveRuns, selected, connectionsAlert, plan, codexPlan, setup, prsBadge, connected, error, core }: Props) {
   const actions = useAppActions()
   const go = (to: Module) => () => actions.goModule(to)
   const status = footerStatus(core, { error, connected })
@@ -261,6 +263,7 @@ export function AppSidebar({ projects, module, inboxBadge, learningsBadge, liveR
       <SidebarFooter className="gap-2.5 border-t border-sidebar-border px-3 pt-3 pb-2">
         {setup ? <SetupProgress steps={setup.steps} onStep={setup.onStep} /> : null}
         <PlanUsage plan={plan} />
+        <CodexPlanUsage plan={codexPlan} />
         <div className="flex items-center justify-between gap-2">
           <Hint label="Actualizar ahora" keys="⌘R" side="top">
             <button type="button" onClick={actions.refresh} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground">
