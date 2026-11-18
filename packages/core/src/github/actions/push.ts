@@ -48,11 +48,13 @@ export async function pushOrThrow(
   workspaces: Workspaces,
   ws: WorkspaceRef,
   account: string,
-  { council }: { council: boolean },
+  opts: { council: boolean; expectedHead?: string },
 ): Promise<void> {
-  const outcome = await workspaces.push(ws, { council });
+  const outcome = await workspaces.push(ws, opts);
   if (outcome === "lease-rejected") {
-    throw new PermanentActionError(`${ws.branch} ya no está donde el core la dejó en el remoto: alguien más pusheó.`);
+    throw new PermanentActionError(opts.expectedHead
+      ? `${ws.branch} cambió en la máquina o en el remoto: revisa el PR antes de volver a publicar.`
+      : `${ws.branch} ya no está donde el core la dejó en el remoto: alguien más pusheó.`);
   }
   if (outcome === "unauthorized") {
     throw githubUnauthorized(account, `pushear ${ws.branch}`);

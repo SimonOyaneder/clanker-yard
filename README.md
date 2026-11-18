@@ -130,9 +130,10 @@ clanker prs list-local
 clanker prs show-local <id> [--commit <sha>] [--json]
 clanker prs edit-local <id> --title "Título" --body-file descripcion.md
 clanker prs apply-local <id> --head <sha-de-show-local> --patch cambio.diff
+clanker prs publish-local <id>
 ```
 
-El patch agrega un commit local, sin push.
+El patch agrega un commit local, sin push. `publish-local` solo solicita autorización: revisa y aprueba en la **Bandeja** de la app.
 
 `clanker` sin argumentos lista todos los comandos. Conecta el MCP para usar Clanker Yard desde Claude Code:
 

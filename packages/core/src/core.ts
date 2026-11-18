@@ -28,7 +28,7 @@ import { prWaits, signalPr } from "./github/pr-waits";
 import { createMergeScope } from "./github/merge-scope";
 import { createPrs } from "./github/prs";
 import { prPublishAction } from "./github/actions/publish";
-import { prPromoteAction, prSaveLocalAction } from "./github/actions/promote";
+import { prPromoteAction, prSaveLocalAction, prValidateLocalPublishAction } from "./github/actions/promote";
 import { stackRestackAction, stackRestackRewrittenAction } from "./github/actions/restack";
 import { prPushFixupsAction } from "./github/actions/push-fixups";
 import { prReplayAction, prSupersedeAction } from "./github/actions/replay-supersede";
@@ -294,6 +294,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   flows.registerAction(commitsApplyAction({ workspaces, recipes }));
   flows.registerAction(prPublishAction({ store, workspaces, recipes, repoConfig: repos.config, connections: opts.connections, packs }));
   flows.registerAction(prPromoteAction({ store, workspaces, repoConfig: repos.config, connections: opts.connections }));
+  flows.registerAction(prValidateLocalPublishAction({ store, workspaces, repoConfig: repos.config }));
   flows.registerAction(prSaveLocalAction({ store, workspaces, repoConfig: repos.config }));
   flows.registerAction(prApplyLocalPatchAction({ store }));
   flows.registerAction(workspaceCombinedBaseMergeAction({ store, workspaces, repoConfig: repos.config }));

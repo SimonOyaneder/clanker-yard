@@ -1,13 +1,14 @@
-import type { PrRef, RepoId, RunId } from "@clanker/api";
+import { APPROVE_LOCAL_PUBLISH, DecisionId, type PrRef, type RepoId, type RunId } from "@clanker/api";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
 import { PermanentActionError, type ActionDef } from "../../flows/catalog";
-import { combinedBases, prParents, pullRequests, runs, workspaces as workspacesTable } from "../../store/schema";
+import { combinedBases, decisions, localPublishRequests, prParents, pullRequests, runs, workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
 import type { RepoConfig } from "../../repos/repos";
 import { WorkspaceOutput, type Workspaces } from "../../workspaces/workspaces";
 import { prById } from "../pr-rows";
+import { localPublishFingerprint } from "../local-publish";
 import { pushOrThrow } from "./push";
 import { assignOrNote, findOpenPull, openPull, type Pull } from "./pulls";
 
@@ -25,7 +26,58 @@ const PromoteArgs = z.object({
   prId: z.string().min(1),
   /** La base del PR en GitHub; por defecto la `base_ref` de la fila (la branch por defecto tras un restack). */
   base: z.string().min(1).nullish(),
+  approval: DecisionId.nullish(),
 });
+const ApprovedArgs = PromoteArgs.required({ approval: true }).extend({ approval: DecisionId });
+
+/** No corre la receta de una revisión distinta de la que la persona aprobó. */
+export function prValidateLocalPublishAction(deps: Pick<PrPromoteDeps, "store" | "workspaces" | "repoConfig">): ActionDef<typeof ApprovedArgs> {
+  return {
+    name: "pr.validateLocalPublish",
+    args: ApprovedArgs,
+    outcomes: ["ok"],
+    effects: "local",
+    async run({ ws, prId, base, approval }, ctx) {
+      const row = prById(deps.store.db, prId);
+      if (!row || row.state !== "local") throw staleApproval();
+      const { remote } = deps.repoConfig(row.repoId);
+      const { head } = await validateApproval(deps, { row, remote, ws, approval, runId: ctx.runId, target: base ?? row.baseRef });
+      return { outcome: "ok", output: { head } };
+    },
+  };
+}
+
+async function validateApproval(
+  { store, workspaces }: Pick<PrPromoteDeps, "store" | "workspaces">,
+  { row, remote, ws, approval, runId, target }: {
+    row: NonNullable<ReturnType<typeof prById>>;
+    remote: RepoConfig["remote"];
+    ws: z.infer<typeof WorkspaceOutput>;
+    approval: DecisionId;
+    runId: RunId;
+    target: string;
+  },
+) {
+  const requested = store.db.select({ fingerprint: localPublishRequests.fingerprint, resolution: decisions.resolution }).from(localPublishRequests)
+    .innerJoin(decisions, eq(decisions.id, localPublishRequests.decisionId))
+    .where(and(eq(localPublishRequests.decisionId, approval), eq(localPublishRequests.prId, row.id),
+      eq(decisions.status, "answered"), eq(decisions.resolvedBy, "ui"), eq(decisions.runId, runId))).get();
+  const workspace = store.db.select().from(workspacesTable).where(eq(workspacesTable.id, ws.workspaceId)).get();
+  if (!requested || requested.resolution?.option !== APPROVE_LOCAL_PUBLISH || !remote || !row.owned ||
+      target !== row.baseRef || row.headRef !== ws.branch || workspace?.holderRunId !== runId ||
+      workspace.repoId !== row.repoId || workspace.path !== ws.path || workspace.branch !== row.headRef ||
+      workspace.fencingToken !== ws.fencingToken) throw staleApproval();
+  const head = await workspaces.git(ws, "rev-parse", "HEAD");
+  if (requested.fingerprint !== localPublishFingerprint(row, remote, head)) throw staleApproval();
+  if (await workspaces.git(ws, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")) {
+    throw new PermanentActionError("El PR tiene cambios sin commitear. Revísalos antes de solicitar la publicación otra vez.");
+  }
+  return { head };
+}
+
+function staleApproval() {
+  return new PermanentActionError("El PR o su destino cambió desde la aprobación. Revisa el PR y solicita la publicación otra vez.");
+}
 
 /**
  * `pr.promote { ws, prId, base? }` (stacks locales): publica en GitHub un PR que vivía solo en la máquina (fila
@@ -44,7 +96,7 @@ export function prPromoteAction(deps: PrPromoteDeps): ActionDef<typeof PromoteAr
     args: PromoteArgs,
     outcomes: ["ok"],
     effects: "remote",
-    async run({ ws, prId, base }, ctx) {
+    async run({ ws, prId, base, approval }, ctx) {
       const row = prById(store.db, prId);
       if (!row) throw new PermanentActionError(`No existe el PR ${prId}.`);
       const { remote } = deps.repoConfig(row.repoId);
@@ -55,16 +107,22 @@ export function prPromoteAction(deps: PrPromoteDeps): ActionDef<typeof PromoteAr
       }
       const [owner = "", name = ""] = remote.repo.split("/");
       const target = base ?? row.baseRef;
+      const approvedHead = approval
+        ? (await validateApproval(deps, { row, remote, ws, approval, runId: ctx.runId, target })).head
+        : undefined;
 
       const head = await ctx.once("push", async () => {
-        await pushOrThrow(workspaces, ws, remote.account, { council: false });
-        return workspaces.git(ws, "rev-parse", "HEAD");
+        await pushOrThrow(workspaces, ws, remote.account, approvedHead ? { council: true, expectedHead: approvedHead } : { council: false });
+        return approvedHead ?? workspaces.git(ws, "rev-parse", "HEAD");
       });
 
       const pull = await ctx.once("pr", async () => {
         workspaces.validate(ws);
         const client = deps.connections.githubClient(remote.account);
         const existing = await findOpenPull(client, owner, name, row.headRef);
+        if (approvedHead && existing && existing.head.sha !== approvedHead) {
+          throw new PermanentActionError(`${row.headRef} ya tiene un PR en GitHub con otra punta; revísalo antes de volver a publicar.`);
+        }
         const pull = existing ?? (await openPull(client, owner, name, { title: row.title ?? row.headRef, body: row.body ?? "", head: row.headRef, base: target, draft: true }));
         record(store, { prId, repoId: row.repoId, repo: remote.repo, pull, base: target, runId: ctx.runId });
         if (!existing) await assignOrNote(store, client, ctx.runId, { owner, repo: name, number: pull.number, assignee: remote.account });

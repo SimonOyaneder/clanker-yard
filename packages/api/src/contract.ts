@@ -438,6 +438,13 @@ const prs = {
       annotations: { destructiveHint: true, openWorldHint: false },
     },
   }).input(LocalPrPatch).output(z.object({ runId: RunId })),
+  requestLocalPublish: base.meta({
+    mcp: {
+      action: "request_local_pr_publish",
+      description: "Solicita publicar un PR local por id interno. Devuelve una decisión que una persona debe aprobar en la Bandeja de la app. La solicitud no hace push ni crea un PR en GitHub.",
+      annotations: SAFE_IDEMPOTENT,
+    },
+  }).input(LocalPrId).output(z.object({ decisionId: DecisionId })),
   /**
    * Rehace los PRs abiertos del sistema con la branch (`eng-1234-slug`), el autor y los commits de las reglas de hoy, en
    * orden de stack (los padres antes que los hijos): el mismo cambio, abierto como PR nuevo ("Reemplaza a #n") y el

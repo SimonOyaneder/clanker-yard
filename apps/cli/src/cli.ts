@@ -5,7 +5,7 @@ import { mcp } from "./mcp";
 import { metricsCompareCommand } from "./metrics-compare";
 import { projectsList } from "./projects";
 import { prsRepublish } from "./prs";
-import { prsApplyLocal, prsEditLocal, prsListLocal, prsShowLocal } from "./prs-local";
+import { prsApplyLocal, prsEditLocal, prsListLocal, prsPublishLocal, prsShowLocal } from "./prs-local";
 import { runsGet, runsStart } from "./runs";
 import { status } from "./status";
 
@@ -21,6 +21,7 @@ const commands: Record<string, Command> = {
   "prs show-local": prsShowLocal,
   "prs edit-local": prsEditLocal,
   "prs apply-local": prsApplyLocal,
+  "prs publish-local": prsPublishLocal,
   "prs republish": prsRepublish,
   mcp,
 };

@@ -124,3 +124,14 @@ export const prsApplyLocal: Command = {
     ctx.write(`Sigue el progreso con: clanker events tail --run ${runId} --follow`);
   },
 };
+
+export const prsPublishLocal: Command = {
+  usage: "clanker prs publish-local <id>",
+  async run(args, ctx) {
+    const { positionals } = parseArgs({ args, allowPositionals: true });
+    const id = localId(positionals, prsPublishLocal.usage);
+
+    const { decisionId } = await (await ctx.client()).prs.requestLocalPublish({ id });
+    ctx.write(`Publicación solicitada (decisión ${decisionId}). El PR aún no se publicó. Aprueba la solicitud en Clanker Yard > Bandeja.`);
+  },
+};

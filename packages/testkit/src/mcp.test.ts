@@ -85,6 +85,7 @@ describe("tools", () => {
     expect(await h.call("get_local_pr_commit_diff", { id, sha: head.slice(0, 8) })).toMatchObject({ sha: head });
     const { runId } = await h.call("apply_local_pr_patch", { id, head, patch: "patch" }) as { runId: unknown };
     expect(await h.api.runs.get({ id: RunId.parse(runId) })).toMatchObject({ subject: { type: "pr", id }, lane: "maintenance" });
+    await expect(h.call("request_local_pr_publish", { id })).rejects.toThrow(/Conecta GitHub/);
     const remote = seedPr(h.store, { repoId, number: 1 });
     await expect(h.call("get_local_pr", { id: remote })).rejects.toThrow(/ya no es local/);
     await expect(h.call("update_local_pr", { id: remote, body: "" })).rejects.toThrow(/no es un PR local/);

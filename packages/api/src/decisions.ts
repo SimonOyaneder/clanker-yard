@@ -4,6 +4,10 @@ import { DecisionId, ProjectId, RunId, StepRunId, SubjectRef } from "./domain";
 export const DecisionKind = z.enum(["gate", "needs_human", "question", "review_note", "note", "alert"]);
 export type DecisionKind = z.infer<typeof DecisionKind>;
 
+/** Una solicitud de la Bandeja solo abre un borrador tras esta opción, autenticada desde la app. */
+export const APPROVE_LOCAL_PUBLISH = "Publicar borrador en GitHub";
+export const DECLINE_LOCAL_PUBLISH = "No publicar";
+
 export const DecisionStatus = z.enum(["pending", "accepted", "rejected", "answered", "expired", "superseded"]);
 export type DecisionStatus = z.infer<typeof DecisionStatus>;
 

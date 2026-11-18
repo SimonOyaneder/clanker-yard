@@ -5,6 +5,7 @@ import { githubPatForm } from "../github/pat";
 import type { PrCache } from "../github/pr-cache";
 import { createPrCommands} from "../github/pr-commands";
 import { createPrDetails } from "../github/pr-detail";
+import { createLocalPublish } from "../github/local-publish";
 import type { Workspaces } from "../workspaces/workspaces";
 import type { Prs } from "../github/prs";
 import type { PrRepublisher } from "../github/republisher";
@@ -117,6 +118,7 @@ export function createRouter(deps: RouterDeps) {
   };
   const prDetails = createPrDetails({ store, repoConfig: (id) => repos.config(id), connections: deps.connections, workspaces: deps.workspaces });
   const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache, flows, projects });
+  const localPublish = createLocalPublish({ store, repos, flows });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
     if (!project) throw new ProjectNotFoundError(id);
@@ -302,6 +304,7 @@ export function createRouter(deps: RouterDeps) {
       localCommitDiff: os.prs.localCommitDiff.handler(({ input }) => prDetails.commit(input.id, input.sha, undefined, true)),
       updateLocal: os.prs.updateLocal.handler(({ input, context }) => prCommands.updateLocal(input, context.origin)),
       applyLocalPatch: os.prs.applyLocalPatch.handler(({ input, context }) => ({ runId: prCommands.applyLocalPatch(input, context.origin) })),
+      requestLocalPublish: os.prs.requestLocalPublish.handler(async ({ input, context }) => ({ decisionId: await localPublish.request(input.id, context.origin) })),
       republish: os.prs.republish.handler(({ input, context }) => deps.republisher.republish(input, context.origin)),
       republishProgress: os.prs.republishProgress.handler(({ input }) => deps.republisher.progress(input.id)),
     },
@@ -351,7 +354,9 @@ export function createRouter(deps: RouterDeps) {
         if (!decision) throw new DecisionNotFoundError(input.id);
         return decision;
       }),
-      resolve: os.decisions.resolve.handler(({ input, context }) => {
+      resolve: os.decisions.resolve.handler(async ({ input, context }) => {
+        const publication = await localPublish.resolve(input.id, input.option, context.origin);
+        if (publication) return publication;
         if (isMergeOffer(store, input.id)) {
           requireUiOrigin(context.origin, "Una oferta de merge la aprueba una persona desde la app: comenta el comando de merge con tu identidad.");
         }

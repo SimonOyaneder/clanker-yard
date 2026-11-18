@@ -139,6 +139,8 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache,
       const row = prById(store.db, id);
       if (!row) throw new PrCommandError(`No existe el PR ${id}.`);
       if (row.state !== "local" || !row.owned) throw new PrCommandError(`${row.headRef} ya no es un PR local: no hay nada que publicar.`);
+      const publishing = livePrFlow(store.db, id, ["promote-approved-local"]);
+      if (publishing) return publishing.id;
       const projectId = row.runId ? store.db.select({ id: runs.projectId }).from(runs).where(eq(runs.id, row.runId)).get()?.id : undefined;
       const project = projectId ? projects.get(projectId) : undefined;
       return flows.start(
@@ -152,7 +154,7 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache,
     updateLocal({ id, title, body }, by) {
       return store.tx((tx) => {
         const row = ownedLocalPr(prById(tx.db, id), id);
-        const publishing = livePrFlow(tx.db, id, ["promote-local"]);
+        const publishing = livePrFlow(tx.db, id, ["promote-local", "promote-approved-local"]);
         if (publishing) throw new PrCommandError(`Este PR se está publicando en la corrida ${publishing.id}. Espera a que termine para editarlo.`);
         const nextTitle = title === undefined ? row.title ?? row.headRef : cleanMessage(title);
         const nextBody = body === undefined ? row.body ?? "" : cleanMessage(body);

@@ -98,6 +98,7 @@ describe("clanker", () => {
     expect(out).toContain("clanker prs show-local");
     expect(out).toContain("clanker prs edit-local");
     expect(out).toContain("clanker prs apply-local");
+    expect(out).toContain("clanker prs publish-local");
     await expect(exec(["--help"], {})).resolves.toBe(out);
   });
 
@@ -429,6 +430,7 @@ describe("clanker prs republish", () => {
 
 describe("clanker prs locales", () => {
   const id = "pr_00000000000000000000000001";
+  const decisionId = "dec_00000000000000000000000001";
   const head = "a".repeat(40);
   const repo = "octocat/demo";
   const patch = "diff --git a/README.md b/README.md\n+hola\n";
@@ -515,6 +517,17 @@ describe("clanker prs locales", () => {
     expect(out).toContain(`clanker events tail --run ${runId} --follow`);
   });
 
+  test("publish-local solo solicita la publicación y manda a Bandeja con el id de decisión", async () => {
+    const requestLocalPublish = vi.fn().mockResolvedValue({ decisionId });
+    const publishLocal = vi.fn();
+
+    const out = await exec(["prs", "publish-local", id], { prs: { requestLocalPublish, publishLocal } });
+
+    expect(requestLocalPublish).toHaveBeenCalledExactlyOnceWith({ id });
+    expect(publishLocal).not.toHaveBeenCalled();
+    for (const text of [decisionId, "aún no se publicó", "Clanker Yard > Bandeja"]) expect(out).toContain(text);
+  });
+
   test.each([
     [["list-local", "--repo", "demo"], "--repo pide"],
     [["show-local"], "Indica un solo id"],
@@ -527,6 +540,7 @@ describe("clanker prs locales", () => {
     [["apply-local", id, "--head", head.slice(0, 7), "--patch", "cambio.diff"], "--head pide el SHA completo"],
     [["apply-local", id, "--head", head], "Falta --patch"],
     [["apply-local", id, "--head", head, "--patch", "vacio.diff"], "El archivo de --patch está vacío"],
+    [["publish-local", id, "otro"], "Indica un solo id"],
   ])("valida %j antes de arrancar el core", async (args, message) => {
     const client = vi.fn();
     await expect(exec(["prs", ...args], {}, { client })).rejects.toThrow(message);

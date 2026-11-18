@@ -694,6 +694,29 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
     "annotations": {
       "destructiveHint": false,
       "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Solicita publicar un PR local por id interno. Devuelve una decisión que una persona debe aprobar en la Bandeja de la app. La solicitud no hace push ni crea un PR en GitHub.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "request_local_pr_publish",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
       "openWorldHint": true,
     },
     "description": "Lanza el flujo del proyecto (o \`flow\`) sobre una issue y vuelve sin esperar; el avance está en \`clanker://run/<id>/timeline\`. Reclama la issue en su tracker. Si ya hay una corrida viva de ese flujo sobre ella, devuelve esa.",

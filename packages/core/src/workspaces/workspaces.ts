@@ -175,7 +175,7 @@ export interface Workspaces {
    * revocada. Con `council` (el PR tuvo threads `[clanker-council]`) el push nunca fuerza: si el
    * `remote_sha` no es ancestro de `HEAD` lanza sin pushear.
    */
-  push(lease: WorkspaceRef, opts?: { council?: boolean }): Promise<PushOutcome>;
+  push(lease: WorkspaceRef, opts?: { council?: boolean; expectedHead?: string }): Promise<PushOutcome>;
   /** Trae las branches del remoto a `refs/remotes/origin/*` con el mismo mecanismo que `push`. */
   fetch(repo: RepoId): Promise<FetchOutcome>;
   fetchPr(repo: RepoId, number: number): Promise<FetchOutcome>;
@@ -773,10 +773,11 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return { remote, ...target };
   }
 
-  async function push(lease: WorkspaceRef, { council = false } = {}): Promise<PushOutcome> {
+  async function push(lease: WorkspaceRef, { council = false, expectedHead }: { council?: boolean; expectedHead?: string } = {}): Promise<PushOutcome> {
     validate(lease);
     const row = store.db.select().from(workspaces).where(eq(workspaces.id, lease.workspaceId)).get()!;
     const sha = await git(lease.path, ["rev-parse", "HEAD"]);
+    if (expectedHead !== undefined && sha !== expectedHead) return "lease-rejected";
     if (council && row.remoteSha && !(await isAncestor(lease.path, row.remoteSha, sha))) {
       throw new Error(
         `${lease.branch} tiene council y su HEAD ${sha.slice(0, 9)} no desciende de lo que hay en el remoto ` +
