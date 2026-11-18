@@ -1,3 +1,4 @@
+import { ChatProposal } from "@clanker/api";
 import * as z from "zod";
 
 // Lo que cada rol de la plantilla pone en `Brief.payload` y `Report.payload` (`d2-plantilla`).
@@ -176,3 +177,12 @@ export const PlanCheckReport = z.object({
   corrections: z.array(z.string()).describe("Ajustes concretos que el dev aplica al implementar."),
 });
 export type PlanCheckReport = z.infer<typeof PlanCheckReport>;
+
+export const ChatTurnBrief = z.object({ text: z.string() });
+export type ChatTurnBrief = z.infer<typeof ChatTurnBrief>;
+
+export const ChatTurnReport = z.object({
+  reply: z.string().describe("Respuesta en markdown para la persona."),
+  proposal: ChatProposal.pick({ summary: true, items: true }).nullable().describe("Lo que cambiaste en el borrador en este turno; null si no tocaste archivos."),
+});
+export type ChatTurnReport = z.infer<typeof ChatTurnReport>;

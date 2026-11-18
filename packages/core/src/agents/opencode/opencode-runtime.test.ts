@@ -1,7 +1,11 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { pathToFileURL } from "node:url";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { compileJsonSchema, type JsonSchema } from "@clanker/api";
+import { roles } from "../../template/roles";
+import { outputSchemaFor } from "../agents";
 import { readTranscript } from "../transcripts";
 import type { AgentEvent, AgentRun, RunSpec } from "../runtime";
 import type { ModelInfo } from "./api";
@@ -128,6 +132,57 @@ describe("un run", () => {
     const config = JSON.parse(fake.launches[1]!.env.OPENCODE_CONFIG_CONTENT!) as { agents: { clanker: { system: string } }; plugins: { options?: unknown }[] };
     expect(config.agents.clanker.system).toContain("Eres un reviewer.");
     expect(config.plugins.at(-1)?.options).toEqual({ schema: { type: "object", required: ["x"] } });
+  });
+
+  test("chat.turn entrega su esquema al plugin y recibe una propuesta y una respuesta al retomar", async () => {
+    const chat = roles.chat!;
+    const outputSchema = outputSchemaFor(chat.modes.turn!);
+    const reports = [
+      { outcome: "ok", summary: "Saludo actualizado", payload: { reply: "Actualicé el saludo.", proposal: { summary: "Ajusta el saludo", items: [{ id: "c1", change: "Actualiza el saludo", path: "hello.txt" }] } } },
+      { outcome: "ok", summary: "Explicación", payload: { reply: "El saludo ahora es más claro.", proposal: null } },
+    ];
+    let turn = 0;
+    const { fake, runtime } = runtimeWith((_text, server) => answer(server, reports[turn++]));
+
+    const first = await runtime.start(spec({ role: "chat", systemPrompt: chat.prompt, outputSchema }));
+    expect((await finish(first)).result).toMatchObject({ status: "success", structured: reports[0] });
+
+    const second = await runtime.resume(first.ref, "Explica el cambio.", { outputSchema, references: [] });
+    expect((await finish(second)).result).toMatchObject({ status: "success", structured: reports[1] });
+    expect(second.ref).toEqual(first.ref);
+    expect(fake.created).toHaveLength(1);
+
+    const schema = { ...outputSchema };
+    delete schema.$schema;
+    for (const launch of fake.launches) {
+      const config = JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT!) as { plugins: { package: string; options: { schema: JsonSchema } }[] };
+      const plugin = config.plugins.at(-1)!;
+      expect(plugin.options.schema).toEqual(schema);
+      const add = vi.fn<(tool: {
+        name: string;
+        input: JsonSchema;
+        execute(input: unknown): Promise<{ content: string }>;
+      }) => void>();
+      const ctx = {
+        options: plugin.options,
+        tool: {
+          transform: async (edit: (editor: { add: typeof add }) => void) => edit({ add }),
+        },
+      };
+      const { default: reportPlugin } = await import(pathToFileURL(join(plugin.package, "index.js")).href) as {
+        default: { setup(context: typeof ctx): Promise<void> };
+      };
+      await reportPlugin.setup(ctx);
+      expect(add).toHaveBeenCalledOnce();
+      const tool = add.mock.calls[0]![0];
+      expect(tool.name).toBe("clanker_report");
+      expect(tool.input).toEqual(schema);
+      const input = compileJsonSchema(tool.input);
+      for (const report of reports) {
+        const parsed = input.parse(report);
+        expect(await tool.execute(parsed)).toEqual({ content: "Reporte recibido. Terminaste: no hagas nada más." });
+      }
+    }
   });
 
   test("sin reporte termina bien pero sin structured: el core lo reintenta como reporte inválido", async () => {

@@ -1,0 +1,9 @@
+match: { mode: turn }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: "Explicación del saludo"
+    payload:
+      reply: "El saludo en `hello.txt` ahora dice «Hola mundo»."
+      proposal: null

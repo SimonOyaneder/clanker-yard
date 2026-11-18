@@ -26,6 +26,7 @@ export const profiles: Record<string, Profile> = {
     committer: "sonnet:medium",
     triage: "sonnet:high",
     "plan-check": "sonnet:medium",
+    chat: "sonnet:high",
   }),
   medio: profile({
     dev: "opus:high",
@@ -37,6 +38,7 @@ export const profiles: Record<string, Profile> = {
     committer: "sonnet:high",
     triage: "sonnet:high",
     "plan-check": "sonnet:medium",
+    chat: "sonnet:high",
   }),
   alto: profile({
     dev: "opus:xhigh",
@@ -48,6 +50,7 @@ export const profiles: Record<string, Profile> = {
     committer: "opus:high",
     triage: "opus:high",
     "plan-check": "sonnet:high",
+    chat: "sonnet:high",
   }),
   max: profile({
     dev: "fable:xhigh",
@@ -59,5 +62,6 @@ export const profiles: Record<string, Profile> = {
     committer: "opus:xhigh",
     triage: "opus:xhigh",
     "plan-check": "sonnet:high",
+    chat: "sonnet:high",
   }),
 };

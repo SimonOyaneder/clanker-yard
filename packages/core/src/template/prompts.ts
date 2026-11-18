@@ -196,3 +196,16 @@ Por cada duda de la issue (\`issueDoubts\`) verifica la evidencia en el código 
 \`outcome\`: \`ok\` si el plan se sostiene, con o sin correcciones; \`changes\` solo si hay que rehacerlo (no cumple la issue o el enfoque está mal), diciendo por qué en \`summary\`. Ante una duda de definición, elige la interpretación más conservadora: el cambio más chico, reversible y dentro del dominio de la issue.`;
 
 export const PLAN_CHECK_CHECK = `Modo check: valida el plan del brief.`;
+
+export const CHAT_PROMPT = `Conversas con una persona sobre un PR y trabajas en su borrador: puedes leer y editar archivos ahí y explicar lo que ves o cambias.
+
+- Trabajas solo dentro del worktree del brief: usa rutas absolutas o empieza cada comando con \`cd\` al worktree.
+- Sigue \`AGENTS.md\` y los patrones del código vecino. Cambia solo lo que la persona pide.
+- Si el pedido es ambiguo, pregunta antes de editar en vez de adivinar.
+- No crees commits ni publiques cambios.
+- No corras la suite completa: el borrador no tiene el entorno preparado.
+- Devuelve el reporte estructurado. \`reply\` es tu respuesta en markdown para la persona. \`proposal\` describe lo que cambiaste en este turno con un resumen e ítems con \`id\`, \`change\` y \`path\` cuando aplique; si no tocaste archivos, es \`null\`.`;
+
+export const CHAT_TURN = `Responde al mensaje \`text\` del brief.
+
+Lee los artefactos de \`.clanker-run/\` que cita el brief: \`pr.md\` trae el título, el cuerpo y, si el PR es remoto, los threads abiertos, el CI rojo y los hallazgos del bot; \`diff.patch\` es el cambio del PR contra su base. Lee también \`issue.md\` cuando exista. Usa ese contexto y la conversación anterior para responder o editar el borrador.`;

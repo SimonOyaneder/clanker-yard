@@ -23,6 +23,48 @@ describe("learnings", () => {
   });
 });
 
+describe("chat", () => {
+  const turn = roles.chat!.modes.turn!;
+
+  test("retoma la conversación y cada perfil le da su propia entrada", () => {
+    expect(turn).toMatchObject({ session: "resume", outcomes: ["ok"] });
+    for (const profile of Object.values(profiles)) {
+      expect(profile.roles.chat).toEqual({ model: "sonnet", effort: "high" });
+    }
+  });
+
+  test("el brief pide el texto del mensaje y acepta el contexto adicional", () => {
+    const payload = compileJsonSchema(turn.payload!);
+    expect(payload.safeParse({ text: "Explica este cambio", pr: "pr-1" }).success).toBe(true);
+    expect(payload.safeParse({}).success).toBe(false);
+  });
+
+  test.each([
+    { reply: "¿Qué comportamiento prefieres?", proposal: null },
+    {
+      reply: "Actualicé el borrador.",
+      proposal: {
+        summary: "Ajusta el saludo",
+        items: [
+          { id: "c1", change: "Actualiza el saludo", path: "hello.txt" },
+          { id: "c2", change: "Ajusta los textos relacionados" },
+        ],
+      },
+    },
+  ])("acepta el reporte $reply", (report) => {
+    expect(compileJsonSchema(turn.report).safeParse(report).success).toBe(true);
+  });
+
+  test.each([
+    { proposal: null },
+    { reply: "Listo" },
+    { reply: "Listo", proposal: { summary: "Cambio" } },
+    { reply: "Listo", proposal: { summary: "Cambio", items: [{ change: "Ajusta el saludo" }] } },
+  ])("rechaza un reporte incompleto: %j", (report) => {
+    expect(compileJsonSchema(turn.report).safeParse(report).success).toBe(false);
+  });
+});
+
 describe("defs", () => {
   test("todos los roles y perfiles se guardan como defs builtin", () => {
     const store = openStore({ path: ":memory:" });
