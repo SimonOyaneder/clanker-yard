@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { NewProject } from "@clanker/api";
 import {
   createArtifacts,
   createAskpass,
@@ -9,8 +10,11 @@ import {
   createDefs,
   createFileSecrets,
   createGitRemote,
+  createIssues,
+  createLocalTracker,
   createPacks,
   createPrs,
+  createProjects,
   createRecipes,
   createSlots,
   createWorkspaces,
@@ -664,6 +668,178 @@ describe("pr.promote", () => {
 });
 
 describe("stack.restackRewritten", () => {
+  test("acepta pr o prId, incluso con el otro nulo, y exige un identificador", () => {
+    const tips = { from: "vieja", to: "nueva" };
+    expect(restackRewritten.args.safeParse({ ...tips, pr: ref(1), prId: null }).success).toBe(true);
+    expect(restackRewritten.args.safeParse({ ...tips, prId: newId("pr"), pr: null }).success).toBe(true);
+    expect(restackRewritten.args.safeParse(tips).success).toBe(false);
+    expect(restackRewritten.args.safeParse({ ...tips, pr: null, prId: null }).success).toBe(false);
+  });
+
+  test("padre local reescrito: el hijo sigue su punta sin push, prs.get ni fetch, también tras un corte", async () => {
+    const a = await localPr("cla-2", "cla-1", { "b.txt": "b1\nparent\n" });
+    const b = await localPr("cla-3", "cla-2", { "c.txt": "c1\nchild\n" });
+    const from = repo.git("rev-parse", "cla-2");
+    const lease = await workspaces.acquire({ repo: "repo_r1", branch: "cla-2", base: "cla-1", runId: newId("run") });
+    writeFileSync(join(lease.path, "b.txt"), "b1\nparent v2\n");
+    repo.git("-C", lease.path, "add", "--all");
+    repo.git("-C", lease.path, "commit", "--amend", "--quiet", "--message", "feat: cla-2 (reescrito)");
+    const to = repo.git("-C", lease.path, "rev-parse", "HEAD");
+    workspaces.release(lease);
+    store.db.$client.prepare("UPDATE pull_requests SET head_sha = ? WHERE id = ?").run(to, a);
+    const fetch = vi.spyOn(workspaces, "fetch");
+    const push = vi.spyOn(workspaces, "push");
+    const restackChild = vi.spyOn(workspaces, "restack");
+    const requests = github.requests.length;
+    const shared = ctx();
+    const once = shared.once;
+    let cut = true;
+    shared.once = async (stage, fn) => {
+      if (stage === `restack:${b}`) {
+        expect(sql(`SELECT key FROM watch_marks WHERE pr_id = '${a}' AND kind = 'pr.base_rewritten'`)).toEqual([{ key: `${from}>${to}` }]);
+      }
+      if (stage === `retarget:${b}` && cut) {
+        cut = false;
+        throw new Error("corte");
+      }
+      return once(stage, fn);
+    };
+    const args = restackRewritten.args.parse({ pr: null, prId: a, from, to });
+
+    await expect(restackRewritten.run(args, shared)).rejects.toThrow("corte");
+    const head = repo.git("rev-parse", "cla-3");
+    const result = await restackRewritten.run(args, shared);
+
+    expect(result.outcome).toBe("ok");
+    expect(result.output).toMatchObject({
+      children: [{ prId: b, branch: "cla-3", status: "restacked", commits: 1, base: "cla-2" }],
+      changedDrafts: [],
+      promotable: [],
+    });
+    expect(repo.git("rev-parse", "cla-3")).toBe(head);
+    expect(repo.git("log", "--format=%s|%P", `${to}..cla-3`)).toBe(`feat: cla-3|${to}`);
+    expect(sql(`SELECT base_ref, head_sha, state FROM pull_requests WHERE id = '${b}'`)).toEqual([{ base_ref: "cla-2", head_sha: head, state: "local" }]);
+    expect(sql(`SELECT child_id, parent_id FROM pr_parents WHERE child_id = '${b}'`)).toEqual([{ child_id: b, parent_id: a }]);
+    expect(() => remoteSha("cla-2")).toThrow();
+    expect(() => remoteSha("cla-3")).toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(restackChild).toHaveBeenCalledTimes(1);
+    expect(github.requests.slice(requests).filter((r) => r.path === "/graphql" || r.method !== "GET")).toEqual([]);
+    expect(store.events.since(0, { types: ["pr.base_rewritten"] })).toEqual([]);
+    fetch.mockRestore();
+    push.mockRestore();
+    restackChild.mockRestore();
+  });
+
+  test("padre remoto reescrito con hijo apilado y combinado: ambos siguen la nueva punta y se recalcula la base", async () => {
+    const plain = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    await openPr("cla-3", "main", { "c.txt": "c1\nother parent\n" });
+    const defs = createDefs({ store });
+    const project = createProjects({ store, defs }).create(NewProject.parse({ slug: "combined", name: "Combined", tracker: "local" }), "cli");
+    const issue = await createIssues({ store, local: createLocalTracker({ store }) }).createLocal({ projectId: project.id, title: "Combined" }, "cli");
+    const branch = "clanker/base/combined";
+    const combined = await workspaces.combineBase({
+      repo: "repo_r1",
+      issueId: issue.id,
+      branch,
+      parents: [{ key: "r1#1", branch: "cla-1" }, { key: "r1#3", branch: "cla-3" }],
+    });
+    expect(combined.outcome).toBe("combined");
+    const child = await openPr("cla-4", branch, { "d.txt": "combined child\n" });
+    store.db.$client.prepare("UPDATE pull_requests SET issue_id = ? WHERE number = ?").run(issue.id, child);
+    const before = sql<{ head_sha: string }>("SELECT head_sha FROM combined_bases")[0]!.head_sha;
+    const [plainPatch, combinedPatch] = [patchId(remoteSha("cla-2")), patchId(remoteSha("cla-4"))];
+    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
+    const parentId = sql<{ id: string }>("SELECT id FROM pull_requests WHERE number = 1")[0]!.id;
+
+    const result = await restackRewritten.run(restackRewritten.args.parse({ prId: parentId, ...rewritten }), ctx());
+
+    expect(result.outcome).toBe("ok");
+    expect(outputOf(result).children).toMatchObject([
+      { pr: { number: plain }, status: "restacked", commits: 1 },
+      { pr: { number: child }, status: "restacked", commits: 1 },
+    ]);
+    expect(repo.git("rev-parse", "refs/remotes/origin/cla-1")).toBe(rewritten.to);
+    const base = sql<{ head_sha: string; parents: string; status: string }>("SELECT head_sha, parents, status FROM combined_bases")[0]!;
+    expect(base.status).toBe("active");
+    expect(base.head_sha).not.toBe(before);
+    expect(JSON.parse(base.parents)).toEqual([
+      { key: "r1#1", branch: "cla-1", sha: rewritten.to },
+      { key: "r1#3", branch: "cla-3", sha: remoteSha("cla-3") },
+    ]);
+    expect(repo.git("rev-parse", branch)).toBe(base.head_sha);
+    expect(repo.git("merge-base", "--is-ancestor", rewritten.to, base.head_sha)).toBe("");
+    expect(remoteLog(`${rewritten.to}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${rewritten.to}`);
+    expect(remoteLog(`${base.head_sha}..cla-4`, "%s|%P")).toBe(`feat: cla-4|${base.head_sha}`);
+    expect(patchId(remoteSha("cla-2"))).toBe(plainPatch);
+    expect(patchId(remoteSha("cla-4"))).toBe(combinedPatch);
+    expect(sql("SELECT * FROM pr_parents")).toHaveLength(3);
+    expect(sql(`SELECT key FROM watch_marks WHERE pr_id = '${parentId}' AND kind = 'pr.base_rewritten'`)).toEqual([{ key: `${rewritten.from}>${rewritten.to}` }]);
+    expect(store.events.since(0, { types: ["pr.base_rewritten"] })).toEqual([]);
+  }, 60_000);
+
+  test("padre que avanza sin reescribirse: el hijo conserva solo sus commits from..HEAD sobre la punta nueva", async () => {
+    await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const from = remoteSha("cla-1");
+    const before = patchId(remoteSha("cla-2"));
+    elsewhere((git, dir) => {
+      git("checkout", "--quiet", "cla-1");
+      write(dir, { "a.txt": "a1\nparent v2\na3\n" });
+      git("add", "--all");
+      git("commit", "--quiet", "--message", "fixup! feat: cla-1");
+      git("push", "--quiet", "origin", "cla-1");
+    });
+    const to = remoteSha("cla-1");
+
+    const result = await runRewritten(1, { from, to });
+
+    expect(result.outcome).toBe("ok");
+    expect(outputOf(result).children).toMatchObject([{ branch: "cla-2", status: "restacked", commits: 1 }]);
+    expect(remoteLog(`${to}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${to}`);
+    expect(patchId(remoteSha("cla-2"))).toBe(before);
+  });
+
+  test.each(["closed", "merged"] as const)("padre remoto %s por prId sigue rechazado", async (state) => {
+    await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
+    if (state === "closed") github.pr(1).close();
+    else github.pr(1).merge({ sha: squashOnMain("cla-1") });
+    const prId = sql<{ id: string }>("SELECT id FROM pull_requests WHERE number = 1")[0]!.id;
+
+    await expect(restackRewritten.run(restackRewritten.args.parse({ prId, ...rewritten }), ctx())).rejects.toThrow(PermanentActionError);
+    expect(sql("SELECT * FROM watch_marks WHERE kind = 'pr.base_rewritten'")).toEqual([]);
+  });
+
+  test.each(["closed", "merged"] as const)("padre %s en la base por prId se rechaza antes de consultar GitHub, salvo que no tenga hijos", async (state) => {
+    await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const prId = sql<{ id: string }>("SELECT id FROM pull_requests WHERE number = 1")[0]!.id;
+    store.db.$client.prepare("UPDATE pull_requests SET state = ? WHERE id = ?").run(state, prId);
+    const head = repo.git("rev-parse", "cla-1");
+    const args = restackRewritten.args.parse({ prId, from: head, to: head });
+    const requests = github.requests.length;
+
+    await expect(restackRewritten.run(args, ctx())).rejects.toThrow(PermanentActionError);
+    expect(github.requests).toHaveLength(requests);
+    expect(sql("SELECT * FROM watch_marks WHERE kind = 'pr.base_rewritten'")).toEqual([]);
+
+    store.db.$client.prepare("DELETE FROM pr_parents WHERE parent_id = ?").run(prId);
+
+    expect(await restackRewritten.run(args, ctx())).toMatchObject({ outcome: "ok", output: { children: [] } });
+    expect(github.requests).toHaveLength(requests);
+    expect(sql("SELECT * FROM watch_marks WHERE kind = 'pr.base_rewritten'")).toEqual([]);
+  });
+
+  test.each(["from", "to"] as const)("padre local con la punta %s ausente no restackea ni marca", async (missing) => {
+    const prId = await localPr("cla-2", "cla-1", { "b.txt": "b1\nparent\n" });
+    await localPr("cla-3", "cla-2", { "c.txt": "c1\nchild\n" });
+    const head = repo.git("rev-parse", "cla-2");
+    const args = restackRewritten.args.parse({ prId, from: head, to: head, [missing]: "0".repeat(40) });
+
+    await expect(restackRewritten.run(args, ctx())).rejects.toThrow(/no está en el repo local/);
+    expect(sql("SELECT * FROM watch_marks WHERE kind = 'pr.base_rewritten'")).toEqual([]);
+  });
+
   test("padre reescrito: el hijo queda sobre la nueva punta con el mismo patch-id y sigue colgando de él", async () => {
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const before = remoteSha("cla-2");

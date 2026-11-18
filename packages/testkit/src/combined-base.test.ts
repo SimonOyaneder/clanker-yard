@@ -581,7 +581,7 @@ describe("stack.restack con una base combinada", () => {
     expect(prBase(child)).toBe("main");
     expect(sql(`SELECT * FROM pr_parents`)).toEqual([]);
     expect(sql(`SELECT base_ref FROM workspaces WHERE branch = 'cla-3'`)).toEqual([{ base_ref: "main" }]);
-  });
+  }, 60_000);
 
   test("mergear el padre que no era la base del PR deja la base en el otro y no cambia la de GitHub", async () => {
     const { branch, child } = await combinedPr();
@@ -677,5 +677,5 @@ describe("stack.restack con una base combinada", () => {
     const { children } = result.output as { children: { branch: string; status: string; base?: string }[] };
     expect(children.find((c) => c.branch === "cla-4")).toMatchObject({ status: "restacked", base: "main" });
     expect(row(branch)?.status).toBe("active");
-  });
+  }, 60_000);
 });

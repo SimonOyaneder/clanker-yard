@@ -1,7 +1,8 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { RepoId, RunId } from "@clanker/api";
+import type { FlowDef, RepoId, RunId } from "@clanker/api";
+import { createWorkspaces, newId } from "@clanker/core";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { ACCOUNT, REPO, startTechleadScenario, type TechleadScenario } from "./techlead-scenario";
 import { seedPr } from "@clanker/core/testing";
@@ -178,6 +179,75 @@ describe("restack con el core real", () => {
 });
 
 describe("restack-rewritten con el core real", () => {
+  test("como subflujo con prId local omite pr y restackea al hijo sin publicarlo", async () => {
+    scenario = await startTechleadScenario({ watch: false });
+    const { repo, store, client, project, github, home } = scenario;
+    const repoId = (store.db.$client.prepare("SELECT id FROM repos").get() as { id: RepoId }).id;
+    repo.git("checkout", "--quiet", "-b", "root");
+    writeFileSync(join(repo.dir, "root.txt"), "root\n");
+    repo.git("add", "--all");
+    repo.git("commit", "--quiet", "--message", "feat: root");
+    repo.git("push", "--quiet", "origin", "root");
+    const root = github.openPr({ head: "root" });
+    const rootId = seedPr(store, { repoId, number: root.number, headRef: "root", headSha: root.headSha() });
+    const workspaces = createWorkspaces({
+      store,
+      dataDir: home.path,
+      repoConfig: () => ({ path: repo.dir, defaultBranch: "main" }),
+      identityOf: async () => ({ name: "Ana Pérez", email: "ana@example.com" }),
+    });
+    const rows = [rootId];
+    for (const [branch, base] of [["local-a", "root"], ["local-b", "local-a"]] as const) {
+      const lease = await workspaces.acquire({ repo: repoId, branch, base, runId: newId("run") });
+      writeFileSync(join(lease.path, `${branch}.txt`), `${branch}\n`);
+      repo.git("-C", lease.path, "add", "--all");
+      repo.git("-C", lease.path, "commit", "--quiet", "--message", `feat: ${branch}`);
+      const head = repo.git("-C", lease.path, "rev-parse", "HEAD");
+      workspaces.release(lease);
+      rows.push(seedPr(store, { repoId, number: null, state: "local", headRef: branch, baseRef: base, headSha: head, title: branch, body: "", parents: rows.slice(-1) }));
+    }
+    const lease = await workspaces.acquire({ repo: repoId, branch: "local-a", base: "root", runId: newId("run") });
+    const from = repo.git("-C", lease.path, "rev-parse", "HEAD");
+    writeFileSync(join(lease.path, "local-a.txt"), "local-a v2\n");
+    repo.git("-C", lease.path, "add", "--all");
+    repo.git("-C", lease.path, "commit", "--quiet", "--amend", "--message", "feat: local-a v2");
+    const to = repo.git("-C", lease.path, "rev-parse", "HEAD");
+    workspaces.release(lease);
+    store.db.$client.prepare("UPDATE pull_requests SET head_sha = ? WHERE id = ?").run(to, rows[1]!);
+    const flow: FlowDef = {
+      schema: 1,
+      id: "restack-local-test",
+      name: "Restack local test",
+      trigger: { type: "manual" },
+      params: { repo: "RepoRef", prId: "string", from: "string", to: "string" },
+      start: "children",
+      nodes: {
+        children: {
+          type: "flow",
+          flow: "restack-rewritten",
+          params: { repo: "$run.params.repo", prId: "$run.params.prId", from: "$run.params.from", to: "$run.params.to" },
+          on: { done: "@done", blocked: "@blocked", failed: "@failed" },
+        },
+      },
+    };
+    await client.defs.create({ kind: "flow", slug: flow.id, scope: "user", body: flow });
+    const issue = await client.issues.createLocal({ projectId: project.id, title: "Restack local" });
+    const started = await client.runs.start({ projectId: project.id, issueId: issue.id, flow: flow.id, params: { repo: repoId, prId: rows[1]!, from, to } });
+
+    const run = await scenario.finished(started.id);
+
+    expect(run).toMatchObject({ status: "done", outcome: "done" });
+    const child = store.db.$client
+      .prepare("SELECT runs.params, runs.outcome FROM runs JOIN defs ON defs.id = runs.flow_def_id WHERE defs.slug = 'restack-rewritten'")
+      .get() as { params: string; outcome: string };
+    expect(child.outcome).toBe("done");
+    expect(JSON.parse(child.params)).toMatchObject({ pr: null, prId: rows[1] });
+    expect(repo.git("log", "--format=%s|%P", `${to}..local-b`)).toBe(`feat: local-b|${to}`);
+    expect(github.pulls()).toHaveLength(1);
+    expect(() => repo.git("--git-dir", repo.remoteDir!, "rev-parse", "refs/heads/local-b")).toThrow();
+    expect(store.events.since(0, { types: ["pr.base_rewritten"] })).toEqual([]);
+  });
+
   test("reescribir la branch del PR de abajo restackea a los de arriba y pide /review solo al draft que se pusheó", async () => {
     const { emit, feedbackRuns, comments, remoteLog, remoteSha, rows } = await chain({ second: true, third: false });
     const before = remoteSha("cla-2");

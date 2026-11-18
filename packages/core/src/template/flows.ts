@@ -895,14 +895,21 @@ export const RESTACK_REWRITTEN: FlowDef = {
   internal: true,
   trigger: { type: "pr.base_rewritten" },
   lane: "maintenance",
-  params: { pr: "PrRef", repo: "RepoRef", from: "string", to: "string", externalRounds: { type: "number", default: 3 } },
+  params: {
+    pr: { type: "PrRef", default: null },
+    prId: { type: "string", default: null },
+    repo: "RepoRef",
+    from: "string",
+    to: "string",
+    externalRounds: { type: "number", default: 3 },
+  },
   limits: { maxCostUsd: null, maxSteps: 50 },
   start: "restack",
   nodes: {
     restack: {
       type: "action",
       action: "stack.restackRewritten",
-      args: { pr: "$run.params.pr", from: "$run.params.from", to: "$run.params.to" },
+      args: { pr: "$run.params.pr", prId: "$run.params.prId", from: "$run.params.from", to: "$run.params.to" },
       on: { ok: "promote", conflict: { to: "promote", note: "Algún hijo quedó en conflicto: el flujo de rebase por conflicto lo toma" } },
     },
     promote: PROMOTE_LOCALS,

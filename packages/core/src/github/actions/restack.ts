@@ -8,12 +8,12 @@ import { PermanentActionError, type ActionCtx, type ActionDef } from "../../flow
 import { git, GitError, isAncestor, tryGit } from "../../git/git";
 import { combinedBases, prParents, pullRequests } from "../../store/schema";
 import type { Store } from "../../store/store";
-import { emitOnce } from "../marks";
+import { emitOnce, recordMarks } from "../marks";
 import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
 import type { GitHubClient } from "../client";
 import type { Prs } from "../prs";
 import type { PrRow } from "../pr-cache";
-import { githubPulls } from "../pr-rows";
+import { githubPulls, prById } from "../pr-rows";
 import { landedCommit } from "../landed";
 import { liveCombinedParents } from "../combined-parents";
 import type { RepoConfig } from "../../repos/repos";
@@ -32,7 +32,9 @@ export interface StackRestackDeps {
 }
 
 const RestackArgs = z.object({ pr: PrRef });
-const RestackRewrittenArgs = z.object({ pr: PrRef, from: z.string().min(1), to: z.string().min(1) });
+const RestackRewrittenArgs = z
+  .object({ pr: PrRef.nullish(), prId: z.string().min(1).nullish(), from: z.string().min(1), to: z.string().min(1) })
+  .refine(({ pr, prId }) => pr != null || prId != null, { message: "Indica pr o prId para restackear sus hijos." });
 
 /** Un PR en draft que se pusheó: con su branch y su base, un flujo toma de ahí su worktree (`workspace.attach`). */
 export type ChangedDraft = { pr: PrRef; branch: string; base: string };
@@ -155,22 +157,33 @@ export function stackRestackRewrittenAction(deps: StackRestackDeps): ActionDef<t
     args: RestackRewrittenArgs,
     outcomes: ["ok", "conflict"],
     effects: "remote",
-    async run({ pr, from, to }, ctx) {
-      const found = rowOf(deps, pr);
+    async run({ pr, prId, from, to }, ctx) {
+      const found = rowOf(deps, pr ?? prId!);
       if (!found || childrenOf(deps.store, found.row.id).length === 0) return { outcome: "ok", output: NOTHING };
 
       await ctx.once("verify", async () => {
-        const state = await deps.prs.get(pr);
-        if (state.state === "merged" || state.state === "closed") {
-          throw new PermanentActionError(`El PR #${pr.number} de ${pr.repo} ya está ${state.state === "merged" ? "mergeado" : "cerrado"}: sus hijos no se restackean sobre su branch reescrita.`);
+        if (found.row.state === "closed" || found.row.state === "merged") {
+          throw new PermanentActionError(`El PR de ${found.row.headRef} ya está ${found.row.state === "merged" ? "mergeado" : "cerrado"}: sus hijos no se restackean sobre su branch reescrita.`);
         }
-        await fetchOrThrow(deps, found, pr.repo, "restackear");
+        if (found.row.state !== "local") {
+          const ref = pr ?? { account: found.remote.account, repo: found.remote.repo, number: found.row.number! };
+          const state = await deps.prs.get(ref);
+          if (state.state === "merged" || state.state === "closed") {
+            throw new PermanentActionError(`El PR #${ref.number} de ${ref.repo} ya está ${state.state === "merged" ? "mergeado" : "cerrado"}: sus hijos no se restackean sobre su branch reescrita.`);
+          }
+          await fetchOrThrow(deps, found, ref.repo, "restackear");
+        }
         const path = deps.repoConfig(found.repoId).path;
         for (const [name, sha] of [["vieja", from], ["nueva", to]] as const) {
           if ((await tryGit(path, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`])) === undefined) {
             throw new PermanentActionError(`La punta ${name} ${sha.slice(0, 9)} de ${found.row.headRef} no está en el repo local: no se puede restackear a sus hijos.`);
           }
         }
+        return null;
+      });
+
+      await ctx.once("mark", async () => {
+        deps.store.tx((tx) => recordMarks(tx, found.row.id, "pr.base_rewritten", [`${from}>${to}`], Date.now()));
         return null;
       });
 
@@ -432,7 +445,13 @@ async function fetchOrThrow(deps: StackRestackDeps, { repoId, remote }: Found, r
 }
 
 /** La fila de `pull_requests` de `pr` (el repo se reconoce por su `owner/repo` de GitHub) con su repo y remoto. */
-function rowOf(deps: StackRestackDeps, pr: PrRef) {
+function rowOf(deps: StackRestackDeps, pr: PrRef | string): { row: PrRow; repoId: RepoId; remote: NonNullable<RepoConfig["remote"]> } | undefined {
+  if (typeof pr === "string") {
+    const row = prById(deps.store.db, pr);
+    if (!row) return undefined;
+    const { remote } = deps.repoConfig(row.repoId);
+    return remote ? { row, repoId: row.repoId, remote } : undefined;
+  }
   for (const row of githubPulls(deps.store.db, eq(pullRequests.number, pr.number))) {
     const { remote } = deps.repoConfig(row.repoId);
     if (remote?.repo === pr.repo) return { row, repoId: row.repoId, remote };

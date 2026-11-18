@@ -729,6 +729,34 @@ describe("eventos", () => {
     expect(emitted("pr.base_rewritten").map((e) => e.payload)).toEqual([{ repo: REPO, number: 1, from: before, to: after }]);
     expect(emittedTypes()).toEqual(["pr.base_rewritten"]);
   });
+
+  test("una reescritura ya marcada por el restack no se anuncia, pero otra distinta sí", async () => {
+    sim.openPr({ head: "one" });
+    await wake();
+    const before = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
+    origin.git("checkout", "one");
+    origin.git("commit", "--amend", "--allow-empty", "--message", "feat: one, reescrito");
+    origin.git("push", "--force", "origin", "one");
+    const after = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
+    store.db.$client
+      .prepare("INSERT INTO watch_marks (pr_id, kind, key, created_at) SELECT id, 'pr.base_rewritten', ?, ? FROM pull_requests WHERE number = 1")
+      .run(`${before}>${after}`, clock);
+
+    await wake(31 * SECOND);
+    await wake(21 * SECOND);
+    await wake(31 * SECOND);
+
+    expect(emitted("pr.base_rewritten")).toEqual([]);
+
+    origin.git("commit", "--amend", "--allow-empty", "--message", "feat: one, reescrito otra vez");
+    origin.git("push", "--force", "origin", "one");
+    const final = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
+    await wake(31 * SECOND);
+    await wake(21 * SECOND);
+    await wake(31 * SECOND);
+
+    expect(emitted("pr.base_rewritten").map((e) => e.payload)).toEqual([{ repo: REPO, number: 1, from: after, to: final }]);
+  });
 });
 
 describe("dispara flujos", () => {
@@ -825,7 +853,7 @@ describe("dispara flujos", () => {
     const restacked: unknown[] = [];
     flows.registerAction({
       name: "stack.restackRewritten",
-      args: z.object({ pr: PrRef, from: z.string(), to: z.string() }),
+      args: z.object({ pr: PrRef, prId: z.string(), from: z.string(), to: z.string() }),
       outcomes: ["ok", "conflict"],
       effects: "remote",
       run: (args) => {
@@ -856,6 +884,7 @@ describe("dispara flujos", () => {
     const pr = sim.openPr({ head: "one" });
     await wake();
     own(pr.number);
+    const prId = cache.list()[0]!.id;
     const from = origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one");
 
     origin.git("checkout", "one");
@@ -867,9 +896,9 @@ describe("dispara flujos", () => {
     await wake(31 * SECOND);
 
     expect(runsOf("restack-rewritten")).toEqual([
-      expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number), repo: expect.any(String), externalRounds: 3, from, to } }),
+      expect.objectContaining({ lane: "maintenance", params: { pr: ref(pr.number), prId, repo: expect.any(String), externalRounds: 3, from, to } }),
     ]);
-    await vi.waitFor(() => expect(restacked).toEqual([{ pr: ref(pr.number), from, to }]), WAIT);
+    await vi.waitFor(() => expect(restacked).toEqual([{ pr: ref(pr.number), prId, from, to }]), WAIT);
   });
 
   test("un conflicto arranca el flujo de rebase, salvo que el PR tenga threads de council", async () => {
