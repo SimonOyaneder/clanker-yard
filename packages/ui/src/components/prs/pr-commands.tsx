@@ -28,8 +28,8 @@ export interface PrCommands {
   openRun: (pr: OpenPr) => void
   /** Publica ya en GitHub un PR local, para pedir review temprano. */
   publishLocal: (pr: LocalPr) => void
-  /** Abre el panel del PR local: descripción, commits y diff, como GitHub. */
-  viewLocal: (pr: LocalPr) => void
+  view: (pr: OpenPr) => void
+  openGithub: (pr: GithubPr) => void
 }
 
 const PrCommandsContext = createContext<PrCommands | null>(null)
@@ -45,12 +45,11 @@ interface Props {
   prs: readonly OpenPr[]
   projects: readonly ClankerProject[]
   onOpenRun: (slug: string, runId: RunId) => void
-  /** Abre la vista del PR local (Stacks de PR › branch). */
-  onOpenLocal: (id: string) => void
+  onOpenPr: (id: string) => void
   children: ReactNode
 }
 
-export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenLocal, children }: Props) {
+export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, children }: Props) {
   const appData = useAppData()
   const host = useHost()
   const [selectedId, select] = useState<string | null>(null)
@@ -66,10 +65,11 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenLocal, chil
       merge: (pr) => (prCaps(pr).merge === "button" ? host.openExternal(pr.state.url) : setConfirming(pr)),
       requestReview: (pr) => void perform(() => appData.requestPrReview(pr.ref), `Le pedí review al bot en ${pr.state.key}`),
       rebase: (pr) => void perform(() => appData.rebasePr(pr.ref), `Rebase de ${pr.state.key} en marcha: corre en el carril de mantenimiento`),
-      viewLocal: (pr) => {
+      view: (pr) => {
         select(pr.id)
-        onOpenLocal(pr.id)
+        onOpenPr(pr.id)
       },
+      openGithub: (pr) => host.openExternal(pr.state.url),
       publishLocal: (pr) => void perform(() => appData.publishLocalPr(pr.id), `Publicando ${branchOf(pr)} en GitHub: corre en el carril de mantenimiento`),
       toggleHold: (pr) =>
         void perform(
@@ -89,7 +89,7 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenLocal, chil
         )
       },
     }),
-    [prs, selectedId, appData, host, perform, projects, onOpenRun, onOpenLocal],
+    [prs, selectedId, appData, host, perform, projects, onOpenRun, onOpenPr],
   )
 
   return (

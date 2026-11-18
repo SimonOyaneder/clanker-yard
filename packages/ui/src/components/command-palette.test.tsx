@@ -1,18 +1,19 @@
 // @vitest-environment jsdom
 import type { QueueEntry } from "@clanker/api"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import type { ComponentProps } from "react"
 import { afterEach, beforeAll, expect, test, vi } from "vitest"
 import { AppDataProvider } from "@/app-data"
 import { CommandPalette } from "@/components/command-palette"
-import { PrCommandsProvider } from "@/components/prs/pr-commands"
+import { PrCommandsProvider, usePrCommands } from "@/components/prs/pr-commands"
+import type { PrControls } from "@/components/prs/pr-view"
 import { RunCommandsProvider } from "@/components/run/run-commands"
 import type { SettingsControls } from "@/components/project-settings/settings-view"
 import type { SummaryControls } from "@/hooks/use-summary-controls"
 import { HostProvider, type Host } from "@/host"
 import { AppActionsContext, type AppActions } from "@/lib/app-context"
 import { createMemoryAppData } from "@/demo/memory-app-data"
-import { openPrsOf, type OpenPr } from "@/lib/prs/prs"
+import { openPrsOf, titleOf, type OpenPr } from "@/lib/prs/prs"
 
 const NOW = Date.parse("2026-11-15T12:00:00Z")
 
@@ -27,7 +28,12 @@ beforeAll(() => {
 })
 afterEach(cleanup)
 
-async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>["projectTab"]; settings?: SettingsControls; summary?: SummaryControls; prs?: OpenPr[] } = {}) {
+function PrSelection({ prs }: { prs: OpenPr[] }) {
+  const commands = usePrCommands()
+  return prs.map((pr) => <button key={pr.id} onClick={() => commands.select(pr.id)}>Seleccionar {titleOf(pr)}</button>)
+}
+
+async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>["projectTab"]; settings?: SettingsControls; summary?: SummaryControls; prs?: OpenPr[]; pr?: PrControls } = {}) {
   const data = createMemoryAppData(NOW)
   const [project] = await data.projects()
   const issues = await data.issues(project!.id)
@@ -38,13 +44,15 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
   ]
   const actions = { setParallel: vi.fn(), setLanes: vi.fn(), boostIssue: vi.fn(), skipIssue: vi.fn(), goModule: vi.fn() }
   const host = { openExternal: vi.fn() } as unknown as Host
+  const openPr = vi.fn()
   const prs = extra.prs ?? []
   render(
     <AppDataProvider value={data}>
       <RunCommandsProvider>
         <HostProvider value={host}>
           <AppActionsContext.Provider value={actions as unknown as AppActions}>
-            <PrCommandsProvider prs={prs} projects={[project!]} onOpenRun={() => {}} onOpenLocal={() => {}}>
+            <PrCommandsProvider prs={prs} projects={[project!]} onOpenRun={() => {}} onOpenPr={openPr}>
+            <PrSelection prs={prs} />
             <CommandPalette
               open
               onOpenChange={() => {}}
@@ -55,6 +63,7 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
               queue={queue}
               prs={prs}
               prsActive={prs.length > 0}
+              pr={extra.pr}
               learnings={null}
               pendingDecisions={[]}
               onUndoDecision={null}
@@ -72,18 +81,66 @@ async function setup(extra: { projectTab?: ComponentProps<typeof CommandPalette>
       </RunCommandsProvider>
     </AppDataProvider>,
   )
-  return { actions, host, data, project: project!, a: a!, b: b! }
+  return { actions, host, data, project: project!, a: a!, b: b!, openPr }
 }
 
-test("un local se busca por branch y título, abre Stacks y no ofrece acciones de GitHub", async () => {
+test("un local se busca por branch y título, abre el detalle y no ofrece acciones de GitHub", async () => {
   const local = openPrsOf(await createMemoryAppData(NOW).openPrs()).find((p) => p.local !== null)!
-  const { actions, host } = await setup({ prs: [local] })
+  const { actions, host, openPr } = await setup({ prs: [local] })
 
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: local.local!.branch } })
   fireEvent.click(screen.getByText(local.local!.title))
-  expect(actions.goModule).toHaveBeenCalledWith("prs")
+  expect(openPr).toHaveBeenCalledWith(local.id)
+  expect(actions.goModule).not.toHaveBeenCalled()
   expect(host.openExternal).not.toHaveBeenCalled()
-  expect(screen.queryByText(/Mergear|Marcar hold|Pedir review del bot|Rebasear/)).toBeNull()
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } })
+  expect(screen.queryByText(/Mergear|Marcar hold|Pedir review del bot|Rebasear|Abrir PR en GitHub/)).toBeNull()
+  fireEvent.click(screen.getByText("Ver PR"))
+  expect(openPr).toHaveBeenCalledTimes(2)
   expect(screen.getByText(local.local!.branch)).toBeTruthy()
+})
+
+test("buscar un remoto abre el detalle interno, no GitHub", async () => {
+  const remote = openPrsOf(await createMemoryAppData(NOW).openPrs()).find((p) => p.state !== null)!
+  const { host, openPr } = await setup({ prs: [remote] })
+
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: titleOf(remote) } })
+  fireEvent.click(screen.getByText(titleOf(remote)))
+
+  expect(openPr).toHaveBeenCalledWith(remote.id)
+  expect(host.openExternal).not.toHaveBeenCalled()
+})
+
+test("la paleta abre GitHub para el PR seleccionado y sigue los cambios de selección del detalle", async () => {
+  const prs = openPrsOf(await createMemoryAppData(NOW).openPrs())
+  const remotes = prs.filter((p) => p.state !== null).slice(0, 2)
+  const local = prs.find((p) => p.local !== null)!
+  const { host, openPr } = await setup({ prs: [...remotes, local] })
+
+  for (const pr of remotes) {
+    fireEvent.click(screen.getByText(`Seleccionar ${titleOf(pr)}`))
+    const action = screen.getByRole("option", { name: /Abrir PR en GitHub/ })
+    expect(within(action).getByText("O")).toBeTruthy()
+    fireEvent.click(action)
+    expect(host.openExternal).toHaveBeenLastCalledWith(pr.state!.url)
+  }
+  fireEvent.click(screen.getByText(`Seleccionar ${titleOf(local)}`))
+  expect(screen.queryByRole("option", { name: /Abrir PR en GitHub/ })).toBeNull()
+  expect(openPr).not.toHaveBeenCalled()
+})
+
+test("los controles del diff siguen disponibles en la paleta del detalle remoto", async () => {
+  const remote = openPrsOf(await createMemoryAppData(NOW).openPrs()).find((p) => p.state !== null)!
+  const controls: PrControls = { reload: vi.fn(), mode: "split", toggleMode: vi.fn(), prevCommit: vi.fn(), nextCommit: vi.fn(), allCommits: vi.fn() }
+  await setup({ prs: [remote], pr: controls })
+  fireEvent.click(screen.getByText(`Seleccionar ${titleOf(remote)}`))
+
+  fireEvent.click(screen.getByText("Ver el diff unificado"))
+  fireEvent.click(screen.getByText("Commit anterior"))
+  fireEvent.click(screen.getByText("Commit siguiente"))
+  fireEvent.click(screen.getByText("Ver todos los commits"))
+
+  for (const command of [controls.toggleMode, controls.prevCommit, controls.nextCommit, controls.allCommits]) expect(command).toHaveBeenCalledOnce()
 })
 
 test("subir, sacar o devolver una issue de la cola están en ⌘K", async () => {

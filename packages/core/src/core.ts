@@ -381,6 +381,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     flows,
     prs,
     prCache,
+    workspaces,
     artifacts,
     decisions: createDecisions({ store }),
     learnings,

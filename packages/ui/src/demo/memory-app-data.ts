@@ -1,7 +1,8 @@
 import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type NewLearning, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
 import type { AppData, RepoRow } from "@/app-data"
 import { SEED_REBASE, SEED_TECHLEAD } from "@/demo/seed-flows"
-import { buildOpenPrs, seedLocalCommitDiff, seedLocalPrDetail } from "@/demo/seed-prs"
+import { buildOpenPrs, seedCommitDiff, seedPrDetail } from "@/demo/seed-prs"
+import { openPrsOf } from "@/lib/prs/prs"
 import { aggregate, seedClosedRuns } from "@/demo/seed-metrics"
 import { seedStep, transcriptPage, type StepSeed } from "@/demo/seed-steps"
 
@@ -537,15 +538,17 @@ export function createMemoryAppData(now = Date.now()): AppData {
       if (!prs.some((p) => p.id === id && p.local)) throw new Error(`${id} no es un PR local`)
     },
     prsByIds: async (ids) => prs.filter((p) => ids.includes(p.id)).map((p) => ({ ...p })),
-    localPrDetail: async (id) => {
-      const local = prs.find((p) => p.id === id)?.local
-      if (!local) throw new Error(`${id} no es un PR local`)
-      return seedLocalPrDetail(id, local, now)
+    prDetail: async (id) => {
+      const pr = openPrsOf(prs).find((p) => p.id === id)
+      if (!pr) throw new Error(`No existe el PR ${id}`)
+      return seedPrDetail(pr, now)
     },
-    localCommitDiff: async (id, sha) => {
-      const local = prs.find((p) => p.id === id)?.local
-      if (!local) throw new Error(`${id} no es un PR local`)
-      return seedLocalCommitDiff(seedLocalPrDetail(id, local, now), sha)
+    prCommitDiff: async ({ id, sha, head, base }) => {
+      const pr = openPrsOf(prs).find((p) => p.id === id)
+      if (!pr) throw new Error(`No existe el PR ${id}`)
+      const detail = seedPrDetail(pr, now)
+      if (detail.head !== head || detail.baseSha !== base) throw new Error("El PR cambió: actualiza el detalle y vuelve a abrir el commit.")
+      return seedCommitDiff(detail, sha)
     },
     // Solo el primer proyecto tiene corridas cerradas de ejemplo; el otro trae su Resumen vacío.
     projectMetrics: async (projectId, range) =>

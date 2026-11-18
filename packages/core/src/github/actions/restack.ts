@@ -398,7 +398,10 @@ async function restackChain(
         : false;
     store.tx((tx) => {
       const changes = { ...(merged !== undefined && { baseRef: base }), ...(head !== undefined && { headSha: head }) };
-      if (Object.keys(changes).length > 0) tx.db.update(pullRequests).set(changes).where(eq(pullRequests.id, child.id)).run();
+      if (Object.keys(changes).length > 0) {
+        tx.db.update(pullRequests).set(changes).where(eq(pullRequests.id, child.id)).run();
+        if (child.state === "local") tx.emit({ type: "pr.changed", origin: "core", subject: { type: "pr", id: child.id }, payload: {} });
+      }
       if (merged !== undefined) tx.db.delete(prParents).where(and(eq(prParents.childId, child.id), eq(prParents.parentId, parent.id))).run();
       if (stale) {
         openDecision(tx, {
@@ -501,4 +504,3 @@ async function readMergeable(
   }
   return [...result].map(([number, mergeable]) => ({ number, mergeable }));
 }
-

@@ -1,6 +1,5 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react"
 import { Repeat2 } from "lucide-react"
-import { useHost } from "@/host"
 import { absolute, ago } from "@/lib/format"
 import { draftTone, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
 import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/lib/prs/prs"
@@ -25,7 +24,6 @@ export const NODE_WIDTH = 296
 export const NODE_HEIGHT = 196
 
 export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
-  const host = useHost()
   const commands = usePrCommands()
   const { pr, dimmed, issueKey, combined } = data
   const { state } = pr
@@ -36,7 +34,7 @@ export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
   return (
     <PrContextMenu pr={pr}>
       <div
-        role={pr.local ? "group" : "link"}
+        role="group"
         tabIndex={0}
         aria-label={`${pr.ref ? `#${pr.ref.number}` : branchOf(pr)} ${titleOf(pr)}`}
         onFocus={() => commands.select(pr.id)}
@@ -45,8 +43,8 @@ export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
           if (e.key !== "Enter") return
           // xyflow también abre el nodo con Enter (`onNodeClick`): una sola vez.
           e.stopPropagation()
-          if (state) host.openExternal(state.url)
-          else if (pr.local) commands.viewLocal(pr)
+          e.preventDefault()
+          commands.view(pr)
         }}
         style={{ width: NODE_WIDTH, minHeight: NODE_HEIGHT - 12 }}
         className={cn(

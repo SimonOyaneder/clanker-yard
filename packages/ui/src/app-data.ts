@@ -32,8 +32,8 @@ import type {
   LearningPatch,
   NewLearning,
   LearningVerdict,
-  LocalCommitDiff,
-  LocalPrDetail,
+  PrCommitDiff,
+  PrDetail,
   ModelMetrics,
   NewProject,
   PackInfo,
@@ -134,10 +134,8 @@ export interface AppData {
   publishLocalPr(id: string): Promise<void>
   /** PRs por su id, en cualquier estado: para nombrar el sujeto de una corrida sobre un PR que ya se cerró. */
   prsByIds(ids: string[]): Promise<CachedPr[]>
-  /** Lo que se ve de un PR local sin GitHub (descripción, commits y diff contra su base), leído del repo. */
-  localPrDetail(id: string): Promise<LocalPrDetail>
-  /** El diff de un commit de un PR local, para revisarlo commit por commit. */
-  localCommitDiff(id: string, sha: string): Promise<LocalCommitDiff>
+  prDetail(id: string): Promise<PrDetail>
+  prCommitDiff(input: { id: string; sha: string; head: string; base: string }): Promise<PrCommitDiff>
   /** Las issues del caché del proyecto. */
   issues(projectId: ProjectId): Promise<CachedIssue[]>
   /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */

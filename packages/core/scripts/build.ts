@@ -24,4 +24,4 @@ export async function buildCore(outfile = coreBundle): Promise<string> {
   return outfile;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await buildCore(process.argv[2]);
+if (import.meta.main) await buildCore(process.argv[2]);

@@ -14,7 +14,6 @@ import "@xyflow/react/dist/style.css"
 import { useEffect, useMemo, useState } from "react"
 import type { OpenPr } from "@/lib/prs/prs"
 import { useColorMode } from "@/hooks/use-color-mode"
-import { useHost } from "@/host"
 import { buildStackForest, layoutStackGroups, listStackGroups } from "@/lib/prs/stack"
 import { NODE_HEIGHT, NODE_WIDTH, PrNode, type PrNodeData } from "./pr-node"
 import { usePrCommands } from "./pr-commands"
@@ -73,7 +72,6 @@ function withMeasuredHeights(prev: ReadonlyMap<string, number>, changes: NodeCha
 }
 
 function GraphInner({ prs, dimmed, issueKeys, layoutKey }: { prs: OpenPr[]; dimmed: Set<string>; issueKeys: ReadonlyMap<string, string>; layoutKey: string }) {
-  const host = useHost()
   const commands = usePrCommands()
   // Primero se dibuja con una altura estimada; cuando xyflow mide cada tarjeta, se vuelve a acomodar con la real.
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map())
@@ -104,8 +102,7 @@ function GraphInner({ prs, dimmed, issueKeys, layoutKey }: { prs: OpenPr[]; dimm
       // seleccionan ni arrastran: el click caía en el fondo y la tarjeta nunca abría el PR.
       onNodeClick={(_e, n) => {
         const { pr } = n.data as PrNodeData
-        if (pr.state) host.openExternal(pr.state.url)
-        else if (pr.local) commands.viewLocal(pr)
+        commands.view(pr)
       }}
       proOptions={{ hideAttribution: true }}
       className="flow-canvas"

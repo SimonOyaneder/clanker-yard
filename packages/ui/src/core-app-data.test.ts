@@ -12,3 +12,15 @@ test("openPrs combina los filtros excluyentes de abiertos y locales", async () =
   expect(await data.openPrs()).toEqual([...remote, ...local])
   expect(list.mock.calls).toEqual([[{ state: "open" }], [{ state: "local" }]])
 })
+
+test("el detalle y el diff por commit usan los procedimientos compartidos y conservan el rango visible", async () => {
+  const detail = vi.fn().mockResolvedValue({ id: "pr_test" })
+  const commitDiff = vi.fn().mockResolvedValue({ sha: "a".repeat(40) })
+  const data = createCoreAppData({ prs: { detail, commitDiff } } as unknown as CoreClient)
+  const input = { id: "pr_test", sha: "a".repeat(40), head: "b".repeat(40), base: "c".repeat(40) }
+
+  expect(await data.prDetail(input.id)).toEqual({ id: input.id })
+  expect(await data.prCommitDiff(input)).toEqual({ sha: input.sha })
+  expect(detail.mock.calls).toEqual([[{ id: input.id }]])
+  expect(commitDiff.mock.calls).toEqual([[input]])
+})

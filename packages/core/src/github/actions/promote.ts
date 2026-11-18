@@ -132,7 +132,7 @@ export function prSaveLocalAction(deps: Pick<PrPromoteDeps, "store" | "workspace
         .where(and(eq(combinedBases.repoId, row.repoId), eq(combinedBases.branch, workspace.baseRef), ne(combinedBases.status, "dissolved")))
         .get();
       const head = await workspaces.git(ws, "rev-parse", "HEAD");
-      const base = store.tx(({ db }) => {
+      const base = store.tx(({ db, emit }) => {
         const branches = combined ? combined.parents.map((p) => p.branch) : [workspace.baseRef];
         const parents = db
           .select({ id: pullRequests.id, headRef: pullRequests.headRef })
@@ -143,6 +143,7 @@ export function prSaveLocalAction(deps: Pick<PrPromoteDeps, "store" | "workspace
         db.update(pullRequests).set({ baseRef: base, headSha: head, headChangedAt: Date.now() }).where(eq(pullRequests.id, prId)).run();
         db.delete(prParents).where(eq(prParents.childId, prId)).run();
         for (const parent of parents) db.insert(prParents).values({ childId: prId, parentId: parent.id }).run();
+        emit({ type: "pr.changed", origin: "core", subject: { type: "pr", id: prId }, payload: {} });
         return base;
       });
       const promotable = base === deps.repoConfig(row.repoId).defaultBranch;

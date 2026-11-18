@@ -169,6 +169,12 @@ const router = os.router({
     publishLocal: os.prs.publishLocal.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    detail: os.prs.detail.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
+    commitDiff: os.prs.commitDiff.handler(() => {
+      throw new Error("no se usa en este test");
+    }),
     localDetail: os.prs.localDetail.handler(() => {
       throw new Error("no se usa en este test");
     }),

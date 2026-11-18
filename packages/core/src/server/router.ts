@@ -3,7 +3,8 @@ import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { githubPatForm } from "../github/pat";
 import type { PrCache } from "../github/pr-cache";
 import { createPrCommands} from "../github/pr-commands";
-import { createLocalPrDetails } from "../github/local-detail";
+import { createPrDetails } from "../github/pr-detail";
+import type { Workspaces } from "../workspaces/workspaces";
 import type { Prs } from "../github/prs";
 import type { PrRepublisher } from "../github/republisher";
 import { type Connections } from "../connections/connections";
@@ -79,6 +80,7 @@ export interface RouterDeps {
   prs: Prs;
   /** `prs.list` y `prs.refresh`: el caché del core, que avisa a los waits y a los eventos de Watch cuando un PR cambia. */
   prCache: PrCache;
+  workspaces: Pick<Workspaces, "fetch" | "fetchPr">;
   artifacts: Artifacts;
   decisions: Decisions;
   learnings: Learnings;
@@ -109,7 +111,7 @@ export function createRouter(deps: RouterDeps) {
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
   const { prs, prCache } = deps;
-  const localPrDetails = createLocalPrDetails({ store, repoConfig: (id) => repos.config(id) });
+  const prDetails = createPrDetails({ store, repoConfig: (id) => repos.config(id), connections: deps.connections, workspaces: deps.workspaces });
   const prCommands = createPrCommands({ store, repos, connections: deps.connections, packs: deps.packs, prs, cache: prCache, flows, projects });
   const projectOrNotFound = (id: ProjectId) => {
     const project = projects.get(id);
@@ -285,8 +287,10 @@ export function createRouter(deps: RouterDeps) {
       requestReview: os.prs.requestReview.handler(({ input, context }) => prCommands.requestReview(input, context.origin)),
       rebase: os.prs.rebase.handler(({ input, context }) => prCommands.rebase(input, context.origin)),
       publishLocal: os.prs.publishLocal.handler(({ input, context }) => ({ runId: prCommands.publishLocal(input.id, context.origin) })),
-      localDetail: os.prs.localDetail.handler(({ input }) => localPrDetails.get(input.id)),
-      localCommitDiff: os.prs.localCommitDiff.handler(({ input }) => localPrDetails.commit(input.id, input.sha)),
+      detail: os.prs.detail.handler(({ input }) => prDetails.get(input.id)),
+      commitDiff: os.prs.commitDiff.handler(({ input }) => prDetails.commit(input.id, input.sha, { head: input.head, base: input.base })),
+      localDetail: os.prs.localDetail.handler(({ input }) => prDetails.get(input.id)),
+      localCommitDiff: os.prs.localCommitDiff.handler(({ input }) => prDetails.commit(input.id, input.sha)),
       republish: os.prs.republish.handler(({ input, context }) => deps.republisher.republish(input, context.origin)),
       republishProgress: os.prs.republishProgress.handler(({ input }) => deps.republisher.progress(input.id)),
     },

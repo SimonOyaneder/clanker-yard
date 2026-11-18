@@ -24,7 +24,7 @@ import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
 import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
-import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
+import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, PrCommitDiff, PrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync, RepoOverview } from "./repos";
@@ -35,7 +35,7 @@ import { CachedIssue, IssueFilter, NewLocalIssue, TrackerId, TrackerProject } fr
  * Versión mayor de la API. Sube cuando el contrato cambia de forma incompatible; el core la
  * informa en `system.health` y la app, si difiere de la suya, relanza el core (`d-data`, "Handshake").
  */
-export const API_MAJOR = 2;
+export const API_MAJOR = 3;
 
 const base = oc.$meta<ContractMeta>({});
 
@@ -386,14 +386,19 @@ const prs = {
    * `BAD_REQUEST` si el PR no existe o ya no es local. Devuelve la corrida, que aparece en el proyecto que lo abrió.
    */
   publishLocal: base.input(z.object({ id: z.string().min(1) })).output(z.object({ runId: RunId })),
+  detail: base.input(z.object({ id: z.string().min(1) })).output(PrDetail),
+  commitDiff: base.input(z.object({
+    id: z.string().min(1),
+    sha: z.string().regex(/^[0-9a-f]{7,40}$/),
+    head: z.string().regex(/^[0-9a-f]{40}$/),
+    base: z.string().regex(/^[0-9a-f]{40}$/),
+  })).output(PrCommitDiff),
   /**
-   * Lo que se ve de un PR local sin GitHub: su título y descripción guardados, los commits sobre su base y el diff
-   * contra ella, leídos del repo. `NOT_FOUND` si el PR no existe; `BAD_REQUEST` si no es local o su branch ya no está.
+   * Alias de `detail`: descripción, commits y diff por el id interno del PR.
    */
   localDetail: base.input(z.object({ id: z.string().min(1) })).output(LocalPrDetail),
   /**
-   * El diff de un commit de un PR local contra su padre, para revisarlo commit por commit. `BAD_REQUEST` si el commit no
-   * es de los del PR (los de `localDetail`).
+   * Alias de `commitDiff` sobre las puntas actuales del PR. Rechaza commits ajenos al PR.
    */
   localCommitDiff: base.input(z.object({ id: z.string().min(1), sha: z.string().regex(/^[0-9a-f]{7,40}$/) })).output(LocalCommitDiff),
   /**

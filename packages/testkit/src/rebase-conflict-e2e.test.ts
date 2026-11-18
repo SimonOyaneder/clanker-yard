@@ -245,5 +245,8 @@ describe("rebase-conflicto-local con el core real", () => {
     expect(repo.git("--git-dir", repo.remoteDir!, "merge-base", "main", branch)).toBe(main);
     expect(github.pulls().at(-1)).toMatchObject({ number: 2, title: "Validar el monto", body: "Cuerpo guardado", draft: true, state: "open" });
     expect(store.db.$client.prepare("SELECT id, number, state FROM pull_requests").all()).toEqual([{ id: pr.id, number: 2, state: "open" }]);
+    expect(store.events.since(0, { types: ["pr.changed"] })).toContainEqual(
+      expect.objectContaining({ subject: { type: "pr", id: pr.id }, payload: {} }),
+    );
   });
 });

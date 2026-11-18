@@ -32,7 +32,7 @@ test("el grafo muestra los PRs del core con riesgo alto, en cola, la cola caída
   await expect(page.getByRole("heading", { name: "Stacks de PR" })).toBeVisible();
 
   await expect(page.locator(".react-flow__node")).toHaveCount(11, { timeout: 30_000 });
-  const card = (title: string) => page.getByRole("link", { name: new RegExp(title) });
+  const card = (title: string) => page.getByRole("group", { name: new RegExp(title) });
   await expect(card("Renombrar Payments::Ledger").getByText("Riesgo alto")).toBeVisible();
   await expect(card("Arreglar el scroll").getByText("En cola")).toBeVisible();
   await expect(card("Migrar el job de conciliación").getByText("Cola falló")).toBeVisible();
@@ -64,7 +64,7 @@ test("el local explica cuándo se publica y actualizar solo relee los remotos", 
 });
 
 test("la base combinada explica en su tooltip de quién sale", async ({ window: page }) => {
-  const chip = page.getByRole("link", { name: /Cerrar la conciliación/ }).getByText("Base combinada");
+  const chip = page.getByRole("group", { name: /Cerrar la conciliación/ }).getByText("Base combinada");
   await chip.hover();
   await expect(page.getByRole("tooltip").first()).toContainText("rama sintética que junta a");
   await expect(page.getByRole("tooltip").first()).toContainText("demo#4");

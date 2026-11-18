@@ -122,7 +122,7 @@ export { commitsApplyAction } from "./commits/apply";
 export { NO_CI_GRACE_MS, prOfWaitKey, prWaits, signalPr } from "./github/pr-waits";
 export { prPublishAction } from "./github/actions/publish";
 export { prPromoteAction, prSaveLocalAction } from "./github/actions/promote";
-export { createLocalPrDetails, type LocalPrDetails } from "./github/local-detail";
+export { createPrDetails, type PrDetails } from "./github/pr-detail";
 export { landedCommit } from "./github/landed";
 export { prRequestRebaseAction, workspaceCombinedBaseMergeAction } from "./workspaces/combined-base-actions";
 

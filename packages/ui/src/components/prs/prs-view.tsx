@@ -1,6 +1,6 @@
 import type { Decision, Repo } from "@clanker/api"
 import { ChevronDown, LayoutList, Network, RefreshCw, Repeat2, Search } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -14,7 +14,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useHost } from "@/host"
 import { absolute, ago } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
 import { mergeMark, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
@@ -24,10 +23,9 @@ import { cn } from "@/lib/utils"
 import { Ago, Hint, Pill } from "../common"
 import { CiBadge, CombinedBaseChip, LocalChip, MergePill, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
-import { PR_KEYS, PrContextMenu } from "./pr-menu"
+import { PrContextMenu, usePrShortcuts } from "./pr-menu"
 import { PrNotes, PrNotesContext } from "./pr-notes"
 import { StackGraph } from "./stack-graph"
-import { isTypingTarget } from "@/lib/keys"
 
 type Filter = "all" | "stacked" | "solo" | "draft" | "ready" | "mergeable" | "hold" | "approved" | "pending" | "changes" | "owned"
 type Mode = "graph" | "list"
@@ -148,27 +146,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
     }
   }, [scoped, stacked, groups, filter, query, picked, issueKeys])
 
-  const commands = usePrCommands()
-  const { selected } = commands
-  // Los atajos de las acciones actúan sobre el PR enfocado; en un campo, un diálogo o un menú son letras.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!selected || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
-      if (isTypingTarget(e.target, ["[role='dialog']", "[role='alertdialog']", "[role='menu']"])) return
-      const caps = commands.caps(selected)
-      const key = e.key.toUpperCase()
-      if (key === PR_KEYS.merge && caps.merge && !selected.local) commands.merge(selected)
-      else if (key === PR_KEYS.requestReview && caps.requestReview && !selected.local) commands.requestReview(selected)
-      else if (key === PR_KEYS.rebase && caps.rebase && !selected.local) commands.rebase(selected)
-      else if (key === PR_KEYS.hold && caps.hold && !selected.local) commands.toggleHold(selected)
-      else if (key === PR_KEYS.run && caps.run) commands.openRun(selected)
-      else if (key === PR_KEYS.publishLocal && caps.publishLocal && selected.local) commands.publishLocal(selected)
-      else return
-      e.preventDefault()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [selected, commands])
+  usePrShortcuts()
 
   if (!loaded) {
     return (
@@ -402,9 +380,7 @@ function PrList({
 }
 
 function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: OpenPr; depth: number; dimmed: boolean; issueKey: string | undefined; combined: string[] | undefined; hasSignals: boolean }) {
-  const host = useHost()
   const commands = usePrCommands()
-  const { state } = pr
   const review = reviewStatus(pr)
   const mark = mergeMark(pr)
   const selected = commands.selected?.id === pr.id
@@ -422,10 +398,11 @@ function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
       <PrContextMenu pr={pr}>
         <button
           type="button"
-          onClick={() => {
-            commands.select(pr.id)
-            if (state) host.openExternal(state.url)
-            else if (pr.local) commands.viewLocal(pr)
+          onClick={() => commands.view(pr)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return
+            e.preventDefault()
+            commands.view(pr)
           }}
           onFocus={() => commands.select(pr.id)}
           className={cn("flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none", selected && "bg-accent/40")}
