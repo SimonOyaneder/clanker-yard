@@ -18,13 +18,14 @@ import {
   PermanentActionError,
   prPublishAction,
   prPushFixupsAction,
+  StaleLeaseError,
   type ActionCtx,
   type Askpass,
   type Store,
   type WorkspaceLease,
   type Workspaces,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
@@ -158,6 +159,10 @@ function durableCtx(crashAfter?: string) {
     signal: new AbortController().signal,
     async once(stage, fn) {
       if (saved.has(stage)) return saved.get(stage) as never;
+      if (crash === `before:${stage}`) {
+        crash = undefined;
+        throw new Error(`corte antes de ${stage}`);
+      }
       const result = await fn();
       if (stage === crash) {
         crash = undefined;
@@ -167,7 +172,7 @@ function durableCtx(crashAfter?: string) {
       return result;
     },
   };
-  return ctx;
+  return { ...ctx, saved };
 }
 
 const fixed = () => file(lines(30)).replace("l2\n", "top fixed\nextra\n").replace("l28\n", "bottom fixed\n");
@@ -205,7 +210,7 @@ describe("pr.pushFixups", () => {
     expect(inCommit(newBottom)).toContain("+bottom fixed");
     expect(result).toEqual({
       outcome: "ok",
-      output: { byItem: { b1: newTop, b2: newBottom, ci: remoteSha() }, head: remoteSha() },
+      output: { byItem: { b1: newTop, b2: newBottom, ci: remoteSha() }, head: remoteSha(), from: bottom, to: remoteSha() },
     });
     expect(local("status", "--porcelain")).toBe("");
   });
@@ -314,7 +319,7 @@ describe("pr.pushFixups", () => {
     expect(remote("merge-base", "--is-ancestor", before, remoteSha())).toBe("");
     expect(remoteSha()).toBe(local("rev-parse", "HEAD"));
     expect(inCommit(fixup)).toContain("+top fixed");
-    expect(result).toEqual({ outcome: "ok", output: { byItem: { b1: fixup }, head: remoteSha() } });
+    expect(result).toEqual({ outcome: "ok", output: { byItem: { b1: fixup }, head: remoteSha(), from: before, to: remoteSha() } });
   });
 
   test("un fixup! de un PR con council se vuelve a atar al commit original, no al fixup", async () => {
@@ -383,7 +388,7 @@ describe("pr.pushFixups", () => {
 
     const result = await pushFixups.run(args({ items: [{ id: "x", path: "c.txt", line: 2 }] }), durableCtx());
 
-    expect(result).toEqual({ outcome: "ok", output: { byItem: { x: head }, head } });
+    expect(result).toEqual({ outcome: "ok", output: { byItem: { x: head }, head, from: head, to: head } });
     expect(remoteSha()).toBe(head);
   });
 
@@ -409,14 +414,25 @@ describe("pr.pushFixups", () => {
     expect(remoteSha()).toBe(lease.baseSha);
   });
 
-  test.each(["commit", "push"])("un corte tras la etapa %s: el reintento deja el remoto con el arreglo una sola vez", async (stage) => {
+  test.each(["commit", "before:push", "push"])("un corte en %s: el reintento deja el remoto con el arreglo una sola vez", async (stage) => {
+    const from = local("rev-parse", "HEAD");
     write("c.txt", fixed());
+    const input = args({ items: [{ id: "b1", path: "c.txt", line: 2 }] });
     const ctx = durableCtx(stage);
-    await expect(pushFixups.run(args(), ctx)).rejects.toThrow(`corte después de ${stage}`);
+    await expect(pushFixups.run(input, ctx)).rejects.toThrow(stage === "before:push" ? "corte antes de push" : `corte después de ${stage}`);
+    if (stage === "before:push") {
+      expect(ctx.saved.get("commit")).toEqual({
+        made: [
+          { sha: shaOf("fixup! feat: top"), lands: shaOf("feat: top"), spans: expect.any(Array) },
+          { sha: shaOf("fixup! feat: bottom"), lands: shaOf("feat: bottom"), spans: expect.any(Array) },
+        ],
+      });
+    }
 
-    const result = await pushFixups.run(args(), ctx);
+    const result = await pushFixups.run(input, ctx);
 
-    expect(result.outcome).toBe("ok");
+    expect(result).toMatchObject({ outcome: "ok", output: { byItem: { b1: shaOf("feat: top") }, from, to: remoteSha(), head: remoteSha() } });
+    expect(await pushFixups.run(input, ctx)).toEqual(result);
     expect(subjects(remoteSha())).toEqual(["feat: top", "feat: bottom"]);
     expect(remote("show", "--format=", `refs/heads/${BRANCH}:c.txt`)).toBe(fixed().trimEnd());
   });
@@ -434,5 +450,134 @@ describe("pr.pushFixups", () => {
     store.db.$client.prepare("UPDATE pull_requests SET state = 'closed'").run();
 
     await expect(pushFixups.run(args(), durableCtx())).rejects.toThrow(PermanentActionError);
+  });
+});
+
+describe("pr.pushFixups con un PR local", () => {
+  let requests: number;
+
+  beforeEach(() => {
+    github.pr(1).close();
+    remote("update-ref", "-d", `refs/heads/${BRANCH}`);
+    local("update-ref", "-d", `refs/remotes/origin/${BRANCH}`);
+    store.db.$client.prepare("UPDATE pull_requests SET state = 'local', number = NULL, node_id = NULL, title = 'Fixups locales', head_changed_at = 0").run();
+    store.db.$client.prepare("UPDATE workspaces SET remote_sha = NULL").run();
+    requests = github.requests.length;
+    vi.spyOn(workspaces, "push");
+  });
+
+  afterEach(() => {
+    expect(github.requests.slice(requests)).toEqual([]);
+    expect(workspaces.push).not.toHaveBeenCalled();
+    expect(() => remoteSha()).toThrow();
+    expect(store.db.$client.prepare("SELECT remote_sha FROM workspaces").get()).toEqual({ remote_sha: null });
+  });
+
+  test("squashea el arreglo en el primero de dos commits y guarda la punta sin publicar", async () => {
+    const from = local("rev-parse", "HEAD");
+    const top = shaOf("feat: top");
+    write("c.txt", file(lines(30)).replace("l2\n", "top fixed\n").replace("l28\n", "bottom\n"));
+
+    const result = await pushFixups.run(args({ items: [{ id: "b1", path: "c.txt", line: 2 }, { id: "ci" }] }), durableCtx());
+
+    const head = local("rev-parse", "HEAD");
+    const newTop = shaOf("feat: top");
+    expect(subjects("HEAD")).toEqual(["feat: top", "feat: bottom"]);
+    expect(newTop).not.toBe(top);
+    expect(head).not.toBe(from);
+    expect(inCommit(newTop)).toContain("+top fixed");
+    expect(inCommit(shaOf("feat: bottom"))).not.toContain("top fixed");
+    expect(result).toEqual({
+      outcome: "ok",
+      output: { byItem: { b1: newTop, ci: head }, head, from, to: head },
+    });
+    expect(store.db.$client.prepare("SELECT state, head_sha, head_changed_at FROM pull_requests").get()).toEqual({
+      state: "local", head_sha: head, head_changed_at: expect.any(Number),
+    });
+    expect(store.db.$client.prepare("SELECT head_changed_at FROM pull_requests").get()?.head_changed_at).toBeGreaterThan(0);
+    expect(local("status", "--porcelain")).toBe("");
+  });
+
+  test.each(["nuevo", "into"])("un hunk sin dueño vuelve al committer y su ruta %s se guarda sin publicar", async (destination) => {
+    const from = local("rev-parse", "HEAD");
+    const top = shaOf("feat: top");
+    write("nuevo.txt", "algo nuevo\n");
+
+    const routed = await pushFixups.run(args(), durableCtx());
+
+    expect(routed).toEqual({
+      outcome: "route",
+      output: { unrouted: ["h1"], commits: [{ sha: top, subject: "feat: top" }, { sha: from, subject: "feat: bottom" }] },
+    });
+    expect(local("rev-parse", "HEAD")).toBe(from);
+    expect(store.db.$client.prepare("SELECT head_sha FROM pull_requests").get()).toEqual({ head_sha: from });
+
+    const route = { commits: [{ message: "feat: add nuevo", hunks: ["h1"], ...(destination === "into" && { into: top }) }] };
+    const result = await pushFixups.run(args({ route, items: [{ id: "nuevo", path: "nuevo.txt" }] }), durableCtx());
+
+    const head = local("rev-parse", "HEAD");
+    const target = shaOf(destination === "into" ? "feat: top" : "feat: add nuevo");
+    expect(subjects("HEAD")).toEqual(["feat: top", "feat: bottom", ...(destination === "into" ? [] : ["feat: add nuevo"])]);
+    expect(inCommit(target)).toContain("+algo nuevo");
+    expect(result).toEqual({ outcome: "ok", output: { byItem: { nuevo: target }, head, from, to: head } });
+    expect(store.db.$client.prepare("SELECT head_sha FROM pull_requests").get()).toEqual({ head_sha: head });
+  });
+
+  test("sin cambios conserva la punta", async () => {
+    const head = local("rev-parse", "HEAD");
+
+    const result = await pushFixups.run(args({ items: [{ id: "ci" }] }), durableCtx());
+
+    expect(result).toEqual({ outcome: "ok", output: { byItem: { ci: head }, head, from: head, to: head } });
+    expect(subjects("HEAD")).toEqual(["feat: top", "feat: bottom"]);
+    expect(store.db.$client.prepare("SELECT head_sha FROM pull_requests").get()).toEqual({ head_sha: head });
+  });
+
+  test.each(["commit", "before:push", "push"])("un corte en %s no duplica commits y conserva la punta inicial", async (stage) => {
+    const from = local("rev-parse", "HEAD");
+    write("c.txt", fixed());
+    const input = args({ items: [{ id: "b1", path: "c.txt", line: 2 }] });
+    const ctx = durableCtx(stage);
+    await expect(pushFixups.run(input, ctx)).rejects.toThrow(stage === "before:push" ? "corte antes de push" : `corte después de ${stage}`);
+
+    const result = await pushFixups.run(input, ctx);
+
+    const head = local("rev-parse", "HEAD");
+    expect(result).toEqual({ outcome: "ok", output: { byItem: { b1: shaOf("feat: top") }, head, from, to: head } });
+    expect(await pushFixups.run(input, ctx)).toEqual(result);
+    expect(subjects("HEAD")).toEqual(["feat: top", "feat: bottom"]);
+    expect(local("show", "HEAD:c.txt")).toBe(fixed().trimEnd());
+    expect(store.db.$client.prepare("SELECT head_sha FROM pull_requests").get()).toEqual({ head_sha: head });
+  });
+
+  test("si el lease cambia al terminar el squash no guarda la punta del PR local", async () => {
+    const head = local("rev-parse", "HEAD");
+    write("c.txt", fixed());
+    const git = workspaces.git;
+    let squashed = false;
+    vi.spyOn(workspaces, "git").mockImplementation(async (ws, ...command) => {
+      const result = await git(ws, ...command);
+      if (command.includes("--autosquash")) squashed = true;
+      if (squashed && command[0] === "log" && command[1] === "--format=%s") {
+        store.db.$client.prepare("UPDATE workspaces SET fencing_token = fencing_token + 1").run();
+      }
+      return result;
+    });
+
+    await expect(pushFixups.run(args(), durableCtx())).rejects.toThrow(StaleLeaseError);
+
+    expect(local("rev-parse", "HEAD")).not.toBe(head);
+    expect(store.db.$client.prepare("SELECT head_sha, head_changed_at FROM pull_requests").get()).toEqual({ head_sha: head, head_changed_at: 0 });
+  });
+
+  test("rechaza un PR local ajeno sin cambiar su punta", async () => {
+    const head = local("rev-parse", "HEAD");
+    store.db.$client.prepare("UPDATE pull_requests SET owned = 0").run();
+    write("c.txt", fixed());
+
+    await expect(pushFixups.run(args(), durableCtx())).rejects.toThrow(PermanentActionError);
+
+    expect(local("rev-parse", "HEAD")).toBe(head);
+    expect(store.db.$client.prepare("SELECT head_sha, head_changed_at FROM pull_requests").get()).toEqual({ head_sha: head, head_changed_at: 0 });
   });
 });
