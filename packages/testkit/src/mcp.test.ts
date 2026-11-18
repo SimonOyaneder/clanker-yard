@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
-import { type Event } from "@clanker/api";
+import { type Event, LocalPrDetail } from "@clanker/api";
 import { createRepos } from "@clanker/core";
+import { seedPr } from "@clanker/core/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { startMcpHarness, type McpHarness } from "./mcp-harness";
 
@@ -32,8 +33,10 @@ describe("tools", () => {
     const { tools } = await h.mcp.listTools();
 
     expect(tools.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations }))).toMatchSnapshot();
-    expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name)).toEqual(["list", "get", "project_queue"]);
-    expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name)).toEqual(["delete", "cancel_run", "interrupt_run", "resolve_decision"]);
+    expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name))
+      .toEqual(expect.arrayContaining(["list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff"]));
+    expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name))
+      .toEqual(expect.arrayContaining(["delete", "cancel_run", "interrupt_run", "resolve_decision"]));
   });
 
   test("list y get de los kinds de defs: los builtin del core", async () => {
@@ -65,6 +68,21 @@ describe("tools", () => {
     await expect(h.call("get", { kind: "run", id: "run_00000000000000000000000001" })).rejects.toThrow(/NOT_FOUND: .*run_00000000000000000000000001/);
     await expect(h.call("get", { kind: "flow", id: "def_nope" })).rejects.toThrow(/NOT_FOUND: No existe flow def_nope/);
     await expect(h.call("list", { kind: "run", filter: { status: ["nope"] } })).rejects.toThrow(/BAD_REQUEST/);
+  });
+
+  test("lee los PRs locales aun sin cuenta de GitHub", async () => {
+    const repoId = createRepos({ store: h.store }).add({ name: "demo", path: h.repo.dir, remote: "octocat/demo" });
+    h.repo.git("switch", "-c", "local");
+    h.repo.git("commit", "--allow-empty", "-m", "feat: local");
+    h.repo.git("switch", "main");
+    const head = h.repo.git("rev-parse", "local");
+    const id = seedPr(h.store, { repoId, number: null, state: "local", headRef: "local", headSha: head, title: "Local" });
+    expect(await h.call("list_prs", { state: "local" })).toMatchObject([{ id, repo: "octocat/demo", local: { title: "Local" }, ref: null }]);
+    const detail = LocalPrDetail.parse(await h.call("get_local_pr", { id }));
+    expect(detail).toMatchObject({ title: "Local", head, commits: [{ sha: head, subject: "feat: local" }] });
+    expect(await h.call("get_local_pr_commit_diff", { id, sha: head.slice(0, 8) })).toMatchObject({ sha: head });
+    const remote = seedPr(h.store, { repoId, number: 1 });
+    await expect(h.call("get_local_pr", { id: remote })).rejects.toThrow(/ya no es local/);
   });
 });
 

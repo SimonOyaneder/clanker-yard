@@ -322,6 +322,7 @@ export type PrDetail = z.infer<typeof PrDetail>;
 export const LocalPrDetail = PrDetail;
 export type LocalPrDetail = PrDetail;
 
+export const LocalPrId = z.strictObject({ id: z.string().min(1) });
 /** `prs.localCommitDiff`: el diff de un solo commit de un PR local (contra su padre), para revisarlo commit por commit. */
 export const LocalCommitDiff = z.object({ sha: z.string(), files: z.array(LocalPrFile), patch: z.string(), truncated: z.boolean() });
 export type LocalCommitDiff = z.infer<typeof LocalCommitDiff>;

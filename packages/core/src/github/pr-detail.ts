@@ -12,9 +12,9 @@ import { isUnauthorized } from "./client";
 import { prById } from "./pr-rows";
 
 export interface PrDetails {
-  get(id: string): Promise<PrDetail>;
+  get(id: string, localOnly?: boolean): Promise<PrDetail>;
   /** El diff de un commit del PR contra su padre; rechaza un commit que no es de los del PR. */
-  commit(id: string, sha: string, range?: { head: string; base: string }): Promise<PrCommitDiff>;
+  commit(id: string, sha: string, range?: { head: string; base: string }, localOnly?: boolean): Promise<PrCommitDiff>;
 }
 
 /** Separa los campos y los commits de `git log`: no aparecen en un mensaje de commit. */
@@ -34,9 +34,10 @@ export function createPrDetails({ store, repoConfig, connections, workspaces }: 
   workspaces: Pick<Workspaces, "fetch" | "fetchPr">;
 }): PrDetails {
   /** La fila, el repo y desde dónde salen los commits propios del PR (el merge-base con su base). */
-  async function locate(id: string) {
+  async function locate(id: string, localOnly = false) {
     const row = prById(store.db, id);
     if (!row) throw new NotFoundError(`No existe el PR ${id}.`);
+    if (localOnly && row.state !== "local") throw new BadRequestError(`El PR ${id} ya no es local.`);
     const { path, remote } = repoConfig(row.repoId);
     let branch = row.headRef;
     let base = row.baseRef;
@@ -119,9 +120,9 @@ export function createPrDetails({ store, repoConfig, connections, workspaces }: 
   }
 
   return {
-    async get(id) {
+    async get(id, localOnly) {
       return reading(async () => {
-        const { row, path, remote, branch, base, title, body, head, baseSha, from } = await locate(id);
+        const { row, path, remote, branch, base, title, body, head, baseSha, from } = await locate(id, localOnly);
         return {
           id: row.id,
           repo: remote?.repo ?? row.repoId,
@@ -137,13 +138,15 @@ export function createPrDetails({ store, repoConfig, connections, workspaces }: 
       });
     },
 
-    async commit(id, sha, range) {
+    async commit(id, sha, range, localOnly) {
       return reading(async () => {
-        const { path, from, head, baseSha, branch } = await locate(id);
+        const { path, from, head, baseSha, branch } = await locate(id, localOnly);
         if (range && (range.head !== head || range.base !== baseSha)) {
           throw new BadRequestError("El PR cambió desde que abriste el detalle: actualízalo antes de ver el commit.");
         }
-        const commit = (await commitsOf(path, from, head)).find((c) => c.sha.startsWith(sha));
+        const matching = (await commitsOf(path, from, head)).filter((c) => c.sha.startsWith(sha));
+        if (matching.length > 1) throw new BadRequestError(`El SHA ${sha} coincide con más de un commit: usa el SHA completo.`);
+        const commit = matching[0];
         if (!commit) throw new BadRequestError(`El commit ${sha.slice(0, 9)} no es de ${branch}.`);
         return { sha: commit.sha, ...(await diffOf(path, `${commit.sha}^`, commit.sha)) };
       });

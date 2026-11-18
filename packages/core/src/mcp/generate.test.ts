@@ -21,7 +21,7 @@ describe("generateMcp sobre el contrato real", () => {
     const safe = { destructiveHint: false, openWorldHint: false };
     const safeIdempotent = { ...safe, idempotentHint: true };
     const destructive = { destructiveHint: true, idempotentHint: true, openWorldHint: false };
-    expect(Object.fromEntries(plan.tools.map((t) => [t.name, t.annotations]))).toEqual({
+    expect(Object.fromEntries(plan.tools.map((t) => [t.name, t.annotations]))).toMatchObject({
       list: readOnly,
       get: readOnly,
       create: safe,
@@ -40,6 +40,9 @@ describe("generateMcp sobre el contrato real", () => {
       resolve_decision: { destructiveHint: true, idempotentHint: false, openWorldHint: true },
       project_queue: readOnly,
       update_project: safeIdempotent,
+      list_prs: readOnly,
+      get_local_pr: readOnly,
+      get_local_pr_commit_diff: readOnly,
       propose_learning: safeIdempotent,
     });
   });

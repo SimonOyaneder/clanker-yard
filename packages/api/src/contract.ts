@@ -24,7 +24,7 @@ import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
 import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
-import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, PrCommitDiff, PrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
+import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, LocalPrId, PrCommitDiff, PrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync, RepoOverview } from "./repos";
@@ -35,7 +35,7 @@ import { CachedIssue, IssueFilter, NewLocalIssue, TrackerId, TrackerProject } fr
  * Versión mayor de la API. Sube cuando el contrato cambia de forma incompatible; el core la
  * informa en `system.health` y la app, si difiere de la suya, relanza el core (`d-data`, "Handshake").
  */
-export const API_MAJOR = 3;
+export const API_MAJOR = 4;
 
 const base = oc.$meta<ContractMeta>({});
 
@@ -358,9 +358,15 @@ const prs = {
   get: base.input(PrRef).output(PrState),
   /**
    * Los PRs que Watch conoce, del caché de `pull_requests` y sin tocar GitHub: los que abrió el sistema
-   * y los que descubrió en tu búsqueda de PRs abiertos, ordenados por repo y número.
+   * y los que descubrió en tu búsqueda de PRs abiertos, además de los locales.
    */
-  list: base.input(PrFilter.default({})).output(z.array(CachedPr)),
+  list: base.meta({
+    mcp: {
+      action: "list_prs",
+      description: "Lista PRs del caché sin contactar a GitHub. Usa `state: \"local\"` para obtener ids, ramas, bases y padres de PRs todavía no publicados.",
+      annotations: READ_ONLY,
+    },
+  }).input(PrFilter.default({})).output(z.array(CachedPr)),
   /**
    * Como `get`, pero además deja el resultado en el caché y, si el estado cambió, avisa a los waits que
    * esperan este PR: sirve para no esperar al polling. Los mismos errores que `get`.
@@ -404,14 +410,20 @@ const prs = {
     head: z.string().regex(/^[0-9a-f]{40}$/),
     base: z.string().regex(/^[0-9a-f]{40}$/),
   })).output(PrCommitDiff),
-  /**
-   * Alias de `detail`: descripción, commits y diff por el id interno del PR.
-   */
-  localDetail: base.input(z.object({ id: z.string().min(1) })).output(LocalPrDetail),
-  /**
-   * Alias de `commitDiff` sobre las puntas actuales del PR. Rechaza commits ajenos al PR.
-   */
-  localCommitDiff: base.input(z.object({ id: z.string().min(1), sha: z.string().regex(/^[0-9a-f]{7,40}$/) })).output(LocalCommitDiff),
+  localDetail: base.meta({
+    mcp: {
+      action: "get_local_pr",
+      description: "Lee título, descripción, ramas, SHA, commits, archivos y diff de un PR local por su id interno. `truncated` indica si el diff supera el límite; se puede consultar por commit.",
+      annotations: READ_ONLY,
+    },
+  }).input(LocalPrId).output(LocalPrDetail),
+  localCommitDiff: base.meta({
+    mcp: {
+      action: "get_local_pr_commit_diff",
+      description: "Lee el diff de un commit de un PR local por id interno y SHA. Rechaza commits ajenos al PR.",
+      annotations: READ_ONLY,
+    },
+  }).input(LocalPrId.extend({ sha: z.string().regex(/^[0-9a-f]{7,40}$/) })).output(LocalCommitDiff),
   /**
    * Rehace los PRs abiertos del sistema con la branch (`eng-1234-slug`), el autor y los commits de las reglas de hoy, en
    * orden de stack (los padres antes que los hijos): el mismo cambio, abierto como PR nuevo ("Reemplaza a #n") y el

@@ -123,7 +123,14 @@ clanker runs get <id>
 clanker events tail [--run <id>] [--project <slug>] [--follow]
 ```
 
-`clanker` sin argumentos lista todos los comandos. Todo lo que hace la app también se puede hacer desde Claude Code por el MCP:
+Para trabajar con un PR local:
+
+```bash
+clanker prs list-local
+clanker prs show-local <id> [--commit <sha>] [--json]
+```
+
+`clanker` sin argumentos lista todos los comandos. Conecta el MCP para usar Clanker Yard desde Claude Code:
 
 ```bash
 claude mcp add -s user clanker -- ~/.local/bin/clanker mcp

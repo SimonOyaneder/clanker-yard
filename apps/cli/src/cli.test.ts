@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
-import { CachedIssue, type Client, ClankerProject, type Event, type RunDetail } from "@clanker/api";
-import { describe, expect, test } from "vitest";
+import { CachedIssue, type CachedPr, type Client, ClankerProject, type Event, type LocalCommitDiff, type LocalPrDetail, type RunDetail } from "@clanker/api";
+import { describe, expect, test, vi } from "vitest";
 import type { CliContext } from "./command";
 import { runCli } from "./cli";
 
@@ -70,7 +70,7 @@ const run: RunDetail = {
 const event = (seq: number, overrides: Partial<Event> = {}): Event => ({ seq, ts: Date.UTC(2026, 10, 15, 12, 0, seq), type: "run.status", origin: "core", payload: {}, ...overrides });
 
 /** Corre un comando contra un cliente de mentira: devuelve lo impreso y lo que le pidió al cliente. */
-async function exec(argv: string[], client: Record<string, unknown>, signal = new AbortController().signal) {
+async function exec(argv: string[], client: Record<string, unknown>, overrides?: Partial<Pick<CliContext, "client" | "readFile" | "signal">>) {
   const out: string[] = [];
   const ctx: CliContext = {
     client: () => Promise.resolve(client as Client),
@@ -78,7 +78,8 @@ async function exec(argv: string[], client: Record<string, unknown>, signal = ne
     write: (line) => out.push(line),
     readFile: () => "",
     sleep: () => Promise.resolve(),
-    signal,
+    signal: new AbortController().signal,
+    ...overrides,
   };
   await runCli(argv, ctx);
   return out.join("\n");
@@ -93,6 +94,8 @@ describe("clanker", () => {
     expect(out).toContain("clanker runs start <proyecto> <issue>");
     expect(out).toContain("clanker events tail");
     expect(out).toContain("clanker metrics compare");
+    expect(out).toContain("clanker prs list-local");
+    expect(out).toContain("clanker prs show-local");
     await expect(exec(["--help"], {})).resolves.toBe(out);
   });
 
@@ -409,7 +412,7 @@ describe("clanker prs republish", () => {
     const interrupted = new AbortController();
     interrupted.abort();
     const stuck = clientFor([[{ repo: "r1", number: 1, status: "pending" }], [{ repo: "r1", number: 1, status: "pending" }]]);
-    await expect(exec(["prs", "republish"], stuck, interrupted.signal)).rejects.toThrow(/Interrumpido/);
+    await expect(exec(["prs", "republish"], stuck, { signal: interrupted.signal })).rejects.toThrow(/Interrumpido/);
   });
 
   test("sin opciones rehace todo y un --pr que no es número falla con el uso, sin tocar el core", async () => {
@@ -419,5 +422,73 @@ describe("clanker prs republish", () => {
 
     await expect(exec(["prs", "republish", "--pr", "abc"], client)).rejects.toThrow(/--pr pide un número de PR, no "abc"\.\nUso: clanker prs republish/);
     expect(client.calls).toHaveLength(1);
+  });
+});
+
+describe("clanker prs locales", () => {
+  const id = "pr_00000000000000000000000001";
+  const head = "a".repeat(40);
+  const repo = "octocat/demo";
+  const patch = "diff --git a/README.md b/README.md\n+hola\n";
+  const local = { branch: "rama-hija", base: "rama-padre", title: "Saluda al mundo" };
+  const cached: CachedPr = {
+    id, repo, ref: null, local, owned: true, issueId, runId, parents: [], signals: [], reviewBot: false, state: null, readAt: null,
+  };
+  const detail: LocalPrDetail = {
+    id, repo, ...local, baseSha: "b".repeat(40), head, body: "Primera línea\n\nSegunda línea",
+    commits: [{ sha: head, subject: "feat: agrega saludo", body: "", author: "Octocat", date: "2026-11-15T12:00:00Z" }],
+    files: [{ path: "README.md", additions: 1, deletions: 0 }],
+    patch, truncated: false,
+  };
+
+  test("list-local pide solo PRs locales, filtra por repo y muestra una tabla o JSON", async () => {
+    const list = vi.fn().mockResolvedValue([cached]);
+    const client = { prs: { list } };
+
+    const out = await exec(["prs", "list-local", "--repo", repo], client);
+
+    expect(list).toHaveBeenCalledExactlyOnceWith({ state: "local", repo });
+    expect(out).toContain("Título");
+    for (const value of [id, repo, local.branch, local.base, local.title]) expect(out).toContain(value);
+    expect(JSON.parse(await exec(["prs", "list-local", "--json"], client))).toEqual([cached]);
+    expect(list).toHaveBeenLastCalledWith({ state: "local", repo: undefined });
+
+    list.mockResolvedValueOnce([]);
+    await expect(exec(["prs", "list-local"], client)).resolves.toBe("No hay PRs locales.");
+  });
+
+  test("show-local muestra título, descripción, commits, archivos y patch (o el detalle JSON)", async () => {
+    const localDetail = vi.fn().mockResolvedValue(detail);
+    const client = { prs: { localDetail } };
+
+    const out = await exec(["prs", "show-local", id], client);
+
+    expect(localDetail).toHaveBeenCalledExactlyOnceWith({ id });
+    for (const text of [local.title, detail.body, head, "feat: agrega saludo", "README.md", "+1", patch]) expect(out).toContain(text);
+    expect(JSON.parse(await exec(["prs", "show-local", id, "--json"], client))).toEqual(detail);
+  });
+
+  test("show-local --commit pide el diff de ese commit y avisa si se truncó", async () => {
+    const diff: LocalCommitDiff = { sha: head, files: detail.files, patch, truncated: true };
+    const localCommitDiff = vi.fn().mockResolvedValue(diff);
+    const client = { prs: { localCommitDiff } };
+    const sha = head.slice(0, 7);
+    const args = ["prs", "show-local", id, "--commit", sha];
+
+    const out = await exec(args, client);
+
+    expect(localCommitDiff).toHaveBeenCalledExactlyOnceWith({ id, sha });
+    for (const text of [head, "README.md", patch, "Patch truncado"]) expect(out).toContain(text);
+    expect(JSON.parse(await exec([...args, "--json"], client))).toEqual(diff);
+  });
+
+  test.each([
+    [["list-local", "--repo", "demo"], "--repo pide"],
+    [["show-local"], "Indica un solo id"],
+    [["show-local", id, "--commit", "main"], "--commit pide un SHA"],
+  ])("valida %j antes de arrancar el core", async (args, message) => {
+    const client = vi.fn();
+    await expect(exec(["prs", ...args], {}, { client })).rejects.toThrow(message);
+    expect(client).not.toHaveBeenCalled();
   });
 });
