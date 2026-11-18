@@ -1,5 +1,6 @@
 import type { IssueId, PrRef, RepoId } from "@clanker/api";
-import { and, asc, eq, inArray, isNotNull, ne, type SQL } from "drizzle-orm";
+import { and, asc, eq, exists, inArray, isNotNull, ne, notExists, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { prParents, pullRequests, watchMarks } from "../store/schema";
 import type { Repos } from "../repos/repos";
 import type { Store } from "../store/store";
@@ -87,24 +88,31 @@ export function prHold(db: Db, repoId: RepoId, number: number): boolean {
  * marca `checked` en su punta: los que una cola de merge pudo haber mergeado sin que nadie lo revisara (Watch).
  */
 export function closedPrsWithLiveChildren(db: Db, checked: string): PrRow[] {
+  // Watch lo pregunta en cada despertar (cada 2 s) y los cerrados solo crecen: el filtro va entero en SQL, así el
+  // `detail` (el `PrState` en JSON) solo se lee y parsea de los pocos que calzan.
+  const child = alias(pullRequests, "child");
   return db
     .select()
     .from(pullRequests)
-    .where(and(eq(pullRequests.state, "closed"), eq(pullRequests.owned, true), isNotNull(pullRequests.detail)))
-    .all()
-    .filter((row) => {
-      const live = db
-        .select({ id: prParents.childId })
-        .from(prParents)
-        .innerJoin(pullRequests, eq(pullRequests.id, prParents.childId))
-        .where(and(eq(prParents.parentId, row.id), inArray(pullRequests.state, ["open", "local"])))
-        .get();
-      if (!live) return false;
-      const mark = db
-        .select({ id: watchMarks.id })
-        .from(watchMarks)
-        .where(and(eq(watchMarks.prId, row.id), inArray(watchMarks.kind, [checked, "pr.merged"])))
-        .get();
-      return !mark;
-    });
+    .where(
+      and(
+        eq(pullRequests.state, "closed"),
+        eq(pullRequests.owned, true),
+        isNotNull(pullRequests.detail),
+        exists(
+          db
+            .select({ id: prParents.childId })
+            .from(prParents)
+            .innerJoin(child, eq(child.id, prParents.childId))
+            .where(and(eq(prParents.parentId, pullRequests.id), inArray(child.state, ["open", "local"]))),
+        ),
+        notExists(
+          db
+            .select({ id: watchMarks.id })
+            .from(watchMarks)
+            .where(and(eq(watchMarks.prId, pullRequests.id), inArray(watchMarks.kind, [checked, "pr.merged"]))),
+        ),
+      ),
+    )
+    .all();
 }
