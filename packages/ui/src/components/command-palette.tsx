@@ -1,6 +1,7 @@
 import type { CachedIssue, ClankerProject, Decision, QueueEntry, Run, RunId } from "@clanker/api"
 import { BarChart3, BookCheck, Bot, CalendarRange, Check, CornerDownLeft, ExternalLink, FileText, Filter, Gauge, GitMerge, GitPullRequest, GitPullRequestArrow, History, Inbox, Keyboard, Layers, ListTodo, ListTree, MessageSquare, Network, Octagon, PanelLeft, Pencil, Paperclip, Pause, PauseCircle, Play, Plug, Plus, RefreshCw, Reply, RotateCcw, RotateCw, Save, ScrollText, Settings2, Square, SquareCheck, Table2, Undo2, Upload, X, Eye, Rows2, Columns2, ChevronLeft, ChevronRight, GitCommitHorizontal } from "lucide-react"
 import { PR_VIEW_KEYS, type PrControls } from "@/components/prs/pr-view"
+import { CHAT_KEYS } from "@/hooks/use-pr-chat"
 import type { ProjectTab } from "@/components/project/project-view"
 import type { OpenPr } from "@/lib/prs/prs"
 import { branchOf, keyOf, repoNameOf, titleOf } from "@/lib/prs/prs"
@@ -178,6 +179,21 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
                 <CommandShortcut>{PR_KEYS.run}</CommandShortcut>
               </CommandItem>
             ) : null}
+          </CommandGroup>
+        ) : null}
+
+        {pr?.chat ? (
+          <CommandGroup heading="Chat del PR">
+            <CommandItem value="chat abrir plegar panel" onSelect={run(pr.chat.toggle)}>
+              <MessageSquare /> {pr.chat.open ? "Plegar chat" : "Abrir chat"}
+              <CommandShortcut>{CHAT_KEYS.toggle}</CommandShortcut>
+            </CommandItem>
+            {Object.entries(pr.chat.actions).map(([id, action]) => (
+              <CommandItem key={id} value={`chat ${action.label}`} disabled={!!action.reason} onSelect={run(action.run)}>
+                <MessageSquare /> {action.label}{action.reason ? `: ${action.reason}` : null}
+                <CommandShortcut>{action.keys}</CommandShortcut>
+              </CommandItem>
+            ))}
           </CommandGroup>
         ) : null}
 

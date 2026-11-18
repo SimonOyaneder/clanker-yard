@@ -4,6 +4,7 @@ import type {
   Breaker,
   CachedIssue,
   CachedPr,
+  Client,
   ClankerProject,
   ClaudeMode,
   ClaudeStatus,
@@ -90,7 +91,17 @@ export interface ProjectMetrics {
 // De dónde saca datos la UI y a quién le pide acciones. Los dominios son los del contrato de
 // `@clanker/api`. `createCoreAppData` habla con el core; `createMemoryAppData` sirve datos de ejemplo
 // para desarrollar sin core. Todo lo que falla rechaza con un `Error` cuyo mensaje se muestra tal cual.
-export interface AppData {
+export interface ChatData {
+  chat: Client["chats"]["get"]
+  sendChat: Client["chats"]["send"]
+  interruptChat: Client["chats"]["interrupt"]
+  resetChat: Client["chats"]["reset"]
+  chatProposal: Client["chats"]["proposal"]
+  discardProposal: Client["chats"]["discard"]
+  applyProposal: Client["chats"]["apply"]
+}
+
+export interface AppData extends Partial<ChatData> {
   projects(): Promise<ClankerProject[]>
   createProject(input: NewProject): Promise<ClankerProject>
   updateProject(input: { id: ProjectId } & ProjectPatch): Promise<ClankerProject>
@@ -247,6 +258,11 @@ export interface AppData {
 
 const AppDataContext = createContext<AppData | null>(null)
 export const AppDataProvider = AppDataContext.Provider
+
+export function supportsChat(data: AppData): data is AppData & ChatData {
+  return !!(data.chat && data.sendChat && data.interruptChat && data.resetChat &&
+    data.chatProposal && data.discardProposal && data.applyProposal)
+}
 
 export function useAppData(): AppData {
   const data = useContext(AppDataContext)

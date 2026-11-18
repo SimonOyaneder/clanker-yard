@@ -7,6 +7,7 @@ import { AppDataProvider } from "@/app-data"
 import { CommandPalette } from "@/components/command-palette"
 import { PrCommandsProvider, usePrCommands } from "@/components/prs/pr-commands"
 import type { PrControls } from "@/components/prs/pr-view"
+import { CHAT_KEYS, type ChatAction, type ChatActionId } from "@/hooks/use-pr-chat"
 import { RunCommandsProvider } from "@/components/run/run-commands"
 import type { SettingsControls } from "@/components/project-settings/settings-view"
 import type { SummaryControls } from "@/hooks/use-summary-controls"
@@ -118,6 +119,31 @@ test("buscar un remoto abre el detalle interno, no GitHub", async () => {
 
   expect(openPr).toHaveBeenCalledWith(remote.id)
   expect(host.openExternal).not.toHaveBeenCalled()
+})
+
+test("la paleta del chat comparte acciones, atajos y restricciones con el panel", async () => {
+  const actions: Record<ChatActionId, ChatAction> = {
+    send: { label: "Enviar mensaje", keys: CHAT_KEYS.send, reason: "Escribe un mensaje para enviar.", run: vi.fn() },
+    interrupt: { label: "Interrumpir turno", keys: CHAT_KEYS.interrupt, reason: "No hay un turno en curso.", run: vi.fn() },
+    reset: { label: "Reiniciar chat", keys: CHAT_KEYS.reset, reason: null, run: vi.fn() },
+    view: { label: "Ver cambios", keys: CHAT_KEYS.view, reason: null, run: vi.fn() },
+    apply: { label: "Aplicar propuesta", keys: CHAT_KEYS.apply, reason: "Este PR no lo abrió Clanker Yard.", run: vi.fn() },
+    discard: { label: "Descartar propuesta", keys: CHAT_KEYS.discard, reason: null, run: vi.fn() },
+  }
+  const toggle = vi.fn()
+  await setup({ pr: { reload: vi.fn(), mode: "unified", toggleMode: vi.fn(), prevCommit: null, nextCommit: null, allCommits: null, chat: { open: true, toggle, actions } } })
+  for (const action of Object.values(actions)) {
+    const option = screen.getByRole("option", { name: new RegExp(action.label) })
+    expect(option.getAttribute("aria-disabled")).toBe(action.reason ? "true" : "false")
+    expect(within(option).getByText(action.keys)).toBeTruthy()
+    if (action.reason) expect(option.textContent).toContain(action.reason)
+  }
+  fireEvent.click(screen.getByRole("option", { name: /Aplicar propuesta/ }))
+  expect(actions.apply.run).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("option", { name: /Ver cambios/ }))
+  expect(actions.view.run).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole("option", { name: /Plegar chat/ }))
+  expect(toggle).toHaveBeenCalledOnce()
 })
 
 test("la paleta abre GitHub para el PR seleccionado y sigue los cambios de selección del detalle", async () => {
