@@ -120,6 +120,8 @@ const events = {
       }),
     )
     .output(z.array(Event)),
+  /** El `seq` del último evento confirmado (0 sin eventos): quien no necesita el historial abre `stream` desde ahí. */
+  latest: base.output(z.object({ seq: z.int().nonnegative() })),
   /**
    * Rellena desde `after` (o desde el `Last-Event-ID` del reconectado) y sigue en vivo, sin
    * duplicados. El `id` de cada mensaje SSE es su `seq`.

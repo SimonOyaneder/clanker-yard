@@ -13,6 +13,9 @@ export function useEvents(onEvent: (event: Event) => void): boolean {
     () =>
       followEvents({
         open: (after, signal) => appData.events(after, signal),
+        // Las consultas se releen al conectar: el historial solo haría releer todo cientos de veces y, con la
+        // ventana sin foco, avisar de decisiones viejas.
+        start: () => appData.latestEventSeq(),
         onEvent: deliver,
         onConnection: setConnected,
       }),

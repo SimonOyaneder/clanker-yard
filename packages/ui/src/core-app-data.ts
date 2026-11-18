@@ -127,6 +127,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     pauseProject: (id) => client.projects.pause({ id }),
     resumeProject: (id) => client.projects.resume({ id }),
     events: (after, signal) => client.events.stream({ after, filter: { types: [...LIVE_EVENTS] } }, { signal }),
+    latestEventSeq: async () => (await client.events.latest()).seq,
     decisions: (filter) => client.decisions.list(filter),
     resolveDecision: (input) => client.decisions.resolve(input),
     learnings: () => client.learnings.list(),

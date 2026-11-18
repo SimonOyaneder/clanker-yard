@@ -185,6 +185,8 @@ export interface AppData extends Partial<ChatData> {
    * se aborta. La promesa resuelve cuando la conexión está abierta.
    */
   events(after: number, signal: AbortSignal): Promise<AsyncIterable<Event>>
+  /** El `seq` del último evento: la UI sigue en vivo desde ahí, sin rellenar el historial (las consultas ya traen el estado). */
+  latestEventSeq(): Promise<number>
   /** La bandeja, de la más reciente a la más antigua; sin filtro trae también las resueltas. */
   decisions(filter?: DecisionFilter): Promise<Decision[]>
   /**

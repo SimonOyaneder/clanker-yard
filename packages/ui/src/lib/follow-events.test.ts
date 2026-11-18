@@ -43,6 +43,31 @@ async function run(opts: { count: number; open: (after: number, attempt: number,
 }
 
 describe("followEvents", () => {
+  test("sin after parte desde start (sin historial) y una caída retoma desde el último entregado", async () => {
+    const opened: number[] = []
+    const received: number[] = []
+    let starts = 0
+    let done!: () => void
+    const finished = new Promise<void>((resolve) => (done = resolve))
+    const stop = followEvents({
+      start: async () => (starts++, 4),
+      open: async (after, signal) => {
+        opened.push(after)
+        return opened.length === 1 ? connection([event(5)], "throw", signal) : connection(LOG.filter((e) => e.seq > after), "open", signal)
+      },
+      onEvent: (e) => {
+        received.push(e.seq)
+        if (received.length === 2) done()
+      },
+      wait: async () => {},
+    })
+    await finished
+    stop()
+    expect(opened).toEqual([4, 5])
+    expect(received).toEqual([5, 6])
+    expect(starts).toBe(1)
+  })
+
   test("tras una caída retoma desde el último seq entregado: no pierde ni repite", async () => {
     const { received, opened } = await run({
       count: 6,

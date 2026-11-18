@@ -817,6 +817,7 @@ export function createMemoryAppData(now = Date.now()): AppData & ChatData {
         }
       },
     }),
+    latestEventSeq: async () => 0,
     decisions: async (filter = {}) =>
       decisions
         .filter((d) => (!filter.projectId || d.projectId === filter.projectId) && (!filter.runId || d.runId === filter.runId) && (!filter.status || filter.status.includes(d.status)) && (!filter.kind || filter.kind.includes(d.kind)))

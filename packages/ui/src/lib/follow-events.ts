@@ -7,7 +7,10 @@ export interface FollowEvents {
   onEvent(event: Event): void
   /** `true` cuando hay un stream abierto, `false` cuando se cayó y espera para reconectar. */
   onConnection?(connected: boolean): void
+  /** Desde dónde seguir. Sin él se lee con `start` al conectar por primera vez (y si no, 0: todo el historial). */
   after?: number
+  /** El `seq` desde el que seguir cuando no hay `after`; se reintenta como una conexión fallida. */
+  start?(signal: AbortSignal): Promise<number>
   /** Espera antes de reconectar tras `failures` intentos seguidos sin conectar; debe resolver al abortarse `signal`. */
   wait?(failures: number, signal: AbortSignal): Promise<void>
 }
@@ -26,12 +29,13 @@ export function followEvents(opts: FollowEvents): () => void {
   const abort = new AbortController()
   const { signal } = abort
   const wait = opts.wait ?? backoff
-  let last = opts.after ?? 0
+  let last = opts.after
 
   void (async () => {
     let failures = 0
     while (!signal.aborted) {
       try {
+        last ??= opts.start ? await opts.start(signal) : 0
         const stream = await opts.open(last, signal)
         opts.onConnection?.(true)
         failures = 0

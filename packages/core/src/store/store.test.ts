@@ -150,6 +150,10 @@ describe("events", () => {
     expect(store.events.since(0, { runId: run1 }).map((e) => e.seq)).toEqual([1, 2]);
     expect(store.events.since(0, { projectId: prj2 }).map((e) => e.seq)).toEqual([3]);
     expect(store.events.since(0, { types: ["run.started"] }).map((e) => e.seq)).toEqual([1, 3]);
+    // Con muchos tipos se recorre por `seq` en vez de por el índice de tipo: mismo resultado.
+    const many = ["run.started", "step.started", "run.finished", "run.parked", "pr.changed"] as const;
+    expect(store.events.since(1, { types: [...many] }, 1).map((e) => e.seq)).toEqual([2]);
+    expect(store.events.since(0, { types: [...many], runId: run1 }).map((e) => e.seq)).toEqual([1, 2]);
     expect(store.events.since(0)[0]).toEqual({
       seq: 1,
       ts: expect.any(Number),
@@ -160,6 +164,16 @@ describe("events", () => {
       subject: { type: "issue", id: "CLA-8" },
       payload: { a: 1 },
     });
+  });
+
+  test("latestSeq es el seq del último evento, 0 sin eventos", () => {
+    const store = memoryStore();
+    expect(store.events.latestSeq()).toBe(0);
+    store.tx((tx) => {
+      tx.emit({ type: "run.started", origin: "core" });
+      tx.emit({ type: "run.started", origin: "core" });
+    });
+    expect(store.events.latestSeq()).toBe(2);
   });
 
   test("subscribe solo recibe lo que cumple el filtro, hasta que se cancela", () => {

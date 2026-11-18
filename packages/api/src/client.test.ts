@@ -307,6 +307,7 @@ const router = os.router({
   },
   events: {
     list: os.events.list.handler(({ input }) => [event(input.after + 1), event(input.after + 2)]),
+    latest: os.events.latest.handler(() => ({ seq: 2 })),
     stream: os.events.stream.handler(async function* ({ input }) {
       yield event((input.after ?? 0) + 1);
       yield event((input.after ?? 0) + 2);

@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { Event, type EventFilter, type EventOf, type EventType, type PayloadOf } from "@clanker/api";
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, max, sql } from "drizzle-orm";
 import { drizzle, type NodeSQLiteDatabase } from "drizzle-orm/node-sqlite";
 import * as z from "zod";
 import { migrateStore } from "./migrate";
@@ -39,6 +39,8 @@ export interface Store {
   events: {
     /** Eventos con `seq` mayor que `seq`, en orden; con `limit`, solo los primeros. `isEventOf` tipa el payload de uno. */
     since(seq: number, filter?: EventFilter, limit?: number): Event[];
+    /** El `seq` del último evento confirmado (0 sin eventos): desde ahí sigue en vivo quien no necesita el historial. */
+    latestSeq(): number;
     /** Llama a `listener` por cada evento confirmado que cumpla el filtro. Devuelve cómo cancelar. */
     subscribe<T extends EventType = EventType>(listener: (event: EventOf<T>) => void, filter?: Omit<EventFilter, "types"> & { types?: T[] }): () => void;
   };
@@ -167,11 +169,20 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
               gt(events.seq, seq),
               filter.projectId === undefined ? undefined : eq(events.projectId, filter.projectId),
               filter.runId === undefined ? undefined : eq(events.runId, filter.runId),
-              filter.types === undefined ? undefined : inArray(events.type, filter.types),
+              filter.types === undefined
+                ? undefined
+                : // Con muchos tipos (la UI pide ~50) el índice por tipo obliga a ordenar todo lo que queda en cada página:
+                  // recorrer por `seq` sin él es ~10 veces más rápido. Con pocos tipos el índice sigue ganando.
+                  filter.types.length > MAX_TYPES_BY_INDEX
+                  ? inArray(sql`+${events.type}`, filter.types)
+                  : inArray(events.type, filter.types),
             ),
           )
           .orderBy(asc(events.seq));
         return (limit === undefined ? query : query.limit(limit)).all().map(toEvent);
+      },
+      latestSeq() {
+        return db.select({ seq: max(events.seq) }).from(events).get()?.seq ?? 0;
       },
       subscribe(listener, filter = {}) {
         // El filtro deja pasar solo eventos de tipo `T`: el payload es el que declara `EventPayloads` (lo revisa `emit`).
@@ -186,6 +197,9 @@ function createStore(sqlite: DatabaseSync, db: StoreDb, now: () => number): Stor
     },
   };
 }
+
+/** Hasta cuántos tipos de un filtro conviene buscar por `events_type_seq` en vez de recorrer por `seq`. */
+const MAX_TYPES_BY_INDEX = 3;
 
 function matches(filter: EventFilter, event: Event): boolean {
   return (
