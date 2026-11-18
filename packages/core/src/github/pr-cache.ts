@@ -133,10 +133,13 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
       for (const { childId, parentId } of store.db.select().from(prParents).orderBy(asc(prParents.parentId)).all()) {
         parents.set(childId, [...(parents.get(childId) ?? []), parentId]);
       }
+      // El remoto y el pack se resuelven una vez por repo y por org, no por PR: cada uno lee y valida filas.
+      const remoteOf = memoize((repoId: RepoId) => (repos.get(repoId) ? repos.config(repoId).remote : undefined));
+      const packOf = memoize((org: string) => packs.packFor({ githubOrg: org }));
       return rows.flatMap((row) => {
-        const remote = repos.get(row.repoId) && repos.config(row.repoId).remote;
+        const remote = remoteOf(row.repoId);
         if (!remote || (repo !== undefined && remote.repo !== repo)) return [];
-        const pack = packs.packFor({ githubOrg: remote.repo.split("/")[0]! });
+        const pack = packOf(remote.repo.split("/")[0]!);
         return [
           {
             id: row.id,
@@ -191,5 +194,14 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
         return find(repoId, pull.number)!;
       });
     },
+  };
+}
+
+/** `fn` con un resultado por argumento, para las búsquedas repetidas de una sola lectura. */
+function memoize<K extends string, T>(fn: (key: K) => T): (key: K) => T {
+  const seen = new Map<K, T>();
+  return (key) => {
+    if (!seen.has(key)) seen.set(key, fn(key));
+    return seen.get(key)!;
   };
 }

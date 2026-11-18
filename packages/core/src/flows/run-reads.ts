@@ -179,14 +179,19 @@ export function createRunReads({ store, defs, artifacts, workspaceOf }: { store:
       .get();
   }
 
-  function viewOf(run: RunRow): RunSummary {
-    const flow = defs.get("flow", run.flowDefId, run.flowVersion);
+  /** El slug del flujo de la corrida (no cambia entre versiones); `slugs` lo recuerda en una lista de muchas corridas. */
+  function viewOf(run: RunRow, slugs?: Map<string, string>): RunSummary {
+    let slug = slugs?.get(run.flowDefId);
+    if (slug === undefined) {
+      slug = defs.get("flow", run.flowDefId, run.flowVersion)?.slug ?? run.flowDefId;
+      slugs?.set(run.flowDefId, slug);
+    }
     return {
       id: run.id,
       projectId: run.projectId,
       parentRunId: run.parentRunId,
       borrowedFromRunId: run.borrowedFromRunId,
-      flow: { slug: flow?.slug ?? run.flowDefId, version: run.flowVersion },
+      flow: { slug, version: run.flowVersion },
       subject: { type: run.subjectType, id: run.subjectId },
       lane: run.lane,
       status: run.status,
@@ -219,6 +224,8 @@ export function createRunReads({ store, defs, artifacts, workspaceOf }: { store:
   }
 
   function listRuns({ projectId, status }: { projectId?: ProjectId; status?: readonly RunRow["status"][] } = {}) {
+    // Una lectura por flujo, no por corrida: cada `defs.get` lee y parsea la versión entera del flujo.
+    const slugs = new Map<string, string>();
     return store.db
       .select()
       .from(runs)
@@ -230,7 +237,7 @@ export function createRunReads({ store, defs, artifacts, workspaceOf }: { store:
       )
       .orderBy(desc(runs.id))
       .all()
-      .map(viewOf);
+      .map((run) => viewOf(run, slugs));
   }
 
   return { flowOf, workspaceFor, lastDoneInLineage, lineage, resolveRef, selectStep, lastDone, outputOf, readArtifact, shrink, parallelStepOf, itemsOf, latestStep, viewOf, getRun, listRuns };
