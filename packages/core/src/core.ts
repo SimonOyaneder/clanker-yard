@@ -212,6 +212,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const stopMarkingLogin = store.events.subscribe(
     ({ payload }) => {
       if (payload.scope === runtimeScope(CLAUDE_RUNTIME_ID) && payload.cause === "login_expired") opts.connections.markClaudeLoginLost("core");
+      if (payload.scope === runtimeScope("codex") && payload.cause === "login_expired") opts.connections.markCodexLoginLost("core");
     },
     { types: ["breaker.opened"] },
   );

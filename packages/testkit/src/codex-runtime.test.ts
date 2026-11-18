@@ -36,23 +36,31 @@ afterEach(async () => {
 });
 
 async function launch(fake: FakeCodex) {
-  const runtime = createCodexRuntime({ home: home.path, store, executable: fake.executable, args: fake.args, baseEnv: { PATH: process.env.PATH, HOME: home.path } });
+  const baseEnv = { PATH: process.env.PATH, HOME: home.path };
+  const connections = createConnections({
+    store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }),
+    codex: { cwd: home.path, executable: fake.executable, args: fake.args, baseEnv },
+  });
+  const runtime = createCodexRuntime({
+    home: home.path, store, executable: fake.executable, args: fake.args, baseEnv,
+    onRateLimits: connections.updateCodexUsage,
+  });
   core = await startCore({
     store, dataDir: home.path, runtimes: [runtime], env: {}, scheduler: false,
-    connections: createConnections({ store, secrets: createFileSecrets({ dir: join(home.path, "secrets") }) }),
+    connections,
     coreVersion: "0.0.0", onShutdown: () => {},
   });
-  return createClient({ url: core.server.url, token: core.server.token, origin: "cli" });
+  return { client: createClient({ url: core.server.url, token: core.server.token, origin: "cli" }), connections };
 }
 
 async function boot(responses: string[], { model = "gpt-5.6-luna", fake: options = {}, maxUsd }: { model?: string; fake?: FakeCodexOptions; maxUsd?: number } = {}) {
   const fake = await createFakeCodex(home.path, { ...options, responses });
-  const client = await launch(fake);
+  const { client, connections } = await launch(fake);
   const repoId = createRepos({ store }).add({ name: "demo", path: repo.dir });
   await client.defs.create({ kind: "profile", slug: "codex-juguete", scope: "user", body: { roles: { juguete: { runtime: "codex", model, effort: "low", ...(maxUsd === undefined ? {} : { budget: { maxUsd } }) } } } });
   const project = await client.projects.create({ slug: "codex", name: "Codex", tracker: "local", defaultFlowId: "juguete", defaultProfileId: "codex-juguete", repos: [{ repoId, labels: [] }] });
   const issue = await client.issues.createLocal({ projectId: project.id, title: "Saluda" });
-  return { client, project, issue, fake };
+  return { client, project, issue, fake, connections };
 }
 
 async function finished(client: Client, id: Parameters<Client["runs"]["get"]>[0]["id"]) {
@@ -90,7 +98,12 @@ test("juguete elige codex por perfil y registra reporte, transcript, uso y costo
 });
 
 test("un reporte inválido se vuelve a pedir en el mismo hilo y el paso termina con el reporte validado", async () => {
-  const { client, project, issue, fake } = await boot([invalid, valid]);
+  const update = {
+    limitId: "codex", primary: { usedPercent: 9, windowDurationMins: 10080, resetsAt: 1795542935 },
+    secondary: null, credits: null, spendControlReached: null,
+  };
+  const { client, project, issue, fake, connections } = await boot([invalid, valid], { fake: { rateLimitUpdates: [update, update] } });
+  await client.connections.testCodex({});
   const { id } = await client.runs.start({ projectId: project.id, issueId: issue.id });
   const run = await finished(client, id);
   expect(run.costMicros).toBe(40);
@@ -100,7 +113,38 @@ test("un reporte inválido se vuelve a pedir en el mismo hilo y el paso termina 
   expect(sent.filter((message) => message.method === "thread/start")).toHaveLength(1);
   expect(sent.filter((message) => message.method === "thread/resume")).toHaveLength(1);
   expect(sent.filter((message) => message.method === "turn/start")).toHaveLength(2);
+  expect(connections.codexStatus()).toMatchObject({
+    state: "ready", plan: "self_serve_business_prolite", usage: { windows: [{ usedPercent: 9 }] },
+  });
+  expect(store.events.since(0, { types: ["connection.usage"] })).toMatchObject([
+    { origin: "cli", payload: { provider: "codex" } },
+    { origin: "core", payload: { provider: "codex" } },
+  ]);
 });
+
+test("login perdido en una corrida expira la conexión y el breaker solo se recupera con testCodex ready", async () => {
+  const { client, project, issue, connections } = await boot([valid]);
+  await connections.testCodex("ui");
+  await createFakeCodex(home.path, { scenario: "login_expired" });
+  const { id } = await client.runs.start({ projectId: project.id, issueId: issue.id });
+  await vi.waitFor(() => expect(connections.list()).toMatchObject([{ provider: "codex", status: "expired" }]), { timeout: 10_000 });
+  expect(await client.system.breakers()).toMatchObject([{ scope: "runtime:codex", cause: "login_expired" }]);
+  await createFakeCodex(home.path, { scenario: "quota_exhausted" });
+  expect((await connections.testCodex("ui")).state).toBe("quota_exhausted");
+  expect(await client.system.retryBreaker({ scope: "runtime:codex" })).toMatchObject({ scope: "runtime:codex" });
+  connections.updateCodexUsage({
+    limitId: "codex", primary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: 1795542935 },
+    secondary: null, credits: null, spendControlReached: null,
+  });
+  expect(connections.codexStatus()?.state).toBe("quota_exhausted");
+  expect(await client.system.breakers()).toHaveLength(1);
+  await createFakeCodex(home.path, { responses: [valid] });
+  expect((await connections.testCodex("ui")).state).toBe("ready");
+  await finished(client, id);
+  expect(await client.system.breakers()).toEqual([]);
+  expect(store.events.since(0, { types: ["breaker.closed"] })).toHaveLength(1);
+  expect(connections.list()).toMatchObject([{ provider: "codex", status: "active" }]);
+}, 60_000);
 
 test("un modelo sin precio queda en cero y avisa por agent.usage", async () => {
   const { client, project, issue } = await boot([valid], { model: "unknown-model" });

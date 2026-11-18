@@ -223,7 +223,9 @@ async function fakeProcess(
         emit({ method: "item/completed", params: { threadId, turnId: turn.id, item } });
         emit({ method: "thread/tokenUsage/updated", params: { threadId, turnId: turn.id, tokenUsage: { total: usage, last: usage, modelContextWindow: 200000 } } });
         if (options.duplicateUsage) emit({ method: "thread/tokenUsage/updated", params: { threadId, turnId: turn.id, tokenUsage: { total: usage, last: usage, modelContextWindow: 200000 } } });
-        emit({ method: "account/rateLimits/updated", params: { rateLimits: { ...limits, spendControlReached: null } } });
+        for (const rateLimits of options.rateLimitUpdates ?? [{ ...limits, spendControlReached: null }]) {
+          emit({ method: "account/rateLimits/updated", params: { rateLimits } });
+        }
         if (!options.holdAfterUsage) finish(options.turnStatus ?? "completed", options.turnError ?? null);
         return;
       }
