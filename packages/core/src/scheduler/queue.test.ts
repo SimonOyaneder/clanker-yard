@@ -132,6 +132,18 @@ describe("elegibles", () => {
 
     expect(keys(queue(issues))).toEqual(["CLA-1"]);
   });
+
+  test("rerun mete a la cola la issue que se corre a mano aunque ya corrió o no está en todo, con su base", () => {
+    const issues = [issue(1, { status: "in_progress", ...blockedBy(2) }), issue(2, { status: "in_progress" }), issue(3, { status: "in_progress" })];
+
+    const entries = queue(issues, { runs: [run(1, "canceled")], prs: [pr(2)], rerun: issueId(1) });
+
+    expect(only(entries)).toMatchObject({ issue: { id: issueId(1) }, state: "ready", base: { kind: "stacked", parent: { key: "app#102" } } });
+  });
+
+  test("rerun no mete la issue de otra persona", () => {
+    expect(queue([issue(1, { assignee: { id: "otra", name: "Otra" } })], { rerun: issueId(1) })).toEqual([]);
+  });
 });
 
 describe("orden", () => {
@@ -459,6 +471,14 @@ describe("repo de la issue", () => {
 
   test("un proyecto con un solo repo nunca es ambiguo, tenga o no labels", () => {
     expect(only(queue([issue(1, { labels: ["otro"] })])).state).toBe("ready");
+  });
+
+  test("rerun de una issue que ya corrió en todos sus repos vuelve al primero, como runs.start", () => {
+    const issues = [issue(1, { labels: ["frontend", "backend"], status: "in_progress" })];
+
+    const entry = only(chained(issues, { runs: [runIn(1, FRONT, "done", "done"), runIn(1, BACK, "done", "done")], rerun: issueId(1) }));
+
+    expect(entry).toMatchObject({ state: "ready", reason: expect.stringContaining("en front") });
   });
 
   test("dos repos generan dos corridas en orden: la segunda espera a la primera, en vuelo", () => {

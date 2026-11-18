@@ -39,7 +39,7 @@ export interface ProjectQueue {
    * ya corrieron en un repo. Lanza `ProjectNotFoundError` o `QueueUnavailableError`. No
    * escribe nada, así que la cola del caché es tan fresca como el último sync.
    */
-  of(projectId: ProjectId): Promise<QueueEntry[]>;
+  of(projectId: ProjectId, opts?: { rerun?: IssueId }): Promise<QueueEntry[]>;
 }
 
 export function createProjectQueue({ store, projects, issues, repos, trackers, prs }: ProjectQueueDeps): ProjectQueue {
@@ -74,7 +74,7 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
   }
 
   return {
-    async of(projectId) {
+    async of(projectId, opts) {
       const project = projects.get(projectId);
       if (!project) throw new ProjectNotFoundError(projectId);
       let tracker: Tracker | undefined;
@@ -111,7 +111,7 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
       const boosted = new Map(store.db.select().from(issueBoosts).all().map((row) => [row.issueId, row.createdAt]));
       const repoNames = new Map(project.repos.map(({ repoId }) => [repoId, repos.get(repoId)?.name ?? repoId]));
       const repoChoices = chosenRepos(store, repos, project);
-      return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs: [...prs, ...chainPrs], skipped, boosted, repoChoices, repoNames });
+      return tickDev({ project, me, capabilities: tracker.capabilities, issues: all, runs: devRuns, prs: [...prs, ...chainPrs], skipped, boosted, repoChoices, repoNames, rerun: opts?.rerun });
     },
   };
 }

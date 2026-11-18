@@ -523,10 +523,10 @@ const runs = {
    * Lanza el flujo del proyecto (o `flow`) sobre una issue del proyecto y vuelve sin esperar: el
    * progreso llega por `events.stream` filtrando por el `runId`. Reclama la issue en su tracker
    * (asignada a ti y en progreso) y pasa `repo` y `base` al flujo si los declara: el repo sale de los
-   * labels de la issue (ver `ProjectRepo`). Pasa por la cola como el Scheduler: una issue de la cola sale
-   * sobre su base (la branch del PR padre o su base combinada) y con sus `dependsOn`, y una que la cola no
-   * lanzaría todavía es `BAD_REQUEST` con el motivo; una que no está en la cola (un reintento a mano) sale
-   * sobre la branch por defecto. `flowParams` del proyecto pisan la branch por defecto y `params` pisa todo. Es idempotente: si ya
+   * labels de la issue (ver `ProjectRepo`). Pasa por la cola como el Scheduler, también en un reintento a mano
+   * (una issue que ya corrió entra a la cola solo para esto): sale sobre su base (la branch del PR padre o su base
+   * combinada) y con sus `dependsOn`, y si la cola no la lanzaría todavía es `BAD_REQUEST` con el motivo.
+   * `flowParams` del proyecto pisan la branch por defecto y `params` pisa todo. Es idempotente: si ya
    * hay una corrida viva de ese flujo sobre la issue devuelve esa. `BAD_REQUEST` también si el proyecto no
    * está activo, no hay flujo, faltan params o falta el perfil, o el tracker no puede reclamar la issue;
    * `NOT_FOUND` si el proyecto o la issue no existen.

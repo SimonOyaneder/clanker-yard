@@ -58,6 +58,12 @@ export interface TickDevInput {
   repoNames?: ReadonlyMap<RepoId, string>;
   /** Issue id → ms epoch en que el usuario la subió (`projects.boostIssue`): van antes que el resto, la más reciente primero. */
   boosted?: ReadonlyMap<IssueId, number>;
+  /**
+   * Una issue que una persona pide correr a mano (`Scheduler.runNow`): entra a la cola aunque ya haya corrido o su
+   * estado no sea el del filtro, para que salga sobre la base que le toca. Si ya corrió en todos sus repos, toca el
+   * primero, como en `runs.start`.
+   */
+  rerun?: IssueId;
 }
 
 const CLOSED: ReadonlySet<StatusCategory> = new Set(["done", "canceled"]);
@@ -69,7 +75,8 @@ const CLOSED: ReadonlySet<StatusCategory> = new Set(["done", "canceled"]);
  *
  * Elegible: su estado está en `queueFilter.status` (default `todo`), calza `queueFilter.labels`, no tiene
  * ninguno de `excludeLabels` (default `no-clanker`), no tiene dueño o es `me`, no tiene sub-issues abiertas
- * y ninguna corrida del carril dev la tomó (viva o terminada: una issue terminada no vuelve a la cola).
+ * y ninguna corrida del carril dev la tomó (viva o terminada: una issue terminada no vuelve a la cola). La de
+ * `rerun` solo necesita no tener dueño (o ser `me`) y no tener sub-issues abiertas.
  *
  * Una issue de varios repos (`planIssue`) corre una vez por repo, encadenadas: con una corrida en el primero
  * sigue elegible, aunque ya no esté en `todo` (salvo que se cerró), mientras le falte un repo. La corrida del
@@ -98,19 +105,24 @@ export function tickDev(input: TickDevInput): QueueEntry[] {
     (issue) => refKey(issue.parent!),
   );
 
-  const planOf = (issue: CachedIssue): IssuePlan =>
-    planIssue(project, issue.labels, input.repoChoices?.get(issue.id), runsOf.get(issue.id) ?? []);
+  const planOf = (issue: CachedIssue): IssuePlan => {
+    const plan = planIssue(project, issue.labels, input.repoChoices?.get(issue.id), runsOf.get(issue.id) ?? []);
+    if (issue.id !== input.rerun || plan.kind !== "repos" || plan.next !== undefined) return plan;
+    return { ...plan, next: { repoId: plan.repoIds[0], after: undefined } };
+  };
   const eligible = issues
     .filter((issue) => {
       if (issue.projectId !== project.id) return false;
+      const takeable =
+        (issue.assignee === undefined || issue.assignee.id === me.id) && !(childrenOf.get(refKey(issue.ref)) ?? []).some((child) => !CLOSED.has(child.status));
+      if (issue.id === input.rerun) return takeable;
       const plan = planOf(issue);
       const hasRuns = runsOf.has(issue.id);
       // Una issue encadenada ya salió de `todo` con su primera corrida: sigue su cadena mientras no se cierre.
       const chained = hasRuns && plan.kind === "repos" && plan.next !== undefined && !CLOSED.has(issue.status);
       return (
+        takeable &&
         matchesIssueFilter(issue, chained ? { ...filter, status: undefined } : filter) &&
-        (issue.assignee === undefined || issue.assignee.id === me.id) &&
-        !(childrenOf.get(refKey(issue.ref)) ?? []).some((child) => !CLOSED.has(child.status)) &&
         (plan.kind === "repos" ? plan.next !== undefined : !hasRuns)
       );
     })

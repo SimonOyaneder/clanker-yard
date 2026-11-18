@@ -86,8 +86,8 @@ function setup({ parallel = 1, lanes: initial, breakers, claim, reopen, dependsO
   const repos = createRepos({ store: h.store });
   const realQueue = createProjectQueue({ store: h.store, projects, issues, repos, trackers, prs: { get: () => Promise.reject(new Error("no se esperaba leer un PR")) } });
   const queue: ProjectQueue = {
-    async of(id) {
-      const entries = await realQueue.of(id);
+    async of(id, opts) {
+      const entries = await realQueue.of(id, opts);
       return dependsOn ? entries.map((entry) => (entry.state === "ready" ? { ...entry, dependsOn } : entry)) : entries;
     },
   };
@@ -354,7 +354,7 @@ describe("lanzar issues por carril", () => {
     expect([first, second].map(h.status)).toEqual(["running", "queued"]);
   });
 
-  test("runNow de una issue que no está en la cola va directo a runs.start, como un reintento a mano", async () => {
+  test("runNow corre a mano una issue que la cola deja fuera por su estado", async () => {
     const h = setup();
     const issue = await h.local.createIssue(h.projectId, { title: "ya empezada", status: "in_progress" });
     await h.issues.sync(h.local, { projectId: h.projectId, project: { tracker: "local", id: h.projectId } });
@@ -593,6 +593,19 @@ describe("bases combinadas", () => {
 
     expect(h.starts).toEqual([{ projectId: h.projectId, issueId: child.id, params: { base: `clanker/base/${child.ref.key}` } }]);
     expect(h.runOf(child)).toMatchObject({ status: "running", params: { base: `clanker/base/${child.ref.key}` } });
+  });
+
+  test("runNow reintenta a mano una issue con una corrida cancelada sobre su base combinada, no sobre la branch por defecto", async () => {
+    const combineBase = (request: CombineRequest): Promise<CombineResult> => Promise.resolve({ outcome: "combined", branch: request.branch, head: "abc", parents: [] });
+    const { h, child } = await blockedByTwo({ combineBase, dissolveBase: dissolve });
+    await h.scheduler.tick();
+    h.flows.control(h.runOf(child)!.id, "cancel", "ui");
+    await until(() => expect(h.status(child)).toBe("canceled"));
+    expect((await h.scheduler.queue.of(h.projectId)).map((e) => e.issue.id)).not.toContain(child.id);
+
+    await h.scheduler.runNow({ projectId: h.projectId, issueId: child.id, params: {} }, "ui");
+
+    expect(h.starts.at(-1)).toEqual({ projectId: h.projectId, issueId: child.id, params: { base: `clanker/base/${child.ref.key}` } });
   });
 
   test("runNow no lanza a mano una issue cuyos padres chocan: dice por qué y no sale sobre la branch por defecto", async () => {

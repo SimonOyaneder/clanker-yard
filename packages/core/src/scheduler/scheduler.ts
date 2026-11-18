@@ -101,9 +101,10 @@ export interface Scheduler {
    * `runs.start`, la corrida que una persona pide a mano: pasa por la misma cola que el tick. Una issue de la cola
    * que no está `ready` (o que el tick dejaría esperando: relacionada en vuelo, repo o runtime en pausa, padres de su
    * base combinada que chocan) lanza `IssueNotReadyError` con el motivo; una `ready` sale sobre la base y con los
-   * `dependsOn` de la cola, que `params` pisa. Una issue que no está en la cola (ya corrió, o su estado no es el del
-   * filtro) va directo a `runs.start` sobre la branch por defecto, como un reintento a mano; una de repo ambiguo
-   * también, porque sin repo no hay base que calcular (`runs.start` pide `params.repo`).
+   * `dependsOn` de la cola, que `params` pisa. Una issue que ya corrió o cuyo estado no es el del filtro entra a la
+   * cola solo para esto (`rerun`), así que un reintento a mano también sale sobre la base que le toca. Van directo a
+   * `runs.start` una con corrida viva (devuelve esa), una de otra persona o con sub-issues abiertas (no está en la
+   * cola) y una de repo ambiguo (sin repo no hay base que calcular: `runs.start` pide `params.repo`).
    */
   runNow(input: z.output<typeof StartRun>, origin: Origin): Promise<RunView>;
   /** Pide (o devuelve) que el Scheduler no lance la issue. Lanza `ProjectNotFoundError` o `IssueNotInProjectError`. */
@@ -232,10 +233,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     return undefined;
   }
 
-  /** El repo donde correrá la issue, si ya se sabe (ver `issuePlan`). */
+  /** El repo donde correrá la issue, si ya se sabe (ver `issuePlan`); si ya corrió en todos (un reintento a mano), el primero, como `runs.start`. */
   function repoOfIssue(project: ClankerProject, issue: CachedIssue): RepoId | undefined {
     const plan = issuePlan(store, repos, project, issue);
-    return plan.kind === "repos" ? plan.next?.repoId : undefined;
+    return plan.kind === "repos" ? (plan.next ? plan.next.repoId : plan.repoIds[0]) : undefined;
   }
 
   /**
@@ -337,7 +338,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     async runNow(input, origin) {
       const project = projects.get(input.projectId);
       if (!project) throw new ProjectNotFoundError(input.projectId);
-      const entry = (await deps.queue.of(project.id)).find((e) => e.issue.id === input.issueId);
+      // Con una corrida viva `runs.start` devuelve esa: no hay base que recalcular.
+      if (issuesInFlight().has(input.issueId)) return deps.runs.start(input, origin);
+      const entry = (await deps.queue.of(project.id, { rerun: input.issueId })).find((e) => e.issue.id === input.issueId);
       // Sin repo no hay base que calcular: `runs.start` pide `params.repo` o corre en el que se eligió.
       if (entry === undefined || issuePlan(store, repos, project, entry.issue).kind === "ambiguous") return deps.runs.start(input, origin);
       const notReady = (reason: string) => new IssueNotReadyError(`${entry.issue.ref.key} no se puede lanzar todavía: ${reason}`);
