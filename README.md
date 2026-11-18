@@ -149,16 +149,18 @@ npm run dev -w apps/desktop   # construye el core y abre Electron
 npm run dev -w packages/ui    # solo la UI en el navegador, con datos de ejemplo
 npm run typecheck
 npm run lint
-npm test
+npm test                      # sin los tests de integración lentos (vitest.slow.ts)
+npm run test:all              # todo; antes de pushear a main
 npm run e2e                   # Playwright sobre la app con un core de demo
 ```
 
-Durante el desarrollo puedes acotar Vitest al archivo o a los módulos afectados. La CI corre la suite completa en los PRs listos.
+Durante el desarrollo puedes acotar Vitest al archivo o a los módulos afectados; con un filtro corren también los tests lentos que calcen. La CI está pausada: corre solo a mano desde Actions.
 
 ```bash
-npm test -- packages/testkit/src/pr-restack.test.ts  # un archivo
+npm test -- packages/testkit/src/pr-restack.test.ts  # un archivo, aunque sea de los lentos
 npm test -- --changed origin/main                    # cambios de la rama y del árbol de trabajo
-npm test -- --maxWorkers=3                           # suite completa con menos procesos
+npm run test:slow                                    # solo los lentos
+npm test -- --maxWorkers=3                           # suite rápida con menos procesos
 ```
 
 Antes de tocar código lee [`AGENTS.md`](AGENTS.md): reglas, límites entre paquetes y trampas que el código no dice. El diseño completo está en [`docs/`](docs/) (`docs/design.html`; `python3 scripts/design-section.py <id>` imprime una sección en texto).
