@@ -34,6 +34,7 @@ export const PR_BRANCHES: Record<string, CommitSpec[]> = {
 interface Spec {
   head: string;
   title: string;
+  body?: string;
   base?: string;
   draft?: boolean;
   /** Lo abrió el sistema: queda `owned` y, el primero, con la corrida y la issue de `origin`. */
@@ -79,7 +80,13 @@ export async function seedPrs({
   sim.defaultBranchCheck("merge-queue");
 
   const specs: Spec[] = [
-    { head: "lint-imports", title: "Lint de imports entre engines", owned: true, setup: (pr) => (approved(pr), lgtm(pr), discussed(pr), pr.label("risk:mid")) },
+    {
+      head: "lint-imports",
+      title: "Lint de imports entre engines",
+      body: "## Qué cambia\n\nAgrega 40 casos de imports entre engines en `lint.txt` para revisar sus dependencias.\n\n## Cómo revisarlo\n\nRevisa el commit y los casos de `lint.txt` en la pestaña Archivos.\n",
+      owned: true,
+      setup: (pr) => (approved(pr), lgtm(pr), discussed(pr), pr.label("risk:mid")),
+    },
     {
       head: "boundary-checks",
       base: "lint-imports",
@@ -141,7 +148,7 @@ export async function seedPrs({
 
   const ids = new Map<string, string>();
   for (const [index, spec] of specs.entries()) {
-    const pr = sim.openPr({ head: spec.head, ...(spec.base && { base: spec.base }), title: spec.title, ...(spec.draft && { draft: true }) });
+    const pr = sim.openPr({ head: spec.head, ...(spec.base && { base: spec.base }), title: spec.title, ...(spec.body && { body: spec.body }), ...(spec.draft && { draft: true }) });
     spec.setup(pr, account);
     const first = index === 0;
     ids.set(
