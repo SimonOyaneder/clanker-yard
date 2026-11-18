@@ -165,6 +165,7 @@ export const agentSessions = sqliteTable(
   },
   (t) => [
     uniqueIndex("agent_sessions_runtime_session_ref").on(t.runtime, t.sessionRef),
+    index("agent_sessions_step_run").on(t.stepRunId),
     foreignKey({ columns: [t.resumedFrom], foreignColumns: [t.id] }),
     foreignKey({
       columns: [t.roleDefId, t.roleVersion],
@@ -462,7 +463,8 @@ export const artifactRefs = sqliteTable(
     ownerId: text("owner_id").notNull(),
     role: text().notNull(),
   },
-  (t) => [primaryKey({ columns: [t.hash, t.ownerType, t.ownerId, t.role] })],
+  // La clave empieza por el hash: buscar lo de un dueño (los archivos de un paso o de una corrida) necesita su propio índice.
+  (t) => [primaryKey({ columns: [t.hash, t.ownerType, t.ownerId, t.role] }), index("artifact_refs_owner").on(t.ownerType, t.ownerId, t.role)],
 );
 
 /**
@@ -720,6 +722,9 @@ export const runs = sqliteTable(
     // Un paso `flow` abre una sola corrida hija, aunque el paso se reabra tras un corte.
     uniqueIndex("runs_parent_step").on(t.parentStepRunId),
     index("runs_parent_run").on(t.parentRunId),
+    // Las listas de corridas (de un proyecto, o las vivas para los carriles) se piden en cada refresco de la app.
+    index("runs_project").on(t.projectId, t.id),
+    index("runs_status").on(t.status),
     check("runs_roles_json", sql`json_valid(${t.roles})`),
     check("runs_params_json", sql`json_valid(${t.params})`),
     check("runs_rounds_json", sql`json_valid(${t.rounds})`),
@@ -842,6 +847,7 @@ export const decisions = sqliteTable(
   (t) => [
     index("decisions_status_project").on(t.status, t.projectId),
     index("decisions_run").on(t.runId),
+    index("decisions_kind_status").on(t.kind, t.status),
     check("decisions_options_json", sql`json_valid(${t.options})`),
     check("decisions_subject_json", sql`${t.subject} IS NULL OR json_valid(${t.subject})`),
     check("decisions_resolution_json", sql`${t.resolution} IS NULL OR json_valid(${t.resolution})`),
@@ -918,6 +924,8 @@ export const pullRequests = sqliteTable(
   },
   (t) => [
     uniqueIndex("pull_requests_repo_number").on(t.repoId, t.number),
+    // Watch, la cola y `prs.list` filtran por estado (los abiertos, los cerrados del sistema) en cada despertar.
+    index("pull_requests_state_owned").on(t.state, t.owned),
     uniqueIndex("pull_requests_repo_branch_local").on(t.repoId, t.headRef).where(sql`${t.state} = 'local'`),
     check("pull_requests_number_iff_not_local", sql`(${t.state} = 'local') = (${t.number} IS NULL) AND (${t.state} = 'local') = (${t.nodeId} IS NULL)`),
     check("pull_requests_local_title", sql`${t.state} != 'local' OR ${t.title} IS NOT NULL`),
