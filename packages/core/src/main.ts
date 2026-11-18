@@ -3,7 +3,7 @@
 import { fileURLToPath } from "node:url";
 import { text } from "node:stream/consumers";
 import { parseArgs } from "node:util";
-import { clankerDirs } from "@clanker/api/node";
+import { logDirFor } from "@clanker/api/node";
 import { runCore } from "./daemon/core";
 
 const { values } = parseArgs({
@@ -28,7 +28,7 @@ if (uiKeyHash !== undefined && !/^[0-9a-f]{64}$/.test(uiKeyHash)) {
 const result = await runCore({
   uiKeyHash,
   dataDir,
-  logDir: values["log-dir"] ?? clankerDirs().logDir,
+  logDir: values["log-dir"] ?? logDirFor(dataDir),
   migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
   factoryPacksDir: fileURLToPath(new URL("../packs", import.meta.url)),
   isolated: home !== undefined,

@@ -141,6 +141,7 @@ describe("ensureCore", () => {
     expect(next.info.pid).not.toBe(old.info.pid);
     expect(isPidAlive(old.info.pid)).toBe(false);
   });
+
 });
 
 describe("ensureCore con un core de otra versión", () => {
@@ -320,6 +321,16 @@ describe("core", () => {
     const log = readFileSync(join(home, "logs", "core.log"), "utf8");
     expect(log).toContain(core.info.bootId);
     expect(JSON.parse(log.split("\n")[0]!)).toMatchObject({ level: "info" });
+  });
+
+  test("sin --log-dir, un core sobre otra carpeta escribe core.log en <dataDir>/logs", async () => {
+    const home = tempHome();
+    const env = { ...process.env };
+    delete env.CLANKER_HOME;
+    const child = spawn(process.execPath, [entry, "--data-dir", home], { env });
+    await vi.waitFor(() => expect(readCoreJson(home)?.pid).toBe(child.pid), { timeout: 10_000 });
+
+    expect(readFileSync(join(home, "logs", "core.log"), "utf8")).toContain(readCoreJson(home)!.bootId);
   });
 
   test.each([

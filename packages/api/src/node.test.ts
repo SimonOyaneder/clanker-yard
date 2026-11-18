@@ -2,7 +2,24 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { clankerDirs, readCoreJson, writeCoreJson } from "./node";
+import { clankerDirs, logDirFor, readCoreJson, writeCoreJson } from "./node";
+
+describe("logDirFor", () => {
+  const opts = { platform: "darwin" as const, env: {}, home: "/Users/ana" };
+
+  test("la carpeta de la app usa la de logs del SO", () => {
+    expect(logDirFor("/Users/ana/Library/Application Support/Clanker Yard", opts)).toBe("/Users/ana/Library/Logs/Clanker Yard");
+    expect(logDirFor("/Users/ana/Library/Application Support/Clanker Yard/", opts)).toBe("/Users/ana/Library/Logs/Clanker Yard");
+  });
+
+  test("otra carpeta (un test, un --data-dir a mano) escribe en <dataDir>/logs", () => {
+    expect(logDirFor("/tmp/clanker-core-x", opts)).toBe("/tmp/clanker-core-x/logs");
+  });
+
+  test("con CLANKER_HOME, su carpeta usa <CLANKER_HOME>/logs", () => {
+    expect(logDirFor("/tmp/home", { ...opts, env: { CLANKER_HOME: "/tmp/home" } })).toBe("/tmp/home/logs");
+  });
+});
 
 describe("clankerDirs", () => {
   test("macOS: Application Support y Logs en el home", () => {

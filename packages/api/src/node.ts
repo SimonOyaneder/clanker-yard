@@ -53,6 +53,17 @@ export function clankerDirs(opts: ClankerDirsOptions = {}): ClankerDirs {
   }
 }
 
+/**
+ * Dónde escribe `core.log` un core sobre `dataDir` cuando nadie le pasa `--log-dir`: la carpeta de logs
+ * del SO solo si `dataDir` es la de la app; si no (un test, un `--data-dir` a mano), `<dataDir>/logs`,
+ * para no mezclar sus arranques con los del core real.
+ */
+export function logDirFor(dataDir: string, opts: ClankerDirsOptions = {}): string {
+  const dirs = clankerDirs(opts);
+  const p = (opts.platform ?? process.platform) === "win32" ? path.win32 : path.posix;
+  return p.resolve(dataDir) === p.resolve(dirs.dataDir) ? dirs.logDir : p.join(dataDir, "logs");
+}
+
 /** Lo que el core publica en `core.json` cuando ya escucha: cómo llegar a él. */
 export const CoreJson = z.object({
   pid: z.int().positive(),
@@ -161,7 +172,7 @@ export async function connectToCore(
 export interface EnsureCoreOptions {
   /** Carpeta de datos; la app siempre la pasa, el core no adivina. Ver `clankerDirs`. */
   dataDir: string;
-  /** Carpeta de `core.log`. Sin ella el core usa la de `clankerDirs()`. */
+  /** Carpeta de `core.log`. Sin ella el core usa `logDirFor(dataDir)`. */
   logDir?: string;
   /** `core/main.js` empaquetado: lo lanza `process.execPath` con `ELECTRON_RUN_AS_NODE=1`. */
   entry: string;
@@ -256,7 +267,7 @@ async function launchCore(opts: EnsureCoreOptions, previousBootId?: string): Pro
 }
 
 function coreStartError(opts: EnsureCoreOptions, reason: string): Error {
-  const logDir = opts.logDir ?? clankerDirs().logDir;
+  const logDir = opts.logDir ?? logDirFor(opts.dataDir);
   return new Error(
     `No se pudo arrancar el core (${reason}). Mira ${path.join(logDir, "core.log")}.`,
   );
