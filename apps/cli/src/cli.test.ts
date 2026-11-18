@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
-import { CachedIssue, type CachedPr, type Client, ClankerProject, type Event, type LocalCommitDiff, type LocalPrDetail, type RunDetail } from "@clanker/api";
+import { CachedIssue, type CachedPr, type Client, ClankerProject, contract, type Event, type LocalCommitDiff, type LocalPrDetail, type RunDetail } from "@clanker/api";
 import { describe, expect, test, vi } from "vitest";
 import type { CliContext } from "./command";
 import { runCli } from "./cli";
+import { rpcCommands } from "./rpc";
 
 const projectId = "prj_00000000000000000000000001" as const;
 const issueId = "iss_00000000000000000000000001" as const;
@@ -107,6 +108,92 @@ describe("clanker", () => {
     await expect(exec(["constructor"], {})).rejects.toThrow(/Comando desconocido: clanker constructor\nUso:/);
     await expect(exec(["runs", "stop"], {})).rejects.toThrow(/Comando desconocido: clanker runs stop/);
     await expect(exec(["projects", "list", "--nope"], {})).rejects.toThrow(/Unknown option '--nope'\.\nUso: clanker projects list/);
+  });
+});
+
+describe("comandos generados desde el contrato", () => {
+  test("cada procedimiento marcado sale por su ruta, independientemente del nombre MCP", async () => {
+    const routes = Object.entries(contract).flatMap(([zone, namespace]) => Object.entries(namespace)
+      .filter(([, procedure]) => procedure["~orpc"].meta.mcp)
+      .map(([procedure]) => `${zone} ${procedure.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`));
+    expect([...rpcCommands().keys()]).toEqual(routes);
+
+    const out = await exec(["--help"], {});
+    expect(out).toContain("clanker artifacts text");
+    expect(out).toContain("clanker events list");
+    expect(out).toContain("clanker runs retry-step");
+    expect(out.match(/clanker runs get\b/g)).toHaveLength(1);
+    expect(out.match(/clanker projects list\b/g)).toHaveLength(1);
+  });
+
+  test("la ayuda por zona y por comando no toca el core ni abre archivos", async () => {
+    const client = vi.fn();
+    const readFile = vi.fn();
+    const ctx = { client, readFile };
+    const area = await exec(["events", "--help"], {}, ctx);
+    expect(area).toContain("clanker events list");
+    expect(area).toContain("clanker events tail");
+    expect(area).not.toContain("clanker artifacts");
+    expect(await exec(["events"], {}, ctx)).toBe(area);
+
+    const help = await exec(["runs", "retry-step", "--help"], {}, ctx);
+    expect(help).toContain("clanker runs retry-step [--input");
+    const schema = JSON.parse(help.split("Esquema de entrada (JSON Schema):\n")[1]!);
+    expect(schema).toMatchObject({ type: "object", required: ["stepId"] });
+    expect(client).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  test("envía el objeto al RPC con input y por archivo; imprime un resultado JSON", async () => {
+    const list = vi.fn().mockResolvedValue([event(11)]);
+    const readFile = vi.fn().mockReturnValue(JSON.stringify({ after: 10 }));
+    const client = { events: { list } };
+    const signal = new AbortController().signal;
+    const commands = [
+      ["events", "list", "--input", '{"after":10}'],
+      ["events", "list", "--input-file", "entrada.json"],
+      ["events", "list"],
+    ];
+    for (const args of commands) {
+      const out = await exec(args, client, { readFile, signal });
+      expect(JSON.parse(out)).toEqual([event(11)]);
+    }
+    expect(list.mock.calls).toEqual([[{ after: 10 }, { signal }], [{ after: 10 }, { signal }], [{}, { signal }]]);
+    expect(readFile).toHaveBeenCalledExactlyOnceWith("entrada.json");
+  });
+
+  test("llama al RPC de texto, al de lectura sin entrada y propaga los errores del core", async () => {
+    const hash = "a".repeat(64);
+    const page = { hash, kind: "log", mime: "text/plain", size: 6, text: "hola!\n", nextOffset: null };
+    const text = vi.fn().mockResolvedValueOnce(page).mockRejectedValueOnce(new Error("No existe ese artefacto."));
+    const args = ["artifacts", "text", "--input", JSON.stringify({ hash })];
+    const client = { artifacts: { text }, events: { latest: vi.fn().mockResolvedValue({ seq: 37 }) } };
+
+    expect(JSON.parse(await exec(args, client))).toEqual(page);
+    await expect(exec(args, client)).rejects.toThrow("No existe ese artefacto.");
+    expect(JSON.parse(await exec(["events", "latest"], client))).toEqual({ seq: 37 });
+    expect(client.events.latest).toHaveBeenCalledExactlyOnceWith(undefined, { signal: expect.any(AbortSignal) });
+  });
+
+  test.each([
+    [["events", "list", "--input", "{"], "no contiene JSON válido"],
+    [["events", "list", "--input", "[]"], "debe contener un objeto JSON"],
+    [["events", "list", "--input", "null"], "debe contener un objeto JSON"],
+    [["events", "list", "--input", "{}", "--input-file", "entrada.json"], "Usa solo uno"],
+    [["events", "list", "--input-file", "no-existe.json"], 'No se pudo leer --input-file "no-existe.json": ENOENT'],
+    [["events", "list", "--input", '{"limit":501}'], "limit:"],
+    [["runs", "retry-step"], "stepId:"],
+    [["events", "latest", "--input", '{"after":10}'], "no recibe campos"],
+    [["defs", "list", "--input", '{"kind":"context"}'], "Valores de kind en la CLI: flow, role, profile, recipe, pack"],
+    [["connections", "set-pat"], "Comando desconocido"],
+    [["runs", "force-outcome"], "Comando desconocido"],
+    [["defs", "export-to-repo"], "Comando desconocido"],
+    [["artifacts", "get"], "Comando desconocido"],
+  ])("rechaza %j sin tocar el core", async (args, message) => {
+    const client = vi.fn();
+    const readFile = () => { throw new Error("ENOENT"); };
+    await expect(exec(args, {}, { client, readFile })).rejects.toThrow(message);
+    expect(client).not.toHaveBeenCalled();
   });
 });
 

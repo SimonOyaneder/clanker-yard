@@ -407,6 +407,8 @@ Una issue bloqueada por PRs en cadenas distintas sale de una base sintética (`d
 
 `apps/cli` es el binario `clanker` (`clanker --help` lista los comandos). Cada comando es un `Command` (`src/command.ts`) que recibe un `CliContext`, así que se prueba con un cliente de mentira (`cli.test.ts`) sin tocar `main.ts`; para sumar uno, agrégalo a `commands`. `core.test.ts` corre el binario empaquetado contra el core real y el de demo.
 
+- `apps/cli/src/rpc.ts` también genera comandos JSON de `meta.mcp` (`docs/design.html#mcp`): los comandos con formato propio tienen prioridad. Las operaciones reservadas a la app no se anotan; una anotación MCP no reemplaza las guardias del core.
+
 Para probarlo sin instalar: `npm run clanker -w @clanker/cli -- status` (con `CLANKER_HOME=$(mktemp -d)` delante no toca tus datos; si no hay core, lo lanza desde `packages/core/dist/main.js`). Para tenerlo en el PATH: `npm run build -w @clanker/cli && npm link -w @clanker/cli`.
 
 ## MCP

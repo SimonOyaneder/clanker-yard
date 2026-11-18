@@ -71,6 +71,16 @@ describe("el binario clanker", () => {
 
     expect(second.stdout).toContain(`pid ${info.pid}`);
     expect(readCoreJson(home)!.bootId).toBe(info.bootId);
+    const lanes = await run(process.execPath, [cliBundle, "system", "lanes"], { env });
+    expect(JSON.parse(lanes.stdout)).toHaveProperty("dev");
+    const created = await run(process.execPath, [
+      cliBundle, "projects", "create", "--input", '{"slug":"paridad","name":"Paridad","tracker":"local"}',
+    ], { env });
+    const project = JSON.parse(created.stdout) as { id: string };
+    const detail = await run(process.execPath, [
+      cliBundle, "projects", "get", "--input", JSON.stringify({ id: project.id }),
+    ], { env });
+    expect(JSON.parse(detail.stdout)).toMatchObject({ slug: "paridad", status: "active" });
   }, 30_000);
 
   test("mcp es un puente stdio al core: lista las tools, las ejecuta y levanta el core si no corre", async () => {
@@ -174,5 +184,8 @@ describe("los comandos contra un core con runtime fake", () => {
 
     const events = await cli("events", "tail", "--run", started.id, "--type", "run.started");
     expect(events).toMatch(new RegExp(`run\\.started +cli +${started.id}`));
+
+    const page = JSON.parse(await cli("events", "list", "--input", JSON.stringify({ filter: { runId: started.id, types: ["run.started"] } })));
+    expect(page).toEqual([expect.objectContaining({ runId: started.id, type: "run.started", origin: "cli" })]);
   }, 60_000);
 });
