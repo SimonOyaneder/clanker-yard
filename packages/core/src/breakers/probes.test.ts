@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ClaudeStatus, RepoId } from "@clanker/api";
+import { CodexState } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createConnections, type Connections } from "../connections/connections";
 import { startFakeGitHub, type FakeGitHub } from "../testing/github/fake-github";
@@ -89,6 +90,24 @@ describe("runtime", () => {
     const probe = environmentProbe({ connections: claude({ state: "login_expired" }), repos: createRepos({ store }), runtimes: [{ id: "fake" }] });
 
     expect(await probe(runtimeScope("claude-sdk"))).toBeUndefined();
+  });
+
+  test.each(CodexState.options)("codex %s solo pasa si testCodex está ready, no basta el probe de instalación", async (state) => {
+    const connections = {
+      testCodex: () => Promise.resolve({ state, message: `Codex está ${state}.` }),
+    } as unknown as Connections;
+    const probe = environmentProbe({
+      connections, repos: createRepos({ store }),
+      runtimes: [{ id: "codex", probe: () => Promise.resolve(undefined) }],
+    });
+    expect(await probe(runtimeScope("codex"))).toBe(state === "ready" ? undefined : `Codex está ${state}.`);
+  });
+
+  test("codex no consulta la conexión si el core no lo tiene registrado", async () => {
+    const connections = createConnections({ store, secrets: createFileSecrets({ dir }) });
+    const probe = environmentProbe({ connections, repos: createRepos({ store }), runtimes: [{ id: "fake" }] });
+    expect(await probe(runtimeScope("codex"))).toBeUndefined();
+    expect(connections.codexStatus()).toBeUndefined();
   });
 });
 

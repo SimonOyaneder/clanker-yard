@@ -96,9 +96,9 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
         .run();
     }
 
-    const connections = createConnections({ store, secrets: secretsFor(opts), ...readCoreConfig(opts.dataDir) });
     // Los procesos de los agentes se registran en `procs` desde el runtime, que se arma antes que el core.
     const procs = createProcs({ store, bootId: newId("boot") });
+    const connections = createConnections({ store, secrets: secretsFor(opts), ...readCoreConfig(opts.dataDir), codex: { cwd: opts.dataDir, procs } });
     const core = await startCore({
       store,
       dataDir: opts.dataDir,
@@ -115,7 +115,7 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
         }),
         // Las entradas de perfil con `runtime: "opencode"`; si opencode no está instalado, su breaker lo dice al primer agente.
         createOpencodeRuntime({ home: opts.dataDir, procs }),
-        createCodexRuntime({ home: opts.dataDir, store, procs }),
+        createCodexRuntime({ home: opts.dataDir, store, procs, onRateLimits: connections.updateCodexUsage }),
       ],
       coreVersion: pkg.version,
       uiKeyHash,

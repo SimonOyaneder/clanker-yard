@@ -119,7 +119,9 @@ export function createBreakers({ store, runtimes, probe, label = (scope) => scop
 
   /** La conexión de la que depende cada ámbito global. */
   const scopeOfProvider = (provider: ConnectionProvider): string | undefined =>
-    provider === "github" ? GITHUB_SCOPE : provider === "claude" && runtimes.includes(CLAUDE_RUNTIME_ID) ? runtimeScope(CLAUDE_RUNTIME_ID) : undefined;
+    provider === "github" ? GITHUB_SCOPE
+      : provider === "claude" && runtimes.includes(CLAUDE_RUNTIME_ID) ? runtimeScope(CLAUDE_RUNTIME_ID)
+      : provider === "codex" && runtimes.includes("codex") ? runtimeScope("codex") : undefined;
 
   /** Guarda lo que sobrevive a un corte, en la misma transacción que el cambio. */
   function persist(tx: Tx): void {

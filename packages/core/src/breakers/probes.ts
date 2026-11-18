@@ -13,7 +13,7 @@ import { messageOf } from "../errors/format";
 const REQUIRES_TIMEOUT_MS = 30_000;
 
 export interface ProbeDeps {
-  connections: Pick<Connections, "list" | "githubClient" | "markRevoked" | "testClaude">;
+  connections: Pick<Connections, "list" | "githubClient" | "markRevoked" | "testClaude" | "testCodex">;
   repos: Pick<Repos, "get">;
   /** Los runtimes registrados: `claude-sdk` se prueba con su conexión y los demás con su `probe`. */
   runtimes: readonly Pick<AgentRuntime, "id" | "probe">[];
@@ -69,6 +69,9 @@ export function environmentProbe({ connections, repos, runtimes }: ProbeDeps): (
   return (scope) => {
     if (scope === GITHUB_SCOPE) return github();
     if (scope === runtimeScope(CLAUDE_RUNTIME_ID) && runtimes.some((r) => r.id === CLAUDE_RUNTIME_ID)) return claude();
+    if (scope === runtimeScope("codex") && runtimes.some((r) => r.id === "codex")) {
+      return connections.testCodex("core").then((status) => status.state === "ready" ? undefined : (status.message ?? `Codex está ${status.state}.`));
+    }
     const runtime = runtimes.find((r) => scope === runtimeScope(r.id));
     if (runtime?.probe) return runtime.probe();
     const repoId = repoOfScope(scope);

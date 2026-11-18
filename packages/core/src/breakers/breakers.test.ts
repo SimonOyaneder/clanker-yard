@@ -239,25 +239,26 @@ describe("eventos de conexión y cuota", () => {
     expect(b.openReason(GITHUB_SCOPE)).toBeUndefined();
   });
 
-  test("lo que emite la propia prueba (testClaude reescribe la conexión) no la dispara de nuevo", async () => {
+  test.each([["claude", "claude-sdk"], ["codex", "codex"]] as const)("la propia prueba de %s no se dispara de nuevo al reescribir la conexión", async (provider, runtime) => {
     let runs = 0;
-    const b = breakers("claude-sdk", () => {
+    const b = breakers(runtime, () => {
       runs++;
-      emit("connection.changed", { provider: "claude", account: "subscription", status: "active" });
+      emit("connection.changed", { provider, account: "subscription", status: "active" });
     });
-    emit("connection.changed", { provider: "claude", account: "subscription", status: "expired" });
+    emit("connection.changed", { provider, account: "subscription", status: "expired" });
 
-    emit("connection.changed", { provider: "claude", account: "subscription", status: "active" });
+    emit("connection.changed", { provider, account: "subscription", status: "active" });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(runs).toBe(1);
-    expect(b.openReason(runtimeScope("claude-sdk"))).toBeUndefined();
+    expect(b.openReason(runtimeScope(runtime))).toBeUndefined();
   });
 
   test("la conexión de Claude solo pausa al runtime claude-sdk, y Linear no abre ninguno", () => {
     const fake = breakers("fake");
 
     emit("connection.changed", { provider: "claude", account: "subscription", status: "expired" });
+    emit("connection.changed", { provider: "codex", account: "subscription", status: "expired" });
     emit("connection.changed", { provider: "linear", account: "acme", status: "revoked" });
 
     expect(fake.list()).toEqual([]);

@@ -10,7 +10,7 @@ import { createEventQueue } from "../event-queue";
 import { estimateCostMicros } from "../pricing";
 import { addUsage, emptyUsage, type AgentEvent, type AgentRun, type AgentRuntime, type RunResult, type RunSpec, type RunStatus } from "../runtime";
 import { clip, createTranscriptAppender, entryRecord, transcriptFile } from "../transcripts";
-import type { CodexMethods, JsonValue, ReasoningEffort } from "./api";
+import type { CodexMethods, JsonValue, RateLimitSnapshot, ReasoningEffort } from "./api";
 import { launchCodexAppServer, type CodexAppServer } from "./app-server";
 import { codexEnv, threadOptions } from "./config";
 import { codexReportSchema, normalizeCodexReport } from "./report-schema";
@@ -43,6 +43,7 @@ export interface CodexRuntimeOptions {
   procs?: Procs;
   killAfterMs?: number;
   interruptSettleMs?: number;
+  onRateLimits?: (update: RateLimitSnapshot) => void;
 }
 
 export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
@@ -181,6 +182,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
         let terminal: RunResult["status"] | undefined;
         let failure: string | undefined;
         for await (const notification of server.notifications) {
+          if (notification.method === "account/rateLimits/updated") options.onRateLimits?.(notification.params.rateLimits);
           const translated = translator.translate(notification);
           if (translated.text !== undefined) {
             text = translated.text;

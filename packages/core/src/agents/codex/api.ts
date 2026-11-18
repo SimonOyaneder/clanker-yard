@@ -63,6 +63,9 @@ export interface TokenUsageBreakdown {
 
 export interface RateLimitSnapshot {
   limitId: string | null;
+  limitName?: string | null;
+  planType?: string | null;
+  rateLimitReachedType?: string | null;
   primary: { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null } | null;
   secondary: RateLimitSnapshot["primary"];
   credits: { hasCredits: boolean; unlimited: boolean; balance: string | null } | null;

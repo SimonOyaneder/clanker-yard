@@ -144,6 +144,7 @@ export const EventType = z.enum([
   "learning.rejected",
   "learning.updated",
   "connection.changed",
+  "connection.usage",
   "connection.login_failed",
   "sync.rate_limited",
   "breaker.opened",

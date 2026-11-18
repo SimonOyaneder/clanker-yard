@@ -182,6 +182,7 @@ export function createRouter(deps: RouterDeps) {
         ({ url: (await deps.connections.linearAuth(context.origin)).url }),
       ),
       testClaude: os.connections.testClaude.handler(({ input, context }) => deps.connections.testClaude(input.mode, context.origin)),
+      testCodex: os.connections.testCodex.handler(({ context }) => deps.connections.testCodex(context.origin)),
       setClaudeApiKey: os.connections.setClaudeApiKey.handler(({ input, context }) =>
         deps.connections.setClaudeApiKey(input.key, context.origin),
       ),

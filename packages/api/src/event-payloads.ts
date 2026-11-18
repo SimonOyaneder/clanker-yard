@@ -23,6 +23,7 @@ export interface EventPayloads {
   "lease.released": { resource: "workspace" | "slot"; id: string; token: number };
   /** Una cuenta se conectó, venció, quedó revocada o se desconectó: abre o prueba su breaker. */
   "connection.changed": { provider: ConnectionProvider; account: string; status: ConnectionStatus | "disconnected" };
+  "connection.usage": { provider: "codex" };
   /** Un device flow de GitHub falló sin tocar la cuenta: la UI lo muestra sin esperar a que venza el código. */
   "connection.login_failed": { provider: "github"; reason: LoginFailure; message: string };
   /** GitHub cortó las requests de la cuenta por cuota hasta `resetAt` (ms epoch). */

@@ -4,7 +4,7 @@ import * as z from "zod";
  * Quién emite el token: GitHub (PAT en la fase 1, GitHub App después), Linear (OAuth) y Claude (el
  * login del `claude` instalado, o una API key). La cuenta de Claude es su modo (`ClaudeMode`).
  */
-export const ConnectionProvider = z.enum(["github", "linear", "claude"]);
+export const ConnectionProvider = z.enum(["github", "linear", "claude", "codex"]);
 export type ConnectionProvider = z.infer<typeof ConnectionProvider>;
 
 /** Cómo se conectó GitHub: con un PAT classic pegado a mano o con el device flow de la GitHub App. */
@@ -114,3 +114,38 @@ export const ClaudeStatus = z.object({
   resetsAt: z.int().nonnegative().optional(),
 });
 export type ClaudeStatus = z.infer<typeof ClaudeStatus>;
+
+export const CodexState = z.enum([
+  "ready",
+  "not_installed",
+  "outdated",
+  "login_required",
+  "login_expired",
+  "quota_exhausted",
+  "error",
+]);
+export type CodexState = z.infer<typeof CodexState>;
+
+export const CodexStatus = z.object({
+  state: CodexState,
+  message: z.string().optional(),
+  executable: z.string().optional(),
+  version: z.string().optional(),
+  plan: z.string().optional(),
+  usage: z.object({
+    windows: z.array(z.object({
+      id: z.string(),
+      label: z.string().optional(),
+      windowMins: z.number().nullable(),
+      usedPercent: z.number(),
+      resetsAt: z.int().nonnegative().optional(),
+    })),
+    credits: z.object({
+      hasCredits: z.boolean(),
+      unlimited: z.boolean(),
+      balance: z.string().nullable(),
+    }).optional(),
+  }).optional(),
+  resetsAt: z.int().nonnegative().optional(),
+});
+export type CodexStatus = z.infer<typeof CodexStatus>;

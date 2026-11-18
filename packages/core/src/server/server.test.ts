@@ -22,6 +22,7 @@ import { openStore, type Store } from "../store/store";
 import { createIssues } from "../tracker/issues";
 import { startFakeGitHubOAuth } from "../testing/github/fake-github-oauth";
 import { startFakeLinear } from "../testing/linear/fake-linear";
+import { createFakeCodex } from "../testing/codex/fake-codex";
 import { startServer, type CoreServer } from "./server";
 import { apiDeps, withPrs } from "../testing/router-deps";
 
@@ -267,6 +268,23 @@ describe("connections", () => {
       code: "BAD_REQUEST",
       message: expect.stringContaining("API key"),
     });
+  });
+
+  test("testCodex devuelve plan y uso sin inferencia y conecta la suscripción", async () => {
+    const fake = await createFakeCodex(secretsDir);
+    connections = createConnections({
+      store, secrets: createFileSecrets({ dir: join(secretsDir, "secrets") }),
+      codex: { executable: fake.executable, args: fake.args, cwd: secretsDir, baseEnv: { HOME: secretsDir, PATH: process.env.PATH } },
+    });
+    const core = await start();
+    const client = createClient({ url: core.url, token: core.token, origin: "cli" });
+    expect(await client.connections.testCodex({})).toMatchObject({
+      state: "ready", plan: "self_serve_business_prolite", version: "0.169.1",
+      usage: { windows: [{ id: "codex:primary", windowMins: 10080, usedPercent: 4, resetsAt: 1795542935000 }] },
+    });
+    expect(await client.connections.list()).toEqual([{
+      provider: "codex", account: "subscription", scopes: ["plan:self_serve_business_prolite"], status: "active",
+    }]);
   });
 
   test("startDeviceFlow sin client_id es BAD_REQUEST con el paso a seguir", async () => {
