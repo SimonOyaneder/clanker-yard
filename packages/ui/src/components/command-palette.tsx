@@ -163,6 +163,10 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
                 </CommandItem>
               </>
             ) : null}
+            <CommandItem value="pr chatear sobre este pr pedir cambios" onSelect={run(() => prCommands.chat(selectedPr))}>
+              <MessageSquare /> Chatear sobre este PR
+              <CommandShortcut>{PR_KEYS.chat}</CommandShortcut>
+            </CommandItem>
             <CommandItem value="pr ver descripción commits diff" onSelect={run(() => prCommands.view(selectedPr))}>
               <Eye /> Ver PR
               <CommandShortcut>{PR_KEYS.view}</CommandShortcut>

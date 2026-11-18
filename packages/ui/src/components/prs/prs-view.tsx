@@ -21,7 +21,7 @@ import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/l
 import { buildStackForest, listStackGroups, type StackGroup } from "@/lib/prs/stack"
 import { cn } from "@/lib/utils"
 import { Ago, Hint, Pill } from "../common"
-import { CiBadge, CombinedBaseChip, LocalChip, MergePill, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
+import { ChatProposalChip, CiBadge, CombinedBaseChip, LocalChip, MergePill, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
 import { usePrCommands } from "./pr-commands"
 import { PrContextMenu, usePrShortcuts } from "./pr-menu"
 import { PrNotes, PrNotesContext } from "./pr-notes"
@@ -418,6 +418,7 @@ function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
             </span>
           ) : null}
           <span className="min-w-0 flex-1 truncate">{titleOf(pr)}</span>
+          {pr.chatProposal ? <ChatProposalChip status={pr.chatProposal} /> : null}
           {pr.local ? <span className="truncate font-mono text-xs text-muted-foreground">{pr.local.branch}</span> : null}
           {pr.owned ? (
             <Pill className="bg-violet-500/10 text-violet-700 dark:text-violet-300" hint={issueKey ? `PR que abrió el sistema, de la issue ${issueKey}` : "PR que abrió el sistema"}>

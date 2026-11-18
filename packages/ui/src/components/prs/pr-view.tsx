@@ -1,7 +1,7 @@
-import type { LocalPrCommit, PrDetail } from "@clanker/api"
-import { Columns2, ExternalLink, FileCode2, GitCommitHorizontal, Rows2, ScrollText } from "lucide-react"
+import type { BotFinding, LocalPrCommit, PrDetail } from "@clanker/api"
+import { Columns2, ExternalLink, FileCode2, GitCommitHorizontal, MessageSquareDiff, Rows2, ScrollText } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { supportsChat, useAppData } from "@/app-data"
+import { useAppData } from "@/app-data"
 import { Hint } from "@/components/common"
 import { ChatPanel } from "./chat-panel"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
@@ -15,6 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useLive, useLiveQuery } from "@/hooks/use-live"
 import { ago } from "@/lib/format"
 import { isTypingTarget } from "@/lib/keys"
+import { takeChatFocus } from "@/lib/chat-focus"
 import { readPref, writePref } from "@/lib/prefs"
 import { fileFingerprint, parsePatch } from "@/lib/prs/diff"
 import { baseOf, branchOf, type OpenPr, titleOf } from "@/lib/prs/prs"
@@ -24,10 +25,11 @@ import { CiBadge, LocalChip, MergePill, PrStateIcon, ReviewPill } from "./pr-bit
 import { usePrCommands } from "./pr-commands"
 import { PR_KEYS, PrContextMenu, usePrShortcuts } from "./pr-menu"
 import { PlainMarkdown } from "./plain-markdown"
-import { type DiffMode, FileDiff } from "./file-diff"
+import { type DiffCitation, type DiffMode, FileDiff } from "./file-diff"
+import { ProposalTab } from "./proposal-tab"
 
 export type { DiffMode } from "./file-diff"
-export type PrTab = "description" | "commits" | "files"
+export type PrTab = "description" | "commits" | "files" | "proposal"
 
 /** Los atajos de la vista; la paleta los muestra igual. */
 export const PR_VIEW_KEYS = { mode: "S", prev: "[", next: "]", all: "A" } as const
@@ -69,8 +71,13 @@ function usePrefSet(key: string) {
 
 export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => void; onControls?: (controls: PrControls | null) => void }) {
   const appData = useAppData()
-  const chat = usePrChat(pr.id, supportsChat(appData) ? appData : null)
+  const chat = usePrChat(pr.id, appData)
   const commands = usePrCommands()
+  // "Chatear sobre este PR" (C en la lista, menú contextual, paleta) abre la vista con el composer enfocado.
+  const { focusComposer } = chat
+  useEffect(() => {
+    if (takeChatFocus(pr.id)) focusComposer()
+  }, [pr.id, focusComposer])
   usePrShortcuts()
   const { select } = commands
   useEffect(() => select(pr.id), [pr.id, select])
@@ -111,6 +118,19 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
   }, [commits, at, showCommit])
   const toggleMode = useCallback(() => setMode(mode === "split" ? "unified" : "split"), [mode, setMode])
 
+  // "Ver cambios" de la propuesta abre su pestaña.
+  const { diffOpen, setDiffOpen } = chat
+  useEffect(() => {
+    if (!diffOpen) return
+    setTab("proposal")
+    setDiffOpen(false)
+  }, [diffOpen, setDiffOpen])
+  const proposal = chat.snapshot?.proposal ?? null
+  const chatId = chat.snapshot?.chat.id
+  const cite = chat.cite
+  const citeLines = useCallback((c: DiffCitation) => cite({ kind: "lines", ...c }), [cite])
+  const citeFinding = useCallback((f: BotFinding) => cite({ kind: "thread", id: f.id, ...(f.path && { path: f.path }), ...(f.line !== undefined && { line: f.line }), author: "bot de review", text: f.text }), [cite])
+
   // Un objeto nuevo solo cuando algo cambia: el padre los guarda en su estado, y uno nuevo en cada render sería un loop.
   const { supported: chatSupported, open: chatOpen, toggle: toggleChat, actions: chatActions } = chat
   const controls = useMemo<PrControls>(() => ({
@@ -128,6 +148,7 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
       if (isTypingTarget(e.target, ["[role='dialog']", "[role='alertdialog']", "[role='menu']", "[role='listbox']"])) return
       if (e.key === "Escape") onBack()
       else if (e.key.toUpperCase() === PR_VIEW_KEYS.mode) toggleMode()
+      else if (tab === "proposal" && (e.key === PR_VIEW_KEYS.prev || e.key === PR_VIEW_KEYS.next)) return
       else if (e.key === PR_VIEW_KEYS.prev && prev) prev()
       else if (e.key === PR_VIEW_KEYS.next && next) next()
       else if (e.key.toUpperCase() === PR_VIEW_KEYS.all && all) all()
@@ -136,7 +157,7 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [onBack, toggleMode, prev, next, all])
+  }, [onBack, toggleMode, prev, next, all, tab])
 
   const additions = detail?.files.reduce((sum, f) => sum + (f.additions ?? 0), 0) ?? 0
   const deletions = detail?.files.reduce((sum, f) => sum + (f.deletions ?? 0), 0) ?? 0
@@ -211,8 +232,16 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
             <TabsTrigger value="files">
               <FileCode2 /> Archivos {detail.files.length}
             </TabsTrigger>
+            {proposal && chatId ? (
+              <TabsTrigger value="proposal">
+                <MessageSquareDiff /> Propuesta {proposal.rev}
+              </TabsTrigger>
+            ) : null}
           </TabsList>
           <TabsContent value="description" className="min-h-0 overflow-y-auto px-6 py-4">
+            {!pr.local && pr.state.bot.state === "findings" && pr.state.bot.findings.length > 0 && chatSupported ? (
+              <BotFindings findings={pr.state.bot.findings} onAsk={citeFinding} />
+            ) : null}
             {detail.body.trim() ? (
               <div className="max-w-3xl">
                 <PlainMarkdown source={detail.body} />
@@ -235,8 +264,14 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
               onViewed={toggleFile}
               commitViewed={current ? viewedCommits.has(current.sha) : false}
               onCommitViewed={(on) => current && toggleCommit(current.sha, on)}
+              onCite={chatSupported ? citeLines : undefined}
             />
           </TabsContent>
+          {proposal && chatId ? (
+            <TabsContent value="proposal" className="flex min-h-0 flex-col">
+              <ProposalTab chatId={chatId} proposal={proposal} mode={mode} onMode={setMode} />
+            </TabsContent>
+          ) : null}
         </Tabs>
       )}
     </div>
@@ -245,7 +280,7 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
         <>
           <ResizableHandle withHandle />
           <ResizablePanel id="chat" defaultSize={`${readPref("prChatSize", 40)}%`} minSize="30%" maxSize="65%">
-            <ChatPanel controller={chat} />
+            <ChatPanel controller={chat} pr={pr} prChildren={commands.childrenOf(pr.id)} onOpenRun={commands.openRunById} />
           </ResizablePanel>
         </>
       ) : null}
@@ -295,9 +330,10 @@ interface FilesProps {
   onViewed: (fingerprint: string, on: boolean) => void
   commitViewed: boolean
   onCommitViewed: (on: boolean) => void
+  onCite?: (citation: DiffCitation) => void
 }
 
-function Files({ detail, commit, mode, onMode, onScope, viewed, onViewed, commitViewed, onCommitViewed }: FilesProps) {
+function Files({ detail, commit, mode, onMode, onScope, viewed, onViewed, commitViewed, onCommitViewed, onCite }: FilesProps) {
   const appData = useAppData()
   const sha = commit?.sha
   const commitQuery = useLiveQuery(`pr-commit:${detail.id}:${detail.head}:${detail.baseSha}:${sha ?? "all"}`, () => (sha ? appData.prCommitDiff({ id: detail.id, sha, head: detail.head, base: detail.baseSha }) : Promise.resolve(null)), { live: false })
@@ -369,9 +405,29 @@ function Files({ detail, commit, mode, onMode, onScope, viewed, onViewed, commit
       ) : null}
       {files.map((file) => {
         const print = fileFingerprint(file)
-        return <FileDiff key={`${sha ?? "all"}:${file.path}`} file={file} mode={mode} viewed={viewed.has(print)} onViewed={(on) => onViewed(print, on)} />
+        return <FileDiff key={`${sha ?? "all"}:${file.path}`} file={file} mode={mode} viewed={viewed.has(print)} onViewed={(on) => onViewed(print, on)} onCite={onCite} />
       })}
       </div>
     </>
+  )
+}
+
+/** Los hallazgos abiertos del bot de review: cada uno se le puede pedir al chat, citado con su texto y su id. */
+function BotFindings({ findings, onAsk }: { findings: readonly BotFinding[]; onAsk: (finding: BotFinding) => void }) {
+  return (
+    <section aria-label="Hallazgos del bot" className="mb-4 max-w-3xl space-y-2 rounded-lg border p-3">
+      <h3 className="text-sm font-medium">Hallazgos abiertos del bot de review</h3>
+      <ul className="space-y-2">
+        {findings.map((finding) => (
+          <li key={finding.id} className="flex items-start gap-3 text-sm">
+            <div className="min-w-0 flex-1">
+              {finding.path ? <code className="font-mono text-xs text-muted-foreground">{finding.path}{finding.line ? `:${finding.line}` : ""}</code> : null}
+              <p className="whitespace-pre-wrap">{finding.text}</p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => onAsk(finding)}>Pedírselo al clanker</Button>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

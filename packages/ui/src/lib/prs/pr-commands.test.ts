@@ -39,7 +39,7 @@ test("rebasear solo se ofrece en PRs del sistema sin threads de council, y la co
 test("un local no tiene acciones ni estados de GitHub, aunque su pack tenga un bot, y el del sistema se puede publicar ya", () => {
   const local = openPrsOf(buildOpenPrs(NOW)).find((p): p is LocalPr => p.local !== null)!
 
-  expect(prCaps(local)).toEqual({ merge: null, requestReview: false, rebase: false, hold: false, run: false, publishLocal: local.owned })
+  expect(prCaps(local)).toEqual({ merge: null, requestReview: false, rebase: false, hold: false, run: false, publishLocal: local.owned, chat: true })
   expect(prCaps({ ...local, owned: true }).publishLocal).toBe(true)
   expect(prCaps({ ...local, owned: false }).publishLocal).toBe(false)
   expect(prCaps({ ...local, runId: "run_00000000000000000000000001" }).run).toBe(true)

@@ -7,7 +7,7 @@ import type { EventType } from "@clanker/api"
 export type LiveTrigger = EventType | `${string}.*`
 
 /** Los PRs del caché: lo que Watch lee, publica o guarda local. */
-export const PR_TRIGGERS: readonly LiveTrigger[] = ["pr.*"]
+export const PR_TRIGGERS: readonly LiveTrigger[] = ["pr.*", "chat.proposal", "chat.apply_started", "chat.apply_finished"]
 /** Los repos registrados, con su receta, su última prueba y su remoto (que depende de la cuenta de GitHub). */
 export const REPO_TRIGGERS: readonly LiveTrigger[] = ["repo.added", "recipe.test_finished", "connection.changed"]
 /** Flujos, roles y perfiles: los de un pack cambian al instalarlo o sacarlo. */

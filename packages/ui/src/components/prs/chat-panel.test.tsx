@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import type { Breaker } from "@clanker/api"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 import { AppDataProvider, type AppData, type ChatData } from "@/app-data"
-import { ChatPanel } from "./chat-panel"
+import { applyPlan, ChatPanel } from "./chat-panel"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Toaster } from "sonner"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 import { CHAT_SCENARIOS } from "@/demo/seed-chats"
+import { UNDO_MS } from "@/hooks/use-decision-resolver"
 import { LiveProvider } from "@/hooks/use-live"
 import { usePrChat } from "@/hooks/use-pr-chat"
+import type { OpenPr } from "@/lib/prs/prs"
 
 const NOW = Date.parse("2026-11-18T12:00:00Z")
 const scrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")
@@ -32,24 +36,27 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLElement.prototype, "hasPointerCapture")
 })
 
-function Harness({ data, prId }: { data: ChatData; prId: string }) {
-  return <ChatPanel controller={usePrChat(prId, data)} />
+function Harness({ data, pr, children }: { data: AppData; pr: OpenPr; children: OpenPr[] }) {
+  return <ChatPanel controller={usePrChat(pr.id, data)} pr={pr} prChildren={children} />
 }
 
 async function setup(index: number, change?: (data: AppData & ChatData) => void, loaded = true) {
   const data = createMemoryAppData(NOW)
   const prId = CHAT_SCENARIOS[index]!.prId
   const snapshot = await data.chat({ prId })
+  const prs = (await data.openPrs()) as OpenPr[]
+  const pr = prs.find((p) => p.id === prId)!
   change?.(data)
   render(
     <AppDataProvider value={data}>
       <TooltipProvider delayDuration={0}>
-        <LiveProvider><Harness data={data} prId={prId} /></LiveProvider>
+        <LiveProvider><Harness data={data} pr={pr} children={prs.filter((p) => p.parents.includes(prId))} /></LiveProvider>
+        <Toaster />
       </TooltipProvider>
     </AppDataProvider>,
   )
-  if (loaded) await screen.findByText(snapshot.chat.model)
-  return { data, prId, snapshot }
+  if (loaded) await screen.findByRole("combobox", { name: "Runtime y modelo del chat" })
+  return { data, prId, snapshot, pr }
 }
 
 test.each([
@@ -64,12 +71,12 @@ test.each([
   { index: 8, label: "PR ajeno", applyReason: "Este PR no lo abrió Clanker Yard. Puedes conversar y revisar propuestas, pero no aplicarlas.", discardReason: null },
 ])("el escenario $label muestra las acciones del estado y sus restricciones", async ({ index, applyReason, discardReason }) => {
   const { data, snapshot } = await setup(index)
-  expect(screen.getByText(snapshot.chat.runtime)).toBeTruthy()
+  expect(screen.getByRole("combobox", { name: "Runtime y modelo del chat" }).textContent).toContain(snapshot.chat.model)
   if (snapshot.chat.busy) {
-    expect(screen.getByRole("button", { name: "Interrumpir turno" })).toHaveProperty("disabled", false)
-    expect(screen.queryByRole("button", { name: "Enviar mensaje" })).toBeNull()
+    expect(screen.getByRole("button", { name: /Interrumpir turno/ })).toHaveProperty("disabled", false)
+    expect(screen.queryByRole("button", { name: /Enviar mensaje/ })).toBeNull()
   } else {
-    const send = screen.getByRole("button", { name: "Enviar mensaje" })
+    const send = screen.getByRole("button", { name: /Enviar mensaje/ })
     expect(send).toHaveProperty("disabled", true)
     fireEvent.focus(send.parentElement!)
     expect((await screen.findByRole("tooltip")).textContent).toContain(index === 4 ? "Espera a que termine la aplicación." : "Escribe un mensaje para enviar.")
@@ -79,9 +86,6 @@ test.each([
     expect(send).toHaveProperty("disabled", index === 4)
     if (index === 4) {
       const sendChat = vi.spyOn(data, "sendChat")
-      fireEvent.focus(send.parentElement!)
-      expect((await screen.findByRole("tooltip")).textContent).toContain("Espera a que termine la aplicación.")
-      fireEvent.blur(send.parentElement!)
       fireEvent.click(send)
       fireEvent.keyDown(input, { key: "Enter", metaKey: true })
       expect(sendChat).not.toHaveBeenCalled()
@@ -106,13 +110,19 @@ test.each([
     expect(screen.queryByRole("button", { name: "Aplicar" })).toBeNull()
   }
   if (index === 0) expect(screen.getByText("¿Qué quieres revisar de este PR?")).toBeTruthy()
+  if (index === 4) expect(screen.getByRole("status", { name: "Progreso de la aplicación" })).toBeTruthy()
   if (index === 5) {
     expect(screen.getByText(/Actualizado sobre la nueva punta/)).toBeTruthy()
     expect(screen.getAllByText(/conflicto/i).length).toBeGreaterThan(0)
     expect(await screen.findByText("acme/ledger#424")).toBeTruthy()
-    expect(screen.getByText("acme/ledger#427")).toBeTruthy()
   }
-  if (index === 7) expect(screen.getByRole("status").textContent).toMatch(/login|sesión/i)
+  if (index === 6) expect(screen.getByRole("button", { name: "Rehacer sobre el PR actual" })).toBeTruthy()
+})
+
+test("los ejemplos del estado vacío llenan el composer", async () => {
+  await setup(0)
+  fireEvent.click(screen.getByRole("button", { name: "Agrega un test para el caso borde que falta." }))
+  expect(screen.getByRole("textbox", { name: "Mensaje para el chat" })).toHaveProperty("value", "Agrega un test para el caso borde que falta.")
 })
 
 test("⌘Enter envía una sola vez, Enter deja escribir y el texto se conserva si falla", async () => {
@@ -132,75 +142,109 @@ test("⌘Enter envía una sola vez, Enter deja escribir y el texto se conserva s
   expect(send).toHaveBeenCalledTimes(2)
 })
 
-test("el texto llega por eventos y se puede interrumpir el turno", async () => {
+test("el turno llega en vivo y Esc en el composer lo interrumpe", async () => {
   const { data, snapshot } = await setup(1)
   const interrupt = vi.spyOn(data, "interruptChat")
   const before = snapshot.messages.findLast((message) => message.role === "assistant")!.text
   expect(screen.getByText(before)).toBeTruthy()
   await waitFor(() => expect(screen.queryByText(before, { exact: true })).toBeNull(), { timeout: 5000 })
-  fireEvent.click(screen.getByRole("button", { name: "Interrumpir turno" }))
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Mensaje para el chat" }), { key: "Escape" })
   await waitFor(() => expect(interrupt).toHaveBeenCalledWith({ chatId: snapshot.chat.id }))
-  expect(await screen.findByRole("button", { name: "Enviar mensaje" })).toBeTruthy()
+  expect(await screen.findByRole("button", { name: /Enviar mensaje/ })).toBeTruthy()
 })
 
-test("Ver cambios usa el patch de la revisión y aplicar requiere confirmación", async () => {
+test("con el breaker del runtime abierto el composer queda apagado y dice por qué", async () => {
+  const breaker: Breaker = { scope: "runtime:opencode", label: "runtime:opencode", cause: "quota_exhausted", reason: "Se agotó la cuota de opencode.", openedAt: NOW, probes: 1, nextProbeAt: NOW + 60_000, decisionId: "dec_01M7QQ00000000000000000000" }
+  await setup(0, (data) => {
+    vi.spyOn(data, "breakers").mockResolvedValue([breaker])
+  })
+  fireEvent.change(screen.getByRole("textbox", { name: "Mensaje para el chat" }), { target: { value: "Hola" } })
+  const send = screen.getByRole("button", { name: /Enviar mensaje/ })
+  await waitFor(() => expect(send).toHaveProperty("disabled", true))
+  fireEvent.focus(send.parentElement!)
+  expect((await screen.findByRole("tooltip")).textContent).toContain("El runtime opencode está en pausa: Se agotó la cuota de opencode.")
+})
+
+test("cambiar el runtime manda el modelo elegido con el próximo mensaje", async () => {
+  const { data, snapshot } = await setup(0, (data) => {
+    vi.spyOn(data, "agentOptions").mockResolvedValue({
+      runtimes: [
+        { id: "claude-sdk", label: "Claude", about: "Claude Code", available: true, models: [{ id: "sonnet", label: "Sonnet", about: "Equilibrado" }], efforts: [] },
+        { id: "opencode", label: "opencode", about: "opencode", available: true, models: [{ id: "openai/gpt-6.1-terra", label: "GPT 6.1 Terra", about: "Rápido" }], efforts: [] },
+        { id: "codex", label: "Codex", about: "Codex", available: false, models: [{ id: "gpt-5.5", label: "GPT 5.5", about: "Codex" }], efforts: [] },
+      ],
+    })
+  })
+  const send = vi.spyOn(data, "sendChat")
+  fireEvent.click(screen.getByRole("combobox", { name: "Runtime y modelo del chat" }))
+  expect(screen.queryByRole("option", { name: "GPT 5.5" })).toBeNull()
+  fireEvent.click(await screen.findByRole("option", { name: "Sonnet" }))
+  fireEvent.change(screen.getByRole("textbox", { name: "Mensaje para el chat" }), { target: { value: "Sigue" } })
+  fireEvent.click(screen.getByRole("button", { name: /Enviar mensaje/ }))
+  await waitFor(() => expect(send).toHaveBeenCalledWith({ chatId: snapshot.chat.id, text: "Sigue", runtime: "claude-sdk", model: "sonnet" }))
+})
+
+test("aplicar abre un diálogo con lo concreto y Enter lo confirma", async () => {
   const { data, snapshot } = await setup(3)
-  const diff = vi.spyOn(data, "chatProposal")
   const apply = vi.spyOn(data, "applyProposal")
-  fireEvent.click(screen.getByRole("button", { name: "Ver cambios" }))
-  const dialog = await screen.findByRole("dialog")
-  await waitFor(() => expect(diff).toHaveBeenCalledWith({ chatId: snapshot.chat.id, rev: snapshot.proposal!.rev }))
-  expect(within(dialog).getByText("Estos cambios son del borrador, no del diff actual del PR.")).toBeTruthy()
-  expect((await within(dialog).findAllByRole("table")).length).toBeGreaterThan(0)
-  fireEvent.keyDown(dialog, { key: "Escape" })
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-  fireEvent.click(screen.getByRole("button", { name: "Aplicar" }))
+  fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true })
+  const dialog = await screen.findByRole("alertdialog")
+  expect(within(dialog).getByText(/fixups de los commits del PR, se squashean y se pushean con lease/)).toBeTruthy()
+  expect(within(dialog).getByText(/checks de la receta/)).toBeTruthy()
   expect(apply).not.toHaveBeenCalled()
-  fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Aplicar" }))
+  fireEvent.keyDown(dialog, { key: "Enter" })
   await waitFor(() => expect(apply).toHaveBeenCalledWith({ chatId: snapshot.chat.id, rev: snapshot.proposal!.rev }))
 })
 
+test("el texto del diálogo de aplicar dice dónde queda el cambio: remoto, con council o local, y qué hijos se restackean", () => {
+  const remote = { id: "a", local: null, parents: [], state: { threads: { councilEver: false }, key: "acme/web#1" } } as unknown as OpenPr
+  const council = { ...remote, state: { ...remote.state, threads: { councilEver: true } } } as unknown as OpenPr
+  const local = { id: "l", local: { branch: "cla-2", base: "cla-1", title: "Local" }, parents: ["a"], state: null } as unknown as OpenPr
+  const stacked = { id: "b", local: null, parents: ["a"], state: { key: "acme/web#2" } } as unknown as OpenPr
+  const combined = { id: "c", local: null, parents: ["a", "d"], state: { key: "acme/web#3" } } as unknown as OpenPr
+
+  expect(applyPlan(remote, [stacked, combined])).toMatchObject({
+    where: "Los cambios salen como fixups de los commits del PR, se squashean y se pushean con lease.",
+    children: ["acme/web#2 (apilado)", "acme/web#3 (base combinada)"],
+  })
+  expect(applyPlan(council, []).where).toBe("Los cambios salen como commits fixup! visibles y se pushean sin forzar: el PR tuvo threads de council y su historia no se reescribe.")
+  expect(applyPlan(local, [{ ...local, id: "m", parents: ["l"], local: { branch: "cla-3", base: "cla-2", title: "Hijo" } } as unknown as OpenPr])).toMatchObject({
+    where: "Los cambios quedan como commits del PR local, en esta máquina: nada se pushea hasta que el PR se publique.",
+    children: ["cla-3 (apilado), local"],
+  })
+})
+
+test("descartar y reiniciar esperan unos segundos con Deshacer antes de llegar al core", async () => {
+  const { data, snapshot } = await setup(3)
+  const discard = vi.spyOn(data, "discardProposal")
+  const reset = vi.spyOn(data, "resetChat")
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  fireEvent.keyDown(window, { code: "KeyD", altKey: true })
+  fireEvent.click(await screen.findByRole("button", { name: "Deshacer" }))
+  await act(() => vi.advanceTimersByTimeAsync(UNDO_MS + 100))
+  expect(discard).not.toHaveBeenCalled()
+
+  fireEvent.keyDown(window, { code: "KeyD", altKey: true })
+  await act(() => vi.advanceTimersByTimeAsync(UNDO_MS + 100))
+  await waitFor(() => expect(discard).toHaveBeenCalledWith({ chatId: snapshot.chat.id }))
+
+  fireEvent.keyDown(window, { code: "KeyR", altKey: true })
+  await act(() => vi.advanceTimersByTimeAsync(UNDO_MS + 100))
+  await waitFor(() => expect(reset).toHaveBeenCalledWith({ chatId: snapshot.chat.id }))
+})
+
 test("un error al cargar el chat permite reintentar y no deja enviar a un chat desconocido", async () => {
-  const { data, snapshot } = await setup(0, (data) => {
+  const { data } = await setup(0, (data) => {
     vi.spyOn(data, "chat").mockRejectedValue(new Error("No pude cargar el chat. Vuelve a intentar."))
   }, false)
   expect((await screen.findByRole("alert")).textContent).toContain("No pude cargar el chat.")
   fireEvent.change(screen.getByRole("textbox", { name: "Mensaje para el chat" }), { target: { value: "Hola" } })
-  const send = screen.getByRole("button", { name: "Enviar mensaje" })
+  const send = screen.getByRole("button", { name: /Enviar mensaje/ })
   expect(send).toHaveProperty("disabled", true)
   fireEvent.focus(send.parentElement!)
   expect((await screen.findByRole("tooltip")).textContent).toContain("Reintenta cargar el chat.")
   fireEvent.blur(send.parentElement!)
   vi.mocked(data.chat).mockRestore()
   fireEvent.click(screen.getByRole("button", { name: "Reintentar" }))
-  expect(await screen.findByText(snapshot.chat.model)).toBeTruthy()
-})
-
-test("un error al abrir los cambios conserva la propuesta y se reintenta dentro del diálogo", async () => {
-  await setup(3, (data) => {
-    vi.spyOn(data, "chatProposal").mockRejectedValueOnce(new Error("No pude leer el patch. Vuelve a intentar."))
-  })
-  fireEvent.click(screen.getByRole("button", { name: "Ver cambios" }))
-  const dialog = await screen.findByRole("dialog")
-  expect((await within(dialog).findByRole("alert")).textContent).toContain("No pude leer el patch.")
-  fireEvent.click(within(dialog).getByRole("button", { name: "Reintentar" }))
-  expect((await within(dialog).findAllByRole("table")).length).toBeGreaterThan(0)
-})
-
-test("descartar y reiniciar desde sus atajos piden confirmación", async () => {
-  const { data, snapshot } = await setup(3)
-  const discard = vi.spyOn(data, "discardProposal")
-  const reset = vi.spyOn(data, "resetChat")
-  fireEvent.keyDown(screen.getByRole("textbox", { name: "Mensaje para el chat" }), { code: "KeyD", altKey: true })
-  expect(screen.queryByRole("alertdialog")).toBeNull()
-  fireEvent.keyDown(window, { code: "KeyD", altKey: true })
-  const discardDialog = await screen.findByRole("alertdialog")
-  expect(discard).not.toHaveBeenCalled()
-  fireEvent.click(within(discardDialog).getByRole("button", { name: "Descartar" }))
-  await waitFor(() => expect(discard).toHaveBeenCalledWith({ chatId: snapshot.chat.id }))
-  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
-  fireEvent.keyDown(window, { code: "KeyR", altKey: true })
-  fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Reiniciar" }))
-  await waitFor(() => expect(reset).toHaveBeenCalledWith({ chatId: snapshot.chat.id }))
-  expect(await screen.findByText("¿Qué quieres revisar de este PR?")).toBeTruthy()
+  expect(await screen.findByRole("combobox", { name: "Runtime y modelo del chat" })).toBeTruthy()
 })

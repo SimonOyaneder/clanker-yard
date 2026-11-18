@@ -282,6 +282,15 @@ export function ReviewPill({ pr, review }: { pr: GithubPr; review: ReviewStatus 
   )
 }
 
+/** El chat del PR tiene una propuesta por aplicar o aplicándose. */
+export function ChatProposalChip({ status }: { status: "draft" | "applying" }) {
+  return (
+    <Pill className={status === "applying" ? tone.sky : tone.violet} hint={status === "applying" ? "Se está aplicando la propuesta de su chat: el PR y su stack se actualizan al terminar." : "Su chat tiene una propuesta sin aplicar: ábrelo para revisarla."}>
+      {status === "applying" ? "Aplicando" : "Propuesta"}
+    </Pill>
+  )
+}
+
 export function LocalChip({ base }: { base: string }) {
   return <Pill className={tone.neutral} hint={`Vive solo en tu máquina. Se publica en GitHub cuando se mergee ${base}.`}>Local</Pill>
 }

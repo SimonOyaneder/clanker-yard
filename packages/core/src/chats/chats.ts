@@ -496,7 +496,8 @@ export function createPrChats(deps: PrChatsDeps): PrChats {
     const next: ChatProposal["status"] = outcome === "done" && summary.applied ? "applied" : summary.stale ? "stale" : "failed";
     const result = summary.applied ? { sha: summary.sha ?? pr.headSha ?? "", children: summary.children } : undefined;
     store.tx((tx) => {
-      tx.db.update(prChatProposals).set({ status: next, ...(result && { result }), note: summary.note ?? null, updatedAt: now() })
+      const note = next === "applied" ? summary.note ?? null : applyMessage(next, summary, outcome);
+      tx.db.update(prChatProposals).set({ status: next, ...(result && { result }), note, updatedAt: now() })
         .where(and(eq(prChatProposals.chatId, proposal.chatId), eq(prChatProposals.rev, proposal.rev))).run();
       addMessage(tx, chat, { role: "system", text: applyMessage(next, summary, outcome), proposalRev: proposal.rev });
       tx.emit({ type: "chat.apply_finished", origin: "core", subject: { type: "pr", id: chat.prId }, payload: { chatId: chat.id, prId: chat.prId } });

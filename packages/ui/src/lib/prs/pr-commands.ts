@@ -18,10 +18,12 @@ export interface PrCaps {
   run: boolean
   /** Es un PR local: se puede publicar ya en GitHub, apilado sobre su padre. */
   publishLocal: boolean
+  /** Chatear sobre el PR: siempre, sobre un PR abierto (aplicar lo que proponga solo vale en uno que abrió el sistema). */
+  chat: boolean
 }
 
 export function prCaps(pr: OpenPr): PrCaps {
-  if (pr.local) return { merge: null, requestReview: false, rebase: false, hold: false, run: pr.runId !== null, publishLocal: pr.owned }
+  if (pr.local) return { merge: null, requestReview: false, rebase: false, hold: false, run: pr.runId !== null, publishLocal: pr.owned, chat: true }
   return {
     merge: mergeBlocker(pr.state) === undefined ? (pr.state.merge.via === "comment" ? "comment" : "button") : null,
     requestReview: pr.reviewBot,
@@ -29,6 +31,7 @@ export function prCaps(pr: OpenPr): PrCaps {
     hold: true,
     run: pr.runId !== null,
     publishLocal: false,
+    chat: true,
   }
 }
 

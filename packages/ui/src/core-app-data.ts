@@ -3,7 +3,7 @@ import type { AppData } from "@/app-data"
 import { messageOf } from "@/lib/utils"
 
 /** Lo que la UI usa de la API; lo cumple tanto el cliente real como un `createRouterClient` en un test. */
-export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "artifacts" | "events" | "learnings" | "connections" | "repos" | "metrics" | "defs" | "trackers" | "packs">
+export type CoreClient = Pick<Client, "system" | "projects" | "issues" | "runs" | "decisions" | "prs" | "chats" | "artifacts" | "events" | "learnings" | "connections" | "repos" | "metrics" | "defs" | "trackers" | "packs">
 
 // Lo que mueve lo que la UI muestra (proyectos, issues, corridas y sus pasos, las sesiones de agente que el
 // panel del paso y su transcript siguen en vivo, las decisiones de la bandeja, los learnings, conexiones y pruebas de receta).
@@ -59,6 +59,12 @@ const LIVE_EVENTS = [
   "recipe.test_started",
   "recipe.test_output",
   "recipe.test_finished",
+  "chat.message",
+  "chat.turn_started",
+  "chat.turn_finished",
+  "chat.proposal",
+  "chat.apply_started",
+  "chat.apply_finished",
 ] as const satisfies readonly EventType[]
 
 /** El `AppData` real: la API del core por el cliente oRPC. */
@@ -174,5 +180,12 @@ export function createCoreAppData(client: CoreClient): AppData {
     syncRepoConfig: (repoId) => client.repos.syncConfig({ repoId }),
     exportProjectConfig: (id) => client.projects.exportConfig({ id }),
     importProjectConfig: ({ projectId, config, dryRun }) => client.projects.importConfig({ id: projectId, config, dryRun }),
+    chat: (input) => client.chats.get(input),
+    sendChat: (input) => client.chats.send(input),
+    interruptChat: (input) => client.chats.interrupt(input),
+    resetChat: (input) => client.chats.reset(input),
+    chatProposal: (input) => client.chats.proposal(input),
+    discardProposal: (input) => client.chats.discard(input),
+    applyProposal: (input) => client.chats.apply(input),
   }
 }

@@ -1,5 +1,6 @@
+import { requestChatFocus } from "@/lib/chat-focus"
 import type { ClankerProject, RunId } from "@clanker/api"
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -25,15 +26,21 @@ export interface PrActions {
   toggleHold: (pr: GithubPr) => void
   /** Va a la corrida que abrió el PR, en su proyecto. */
   openRun: (pr: OpenPr) => void
+  /** Va a una corrida cualquiera (la que aplica la propuesta del chat), en su proyecto. */
+  openRunById: (runId: RunId) => void
   /** Publica ya en GitHub un PR local, para pedir review temprano. */
   publishLocal: (pr: LocalPr) => void
   view: (pr: OpenPr) => void
+  /** Abre el PR con su chat enfocado. */
+  chat: (pr: OpenPr) => void
   openGithub: (pr: GithubPr) => void
 }
 
 export interface PrCommands extends PrActions {
   /** El PR sobre el que actúan los atajos y la paleta: el último que se enfocó, si sigue abierto. */
   selected: OpenPr | null
+  /** Los PRs abiertos que cuelgan de `id` (apilados o con base combinada): lo que restackea aplicar un cambio en él. */
+  childrenOf: (id: string) => OpenPr[]
 }
 
 const PrActionsContext = createContext<PrActions | null>(null)
@@ -74,6 +81,18 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, childre
     latest.current = { projects, onOpenRun, onOpenPr }
   })
 
+  // La corrida en su proyecto; lee `latest` al usarse, así no cambia con cada render.
+  const openRunById = useCallback((runId: RunId) => {
+    appData.run(runId).then(
+      (run) => {
+        const project = latest.current.projects.find((p) => p.id === run.projectId)
+        if (project) latest.current.onOpenRun(project.slug, runId)
+        else toast.error("Esa corrida no es de ningún proyecto")
+      },
+      (e: unknown) => toast.error(messageOf(e)),
+    )
+  }, [appData])
+
   const actions = useMemo<PrActions>(
     () => ({
       select,
@@ -85,6 +104,11 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, childre
         select(pr.id)
         latest.current.onOpenPr(pr.id)
       },
+      chat: (pr) => {
+        requestChatFocus(pr.id)
+        select(pr.id)
+        latest.current.onOpenPr(pr.id)
+      },
       openGithub: (pr) => host.openExternal(pr.state.url),
       publishLocal: (pr) => void perform(() => appData.publishLocalPr(pr.id), `Publicando ${branchOf(pr)} en GitHub: corre en el carril de mantenimiento`),
       toggleHold: (pr) =>
@@ -93,21 +117,17 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, childre
           pr.state.hold ? `${pr.state.key} sin hold: vuelve a ofrecerse cuando esté listo` : `${pr.state.key} en hold: no se ofrece ni se mergea`,
         ),
       openRun: (pr) => {
-        const runId = pr.runId
-        if (runId === null) return
-        appData.run(runId).then(
-          (run) => {
-            const project = latest.current.projects.find((p) => p.id === run.projectId)
-            if (project) latest.current.onOpenRun(project.slug, runId)
-            else toast.error("La corrida que abrió este PR no es de ningún proyecto")
-          },
-          (e: unknown) => toast.error(messageOf(e)),
-        )
+        if (pr.runId !== null) openRunById(pr.runId)
       },
+      openRunById: (runId) => openRunById(runId),
     }),
-    [appData, host, perform],
+    [appData, host, perform, openRunById],
   )
-  const commands = useMemo<PrCommands>(() => ({ ...actions, selected: prs.find((p) => p.id === selectedId) ?? null }), [actions, prs, selectedId])
+  const commands = useMemo<PrCommands>(() => ({
+    ...actions,
+    selected: prs.find((p) => p.id === selectedId) ?? null,
+    childrenOf: (id) => prs.filter((p) => p.parents.includes(id)),
+  }), [actions, prs, selectedId])
 
   return (
     <PrActionsContext.Provider value={actions}>

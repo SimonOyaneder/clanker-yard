@@ -6,7 +6,7 @@ import { draftTone, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
 import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/lib/prs/prs"
 import { cn } from "@/lib/utils"
 import { Hint, Pill } from "../common"
-import { CiBadge, CombinedBaseChip, Labels, LocalChip, MergePill, mergeRing, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
+import { ChatProposalChip, CiBadge, CombinedBaseChip, Labels, LocalChip, MergePill, mergeRing, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
 import { usePrActions } from "./pr-commands"
 import { PrContextMenu } from "./pr-menu"
 import { PrNotes } from "./pr-notes"
@@ -69,6 +69,7 @@ export const PrNode = memo(function PrNode({ data }: NodeProps & { data: PrNodeD
                 {draft.label}
               </Pill>
             ) : null}
+            {pr.chatProposal ? <ChatProposalChip status={pr.chatProposal} /> : null}
             <Signals pr={pr} />
           </span>
         </div>

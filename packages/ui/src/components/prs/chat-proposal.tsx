@@ -1,4 +1,4 @@
-import type { ChatProposal } from "@clanker/api"
+import type { ChatProposal, RunDetail } from "@clanker/api"
 import { useId } from "react"
 import { Hint, Pill } from "@/components/common"
 import { Button } from "@/components/ui/button"
@@ -11,9 +11,28 @@ export interface ProposalCardProps {
   busy: boolean
   pending: boolean
   childNames?: ReadonlyMap<string, string>
+  /** La corrida que la aplica, mientras está `applying`. */
+  run?: RunDetail | null
   onView: () => void
   onApply: () => void
   onDiscard: () => void
+  /** "Rehacer sobre el PR actual" de una propuesta `stale`: le pide al agente que la rehaga. */
+  onRedo?: () => void
+  /** Abre la corrida que la aplica. */
+  onOpenRun?: (runId: string) => void
+}
+
+/** Cómo se llama cada paso de las corridas de aplicar, en el orden en que corren. */
+const APPLY_STEPS: Record<string, string> = {
+  ws: "Tomar el worktree del PR",
+  apply: "Aplicar el diff",
+  checks: "Checks de la receta",
+  fix: "Arreglar los checks",
+  fixups: "Fixups y push",
+  route: "Ubicar los cambios en sus commits",
+  restack: "Restackear los hijos",
+  state: "Ver si el PR pide review",
+  feedback: "Review del bot",
 }
 
 const STATUS: Record<ChatProposal["status"], { label: string; hint: string; className: string }> = {
@@ -128,6 +147,14 @@ export function ChatProposalCard(props: ProposalCardProps) {
             </div>
           ) : null}
           {!props.canApply && props.applyReason && proposal.status === "draft" ? <p className="text-xs text-muted-foreground">{props.applyReason}</p> : null}
+          {proposal.status === "stale" ? (
+            <div className="space-y-2 rounded-md border border-viz-4/40 p-3 text-xs">
+              <p>El PR cambió desde la propuesta: aplicarla ahora podría no calzar.{proposal.note ? ` ${proposal.note}` : ""}</p>
+              {props.onRedo ? <Button type="button" size="sm" variant="outline" disabled={props.busy || pending} onClick={props.onRedo}>Rehacer sobre el PR actual</Button> : null}
+            </div>
+          ) : null}
+          {proposal.status === "failed" && proposal.note ? <p className="whitespace-pre-wrap rounded-md border border-destructive/40 p-3 text-xs">{proposal.note}</p> : null}
+          {proposal.status === "applying" ? <ApplyProgress run={props.run ?? null} onOpenRun={props.onOpenRun} /> : null}
           <div className="flex flex-wrap gap-2">
             <ProposalAction label="Ver cambios" hint="Ver el diff de esta propuesta" keys="⌥V" reason={viewReason} onClick={onView} />
             <ProposalAction label="Aplicar" hint="Aplicar esta propuesta al PR" keys="⌥A" reason={applyReason} onClick={onApply} primary />
@@ -147,5 +174,27 @@ export function ChatProposalCard(props: ProposalCardProps) {
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  )
+}
+
+/** Los pasos de la corrida que aplica la propuesta, con link a ella; `queued` es que otra corrida tiene el PR. */
+function ApplyProgress({ run, onOpenRun }: { run: RunDetail | null; onOpenRun?: (runId: string) => void }) {
+  if (!run) return <p role="status" aria-label="Progreso de la aplicación" className="text-xs text-muted-foreground">Preparando la corrida que aplica la propuesta…</p>
+  const seen = new Map<string, RunDetail["steps"][number]>()
+  for (const step of run.steps) if (APPLY_STEPS[step.nodeId]) seen.set(step.nodeId, step)
+  return (
+    <div role="status" aria-label="Progreso de la aplicación" className="space-y-2 border-t pt-3 text-xs">
+      {run.status === "queued" ? <p>En cola: otra corrida está trabajando este PR. Esta parte apenas termine.</p> : null}
+      {run.status === "parked" ? <p>La corrida espera una decisión: respóndela en la bandeja.</p> : null}
+      <ol className="space-y-1">
+        {[...seen.values()].map((step) => (
+          <li key={step.nodeId} className="flex items-center gap-2">
+            <span className={step.status === "done" ? "text-viz-3" : step.status === "failed" ? "text-destructive" : "text-muted-foreground"}>{step.status === "done" ? "✓" : step.status === "failed" ? "✗" : "…"}</span>
+            {APPLY_STEPS[step.nodeId]}{step.outcome && step.outcome !== "ok" && step.status === "done" ? <span className="text-muted-foreground">({step.outcome})</span> : null}
+          </li>
+        ))}
+      </ol>
+      {onOpenRun ? <Button type="button" size="sm" variant="link" className="h-auto p-0 text-xs" onClick={() => onOpenRun(run.id)}>Ver la corrida</Button> : null}
+    </div>
   )
 }

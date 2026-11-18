@@ -7,7 +7,7 @@ import { copy } from "./pr-bits"
 import { usePrActions, usePrCommands } from "./pr-commands"
 
 /** Los atajos de las acciones de un PR, con el PR enfocado: la vista de PRs, el menú contextual y la paleta los comparten. */
-export const PR_KEYS = { merge: "M", requestReview: "B", rebase: "R", hold: "H", run: "V", publishLocal: "P", view: "↵", openGithub: "O" } as const
+export const PR_KEYS = { merge: "M", requestReview: "B", rebase: "R", hold: "H", run: "V", publishLocal: "P", view: "↵", openGithub: "O", chat: "C" } as const
 
 export function usePrShortcuts() {
   const commands = usePrCommands()
@@ -26,6 +26,7 @@ export function usePrShortcuts() {
       else if (key === PR_KEYS.run && caps.run) commands.openRun(selected)
       else if (key === PR_KEYS.publishLocal && caps.publishLocal && selected.local) commands.publishLocal(selected)
       else if (key === PR_KEYS.openGithub && !selected.local) commands.openGithub(selected)
+      else if (key === PR_KEYS.chat && caps.chat) commands.chat(selected)
       else return
       e.preventDefault()
     }
@@ -47,6 +48,11 @@ export function PrContextMenu({ pr, children }: { pr: OpenPr; children: ReactNod
         <ContextMenuItem onSelect={() => commands.view(pr)}>
           Ver PR <ContextMenuShortcut>{PR_KEYS.view}</ContextMenuShortcut>
         </ContextMenuItem>
+        {caps.chat ? (
+          <ContextMenuItem onSelect={() => commands.chat(pr)}>
+            Chatear sobre este PR <ContextMenuShortcut>{PR_KEYS.chat}</ContextMenuShortcut>
+          </ContextMenuItem>
+        ) : null}
         {!pr.local ? (
           <ContextMenuItem onSelect={() => commands.openGithub(pr)}>
             Abrir PR en GitHub <ContextMenuShortcut>{PR_KEYS.openGithub}</ContextMenuShortcut>

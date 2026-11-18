@@ -2,6 +2,8 @@ import { Check } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { isTypingTarget } from "@/lib/keys"
 import { type DiffFile, type DiffLine, splitRows } from "@/lib/prs/diff"
 import { highlightLine, languageOf } from "@/lib/prs/highlight"
 import { cn } from "@/lib/utils"
@@ -10,6 +12,17 @@ import { cn } from "@/lib/utils"
 const LINES_PER_FILE = 400
 
 export type DiffMode = "unified" | "split"
+
+/** Las líneas que se le citan al chat: rutas y números del lado nuevo (o del viejo en una línea borrada). */
+export interface DiffCitation {
+  path: string
+  start: number
+  end: number
+  text: string
+}
+
+/** El atajo para citar lo marcado; lo muestra también el composer del chat. */
+export const CITE_KEY = "⌥K"
 
 const LINE_TONE: Record<DiffLine["kind"], string> = {
   add: "bg-viz-3/10",
@@ -27,8 +40,10 @@ function Code({ line, language }: { line: DiffLine; language: string | undefined
 
 const sign = (line: DiffLine | undefined) => (line?.kind === "add" ? "+" : line?.kind === "del" ? "−" : "")
 
-export function FileDiff({ file, mode, viewed, onViewed }: { file: DiffFile; mode: DiffMode; viewed: boolean; onViewed: (on: boolean) => void }) {
+export function FileDiff({ file, mode, viewed, onViewed, onCite }: { file: DiffFile; mode: DiffMode; viewed: boolean; onViewed: (on: boolean) => void; onCite?: (citation: DiffCitation) => void }) {
   const [all, setAll] = useState(false)
+  /** Las líneas marcadas para citar (índices de `lines`, en el diff unificado): clic en el número marca, Mayús+clic extiende. */
+  const [marked, setMarked] = useState<{ from: number; to: number } | null>(null)
   // Un archivo visto queda plegado, como en GitHub; se puede abrir sin desmarcarlo.
   const [open, setOpen] = useState(!viewed)
   useEffect(() => setOpen(!viewed), [viewed])
@@ -36,6 +51,24 @@ export function FileDiff({ file, mode, viewed, onViewed }: { file: DiffFile; mod
   const lines = all ? file.lines : file.lines.slice(0, LINES_PER_FILE)
   const rows = useMemo(() => (mode === "split" ? splitRows(lines) : []), [mode, lines])
   const status = { added: "nuevo", deleted: "borrado", binary: "binario", modified: null }[file.status]
+  const citable = onCite !== undefined && mode === "unified"
+  const cite = (from: number, to: number) => {
+    const picked = lines.slice(Math.min(from, to), Math.max(from, to) + 1).filter((l) => l.kind === "add" || l.kind === "del" || l.kind === "ctx")
+    if (!onCite || picked.length === 0) return
+    const numberOf = (l: DiffLine) => l.new ?? l.old ?? 0
+    onCite({ path: file.path, start: numberOf(picked[0]!), end: numberOf(picked.at(-1)!), text: picked.map((l) => `${sign(l) || " "}${l.text}`).join("\n") })
+    setMarked(null)
+  }
+  useEffect(() => {
+    if (!citable || !marked) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.metaKey || e.ctrlKey || e.code !== "KeyK" || isTypingTarget(e.target)) return
+      e.preventDefault()
+      cite(marked.from, marked.to)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  })
   return (
     <section className={cn("overflow-hidden rounded-lg border", viewed && "opacity-80")} aria-label={file.path}>
       <header className="flex items-center gap-2 border-b bg-muted/50 px-3 py-2 font-mono text-[12px]">
@@ -68,16 +101,32 @@ export function FileDiff({ file, mode, viewed, onViewed }: { file: DiffFile; mod
             ) : null}
             <tbody>
               {mode === "unified"
-                ? lines.map((line, i) => (
-                    <tr key={i} data-kind={line.kind} className={LINE_TONE[line.kind]}>
-                      <td className="w-12 select-none px-2 text-right text-muted-foreground/70">{line.old ?? ""}</td>
-                      <td className="w-12 select-none px-2 text-right text-muted-foreground/70">{line.new ?? ""}</td>
+                ? lines.map((line, i) => {
+                    const on = marked !== null && i >= Math.min(marked.from, marked.to) && i <= Math.max(marked.from, marked.to)
+                    const mark = (e: React.MouseEvent) => setMarked((current) => (e.shiftKey && current ? { from: current.from, to: i } : { from: i, to: i }))
+                    const row = (
+                    <tr key={i} data-kind={line.kind} data-marked={on || undefined} className={cn(LINE_TONE[line.kind], on && "outline outline-1 -outline-offset-1 outline-primary/60 bg-primary/10")}
+                      onContextMenu={() => { if (citable && !on) setMarked({ from: i, to: i }) }}>
+                      <td className={cn("w-12 select-none px-2 text-right text-muted-foreground/70", citable && "cursor-pointer hover:text-foreground")} onClick={citable ? mark : undefined} title={citable ? `Marcar para citar (Mayús+clic extiende, ${CITE_KEY} cita)` : undefined}>{line.old ?? ""}</td>
+                      <td className={cn("w-12 select-none px-2 text-right text-muted-foreground/70", citable && "cursor-pointer hover:text-foreground")} onClick={citable ? mark : undefined}>{line.new ?? ""}</td>
                       <td className="w-4 select-none text-center text-muted-foreground">{sign(line)}</td>
                       <td className="pr-3 whitespace-pre">
                         <Code line={line} language={language} />
                       </td>
                     </tr>
-                  ))
+                    )
+                    return citable ? (
+                      <ContextMenu key={i}>
+                        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                        <ContextMenuContent>
+                          <ContextMenuItem onSelect={() => (marked ? cite(marked.from, marked.to) : cite(i, i))}>
+                            Preguntar al clanker <ContextMenuShortcut>{CITE_KEY}</ContextMenuShortcut>
+                          </ContextMenuItem>
+                          {marked ? <ContextMenuItem onSelect={() => setMarked(null)}>Quitar la marca</ContextMenuItem> : null}
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    ) : row
+                  })
                 : rows.map((row, i) =>
                     row.kind === "full" ? (
                       <tr key={i} data-kind={row.line.kind} className={LINE_TONE[row.line.kind]}>
