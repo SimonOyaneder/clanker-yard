@@ -39,8 +39,11 @@ export interface TurnError {
 
 export type ThreadItem =
   | { type: "agentMessage"; id: string; text: string }
-  | { type: "commandExecution"; id: string; command: string; aggregatedOutput: string | null; exitCode: number | null }
-  | { type: "reasoning"; id: string; summary: string[]; content: string[] };
+  | { type: "commandExecution"; id: string; command: string; aggregatedOutput: string | null; exitCode: number | null; status: "inProgress" | "completed" | "failed" | "declined" }
+  | { type: "reasoning"; id: string; summary: string[]; content: string[] }
+  | { type: "fileChange"; id: string; changes: { path: string; kind: { type: "add" } | { type: "delete" } | { type: "update"; move_path: string | null }; diff: string }[]; status: "inProgress" | "completed" | "failed" | "declined" }
+  | { type: "mcpToolCall"; id: string; server: string; tool: string; status: "inProgress" | "completed" | "failed"; arguments: JsonValue; result: { content: JsonValue[]; structuredContent: JsonValue | null; _meta: JsonValue | null } | null; error: { message: string } | null }
+  | { type: "contextCompaction"; id: string };
 
 export interface Turn {
   id: string;
@@ -101,9 +104,15 @@ export interface CodexMethods {
   "turn/interrupt": { params: { threadId: string; turnId: string }; result: Record<string, never> };
 }
 
+export type ModelInfo = CodexMethods["model/list"]["result"]["data"][number];
+
 export type CodexNotification =
   | { method: "item/started" | "item/completed"; params: { threadId: string; turnId: string; item: ThreadItem } }
   | { method: "item/agentMessage/delta"; params: { threadId: string; turnId: string; itemId: string; delta: string } }
+  | { method: "item/reasoning/summaryTextDelta"; params: { threadId: string; turnId: string; itemId: string; delta: string; summaryIndex: number } }
+  | { method: "item/reasoning/textDelta"; params: { threadId: string; turnId: string; itemId: string; delta: string; contentIndex: number } }
+  | { method: "item/reasoning/summaryPartAdded"; params: { threadId: string; turnId: string; itemId: string; summaryIndex: number } }
+  | { method: "item/commandExecution/outputDelta" | "item/fileChange/outputDelta"; params: { threadId: string; turnId: string; itemId: string; delta: string } }
   | { method: "thread/tokenUsage/updated"; params: { threadId: string; turnId: string; tokenUsage: { total: TokenUsageBreakdown; last: TokenUsageBreakdown; modelContextWindow: number | null } } }
   | { method: "account/rateLimits/updated"; params: { rateLimits: RateLimitSnapshot } }
   | { method: "turn/started" | "turn/completed"; params: { threadId: string; turn: Turn } }
