@@ -285,6 +285,26 @@ describe("clanker runs", () => {
     expect(JSON.parse(out)).toMatchObject({ id: runId, status: "parked" });
   });
 
+  test("start acepta el input RPC, incluidos params, sin resolver slugs y devuelve JSON", async () => {
+    const input = { projectId, issueId, flow: "otro", params: { base: "rama-padre", dependsOn: ["repo#32"] } };
+    const start = vi.fn().mockResolvedValue(run);
+    const client = { runs: { start } };
+    const readFile = vi.fn().mockReturnValue(JSON.stringify(input));
+
+    expect(JSON.parse(await exec(["runs", "start", "--input", JSON.stringify(input)], client))).toEqual(run);
+    expect(JSON.parse(await exec(["runs", "start", "--input-file", "corrida.json"], client, { readFile }))).toEqual(run);
+    expect(start.mock.calls).toEqual([[input, { signal: expect.any(AbortSignal) }], [input, { signal: expect.any(AbortSignal) }]]);
+    expect(readFile).toHaveBeenCalledExactlyOnceWith("corrida.json");
+  });
+
+  test("start valida el modo JSON antes de arrancar el core", async () => {
+    const client = vi.fn();
+    await expect(exec(["runs", "start", "--input", "{}"], {}, { client })).rejects.toThrow("projectId:");
+    await expect(exec(["runs", "start", "demo", "DEMO-1", "--input", "{}"], {}, { client })).rejects.toThrow("No combines");
+    await expect(exec(["runs", "start", "--flow", "otro", "--input", "{}"], {}, { client })).rejects.toThrow("No combines");
+    expect(client).not.toHaveBeenCalled();
+  });
+
   test("start falla con un mensaje claro si falta algo o no existe el proyecto o la issue", async () => {
     const { client } = fakeRuns();
 
