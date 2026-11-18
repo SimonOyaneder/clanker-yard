@@ -213,6 +213,8 @@ export const PrFilter = z.object({
   owned: z.boolean().optional(),
   /** El estado de GitHub del PR (`draft` cuenta como `open`), o `local` para los que aún no se publican. */
   state: z.enum(["open", "closed", "merged", "local"]).optional(),
+  /** Solo estos PRs (por su id), en cualquier estado: la vista de una corrida nombra así a uno que ya se cerró. */
+  ids: z.array(z.string().min(1)).max(200).optional(),
 });
 export type PrFilter = z.infer<typeof PrFilter>;
 

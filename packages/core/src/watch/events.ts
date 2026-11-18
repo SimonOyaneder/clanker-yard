@@ -7,6 +7,8 @@ import type { Workspaces } from "../workspaces/workspaces";
 import { approvalEpoch, emitOnce, lastEvaluatedHead, markHead, recordMarks, type PrEventInput } from "../github/marks";
 import type { ErrorReporter } from "../errors/reporter";
 import { closedPrsWithLiveChildren, openPrsWithDetail, prRefOf } from "../github/pr-rows";
+import { and, eq, inArray } from "drizzle-orm";
+import { combinedBases, pullRequests, workspaces as workspacesTable } from "../store/schema";
 import { landedCommit } from "../github/landed";
 
 // Los eventos de Watch (`docs/design.html#d-ops`, "Watch: eventos y qué disparan"): de lo que cambió en un
@@ -101,6 +103,48 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
     });
   }
 
+  /**
+   * Una base combinada en `conflict` (sus padres chocan) con un PR hijo vivo del sistema pide resolverla
+   * (`pr.baseConflict`, que toma `base-combinada-conflicto`), una vez por punta del hijo y de los padres: así se
+   * resuelven también las que quedaron en conflicto al publicar o antes de que el core supiera hacerlo.
+   */
+  function requestBaseResolutions(at: number): void {
+    for (const base of store.db.select().from(combinedBases).where(eq(combinedBases.status, "conflict")).all()) {
+      if (base.issueId === null) continue;
+      const children = store.db
+        .select()
+        .from(pullRequests)
+        .where(and(eq(pullRequests.repoId, base.repoId), eq(pullRequests.issueId, base.issueId), eq(pullRequests.owned, true), inArray(pullRequests.state, ["open", "local"])))
+        .all();
+      const cfg = repos.config(base.repoId);
+      for (const child of children) {
+        // Solo el hijo que sale de esta base: una fila vieja (la issue se relanzó sobre otra) no pide nada.
+        const ws = store.db.select({ baseRef: workspacesTable.baseRef }).from(workspacesTable).where(and(eq(workspacesTable.repoId, child.repoId), eq(workspacesTable.branch, child.headRef))).get();
+        if (ws?.baseRef !== base.branch) continue;
+        const local = child.state === "local";
+        store.tx((tx) =>
+          emitOnce(
+            tx,
+            child,
+            {
+              type: "pr.baseConflict",
+              keys: [`${child.headSha}:${base.parents.map((p) => p.sha).join(",")}`],
+              payload: () => ({
+                repo: cfg.remote?.repo,
+                ...(local ? { prId: child.id, local: true } : { number: child.number }),
+                sha: child.headSha,
+                base: base.branch,
+                resolveBranch: base.branch.replace(/^clanker\/base\//, "clanker/resolve/"),
+                defaultBranch: cfg.defaultBranch,
+              }),
+            },
+            at,
+          ),
+        );
+      }
+    }
+  }
+
   /** El commit de la base por defecto que trae lo del PR cerrado, si ya llegó. */
   async function landedOf(row: PrRow, state: PrState): Promise<string | undefined> {
     if ((await workspaces.fetch(row.repoId)) === "unauthorized") return undefined;
@@ -131,6 +175,7 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
         enqueue(`events ${ref.repo}#${ref.number}`, () => evaluate(row, ref, detail, at));
       }
       await queue;
+      requestBaseResolutions(at);
     },
   };
 }

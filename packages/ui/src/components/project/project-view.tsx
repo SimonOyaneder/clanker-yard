@@ -122,7 +122,11 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
   const finished = roots.filter((r) => !isLive(r.status))
   const stopped = breakersOf(project, breakers)
   const now = useNow(live.length > 0 || stopped.length > 0)
-  const subjectOf = subjectLabeler(issues, prs)
+  // El sujeto de una corrida sobre un PR que ya se cerró (un restack, por ejemplo) no está entre los abiertos: se pide aparte.
+  const appData = useAppData()
+  const missing = [...new Set(runs.filter((r) => r.subject.type === "pr" && !prs.some((p) => p.id === r.subject.id)).map((r) => r.subject.id))].sort()
+  const closedPrs = useLiveQuery(`subject-prs:${missing.join(",")}`, () => appData.prsByIds(missing))
+  const subjectOf = subjectLabeler(issues, [...prs, ...(closedPrs.data ?? [])])
   const usage = laneUsage(project, roots, lanes)
   const pending = decisions.filter((d) => d.status === "pending")
   const queued = queue.filter((e) => e.state !== "blocked")

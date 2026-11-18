@@ -16,7 +16,7 @@ test("una corrida sobre un PR lleva repo#número y el título de la issue que lo
   const subjectOf = subjectLabeler([issue], [pr])
 
   expect(subjectOf({ subject: { type: "pr", id: "pr_1" } })).toEqual({ key: "api#4251", title: "Lint de imports entre engines" })
-  expect(subjectOf({ subject: { type: "pr", id: "pr_2" } })).toEqual({ key: "PR", title: "PR que ya no está abierto" })
+  expect(subjectOf({ subject: { type: "pr", id: "pr_2" } })).toEqual({ key: "PR", title: "un PR que Clanker Yard ya no tiene" })
 })
 
 test("una corrida sobre un PR local, sin número en GitHub, no tiene repo#número", () => {
@@ -24,4 +24,11 @@ test("una corrida sobre un PR local, sin número en GitHub, no tiene repo#númer
   const subjectOf = subjectLabeler([issue], [local])
 
   expect(subjectOf({ subject: { type: "pr", id: "pr_3" } })).toEqual({ key: "feat/y", title: "feat: y" })
+})
+
+test("una corrida sobre un PR que ya se cerró (el restack de una base que mergeó la cola) lo nombra y dice que está cerrado", () => {
+  const closed = { id: "pr_4", issueId: null, ref: { account: "octocat", repo: "acme/api", number: 4326 }, state: { state: "closed", title: "Procesar CDA en el adapter" } } as unknown as CachedPr
+  const subjectOf = subjectLabeler([issue], [closed])
+
+  expect(subjectOf({ subject: { type: "pr", id: "pr_4" } })).toEqual({ key: "api#4326", title: "Procesar CDA en el adapter (cerrado)" })
 })

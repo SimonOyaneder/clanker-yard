@@ -536,6 +536,7 @@ export function createMemoryAppData(now = Date.now()): AppData {
     publishLocalPr: async (id) => {
       if (!prs.some((p) => p.id === id && p.local)) throw new Error(`${id} no es un PR local`)
     },
+    prsByIds: async (ids) => prs.filter((p) => ids.includes(p.id)).map((p) => ({ ...p })),
     localPrDetail: async (id) => {
       const local = prs.find((p) => p.id === id)?.local
       if (!local) throw new Error(`${id} no es un PR local`)

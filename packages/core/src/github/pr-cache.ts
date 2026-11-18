@@ -1,5 +1,5 @@
 import type { CachedPr, PrFilter, PrRef, PrState, RepoId } from "@clanker/api";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import * as z from "zod";
 import { newId } from "../store/conventions";
 import type { Packs } from "../packs/packs";
@@ -116,11 +116,17 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
   return {
     refresh,
 
-    list({ repo, owned, state } = {}) {
+    list({ repo, owned, state, ids } = {}) {
       const rows = store.db
         .select()
         .from(pullRequests)
-        .where(and(owned === undefined ? undefined : eq(pullRequests.owned, owned), state === undefined ? undefined : eq(pullRequests.state, state)))
+        .where(
+          and(
+            owned === undefined ? undefined : eq(pullRequests.owned, owned),
+            state === undefined ? undefined : eq(pullRequests.state, state),
+            ids === undefined ? undefined : inArray(pullRequests.id, ids),
+          ),
+        )
         .orderBy(asc(pullRequests.repoId), asc(pullRequests.number))
         .all();
       const parents = new Map<string, string[]>();

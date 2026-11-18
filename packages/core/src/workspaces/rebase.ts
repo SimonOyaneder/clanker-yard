@@ -122,7 +122,7 @@ async function applyingCommit(git: Git): Promise<string | undefined> {
  * Los archivos de texto que el rebase en curso tiene cambiados contra `HEAD` (con o sin `git add`: un
  * archivo agregado con marcas ya no figura como sin mergear) y todavía traen marcas de conflicto.
  */
-async function withMarkers(git: Git): Promise<string[]> {
+export async function withMarkers(git: Git): Promise<string[]> {
   const root = await git("rev-parse", "--show-toplevel");
   const changed = (await git("-c", "core.quotePath=false", "diff", "--name-only", "HEAD")).split("\n").filter(Boolean);
   return changed.filter((path) => {

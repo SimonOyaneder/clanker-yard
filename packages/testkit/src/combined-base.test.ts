@@ -22,6 +22,7 @@ import {
   openStore,
   prPublishAction,
   stackRestackAction,
+  workspaceCombinedBaseMergeAction,
   type ActionCtx,
   type Askpass,
   type Store,
@@ -52,6 +53,7 @@ let restack: ReturnType<typeof stackRestackAction>;
 let publish: ReturnType<typeof prPublishAction>;
 let issues: ReturnType<typeof createIssues>;
 let projectId: CachedIssue["projectId"];
+let combinedMerge: ReturnType<typeof workspaceCombinedBaseMergeAction>;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-combined-"));
@@ -78,6 +80,7 @@ beforeEach(async () => {
   const packs = createPacks({ defs });
   const recipes = createRecipes({ store, defs, workspaces, artifacts: createArtifacts({ store, dir: join(dataDir, "artifacts") }), slots: createSlots({ store }) });
   publish = prPublishAction({ store, workspaces, recipes, repoConfig: repos, connections, packs });
+  combinedMerge = workspaceCombinedBaseMergeAction({ store, workspaces, repoConfig: repos });
   restack = stackRestackAction({ store, workspaces, repoConfig: repos, prs: createPrs({ connections, packs }), connections, pause: () => Promise.resolve() });
 
   issues = createIssues({ store, local: createLocalTracker({ store }) });
@@ -221,6 +224,50 @@ describe("workspaces.combineBase", () => {
     expect(again).toMatchObject({ outcome: "base-conflict", changed: false });
     expect(() => localRef(branch)).toThrow();
     expect(row(branch)).toMatchObject({ status: "conflict", head_sha: null });
+  });
+
+  test("padres que chocan: el flujo enseña la resolución, la base queda registrada y rerere la reaplica aunque un padre se mueva", async () => {
+    await openPr("cla-1", "main", { "a.txt": "a1\nuno\na3\n" });
+    await openPr("cla-2", "main", { "a.txt": "a1\ndos\na3\n" });
+    const issue = await newIssue();
+    const branch = combinedBaseBranch(issue.ref.key);
+    const parents = [
+      { key: "r1#1", branch: "cla-1" },
+      { key: "r1#2", branch: "cla-2" },
+    ];
+    expect(await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents })).toMatchObject({ outcome: "base-conflict" });
+
+    // Lo que hace `base-combinada-conflicto`: un worktree propio, el merge real, el dev resuelve y el core sigue.
+    const lease = await workspaces.acquire({ repo: "repo_r1", branch: branch.replace("clanker/base/", "clanker/resolve/"), base: "main", runId: newId("run") });
+    const { workspaceId, path, baseSha, fencingToken } = lease;
+    const ws = { workspaceId, path, branch: lease.branch, baseSha, fencingToken };
+    const first = await combinedMerge.run(combinedMerge.args.parse({ ws, base: branch }), ctx());
+    expect(first).toMatchObject({ outcome: "conflict", output: { conflicts: ["a.txt"] } });
+    writeFileSync(join(path, "a.txt"), "a1\nuno\ndos\na3\n");
+    const done = await combinedMerge.run(combinedMerge.args.parse({ ws, base: branch, continue: true }), ctx());
+    workspaces.release(lease);
+
+    expect(done).toMatchObject({ outcome: "clean" });
+    const head = (done.output as { head: string }).head;
+    expect(row(branch)).toMatchObject({ status: "active", head_sha: head });
+    expect(localRef(branch)).toBe(head);
+    expect(repo.git("show", `${head}:a.txt`)).toBe("a1\nuno\ndos\na3");
+    // Rearmarla da la misma base, sin el agente.
+    await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
+    expect(localRef(branch)).toBe(head);
+
+    // Un padre se mueve con algo que no choca: `rerere` reaplica la misma resolución y la base se rearma sola.
+    elsewhere((g, dir) => {
+      g("checkout", "--quiet", "cla-2");
+      writeFileSync(join(dir, "c.txt"), "c1\notro\n");
+      g("commit", "--quiet", "--all", "--message", "feat: c en cla-2");
+      g("push", "--quiet", "origin", "cla-2");
+    });
+    const moved = await workspaces.combineBase({ repo: "repo_r1", issueId: issue.id, branch, parents });
+
+    expect(moved).toMatchObject({ outcome: "combined" });
+    expect(repo.git("show", `${localRef(branch)}:a.txt`)).toBe("a1\nuno\ndos\na3");
+    expect(repo.git("show", `${localRef(branch)}:c.txt`)).toBe("c1\notro");
   });
 
   test("dissolveBase borra la branch sintética y la marca disuelta", async () => {
@@ -450,6 +497,35 @@ describe("stack.restack con una base combinada", () => {
   const run = (number: number) => restack.run(restack.args.parse({ pr: { account: ACCOUNT, repo: REPO, number } }), ctx());
   const prBase = (number: number) => github.pulls().find((p) => p.number === number)?.base.ref;
 
+  test("un padre republicado (branch y PR nuevos, pr_parents repuntado) sigue siendo padre: la base no se disuelve al mergear el otro", async () => {
+    const { branch, child } = await combinedPr();
+    // Como `prs.republish`: cla-2 sale de nuevo como cla-2b (mismo contenido, PR nuevo), el viejo se cierra y el hijo
+    // pasa a colgar del nuevo; la base combinada sigue guardando la branch vieja.
+    elsewhere((g) => {
+      g("checkout", "--quiet", "-b", "cla-2b", "origin/cla-2");
+      g("push", "--quiet", "origin", "cla-2b");
+    });
+    const fresh = github.openPr({ head: "cla-2b" });
+    github.pr(2).close();
+    elsewhere((g) => g("push", "--quiet", "origin", "--delete", "cla-2"));
+    store.db.$client.prepare("UPDATE pull_requests SET state = 'closed' WHERE number = 2").run();
+    const freshId = newId("pr");
+    store.db.$client
+      .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'repo_r1', ?, ?, 'cla-2b', 'main', ?, 'open', 1, 1)")
+      .run(freshId, fresh.number, `PR_${fresh.number}`, remoteSha("cla-2b"));
+    const childId = sql<{ id: string }>(`SELECT id FROM pull_requests WHERE number = ${child}`)[0]!.id;
+    const oldId = sql<{ id: string }>(`SELECT id FROM pull_requests WHERE number = 2`)[0]!.id;
+    store.db.$client.prepare("UPDATE pr_parents SET parent_id = ? WHERE child_id = ? AND parent_id = ?").run(freshId, childId, oldId);
+    github.pr(1).merge({ sha: squashOnMain("cla-1") });
+
+    const result = await run(1);
+
+    expect(result.output).toMatchObject({ children: [{ pr: { number: child }, status: "restacked", base: "cla-2b" }] });
+    expect(row(branch)).toMatchObject({ status: "active" });
+    expect(parentsOf(branch)).toEqual(["cla-2b"]);
+    expect(repo.git("--git-dir", repo.remoteDir!, "merge-base", "--is-ancestor", remoteSha("cla-2b"), "cla-3")).toBe("");
+  });
+
   test("al mergear un padre recalcula la base con el que queda y el PR cambia de base", async () => {
     const { branch, child } = await combinedPr();
     const before = row(branch)!.head_sha;
@@ -504,7 +580,7 @@ describe("stack.restack con una base combinada", () => {
     expect(github.requests.filter((r) => r.method === "PATCH")).toEqual([]);
   });
 
-  test("si los padres que quedan chocan con la base nueva: nada se mueve y queda una alerta", async () => {
+  test("si los padres que quedan chocan con la base nueva: nada se mueve y se pide resolver la base (pr.baseConflict)", async () => {
     const { branch, child } = await combinedPr();
     const head = remoteSha("cla-3");
     // Alguien deja en main un cambio de b.txt distinto del de `cla-2`, y mergea `cla-1`.
@@ -524,8 +600,10 @@ describe("stack.restack con una base combinada", () => {
     expect(remoteSha("cla-3")).toBe(head);
     expect(prBase(child)).toBe("cla-1");
     expect(row(branch)?.status).toBe("conflict");
-    expect(sql(`SELECT kind, title FROM decisions`)).toEqual([{ kind: "alert", title: expect.stringContaining(`#${child}`) }]);
+    expect(sql(`SELECT kind FROM decisions WHERE kind = 'alert'`)).toEqual([]);
     expect(sql(`SELECT * FROM events WHERE type = 'pr.conflict'`)).toEqual([]);
+    const asked = sql<{ payload: string }>(`SELECT payload FROM events WHERE type = 'pr.baseConflict'`).map((e) => JSON.parse(e.payload) as Record<string, unknown>);
+    expect(asked).toMatchObject([{ number: child, base: branch, resolveBranch: branch.replace("clanker/base/", "clanker/resolve/"), defaultBranch: "main", files: ["b.txt"] }]);
   });
 
   test("si otro rearmó la base y rehízo el PR por fuera, sale del último merge hacia la base que trae su historia", async () => {
