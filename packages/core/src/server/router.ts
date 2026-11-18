@@ -180,6 +180,7 @@ export function createRouter(deps: RouterDeps) {
       ),
       testClaude: os.connections.testClaude.handler(({ input, context }) => deps.connections.testClaude(input.mode, context.origin)),
       testCodex: os.connections.testCodex.handler(({ context }) => deps.connections.testCodex(context.origin)),
+      codexStatus: os.connections.codexStatus.handler(() => deps.connections.codexStatus() ?? null),
       setClaudeApiKey: os.connections.setClaudeApiKey.handler(({ input, context }) =>
         deps.connections.setClaudeApiKey(input.key, context.origin),
       ),

@@ -278,7 +278,10 @@ describe("connections", () => {
     });
     const core = await start();
     const client = createClient({ url: core.url, token: core.token, origin: "cli" });
-    expect(await client.connections.testCodex({})).toMatchObject({
+    expect(await client.connections.codexStatus()).toBeNull();
+    const tested = await client.connections.testCodex({});
+    expect(await client.connections.codexStatus()).toEqual(tested);
+    expect(tested).toMatchObject({
       state: "ready", plan: "self_serve_business_prolite", version: "0.169.1",
       usage: { windows: [{ id: "codex:primary", windowMins: 10080, usedPercent: 4, resetsAt: 1795542935000 }] },
     });

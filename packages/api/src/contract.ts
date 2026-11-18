@@ -182,6 +182,11 @@ const connections = {
   testClaude: base.input(z.object({ mode: ClaudeMode.optional() }).default({})).output(ClaudeStatus),
   testCodex: base.input(z.object({}).default({})).output(CodexStatus),
   /**
+   * Lo último que el core sabe de Codex: la última `testCodex` con el uso que trajeron después las corridas
+   * (`account/rateLimits/updated`). No lanza nada; `null` si nunca se probó. Cambia con `connection.usage`.
+   */
+  codexStatus: base.output(CodexStatus.nullable()),
+  /**
    * Guarda una API key de Anthropic como alternativa a la suscripción (en `Secrets`, nunca en la base) y
    * la deja activa: desde entonces los agentes la usan. Antes la prueba con una llamada mínima y no
    * guarda nada si Anthropic la rechaza (`BAD_REQUEST`). Para volver a la suscripción:

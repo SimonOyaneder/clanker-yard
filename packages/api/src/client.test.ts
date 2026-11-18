@@ -65,6 +65,7 @@ const router = os.router({
     testCodex: os.connections.testCodex.handler(() => {
       throw new Error("no se usa en este test");
     }),
+    codexStatus: os.connections.codexStatus.handler(() => null),
     setClaudeApiKey: os.connections.setClaudeApiKey.handler(() => {
       throw new Error("no se usa en este test");
     }),
