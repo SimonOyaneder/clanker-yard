@@ -114,3 +114,38 @@ export const ClaudeStatus = z.object({
   resetsAt: z.int().nonnegative().optional(),
 });
 export type ClaudeStatus = z.infer<typeof ClaudeStatus>;
+
+export const CodexState = z.enum([
+  "ready",
+  "not_installed",
+  "outdated",
+  "login_required",
+  "login_expired",
+  "quota_exhausted",
+  "error",
+]);
+export type CodexState = z.infer<typeof CodexState>;
+
+export const CodexStatus = z.object({
+  state: CodexState,
+  message: z.string().optional(),
+  executable: z.string().optional(),
+  version: z.string().optional(),
+  plan: z.string().optional(),
+  usage: z.object({
+    windows: z.array(z.object({
+      id: z.string(),
+      label: z.string().optional(),
+      windowMins: z.number().nullable(),
+      usedPercent: z.number(),
+      resetsAt: z.int().nonnegative().optional(),
+    })),
+    credits: z.object({
+      hasCredits: z.boolean(),
+      unlimited: z.boolean(),
+      balance: z.string().nullable(),
+    }).optional(),
+  }).optional(),
+  resetsAt: z.int().nonnegative().optional(),
+});
+export type CodexStatus = z.infer<typeof CodexStatus>;
