@@ -1,0 +1,17 @@
+[mcp_servers.chrome-devtools]
+command = "npx"
+args = ["chrome-devtools-mcp@latest"]
+
+[mcp_servers.clanker]
+command = "sh"
+args = [
+    "-c",
+    "if command -v clanker >/dev/null; then exec clanker mcp; else exec npx --no-install tsx apps/cli/src/main.ts mcp; fi",
+]
+
+[mcp_servers.shadcn]
+command = "npx"
+args = [
+    "shadcn@latest",
+    "mcp",
+]
