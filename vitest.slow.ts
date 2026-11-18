@@ -1,7 +1,7 @@
 /**
  * Los tests de integración pesados (repos git reales, el GitHub simulado, el core completo): son ~10% de los archivos
  * y ~65% del tiempo de la suite. `npm test` los deja fuera; `npm run test:slow` corre solo estos y `npm run test:all`
- * todo. `vitest related` (el check `test:related` de la receta) los incluye si tocan lo que cambió.
+ * todo. Nombrarlos (o `npm run test:changed`, si son de lo que cambió) los corre igual.
  *
  * Un archivo entra si en la suite completa pasa de ~60 s de trabajo. Rutas desde la raíz del repo.
  */

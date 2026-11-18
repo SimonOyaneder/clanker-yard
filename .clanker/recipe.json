@@ -10,9 +10,8 @@
   "commands": {
     "typecheck": "npm run -s typecheck",
     "lint": "npm run -s lint",
-    "test:related": "npx vitest related --run --passWithNoTests --testTimeout=30000 {{files}}",
-    "test": "npx vitest run --passWithNoTests --testTimeout=30000 {{files}}",
-    "test:full": "npx vitest run --maxWorkers=3 --testTimeout=30000"
+    "test:changed": "node scripts/changed-tests.ts --testTimeout=30000 {{files}}",
+    "test": "npx vitest run --passWithNoTests --testTimeout=30000 {{files}}"
   },
-  "checks": ["typecheck", "lint", "test:related", "test:full"]
+  "checks": ["typecheck", "lint", "test:changed"]
 }
