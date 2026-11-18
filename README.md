@@ -128,6 +128,7 @@ Para trabajar con un PR local:
 ```bash
 clanker prs list-local
 clanker prs show-local <id> [--commit <sha>] [--json]
+clanker prs edit-local <id> --title "Título" --body-file descripcion.md
 ```
 
 `clanker` sin argumentos lista todos los comandos. Conecta el MCP para usar Clanker Yard desde Claude Code:

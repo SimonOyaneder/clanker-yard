@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { RepoRemote, type LocalCommitDiff, type LocalPrDetail } from "@clanker/api";
+import { LocalPrUpdate, RepoRemote, type LocalCommitDiff, type LocalPrDetail } from "@clanker/api";
 import type { Command } from "./command";
 import { formatTable } from "./format";
 
@@ -73,5 +73,30 @@ export const prsShowLocal: Command = {
     }
     const pr = await client.prs.localDetail({ id });
     ctx.write(values.json ? JSON.stringify(pr, null, 2) : formatDetail(pr));
+  },
+};
+
+export const prsEditLocal: Command = {
+  usage: "clanker prs edit-local <id> [--title <título>] [--body-file <archivo>]",
+  async run(args, ctx) {
+    const { values, positionals } = parseArgs({
+      args, allowPositionals: true, options: { title: { type: "string" }, "body-file": { type: "string" } },
+    });
+    const id = localId(positionals, prsEditLocal.usage);
+    const { title, "body-file": file } = values;
+    if (title === undefined && file === undefined) {
+      throw new Error(`Indica --title o --body-file.\nUso: ${prsEditLocal.usage}`);
+    }
+    if (!LocalPrUpdate.shape.title.safeParse(title).success) {
+      throw new Error(`--title pide un título no vacío de una sola línea, de hasta 256 caracteres.\nUso: ${prsEditLocal.usage}`);
+    }
+    if (file === "") throw new Error(`--body-file pide la ruta de un archivo.\nUso: ${prsEditLocal.usage}`);
+
+    const body = file === undefined ? undefined : ctx.readFile(file);
+    if (!LocalPrUpdate.shape.body.safeParse(body).success) {
+      throw new Error(`El archivo de --body-file excede el tamaño de descripción admitido.\nUso: ${prsEditLocal.usage}`);
+    }
+    const pr = await (await ctx.client()).prs.updateLocal({ id, ...(title === undefined ? {} : { title }), ...(body === undefined ? {} : { body }) });
+    ctx.write(`PR local ${pr.id} actualizado: ${pr.title}`);
   },
 };

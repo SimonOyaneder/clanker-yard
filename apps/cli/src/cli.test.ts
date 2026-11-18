@@ -96,6 +96,7 @@ describe("clanker", () => {
     expect(out).toContain("clanker metrics compare");
     expect(out).toContain("clanker prs list-local");
     expect(out).toContain("clanker prs show-local");
+    expect(out).toContain("clanker prs edit-local");
     await expect(exec(["--help"], {})).resolves.toBe(out);
   });
 
@@ -482,13 +483,47 @@ describe("clanker prs locales", () => {
     expect(JSON.parse(await exec([...args, "--json"], client))).toEqual(diff);
   });
 
+  test("edit-local envía solo los campos pedidos; un archivo vacío borra la descripción", async () => {
+    const updateLocal = vi.fn().mockResolvedValue({ id, title: "Título nuevo", body: "" });
+    const client = { prs: { updateLocal } };
+    const readFile = vi.fn().mockReturnValueOnce("").mockReturnValueOnce(detail.body);
+    const args = ["prs", "edit-local", id];
+
+    const out = await exec([...args, "--title", "Título nuevo"], client, { readFile });
+    expect(updateLocal).toHaveBeenNthCalledWith(1, { id, title: "Título nuevo" });
+    expect(readFile).not.toHaveBeenCalled();
+    expect(out).toContain(`PR local ${id} actualizado: Título nuevo`);
+
+    await exec([...args, "--body-file", "vacio.md"], client, { readFile });
+    expect(readFile).toHaveBeenCalledExactlyOnceWith("vacio.md");
+    expect(updateLocal).toHaveBeenNthCalledWith(2, { id, body: "" });
+
+    await exec([...args, "--title", "Título nuevo", "--body-file", "cuerpo.md"], client, { readFile });
+    expect(updateLocal).toHaveBeenNthCalledWith(3, { id, title: "Título nuevo", body: detail.body });
+  });
+
   test.each([
     [["list-local", "--repo", "demo"], "--repo pide"],
     [["show-local"], "Indica un solo id"],
     [["show-local", id, "--commit", "main"], "--commit pide un SHA"],
+    [["edit-local", id], "Indica --title o --body-file"],
+    [["edit-local", id, "--title", ""], "--title pide un título no vacío"],
+    [["edit-local", id, "--title", "Dos\nlíneas"], "--title pide un título no vacío"],
+    [["edit-local", id, "--body-file", ""], "--body-file pide la ruta"],
   ])("valida %j antes de arrancar el core", async (args, message) => {
     const client = vi.fn();
     await expect(exec(["prs", ...args], {}, { client })).rejects.toThrow(message);
+    expect(client).not.toHaveBeenCalled();
+  });
+
+  test("valida los archivos antes de arrancar el core", async () => {
+    const client = vi.fn();
+    const readFile = vi.fn().mockImplementationOnce(() => { throw new Error("ENOENT"); })
+      .mockReturnValueOnce("x".repeat(65_537));
+    const edit = ["prs", "edit-local", id, "--body-file", "cuerpo.md"];
+
+    await expect(exec(edit, {}, { client, readFile })).rejects.toThrow("ENOENT");
+    await expect(exec(edit, {}, { client, readFile })).rejects.toThrow("excede el tamaño de descripción");
     expect(client).not.toHaveBeenCalled();
   });
 });

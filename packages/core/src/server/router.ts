@@ -300,6 +300,7 @@ export function createRouter(deps: RouterDeps) {
       commitDiff: os.prs.commitDiff.handler(({ input }) => prDetails.commit(input.id, input.sha, { head: input.head, base: input.base })),
       localDetail: os.prs.localDetail.handler(({ input }) => prDetails.get(input.id, true)),
       localCommitDiff: os.prs.localCommitDiff.handler(({ input }) => prDetails.commit(input.id, input.sha, undefined, true)),
+      updateLocal: os.prs.updateLocal.handler(({ input, context }) => prCommands.updateLocal(input, context.origin)),
       republish: os.prs.republish.handler(({ input, context }) => deps.republisher.republish(input, context.origin)),
       republishProgress: os.prs.republishProgress.handler(({ input }) => deps.republisher.progress(input.id)),
     },

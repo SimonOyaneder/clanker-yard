@@ -1,17 +1,18 @@
-import { mergeBlocker, rebaseBlocker, type ClientOrigin, type PrRef, type PrState, type RunId } from "@clanker/api";
+import { mergeBlocker, rebaseBlocker, type ClientOrigin, type LocalPrMetadata, type LocalPrUpdate, type PrRef, type PrState, type RunId } from "@clanker/api";
 import { eq } from "drizzle-orm";
+import { cleanMessage } from "../commits/apply";
 import type { Packs } from "../packs/packs";
-import { runs } from "../store/schema";
+import { pullRequests, runs } from "../store/schema";
 import type { Store } from "../store/store";
 import type { Connections } from "../connections/connections";
 import type { Repos } from "../repos/repos";
 import type { Engine } from "../flows/engine";
 import type { Projects } from "../projects/projects";
-import { prById } from "./pr-rows";
+import { livePrFlow, prById } from "./pr-rows";
 import { commentOnPr } from "./comment";
-import type { PrCache } from "./pr-cache";
+import type { PrCache, PrRow } from "./pr-cache";
 import type { Prs } from "./prs";
-import { BadRequestError, requireUiOrigin } from "../errors/domain";
+import { BadRequestError, NotFoundError, requireUiOrigin } from "../errors/domain";
 
 // Lo que una persona le pide al core sobre un PR desde la app (`prs.setHold`, `prs.merge`,
 // `prs.requestReview`, `prs.rebase`). Cada pedido relee el PR antes de actuar: lo que vale es lo que pasa
@@ -19,6 +20,12 @@ import { BadRequestError, requireUiOrigin } from "../errors/domain";
 
 /** El pedido no se puede cumplir; el mensaje dice qué cambiar. */
 export class PrCommandError extends BadRequestError {}
+
+export function ownedLocalPr(row: PrRow | undefined, id: string): PrRow {
+  if (!row) throw new NotFoundError(`No existe el PR ${id}.`);
+  if (row.state !== "local" || !row.owned) throw new PrCommandError(`${row.headRef} no es un PR local del sistema.`);
+  return row;
+}
 
 export interface PrCommandsDeps {
   store: Store;
@@ -55,6 +62,8 @@ export interface PrCommands {
    * identidad del usuario sin preguntar: solo con `by: "ui"` (`UiOnlyError` si no).
    */
   publishLocal(id: string, by: ClientOrigin): RunId;
+  /** Edita solo título y descripción; nunca toca Git. */
+  updateLocal(input: LocalPrUpdate, by: ClientOrigin): LocalPrMetadata;
 }
 
 export function createPrCommands({ store, repos, connections, packs, prs, cache, flows, projects }: PrCommandsDeps): PrCommands {
@@ -136,6 +145,22 @@ export function createPrCommands({ store, repos, connections, packs, prs, cache,
         { prId: row.id, repo: row.repoId, branch: row.headRef, base: row.baseRef },
         { ...(projectId && { projectId }), repoId: row.repoId, ...(project?.defaultProfileId && { profile: project.defaultProfileId }), by },
       );
+    },
+
+    updateLocal({ id, title, body }, by) {
+      return store.tx((tx) => {
+        const row = ownedLocalPr(prById(tx.db, id), id);
+        const publishing = livePrFlow(tx.db, id, ["promote-local"]);
+        if (publishing) throw new PrCommandError(`Este PR se está publicando en la corrida ${publishing.id}. Espera a que termine para editarlo.`);
+        const nextTitle = title === undefined ? row.title ?? row.headRef : cleanMessage(title);
+        const nextBody = body === undefined ? row.body ?? "" : cleanMessage(body);
+        if (!nextTitle) throw new PrCommandError("El título del PR no puede quedar vacío.");
+        if (nextTitle !== row.title || nextBody !== (row.body ?? "")) {
+          tx.db.update(pullRequests).set({ title: nextTitle, body: nextBody }).where(eq(pullRequests.id, id)).run();
+          tx.emit({ type: "pr.changed", origin: by, subject: { type: "pr", id } });
+        }
+        return { id, title: nextTitle, body: nextBody };
+      });
     },
   };
 }

@@ -36,7 +36,7 @@ describe("tools", () => {
     expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name))
       .toEqual(expect.arrayContaining(["list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff"]));
     expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name))
-      .toEqual(expect.arrayContaining(["delete", "cancel_run", "interrupt_run", "resolve_decision"]));
+      .toEqual(expect.arrayContaining(["delete", "update_local_pr", "cancel_run", "interrupt_run", "resolve_decision"]));
   });
 
   test("list y get de los kinds de defs: los builtin del core", async () => {
@@ -70,7 +70,7 @@ describe("tools", () => {
     await expect(h.call("list", { kind: "run", filter: { status: ["nope"] } })).rejects.toThrow(/BAD_REQUEST/);
   });
 
-  test("lee los PRs locales aun sin cuenta de GitHub", async () => {
+  test("lee y edita los PRs locales aun sin cuenta de GitHub", async () => {
     const repoId = createRepos({ store: h.store }).add({ name: "demo", path: h.repo.dir, remote: "octocat/demo" });
     h.repo.git("switch", "-c", "local");
     h.repo.git("commit", "--allow-empty", "-m", "feat: local");
@@ -78,11 +78,14 @@ describe("tools", () => {
     const head = h.repo.git("rev-parse", "local");
     const id = seedPr(h.store, { repoId, number: null, state: "local", headRef: "local", headSha: head, title: "Local" });
     expect(await h.call("list_prs", { state: "local" })).toMatchObject([{ id, repo: "octocat/demo", local: { title: "Local" }, ref: null }]);
+    expect(await h.call("update_local_pr", { id, title: "Revisado", body: "Descripción" })).toEqual({ id, title: "Revisado", body: "Descripción" });
+    expect(h.store.events.since(0, { types: ["pr.changed"] })).toMatchObject([{ origin: "mcp", subject: { id } }]);
     const detail = LocalPrDetail.parse(await h.call("get_local_pr", { id }));
-    expect(detail).toMatchObject({ title: "Local", head, commits: [{ sha: head, subject: "feat: local" }] });
+    expect(detail).toMatchObject({ title: "Revisado", body: "Descripción", head, commits: [{ sha: head, subject: "feat: local" }] });
     expect(await h.call("get_local_pr_commit_diff", { id, sha: head.slice(0, 8) })).toMatchObject({ sha: head });
     const remote = seedPr(h.store, { repoId, number: 1 });
     await expect(h.call("get_local_pr", { id: remote })).rejects.toThrow(/ya no es local/);
+    await expect(h.call("update_local_pr", { id: remote, body: "" })).rejects.toThrow(/no es un PR local/);
   });
 });
 

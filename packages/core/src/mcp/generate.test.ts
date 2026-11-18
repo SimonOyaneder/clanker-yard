@@ -43,6 +43,7 @@ describe("generateMcp sobre el contrato real", () => {
       list_prs: readOnly,
       get_local_pr: readOnly,
       get_local_pr_commit_diff: readOnly,
+      update_local_pr: destructive,
       propose_learning: safeIdempotent,
     });
   });

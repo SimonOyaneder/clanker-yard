@@ -323,6 +323,14 @@ export const LocalPrDetail = PrDetail;
 export type LocalPrDetail = PrDetail;
 
 export const LocalPrId = z.strictObject({ id: z.string().min(1) });
+export const LocalPrUpdate = LocalPrId.extend({
+  title: z.string().trim().min(1).max(256).regex(/^[^\r\n]+$/).optional(),
+  body: z.string().max(65_536).optional(),
+}).refine(({ title, body }) => title !== undefined || body !== undefined, "Indica un título o una descripción para cambiar.");
+export type LocalPrUpdate = z.infer<typeof LocalPrUpdate>;
+export const LocalPrMetadata = LocalPrId.extend({ title: z.string(), body: z.string() });
+export type LocalPrMetadata = z.infer<typeof LocalPrMetadata>;
+
 /** `prs.localCommitDiff`: el diff de un solo commit de un PR local (contra su padre), para revisarlo commit por commit. */
 export const LocalCommitDiff = z.object({ sha: z.string(), files: z.array(LocalPrFile), patch: z.string(), truncated: z.boolean() });
 export type LocalCommitDiff = z.infer<typeof LocalCommitDiff>;

@@ -626,6 +626,39 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
   },
   {
     "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+    },
+    "description": "Edita el título y/o la descripción de un PR local por id interno. Una descripción vacía la borra. No cambia commits ni publica.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "maxLength": 65536,
+          "type": "string",
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\r\\n]+$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "update_local_pr",
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": true,
