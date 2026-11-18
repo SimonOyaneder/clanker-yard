@@ -196,9 +196,10 @@ const POLL_MS = 50;
 
 /**
  * Devuelve la conexión a un core sano de este `apiMajor` (y, con `uiKey`, que la reconozca), lanzándolo si
- * hace falta. Si el que corre tiene otro `apiMajor` (pasa al actualizar la app) le pide `system.shutdown({ drain: true })` y
- * lanza el nuevo. Varias llamadas concurrentes terminan con un solo core: los sobrantes salen solos
- * al ver `core.lock` (ver `packages/core/src/daemon/lock.ts`).
+ * hace falta. Si el que corre tiene un `apiMajor` menor (pasa al actualizar la app) o no reconoce la llave, le pide
+ * `system.shutdown({ drain: true })` y lanza el nuevo; si tiene uno mayor, el viejo es este cliente y falla sin tocarlo.
+ * Varias llamadas concurrentes terminan con un solo core: los sobrantes salen solos al ver `core.lock` (ver
+ * `packages/core/src/daemon/lock.ts`).
  */
 export async function ensureCore(opts: EnsureCoreOptions): Promise<CoreConnection> {
   const { dataDir, origin } = opts;
@@ -209,6 +210,14 @@ export async function ensureCore(opts: EnsureCoreOptions): Promise<CoreConnectio
   for (let round = 0; round < 2; round++) {
     const running = await connectToCore(dataDir, origin, opts.uiKey);
     if (running && fits(running)) return running;
+    // Un cliente viejo (un `clanker mcp` que sigue vivo tras actualizar la app) no apaga un core más nuevo:
+    // lo volvería a lanzar desde el bundle nuevo y lo apagaría en cada llamada.
+    if (running && running.health.apiMajor > apiMajor) {
+      throw new Error(
+        `El core que corre en ${dataDir} tiene apiMajor ${running.health.apiMajor} y este cliente es más viejo (espera ${apiMajor}): ` +
+          "no lo apago. Reinicia este proceso para usar la versión instalada (en una sesión de Claude, /mcp).",
+      );
+    }
     if (running) {
       await running.client.system.shutdown({ drain: true });
       await waitUntil(

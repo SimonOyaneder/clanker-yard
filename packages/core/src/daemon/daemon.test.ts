@@ -142,6 +142,14 @@ describe("ensureCore", () => {
     expect(isPidAlive(old.info.pid)).toBe(false);
   });
 
+  test("un cliente con un apiMajor menor que el del core falla sin apagarlo", async () => {
+    const home = tempHome();
+    const core = await ensure(home);
+
+    await expect(ensure(home, { apiMajor: core.health.apiMajor - 1 })).rejects.toThrow(/este cliente es más viejo/);
+    expect(isPidAlive(core.info.pid)).toBe(true);
+    expect(await core.client.system.health()).toMatchObject({ bootId: core.info.bootId });
+  });
 });
 
 describe("ensureCore con un core de otra versión", () => {
