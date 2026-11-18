@@ -10,6 +10,7 @@ import type { AgentEvent, AgentRun, RunSpec } from "../runtime";
 import { readTranscript } from "../transcripts";
 import type { CodexMethods, RateLimitSnapshot, RpcMessage, TurnError } from "./api";
 import { createCodexRuntime, MAX_PROVIDER_RETRIES, MIN_CODEX_VERSION } from "./codex-runtime";
+import { threadOptions } from "./config";
 
 let home: string;
 let store: Store;
@@ -78,7 +79,16 @@ describe("ejecución", () => {
     expect(events.filter((event) => event.type === "usage")).toHaveLength(1);
     const sent = await requests(fake.requests);
     expect(sent.find((message) => message.method === "thread/start")).toMatchObject({
-      params: { cwd: home, model: spec.model, sandbox: "danger-full-access", approvalPolicy: "never", developerInstructions: "Eres juguete.\n\n# reglas\nNo publiques.", config: { project_doc_max_bytes: 32768 } },
+      params: {
+        cwd: home, model: spec.model, sandbox: "danger-full-access", approvalPolicy: "never", developerInstructions: "Eres juguete.\n\n# reglas\nNo publiques.",
+        config: {
+          project_doc_max_bytes: 32768,
+          "shell_environment_policy.set": {
+            GIT_AUTHOR_NAME: "Usuario", GIT_AUTHOR_EMAIL: "usuario@example.com",
+            GIT_COMMITTER_NAME: "Usuario", GIT_COMMITTER_EMAIL: "usuario@example.com",
+          },
+        },
+      },
     });
     expect(sent.find((message) => message.method === "thread/start")).not.toHaveProperty("params.baseInstructions");
     expect(sent.find((message) => message.method === "turn/start")).toMatchObject({ params: { input: [{ type: "text", text: "Saluda." }], effort: "low", outputSchema: { additionalProperties: false, required: ["outcome", "summary", "decisions", "payload"] } } });
@@ -98,8 +108,11 @@ describe("ejecución", () => {
     expect(env.GIT_CONFIG_NOSYSTEM).toBe("1");
     expect(await readFile(env.GIT_CONFIG_GLOBAL!, "utf8")).toBe('[user]\n\tname = "Usuario"\n\temail = "usuario@example.com"\n[credential]\n\thelper =\n');
     await git(home, ["init"], env);
-    await git(home, ["-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "test: identidad"], env);
-    expect(await git(home, ["log", "-1", "--format=%an <%ae>"], env)).toBe("Usuario <usuario@example.com>");
+    await git(home, ["config", "user.name", "Identidad del checkout"], env);
+    await git(home, ["config", "user.email", "checkout@example.com"], env);
+    const shellEnv = { ...env, ...threadOptions(spec).config!["shell_environment_policy.set"] };
+    await git(home, ["-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "test: identidad"], shellEnv);
+    expect(await git(home, ["log", "-1", "--format=%an <%ae>|%cn <%ce>"], shellEnv)).toBe("Usuario <usuario@example.com>|Usuario <usuario@example.com>");
   });
 
   test("retoma el mismo hilo desde otro runtime con esquema y referencias nuevos", async () => {

@@ -36,6 +36,14 @@ export function threadOptions(spec: RunSpec) {
     approvalPolicy: "never" as const,
     sandbox: "danger-full-access" as const,
     developerInstructions: [spec.systemPrompt, ...spec.references.map((ref) => `# ${ref.label}\n${ref.content}`)].join("\n\n"),
+    ...(spec.gitIdentity && {
+      config: {
+        "shell_environment_policy.set": {
+          GIT_AUTHOR_NAME: spec.gitIdentity.name, GIT_AUTHOR_EMAIL: spec.gitIdentity.email,
+          GIT_COMMITTER_NAME: spec.gitIdentity.name, GIT_COMMITTER_EMAIL: spec.gitIdentity.email,
+        },
+      },
+    }),
   };
 }
 
