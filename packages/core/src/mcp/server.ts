@@ -139,7 +139,7 @@ async function timeline(call: Call, route: McpRoute, runId: string): Promise<Eve
   }
 }
 
-const json = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
+const json = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value ?? null) }] });
 
 const resource = (uri: URL, value: unknown): ReadResourceResult => ({
   contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(value) }],

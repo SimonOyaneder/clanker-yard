@@ -136,11 +136,13 @@ clanker prs publish-local <id>
 
 El patch agrega un commit local, sin push. `publish-local` solo solicita autorización: revisa y aprueba en la **Bandeja** de la app. El archivado conserva el historial del proyecto y no detiene corridas en curso.
 
-`clanker` sin argumentos lista todos los comandos. Conecta el MCP para usar Clanker Yard desde Claude Code:
+`clanker` sin argumentos lista todos los comandos. Conecta el MCP para consultar y operar Clanker Yard sin abrir la app; las aprobaciones de publicación y merge se mantienen en la app:
 
 ```bash
 claude mcp add -s user clanker -- ~/.local/bin/clanker mcp
 ```
+
+Siguen fuera del MCP las acciones reservadas: gestionar credenciales y logins, probar Claude, aprobar learnings, forzar pasos, publicar directamente, mergear, pedir review o rebase en GitHub, aplicar propuestas de chat y exportar defs a un repo. El MCP permite editar learnings no aprobados; los aprobados solo se editan en la app.
 
 ## Desarrollo
 

@@ -89,7 +89,7 @@ describe("el binario clanker", () => {
 
     expect(tools.map((t) => t.name)).toEqual(expect.arrayContaining(["list", "get", "create", "update", "delete", "run_issue", "resolve_decision"]));
     expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name)).toEqual(expect.arrayContaining([
-      "list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff", "read_artifact",
+      "list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff", "list_events", "read_artifact",
     ]));
     expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "flow", slug: "techlead-clasico" })]));
     expect(resources.map((r) => r.uri)).toContain("clanker://schema/run");

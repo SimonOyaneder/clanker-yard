@@ -45,8 +45,11 @@ const base = oc.$meta<ContractMeta>({});
  */
 const SAFE = { destructiveHint: false, openWorldHint: false } as const;
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
+const READ_EXTERNAL = { ...READ_ONLY, openWorldHint: true } as const;
+const SAFE_EXTERNAL = { ...SAFE, openWorldHint: true } as const;
 const SAFE_IDEMPOTENT = { ...SAFE, idempotentHint: true } as const;
-const DESTRUCTIVE_IDEMPOTENT = { destructiveHint: true, idempotentHint: true, openWorldHint: false } as const;
+const DESTRUCTIVE = { destructiveHint: true, openWorldHint: false } as const;
+const DESTRUCTIVE_IDEMPOTENT = { ...DESTRUCTIVE, idempotentHint: true } as const;
 
 /** Los kinds de `defs` que `list` y `get` sirven: los que ya tienen esquema (`context` no). */
 const DEF_MCP_KINDS = ["flow", "role", "profile", "recipe", "pack"] as const;
@@ -65,7 +68,13 @@ const system = {
     }),
   ),
   /** Datos del proceso del core; `health` solo lleva lo que necesita el handshake. */
-  info: base.output(
+  info: base.meta({
+    mcp: {
+      action: "core_info",
+      description: "Lee los datos del proceso del core: PID, hora de arranque, carpeta de datos, plataforma y configuración pública de las apps de Linear y GitHub.",
+      annotations: READ_ONLY,
+    },
+  }).output(
     z.object({
       pid: z.int().positive(),
       /** ms epoch */
@@ -79,9 +88,21 @@ const system = {
     }),
   ),
   /** Con `drain` el core no toma pasos nuevos y espera las acciones en curso antes de salir. */
-  shutdown: base.input(z.object({ drain: z.boolean() })),
+  shutdown: base.meta({
+    mcp: {
+      action: "shutdown_core",
+      description: "Pide apagar el core y detiene el despacho de pasos. Interrumpe los agentes; con `drain: true` da hasta 60 segundos a las acciones en curso para terminar, y con `false` las interrumpe de inmediato. Los pasos interrumpidos quedan pendientes para el próximo arranque.",
+      annotations: DESTRUCTIVE,
+    },
+  }).input(z.object({ drain: z.boolean() })),
   /** La capacidad de cada carril de la máquina y cuánto está en uso. */
-  lanes: base.output(Lanes),
+  lanes: base.meta({
+    mcp: {
+      action: "get_lanes",
+      description: "Lee la capacidad y el uso actual de los carriles `dev` y `maintenance` de esta máquina.",
+      annotations: READ_ONLY,
+    },
+  }).output(Lanes),
   /**
    * Cambia la capacidad de los carriles presentes (por defecto `maintenance` 2 y `dev` 4, que es el tope
    * global: cada proyecto además tiene su `parallel`). Rige de inmediato: las corridas que esperaban cupo
@@ -99,19 +120,38 @@ const system = {
     .input(LanesPatch)
     .output(Lanes),
   /** Los circuit breakers abiertos ahora, el más antiguo primero: qué está en pausa, por qué y cuándo se vuelve a probar. */
-  breakers: base.output(z.array(Breaker)),
+  breakers: base.meta({
+    mcp: {
+      action: "list_breakers",
+      description: "Lista los circuit breakers abiertos: qué ámbito está en pausa (`scope`), por qué y cuándo se vuelve a probar.",
+      annotations: READ_ONLY,
+    },
+  }).output(z.array(Breaker)),
   /**
    * Prueba ya el breaker de `scope`, sin esperar al próximo reintento: si la causa se fue lo cierra y lo pausado
    * sigue. Devuelve el breaker si sigue abierto (con el motivo de esta prueba y su próximo reintento) o `null` si
    * se cerró o ya no estaba abierto.
    */
-  retryBreaker: base.input(z.object({ scope: z.string().min(1) })).output(Breaker.nullable()),
+  retryBreaker: base.meta({
+    mcp: {
+      action: "retry_breaker",
+      description: "Repite ahora la prueba del breaker indicado por `scope`. Puede ejecutar los requisitos de la receta del repo o consultar un proveedor; en Claude puede gastar cuota. Si la causa desaparece, cierra el breaker y el trabajo en pausa puede seguir. Devuelve `null` si ya no está abierto.",
+      annotations: { ...DESTRUCTIVE, openWorldHint: true },
+    },
+  }).input(z.object({ scope: z.string().min(1) })).output(Breaker.nullable()),
 };
 
 const events = {
   /** Eventos con `seq > after`, en orden de `seq`. */
   list: base
-    .meta({ mcp: { resource: "run_timeline" } })
+    .meta({
+      mcp: {
+        resource: "run_timeline",
+        action: "list_events",
+        description: "Lista eventos confirmados en orden de `seq`, después de `after`. Usa `filter` para acotar y el último `seq` devuelto para pedir la página siguiente (`limit`: 100 por defecto, máximo 500). No abre un stream.",
+        annotations: READ_ONLY,
+      },
+    })
     .input(
       z.object({
         after: z.int().nonnegative().default(0),
@@ -121,7 +161,13 @@ const events = {
     )
     .output(z.array(Event)),
   /** El `seq` del último evento confirmado (0 sin eventos): quien no necesita el historial abre `stream` desde ahí. */
-  latest: base.output(z.object({ seq: z.int().nonnegative() })),
+  latest: base.meta({
+    mcp: {
+      action: "latest_event_seq",
+      description: "Lee el `seq` del último evento confirmado, o 0 si no hay eventos. Úsalo como `after` en `list_events` para consultar solo los eventos nuevos.",
+      annotations: READ_ONLY,
+    },
+  }).output(z.object({ seq: z.int().nonnegative() })),
   /**
    * Rellena desde `after` (o desde el `Last-Event-ID` del reconectado) y sigue en vivo, sin
    * duplicados. El `id` de cada mensaje SSE es su `seq`.
@@ -138,7 +184,13 @@ const events = {
 
 const connections = {
   /** Cuentas conectadas, sin sus tokens. */
-  list: base.output(z.array(Connection)),
+  list: base.meta({
+    mcp: {
+      action: "list_connections",
+      description: "Lista las cuentas conectadas y su estado según el core, sin tokens ni pruebas contra los proveedores.",
+      annotations: READ_ONLY,
+    },
+  }).output(z.array(Connection)),
   /**
    * Valida el PAT classic contra GitHub (usuario, scope `repo`, repos visibles y una lectura por permiso) y lo conecta con
    * la cuenta a la que pertenece. Rechaza el token con un mensaje accionable si GitHub lo rechaza, si
@@ -161,9 +213,15 @@ const connections = {
   /**
    * Cuántas instalaciones de la GitHub App ve el token de la cuenta conectada (`GET /user/installations`).
    * Con cero, la cuenta conecta pero los repos salen vacíos: la UI avisa y ofrece instalarla. Falla con
-   * `BAD_REQUEST` si GitHub no está conectado con la App. Sin `meta.mcp`: es de la tarjeta de Conexiones.
+   * `BAD_REQUEST` si GitHub no está conectado con la App.
    */
-  githubInstallations: base.output(GitHubInstallations),
+  githubInstallations: base.meta({
+    mcp: {
+      action: "github_installations",
+      description: "Consulta cuántas instalaciones de la GitHub App ve la cuenta conectada con la App. Con cero, la cuenta no ve repos; si el core conoce la URL de instalación, también la devuelve.",
+      annotations: READ_EXTERNAL,
+    },
+  }).output(GitHubInstallations),
   /**
    * Inicia el login de Linear (OAuth con PKCE) y devuelve el `url` que hay que abrir en el navegador: el
    * core no lo abre. Responde en cuanto el core escucha el redirect; la cuenta aparece al aprobar, con un
@@ -180,12 +238,24 @@ const connections = {
    * tener una guardada. Sin `meta.mcp`: un agente no debe gastar la cuota de la persona.
    */
   testClaude: base.input(z.object({ mode: ClaudeMode.optional() }).default({})).output(ClaudeStatus),
-  testCodex: base.input(z.object({}).default({})).output(CodexStatus),
+  testCodex: base.meta({
+    mcp: {
+      action: "test_codex",
+      description: "Prueba el login existente del binario de Codex y consulta el plan y sus límites, sin inferencia ni gasto de tokens del modelo. Actualiza el estado de la conexión y el uso guardado; no inicia un login interactivo.",
+      annotations: SAFE_EXTERNAL,
+    },
+  }).input(z.object({}).default({})).output(CodexStatus),
   /**
    * Lo último que el core sabe de Codex: la última `testCodex` con el uso que trajeron después las corridas
    * (`account/rateLimits/updated`). No lanza nada; `null` si nunca se probó. Cambia con `connection.usage`.
    */
-  codexStatus: base.output(CodexStatus.nullable()),
+  codexStatus: base.meta({
+    mcp: {
+      action: "codex_status",
+      description: "Lee el último estado y uso de Codex conocidos por el core, sin lanzar Codex ni consultar al proveedor. Devuelve `null` si el core no tiene datos.",
+      annotations: READ_ONLY,
+    },
+  }).output(CodexStatus.nullable()),
   /**
    * Guarda una API key de Anthropic como alternativa a la suscripción (en `Secrets`, nunca en la base) y
    * la deja activa: desde entonces los agentes la usan. Antes la prueba con una llamada mínima y no
@@ -237,15 +307,35 @@ const issues = {
    * `withBody: false` cada `body` va vacío: la descripción es lo más pesado y una lista no la muestra (`get` la trae).
    */
   list: base
+    .meta({
+      mcp: {
+        action: "list_issues",
+        description: "Lista issues del caché local, sin consultar al tracker. Filtra por proyecto, estados o labels. Con `withBody: false`, omite las descripciones; usa `get_issue` para leer una en detalle.",
+        annotations: READ_ONLY,
+      },
+    })
     .input(IssueFilter.extend({ projectId: ProjectId.optional(), withBody: z.boolean().default(true) }))
     .output(z.array(CachedIssue)),
   /** Del caché, con sus relaciones. */
-  get: base.input(z.object({ id: IssueId })).output(CachedIssue),
+  get: base.meta({
+    mcp: {
+      action: "get_issue",
+      description: "Lee una issue por su id interno (`list_issues` lo muestra), con descripción y relaciones. Lee del caché, no del tracker.",
+      annotations: READ_ONLY,
+    },
+  }).input(z.object({ id: IssueId })).output(CachedIssue),
   /**
    * Crea una issue en el tracker local (demos y fixtures) y la deja en el caché. El proyecto debe
    * existir y ser de tracker `local`; si no, falla con `NOT_FOUND` o `BAD_REQUEST`.
    */
   createLocal: base
+    .meta({
+      mcp: {
+        action: "create_local_issue",
+        description: "Crea una issue para un proyecto con tracker `local` y la guarda en el caché. No crea issues en Linear ni GitHub.",
+        annotations: SAFE,
+      },
+    })
     .input(NewLocalIssue.extend({ projectId: ProjectId }))
     .output(CachedIssue),
 };
@@ -257,7 +347,13 @@ const trackers = {
    * tracker no tiene adapter en el core, si no hay una cuenta conectada (el mensaje manda a Conexiones) o si el
    * tracker no responde.
    */
-  projects: base.input(z.object({ tracker: TrackerId })).output(z.array(TrackerProject)),
+  projects: base.meta({
+    mcp: {
+      action: "list_tracker_projects",
+      description: "Consulta los proyectos de los workspaces conectados al tracker (hoy, Linear). Para crear un proyecto de Yard, usa `ref.id` como `trackerRef` y `account` como `trackerAccount`.",
+      annotations: READ_EXTERNAL,
+    },
+  }).input(z.object({ tracker: TrackerId })).output(z.array(TrackerProject)),
 };
 
 const projects = {
@@ -272,14 +368,32 @@ const projects = {
    * perfil por defecto no existen, o si un repo no está registrado (`repos.add`), se repite o comparte
    * un label con otro repo del proyecto.
    */
-  create: base.input(NewProject).output(ClankerProject),
+  create: base.meta({
+    mcp: {
+      action: "create_project",
+      description: "Crea un proyecto activo en Yard; el Scheduler puede empezar a trabajar su cola de inmediato. Con `tracker: \"local\"` no pases `trackerRef` ni `trackerAccount`. Para Linear, busca el proyecto con `list_tracker_projects` y pasa su `trackerRef`.",
+      annotations: SAFE_EXTERNAL,
+    },
+  }).input(NewProject).output(ClankerProject),
   /** Lo que un proyecto nuevo toma si `create` no lo dice: flujo, perfil, corridas en paralelo y tope de gasto. */
-  defaults: base.output(ProjectDefaults),
+  defaults: base.meta({
+    mcp: {
+      action: "get_project_defaults",
+      description: "Lee los valores por defecto de un proyecto nuevo: flujo, perfil, cupo de corridas en paralelo y tope de gasto por corrida.",
+      annotations: READ_ONLY,
+    },
+  }).output(ProjectDefaults),
   /**
    * Cambia los defaults de proyectos nuevos; lo que no se pasa no cambia. Rige en el próximo `create`, sin
    * reiniciar el core, y no toca proyectos existentes. `BAD_REQUEST` si el flujo o el perfil no existen.
    */
-  setDefaults: base.input(ProjectDefaultsPatch).output(ProjectDefaults),
+  setDefaults: base.meta({
+    mcp: {
+      action: "set_project_defaults",
+      description: "Cambia los valores por defecto de proyectos nuevos. Solo se guardan los campos presentes; los proyectos existentes no cambian.",
+      annotations: SAFE_IDEMPOTENT,
+    },
+  }).input(ProjectDefaultsPatch).output(ProjectDefaults),
   /**
    * Cambia solo los campos presentes, planos junto al `id` (`{ id, name }`, no `{ id, patch: { name } }`); las
    * mismas validaciones que `create`. Un campo que no existe es `BAD_REQUEST`.
@@ -307,7 +421,13 @@ const projects = {
    * La configuración del proyecto como archivo (`ProjectConfig`): repos por nombre y remoto, filtros, mapeo de estados,
    * flujo y perfil por defecto, parámetros, convenciones y límites. `NOT_FOUND` si no existe.
    */
-  exportConfig: base.input(z.object({ id: ProjectId })).output(ProjectConfig),
+  exportConfig: base.meta({
+    mcp: {
+      action: "export_project_config",
+      description: "Devuelve la configuración de un proyecto por su id para llevarla a otra máquina, identificando los repos por nombre y remoto, no por id local. No escribe archivos.",
+      annotations: READ_ONLY,
+    },
+  }).input(z.object({ id: ProjectId })).output(ProjectConfig),
   /**
    * Aplica una configuración exportada (`config`, sin validar) a un proyecto existente: valida todo antes de escribir,
    * y con `dryRun` solo devuelve qué cambiaría (`changes`) y qué no se pudo mapear a esta máquina (`unmapped`: un repo
@@ -315,7 +435,13 @@ const projects = {
    * repetidos, un label en dos repos) impiden escribir: sin `dryRun` son `BAD_REQUEST`. El nombre, el tracker y su
    * proyecto no se importan. `NOT_FOUND` si el proyecto no existe.
    */
-  importConfig: base.input(z.object({ id: ProjectId, config: z.unknown(), dryRun: z.boolean().default(false) })).output(ProjectImportResult),
+  importConfig: base.meta({
+    mcp: {
+      action: "import_project_config",
+      description: "Aplica `config` de `export_project_config` a un proyecto existente, reemplazando sus ajustes sin cambiar el nombre ni el tracker. Usa `dryRun: true` para ver `changes`, `unmapped` y `errors` antes de guardar.",
+      annotations: DESTRUCTIVE_IDEMPOTENT,
+    },
+  }).input(z.object({ id: ProjectId, config: z.unknown(), dryRun: z.boolean().default(false) })).output(ProjectImportResult),
   /**
    * Pausa el proyecto: el Scheduler deja de lanzar sus issues. No toca a otros proyectos ni lo que ya corre (sus
    * corridas y el carril de mantenimiento siguen). Emite `project.paused` con el actor. `NOT_FOUND` si no existe;
@@ -347,13 +473,25 @@ const projects = {
    * cola como `blocked` con el motivo y emite `issue.skipped`. Con `false` vuelve a la cola (`issue.queued`).
    * `NOT_FOUND` si el proyecto no existe; `BAD_REQUEST` si la issue no es de ese proyecto.
    */
-  skipIssue: base.input(z.object({ id: ProjectId, issueId: IssueId, skipped: z.boolean().default(true) })),
+  skipIssue: base.meta({
+    mcp: {
+      action: "skip_issue",
+      description: "Impide que el Scheduler lance una issue del proyecto: queda bloqueada en la cola. Con `skipped: false` vuelve a ser elegible. No cancela una corrida ni modifica la issue en su tracker.",
+      annotations: SAFE_IDEMPOTENT,
+    },
+  }).input(z.object({ id: ProjectId, issueId: IssueId, skipped: z.boolean().default(true) })),
   /**
    * Con `boosted: true` (por defecto) la issue pasa al principio de la cola: el Scheduler la lanza antes que
    * las demás `ready`, la última subida primero; sigue sujeta a lo que la bloquea. Con `false` vuelve a su
    * lugar. Emite `issue.queued`. Los mismos errores que `skipIssue`.
    */
-  boostIssue: base.input(z.object({ id: ProjectId, issueId: IssueId, boosted: z.boolean().default(true) })),
+  boostIssue: base.meta({
+    mcp: {
+      action: "boost_issue",
+      description: "Sube una issue al principio de las elegibles de su proyecto sin saltarse bloqueos. La última subida va primero, incluso al repetir la llamada. Con `boosted: false`, recupera su prioridad normal.",
+      annotations: SAFE,
+    },
+  }).input(z.object({ id: ProjectId, issueId: IssueId, boosted: z.boolean().default(true) })),
   /**
    * La cola del proyecto, calculada por el core a partir del caché de issues, sus corridas y sus PRs:
    * primero las `ready` (en el orden en que se lanzarían), luego `waiting` y `blocked`, cada una con su
@@ -373,7 +511,13 @@ const projects = {
    * Totales, rondas y costo por rol de las corridas cerradas del proyecto, por el instante en que cerraron:
    * `from`, `to` e `imported` acotan como en `metrics.*`. `NOT_FOUND` si no existe.
    */
-  summary: base.input(ProjectSummaryFilter).output(ProjectSummary),
+  summary: base.meta({
+    mcp: {
+      action: "project_summary",
+      description: "Resume las corridas cerradas de un proyecto: conteos, resultados, tiempo, rondas y costo (en millonésimas de USD). Filtra por fecha de cierre (`from` inclusivo y `to` exclusivo, en ms epoch) y por origen (`imported`).",
+      annotations: READ_ONLY,
+    },
+  }).input(ProjectSummaryFilter).output(ProjectSummary),
 };
 
 const prs = {
@@ -382,7 +526,13 @@ const prs = {
    * de la org del repo. `NOT_FOUND` si el repo o el PR no existen o la cuenta no los ve; `BAD_REQUEST`
    * si la cuenta no está conectada.
    */
-  get: base.input(PrRef).output(PrState),
+  get: base.meta({
+    mcp: {
+      action: "get_pr",
+      description: "Consulta en GitHub el estado actual de un PR por `account`, `repo` y `number`, con CI, reviews y reglas de merge del pack. No actualiza el caché de PRs ni despierta corridas.",
+      annotations: READ_EXTERNAL,
+    },
+  }).input(PrRef).output(PrState),
   /**
    * Los PRs que Watch conoce, del caché de `pull_requests` y sin tocar GitHub: los que abrió el sistema
    * y los que descubrió en tu búsqueda de PRs abiertos, además de los locales.
@@ -398,13 +548,25 @@ const prs = {
    * Como `get`, pero además deja el resultado en el caché y, si el estado cambió, avisa a los waits que
    * esperan este PR: sirve para no esperar al polling. Los mismos errores que `get`.
    */
-  refresh: base.input(PrRef).output(PrState),
+  refresh: base.meta({
+    mcp: {
+      action: "refresh_pr",
+      description: "Relee un PR en GitHub y actualiza su caché si el core ya lo conoce. Un cambio puede despertar corridas o disparar las reacciones automáticas del pack. Para solo consultar el estado, usa `get_pr`.",
+      annotations: SAFE_EXTERNAL,
+    },
+  }).input(PrRef).output(PrState),
   /**
    * Marca o desmarca "no mergear nunca" (`hold`) y devuelve el PR releído: apaga `merge.offer` y `merge.auto`, y
    * `merge` de abajo lo rechaza. `BAD_REQUEST` si el core no conoce el PR (solo los que Watch o `pr.publish`
    * registraron) o la cuenta no está conectada.
    */
-  setHold: base.input(z.object({ ref: PrRef, hold: z.boolean() })).output(PrState),
+  setHold: base.meta({
+    mcp: {
+      action: "set_pr_hold",
+      description: "Marca un PR conocido para impedir su merge desde Yard. Con `hold: false` vuelve a permitir ofertas y merge automático según el pack. Guarda el cambio local y relee el PR en GitHub; no ordena un merge directo.",
+      annotations: { ...DESTRUCTIVE_IDEMPOTENT, openWorldHint: true },
+    },
+  }).input(z.object({ ref: PrRef, hold: z.boolean() })).output(PrState),
   /**
    * Mergea el PR según la estrategia del pack: comenta su comando desde la cuenta del PR y lo devuelve releído
    * (con `merge.queue: "queued"`). Solo lo pide una persona desde la app (`origin: "ui"`). `BAD_REQUEST` si el
@@ -430,8 +592,20 @@ const prs = {
    * `BAD_REQUEST` si el PR no existe o ya no es local. Devuelve la corrida, que aparece en el proyecto que lo abrió.
    */
   publishLocal: base.input(z.object({ id: z.string().min(1) })).output(z.object({ runId: RunId })),
-  detail: base.input(z.object({ id: z.string().min(1) })).output(PrDetail),
-  commitDiff: base.input(z.object({
+  detail: base.meta({
+    mcp: {
+      action: "get_pr_detail",
+      description: "Lee el título, cuerpo, puntas, commits, archivos y diff de un PR por su id interno (`list_prs`). Sirve a PRs locales y publicados; si está publicado, consulta GitHub y trae los commits faltantes. `truncated` indica si se recortó el diff.",
+      annotations: READ_EXTERNAL,
+    },
+  }).input(z.object({ id: z.string().min(1) })).output(PrDetail),
+  commitDiff: base.meta({
+    mcp: {
+      action: "get_pr_commit_diff",
+      description: "Lee el diff de un commit de un PR por su id interno y SHA. Pasa `head` y `base` (el `baseSha` de `get_pr_detail`) para comprobar que el PR no cambió. En PRs publicados puede consultar GitHub y traer los commits faltantes.",
+      annotations: READ_EXTERNAL,
+    },
+  }).input(z.object({
     id: z.string().min(1),
     sha: z.string().regex(/^[0-9a-f]{7,40}$/),
     head: z.string().regex(/^[0-9a-f]{40}$/),
@@ -487,12 +661,24 @@ const prs = {
 };
 
 const chats = {
-  get: base.input(z.object({ prId: z.string().min(1) })).output(z.object({
+  get: base.meta({
+    mcp: {
+      action: "get_pr_chat",
+      description: "Abre el chat vigente por id interno del PR y devuelve sus mensajes y última propuesta. Si aún no hay chat, crea uno vacío sin iniciar un turno.",
+      annotations: SAFE_IDEMPOTENT,
+    },
+  }).input(z.object({ prId: z.string().min(1) })).output(z.object({
     chat: PrChat,
     messages: z.array(ChatMessage),
     proposal: ChatProposal.nullable(),
   })),
-  send: base.input(z.object({
+  send: base.meta({
+    mcp: {
+      action: "send_pr_chat_message",
+      description: "Envía un mensaje al chat y lanza un turno del agente. El turno usa cuota del proveedor y puede modificar el borrador aislado, pero no aplica la propuesta al PR. Consulta `get_pr_chat` para ver la respuesta y la propuesta.",
+      annotations: SAFE_EXTERNAL,
+    },
+  }).input(z.object({
     chatId: ChatId,
     text: z.string().min(1),
     refs: z.array(ChatRef).max(20).optional(),
@@ -500,36 +686,84 @@ const chats = {
     model: z.string().min(1).optional(),
     effort: Effort.optional(),
   })).output(PrChat),
-  interrupt: base.input(z.object({ chatId: ChatId })).output(PrChat),
-  reset: base.input(z.object({ chatId: ChatId })).output(PrChat),
+  interrupt: base.meta({
+    mcp: {
+      action: "interrupt_pr_chat",
+      description: "Interrumpe el turno en curso del chat sin aplicar su propuesta al PR. Devuelve un error si no hay un turno en curso.",
+      annotations: DESTRUCTIVE_IDEMPOTENT,
+    },
+  }).input(z.object({ chatId: ChatId })).output(PrChat),
+  reset: base.meta({
+    mcp: {
+      action: "reset_pr_chat",
+      description: "Archiva el chat vigente, elimina su espacio de borrador y abre un chat nuevo para el mismo PR. No modifica el PR. No se puede reiniciar durante un turno o mientras se aplica una propuesta.",
+      annotations: DESTRUCTIVE,
+    },
+  }).input(z.object({ chatId: ChatId })).output(PrChat),
   /** El patch de la propuesta `rev` contra su base, o con `since` solo lo que cambió desde esa propuesta anterior. */
-  proposal: base.input(z.object({ chatId: ChatId, rev: z.int().positive(), since: z.int().positive().optional() })).output(z.object({
+  proposal: base.meta({
+    mcp: {
+      action: "get_pr_chat_proposal",
+      description: "Lee los archivos y el patch de la propuesta `rev` del chat. Por defecto compara con la base de la propuesta; con `since`, compara con esa revisión anterior del mismo chat.",
+      annotations: READ_ONLY,
+    },
+  }).input(z.object({ chatId: ChatId, rev: z.int().positive(), since: z.int().positive().optional() })).output(z.object({
     patch: z.string(),
     files: z.array(LocalPrFile),
   })),
-  discard: base.input(z.object({ chatId: ChatId })).output(PrChat),
+  discard: base.meta({
+    mcp: {
+      action: "discard_pr_chat_proposal",
+      description: "Descarta la propuesta pendiente y reinicia el borrador del chat a la punta conocida del PR, sin tocar el PR. No se puede descartar durante un turno o mientras se aplica una propuesta.",
+      annotations: DESTRUCTIVE,
+    },
+  }).input(z.object({ chatId: ChatId })).output(PrChat),
   apply: base.input(z.object({ chatId: ChatId, rev: z.int().positive() })).output(z.object({ runId: RunId })),
 };
 
 const repos = {
   /** Por nombre. */
-  list: base.output(z.array(Repo)),
+  list: base.meta({
+    mcp: {
+      action: "list_repos",
+      description: "Lista los repos registrados en este core, por nombre, con sus ids, rutas, ramas por defecto y remotos.",
+      annotations: READ_ONLY,
+    },
+  }).output(z.array(Repo)),
   /**
    * Los repos registrados, por nombre, con el estado de su receta (`invalid` si la carpeta ya no existe) y
    * cómo terminó su última `repos.testRecipe`: lo que muestra Conexiones.
    */
-  overview: base.output(z.array(RepoOverview)),
+  overview: base.meta({
+    mcp: {
+      action: "repos_overview",
+      description: "Lista los repos registrados con el estado de sus recetas y el resultado de la última prueba de cada uno. No ejecuta las recetas.",
+      annotations: READ_ONLY,
+    },
+  }).output(z.array(RepoOverview)),
   /**
    * Registra el checkout de `path`, que debe ser la raíz de un repo de git: el nombre, la branch por
    * defecto y el remoto de GitHub salen de él. `BAD_REQUEST` si no es la raíz de un repo o ya está
    * registrado.
    */
-  add: base.input(NewRepo).output(Repo),
+  add: base.meta({
+    mcp: {
+      action: "add_repo",
+      description: "Registra la raíz de un checkout de Git. Detecta su rama por defecto y su remoto de GitHub, si lo tiene, y carga las defs válidas de `.clanker/`.",
+      annotations: SAFE,
+    },
+  }).input(NewRepo).output(Repo),
   /**
    * Los repos de git que hay en `folder` (la propia carpeta si es un repo; si no, sus subcarpetas
    * directas), cada uno con su receta: encontrada, falta o inválida. No registra nada.
    */
-  detect: base.input(z.object({ folder: z.string().min(1) })).output(z.array(DetectedRepo)),
+  detect: base.meta({
+    mcp: {
+      action: "detect_repos",
+      description: "Busca un repositorio Git en `folder` o, si no es un repo, en sus subcarpetas directas. Indica si encontró una receta válida, ausente o inválida. No registra repos ni ejecuta recetas.",
+      annotations: READ_ONLY,
+    },
+  }).input(z.object({ folder: z.string().min(1) })).output(z.array(DetectedRepo)),
   /**
    * Corre la receta de un repo sobre un worktree desechable: `requires`, `setup.worktree`, `setup.guard`
    * y `setup.slot`, con un slot libre del pool de mantenimiento (si la receta define `slots`). La salida va en vivo por los eventos
@@ -537,31 +771,61 @@ const repos = {
    * llamada vuelve al terminar. `BAD_REQUEST` si el repo no tiene receta o es inválida, o si ya hay una
    * prueba en curso de ese repo, o si los slots de mantenimiento están ocupados; `NOT_FOUND` si no está registrado.
    */
-  testRecipe: base.input(z.object({ repoId: RepoId })).output(RecipeTestResult),
+  testRecipe: base.meta({
+    mcp: {
+      action: "test_repo_recipe",
+      description: "Ejecuta los comandos de requisitos y preparación de la receta en un worktree desechable, con un slot de mantenimiento si hace falta. Los comandos del repo pueden usar servicios externos o modificar el entorno de ese slot. Devuelve el resultado al terminar.",
+      annotations: { ...DESTRUCTIVE, openWorldHint: true },
+    },
+  }).input(z.object({ repoId: RepoId })).output(RecipeTestResult),
   /**
    * Carga `.clanker/flows`, `roles` y `profiles` de la branch por defecto del repo como defs con scope `repo`
    * (lo mismo que el core hace al registrar el repo y cada tanto). Un archivo inválido sale en `errors` y no
    * frena a los demás. `NOT_FOUND` si el repo no está registrado.
    */
-  syncConfig: base.input(z.object({ repoId: RepoId })).output(RepoConfigSync),
+  syncConfig: base.meta({
+    mcp: {
+      action: "sync_repo_config",
+      description: "Recarga los flujos, roles y perfiles de `.clanker/` desde la rama por defecto que este core ya tiene. Actualiza las defs válidas, archiva las que se quitaron y devuelve errores por archivo sin hacer fetch ni push.",
+      annotations: DESTRUCTIVE_IDEMPOTENT,
+    },
+  }).input(z.object({ repoId: RepoId })).output(RepoConfigSync),
 };
 
 const packs = {
   /** Los packs activos, por id: su versión, a quién cubren y si vienen con la app o están instalados. */
-  list: base.output(z.array(PackInfo)),
+  list: base.meta({
+    mcp: {
+      action: "list_packs",
+      description: "Lista los packs activos por id, con su versión, alcance y si vienen con la app o están instalados.",
+      annotations: READ_ONLY,
+    },
+  }).output(z.array(PackInfo)),
   /**
    * Instala el pack de la carpeta `path` (la que tiene su `pack.json`): lo valida entero, lo copia a
    * `<dataDir>/packs/<id>` y lo aplica sin reiniciar el core. Sirve también para actualizarlo. Instalar uno con
    * el mismo id y versión que el activo no crea versiones nuevas. `BAD_REQUEST` si la carpeta no es un pack
    * válido (dice qué archivo y campo fallan) o si ya hay una versión más nueva activa.
    */
-  install: base.input(z.object({ path: z.string().min(1) })).output(PackInfo),
+  install: base.meta({
+    mcp: {
+      action: "install_pack",
+      description: "Valida, copia y activa un pack desde la carpeta local que contiene su `pack.json`. Puede reemplazar el pack instalado y cambiar las reglas y defs activas sin reiniciar el core.",
+      annotations: DESTRUCTIVE_IDEMPOTENT,
+    },
+  }).input(z.object({ path: z.string().min(1) })).output(PackInfo),
   /**
    * Quita el pack instalado `id` (borra su carpeta). Si la app trae uno con ese id vuelve a regir el de la app;
    * si no, sus flujos, roles y contextos se archivan. `BAD_REQUEST` si el pack viene con la app y no está
    * instalado, o no existe.
    */
-  remove: base.input(z.object({ id: z.string().min(1) })).output(z.void()),
+  remove: base.meta({
+    mcp: {
+      action: "remove_pack",
+      description: "Desinstala un pack por id y borra su copia instalada. Si hay una versión incluida con la app, vuelve a regir; si no, se archivan las defs del pack.",
+      annotations: DESTRUCTIVE_IDEMPOTENT,
+    },
+  }).input(z.object({ id: z.string().min(1) })).output(z.void()),
 };
 
 const runs = {
@@ -581,7 +845,14 @@ const runs = {
    * los comandos que corrió con su salida y su código de salida. `NOT_FOUND` si no existe el paso.
    */
   step: base
-    .meta({ mcp: { resource: "step_report" } })
+    .meta({
+      mcp: {
+        resource: "step_report",
+        action: "get_step",
+        description: "Lee el detalle de un paso por id (`get` de kind `run` lista los pasos): sesiones y reportes, referencias a artefactos y comandos con su salida y código de salida.",
+        annotations: READ_ONLY,
+      },
+    })
     .input(z.object({ id: StepRunId }))
     .output(StepDetail),
   /**
@@ -590,7 +861,13 @@ const runs = {
    * sin transcript (el runtime no lo guarda, o aún no escribió) devuelve una página vacía.
    * `NOT_FOUND` si no existe la sesión.
    */
-  transcript: base.input(TranscriptQuery).output(TranscriptPage),
+  transcript: base.meta({
+    mcp: {
+      action: "get_transcript",
+      description: "Lee una página del transcript de una sesión de agente (`get_step` devuelve los ids de sesión). Usa el `next` devuelto como `cursor` para continuar; es un offset, no un número de página.",
+      annotations: READ_ONLY,
+    },
+  }).input(TranscriptQuery).output(TranscriptPage),
   /**
    * Lanza el flujo del proyecto (o `flow`) sobre una issue del proyecto y vuelve sin esperar: el
    * progreso llega por `events.stream` filtrando por el `runId`. Reclama la issue en su tracker
@@ -717,15 +994,45 @@ const imports = {
 
 const metrics = {
   /** Por costo, de más a menos. */
-  byRole: base.input(MetricsFilter.default({})).output(z.array(RoleMetrics)),
+  byRole: base.meta({
+    mcp: {
+      action: "metrics_by_role",
+      description: "Agrupa por rol el costo (en millonésimas de USD), tokens y corridas cerradas en que actuó, de mayor a menor costo. Filtra por proyecto, fechas de cierre y origen (`imported`).",
+      annotations: READ_ONLY,
+    },
+  }).input(MetricsFilter.default({})).output(z.array(RoleMetrics)),
   /** Por día de cierre, del más antiguo al más reciente. */
-  byDay: base.input(DayMetricsFilter.default({ utcOffsetMinutes: 0 })).output(z.array(DayMetrics)),
+  byDay: base.meta({
+    mcp: {
+      action: "metrics_by_day",
+      description: "Agrupa por día de cierre el conteo de corridas raíz y costo (en millonésimas de USD). `utcOffsetMinutes` define el desfase para agrupar (UTC por defecto). Filtra por proyecto, fechas de cierre y origen (`imported`).",
+      annotations: READ_ONLY,
+    },
+  }).input(DayMetricsFilter.default({ utcOffsetMinutes: 0 })).output(z.array(DayMetrics)),
   /** Por costo, de más a menos. */
-  byModel: base.input(MetricsFilter.default({})).output(z.array(ModelMetrics)),
+  byModel: base.meta({
+    mcp: {
+      action: "metrics_by_model",
+      description: "Agrupa por modelo el costo (en millonésimas de USD) y tokens de corridas cerradas, de mayor a menor costo. Filtra por proyecto, fechas de cierre y origen (`imported`).",
+      annotations: READ_ONLY,
+    },
+  }).input(MetricsFilter.default({})).output(z.array(ModelMetrics)),
   /** Por costo, de más a menos: lo que gastó cada nodo de cada flujo. Sin las corridas importadas. */
-  byStep: base.input(MetricsFilter.default({})).output(z.array(StepMetrics)),
+  byStep: base.meta({
+    mcp: {
+      action: "metrics_by_step",
+      description: "Agrupa por flujo y nodo las visitas con costo y su costo (en millonésimas de USD). No incluye corridas importadas porque no tienen pasos. Filtra por proyecto y fechas de cierre.",
+      annotations: READ_ONLY,
+    },
+  }).input(MetricsFilter.default({})).output(z.array(StepMetrics)),
   /** Por costo, de más a menos: cada issue con su costo y sus rondas. */
-  byIssue: base.input(MetricsFilter.default({})).output(z.array(IssueMetrics)),
+  byIssue: base.meta({
+    mcp: {
+      action: "metrics_by_issue",
+      description: "Agrupa por issue las corridas raíz cerradas, su costo (en millonésimas de USD) y las rondas por contador, de mayor a menor costo. Filtra por proyecto, fechas de cierre y origen (`imported`).",
+      annotations: READ_ONLY,
+    },
+  }).input(MetricsFilter.default({})).output(z.array(IssueMetrics)),
 };
 
 const decisions = {
@@ -796,24 +1103,48 @@ const learnings = {
    * Emite `learning.rejected`. Uno que ya está `rejected` o `archived` se devuelve igual, sin evento.
    * `NOT_FOUND` si no existe.
    */
-  reject: base.input(z.object({ id: LearningId })).output(Learning),
+  reject: base.meta({
+    mcp: {
+      action: "reject_learning",
+      description: "Rechaza un learning propuesto. Si ya estaba aprobado, lo retira (`archived`) y deja de entrar en los briefs. Conserva el historial.",
+      annotations: DESTRUCTIVE_IDEMPOTENT,
+    },
+  }).input(z.object({ id: LearningId })).output(Learning),
   /**
    * Cambia texto, roles o tags, en cualquier estado; los campos que faltan quedan como estaban. Uno `approved` solo
    * se edita desde la app (`FORBIDDEN` para CLI y MCP). `NOT_FOUND` si no existe; `BAD_REQUEST` si el texto nuevo
    * ya existe en su alcance.
    */
-  update: base.input(LearningPatch).output(Learning),
+  update: base.meta({
+    mcp: {
+      action: "update_learning",
+      description: "Cambia el texto, roles o tags de un learning sin cambiar su alcance ni su estado. Solo se cambian los campos presentes. Los learnings aprobados solo se editan desde la app.",
+      annotations: SAFE_IDEMPOTENT,
+    },
+  }).input(LearningPatch).output(Learning),
   /**
    * Revisa con el criterio de proponer (reutilizable, no obvio, comprobado, una línea) los `proposed` de un agente,
    * con un agente barato (haiku). No cambia nada: devuelve un veredicto por learning y la razón de cada uno. Archivar
    * los que no cumplen es `archive`, tras la confirmación de una persona. `BAD_REQUEST` si el agente no responde.
    */
-  screen: base.input(z.object({ projectId: ProjectId.optional() }).default({})).output(z.array(LearningVerdict)),
+  screen: base.meta({
+    mcp: {
+      action: "screen_learnings",
+      description: "Envía a Claude Haiku el texto de los learnings propuestos por agentes y devuelve un veredicto y motivo por cada uno. Gasta tokens (cuota de la suscripción o costo de API). Usa `projectId` para acotar el gasto. No archiva ni modifica learnings.",
+      annotations: SAFE_EXTERNAL,
+    },
+  }).input(z.object({ projectId: ProjectId.optional() }).default({})).output(z.array(LearningVerdict)),
   /**
    * Un `proposed` pasa a `archived` (no entra a ningún brief y se puede volver a aprobar). Emite `learning.rejected`.
    * Uno que ya no está `proposed` se devuelve igual, sin evento. `NOT_FOUND` si algún id no existe.
    */
-  archive: base.input(z.object({ ids: z.array(LearningId).min(1) })).output(z.array(Learning)),
+  archive: base.meta({
+    mcp: {
+      action: "archive_learnings",
+      description: "Archiva por id los learnings que sigan propuestos. No modifica los que ya están en otro estado y no borra su historial. Confirma qué propuestas archivar antes de llamar.",
+      annotations: DESTRUCTIVE_IDEMPOTENT,
+    },
+  }).input(z.object({ ids: z.array(LearningId).min(1) })).output(z.array(Learning)),
 };
 
 /** Flujos, roles, perfiles, recetas y packs: lo versionado en `defs`, leído por kind. */
@@ -858,15 +1189,26 @@ const defs = {
     .meta({ mcp: { tool: "delete", kind: DEF_WRITE_KINDS } })
     .input(DefArchive)
     .output(DefRecord),
-  /** Deshace `archive`; una vigente no cambia. `NOT_FOUND` si no existe; `BAD_REQUEST` si su scope es `builtin` o `pack`. Emite `def.restored`. Sin `meta.mcp`: el deshacer lo ofrece la UI. */
-  restore: base.input(DefArchive).output(DefRecord),
+  /** Deshace `archive`; una vigente no cambia. `NOT_FOUND` si no existe; `BAD_REQUEST` si su scope es `builtin` o `pack`. Emite `def.restored`. */
+  restore: base.meta({
+    mcp: {
+      action: "restore_def",
+      description: "Restaura una def archivada por `kind` e `id`, sin crear una versión nueva. Si ya está vigente, no cambia. No restaura defs `builtin` ni de packs.",
+      annotations: SAFE_IDEMPOTENT,
+    },
+  }).input(DefArchive).output(DefRecord),
   /**
    * Por runtime (`ProfileRole.runtime`), los modelos y esfuerzos que acepta en un perfil (`model` y `effort`), de menos a
    * más potente, y si este core puede usarlo. Los de opencode salen de `opencode models` (lo que tiene conectado esta
-   * máquina). Solo lectura: quien arma un perfil no debe inventarlos. Sin `meta.mcp`: un agente lee el esquema del
-   * perfil (`clanker://schema/profile`); la lista es para el selector de la UI.
+   * máquina). Solo lectura: quien arma un perfil no debe inventarlos.
    */
-  agentOptions: base.output(AgentOptions),
+  agentOptions: base.meta({
+    mcp: {
+      action: "agent_options",
+      description: "Consulta qué runtimes están disponibles y qué modelos y niveles de esfuerzo ofrecen para los perfiles. Puede consultar los catálogos de runtimes conectados; no inicia turnos de agente.",
+      annotations: READ_EXTERNAL,
+    },
+  }).output(AgentOptions),
   /**
    * "Exportar al repo": escribe la def propia (scope `user`) en `.clanker/` del repo (`flows/<slug>.json`,
    * `roles/<slug>.md`, `profiles/<slug>.json`) en un worktree desechable sobre la branch por defecto, pushea una branch

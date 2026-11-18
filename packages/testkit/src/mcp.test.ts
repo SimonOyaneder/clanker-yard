@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { type Event, LocalPrDetail, RunId } from "@clanker/api";
+import { CachedIssue, ClankerProject, type Event, LocalPrDetail, RunId } from "@clanker/api";
 import { createArtifacts, createRepos } from "@clanker/core";
 import { seedPr } from "@clanker/core/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -107,6 +107,22 @@ describe("tools", () => {
     expect(await h.call("read_artifact", { hash, offset: 2 })).toMatchObject({ text: "🙂z", nextOffset: null });
     const binary = artifacts.put(Uint8Array.of(0xff), "snapshot");
     await expect(h.call("read_artifact", { hash: binary })).rejects.toThrow("BAD_REQUEST: El artefacto no es de texto");
+  });
+
+  test("opera la cola y consulta su historial desde las tools de paridad", async () => {
+    expect(await h.call("list_breakers", {})).toEqual([]);
+    expect(await h.call("retry_breaker", { scope: "github" })).toBeNull();
+    expect(await h.call("get_lanes", {})).toHaveProperty("dev");
+    const project = ClankerProject.parse(await h.call("create_project", { slug: "cola", name: "Cola", tracker: "local" }));
+    const issue = CachedIssue.parse(await h.call("create_local_issue", { projectId: project.id, title: "Saluda" }));
+    expect(await h.call("list_issues", { projectId: project.id })).toMatchObject([{ id: issue.id }]);
+    expect(await h.call("skip_issue", { id: project.id, issueId: issue.id })).toBeNull();
+    expect(await h.call("project_queue", { id: project.id })).toMatchObject([{ issue: { id: issue.id }, state: "blocked", skipped: true }]);
+    expect(await h.call("skip_issue", { id: project.id, issueId: issue.id, skipped: false })).toBeNull();
+    expect(await h.call("boost_issue", { id: project.id, issueId: issue.id })).toBeNull();
+    expect(await h.call("list_events", { filter: { projectId: project.id, types: ["issue.skipped"] } })).toMatchObject([{ origin: "mcp", projectId: project.id }]);
+    expect(await h.call("export_project_config", { id: project.id })).toMatchObject({ name: "Cola" });
+    expect(await h.call("project_summary", { id: project.id })).toBeTypeOf("object");
   });
 });
 

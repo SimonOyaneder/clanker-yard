@@ -186,7 +186,7 @@ describe("chats", () => {
     }
   });
 
-  test("valida las entradas de los siete procedimientos sin exponerlos por MCP", async () => {
+  test("valida las entradas del chat y reserva aplicar la propuesta a la app", async () => {
     for (const [procedure, input] of [
       [contract.chats.get, { prId: chat.prId }],
       [contract.chats.send, { chatId: chat.id, text: message.text }],
@@ -198,7 +198,8 @@ describe("chats", () => {
       [contract.chats.apply, { chatId: chat.id, rev: 1 }],
     ] as const) {
       expect(await procedure["~orpc"].inputSchema!["~standard"].validate(input)).toEqual({ value: input });
-      expect(procedure["~orpc"].meta.mcp).toBeUndefined();
+      if (procedure === contract.chats.apply) expect(procedure["~orpc"].meta.mcp).toBeUndefined();
+      else expect(procedure["~orpc"].meta.mcp).toHaveProperty("action");
     }
     for (const procedure of Object.values(contract.chats)) {
       expect(await procedure["~orpc"].inputSchema!["~standard"].validate({})).toHaveProperty("issues");
