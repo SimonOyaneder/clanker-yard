@@ -8,10 +8,10 @@ import * as z from "zod";
 import { githubUnauthorized } from "../breakers/breakers";
 import { type ActionCtx, type ActionDef, PermanentActionError } from "../flows/catalog";
 import type { GitIdentity, GitIdentityOf } from "../git/identity";
-import { git, GitError, isAncestor, tryGit, USER_REMOTE_ENV } from "../git/git";
+import { git, isAncestor, tryGit, USER_REMOTE_ENV } from "../git/git";
 import { pickEnv } from "../procs/env";
 import type { FetchOutcome, GitRemote, PushOutcome } from "../git/remote";
-import { diffBetween, snapshotTree } from "../git/tree";
+import { applyThreeWay, diffBetween, snapshotTree } from "../git/tree";
 import { defaultLogDir, excerpt, execLogged, stepLogPath, type ExecResult } from "./exec";
 import { createArchive, type CleanupResult } from "./archive";
 import { continueRebase, rebaseInProgress, rebaseOnto, startRebase, type RebaseStep } from "./rebase";
@@ -93,6 +93,7 @@ export interface ExecOptions {
 }
 
 export interface Workspaces {
+  withRepoLock<T>(repoId: RepoId, fn: () => Promise<T>): Promise<T>;
   /**
    * Toma el lease del worktree de `branch`, creándolo si no existe. Si otra corrida lo tiene
    * vigente lanza `WorkspaceBusyError`. Renueva el lease cada ttl/3 hasta `release` o hasta perderlo.
@@ -879,7 +880,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     await gitIn(lease, "reset", "--quiet", "--hard", target);
     // El reset no toca los archivos nuevos sin seguimiento, que el patch vuelve a crear.
     await gitIn(lease, "clean", "--quiet", "--force", "-d");
-    const applied = patch === "" ? undefined : await applyThreeWay(lease, patch);
+    const applied = patch === "" ? undefined : await applyThreeWay((...args) => gitIn(lease, ...args), patch);
     const unmerged = (await gitIn(lease, "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=U"))
       .split("\n")
       .filter(Boolean);
@@ -940,27 +941,6 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   async function isResumable(lease: WorkspaceRef, backupRef: string, from: string): Promise<boolean> {
     const parent = await tryGit(lease.path, ["rev-parse", "--verify", "--quiet", `${backupRef}^`]);
     return parent === from;
-  }
-
-  /** `apply --3way`: git sale con 1 si deja conflictos, y eso es un resultado. */
-  async function applyThreeWay(
-    lease: WorkspaceRef,
-    patch: string,
-  ): Promise<{ ok: true } | { ok: false; error: GitError; unapplied: string[] }> {
-    const dir = mkdtempSync(join(tmpdir(), "clanker-sync-"));
-    try {
-      const file = join(dir, "changes.patch");
-      writeFileSync(file, patch);
-      await gitIn(lease, "apply", "--3way", file);
-      return { ok: true };
-    } catch (error) {
-      if (!(error instanceof GitError)) throw error;
-      // Un archivo que git no puede ni mezclar (el cambio toca un archivo que la base nueva borró) no deja marcas.
-      const unapplied = [...error.output.matchAll(/^error: (.+): (?:does not exist in index|patch does not apply)$/gm)].map((m) => m[1]!);
-      return { ok: false, error, unapplied };
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   }
 
   async function attach(request: AcquireRequest): Promise<WorkspaceLease & { fastForwarded: boolean; remoteRewritten: boolean }> {
@@ -1447,6 +1427,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   }
 
   return {
+    withRepoLock,
     acquire,
     attach,
     rebase,

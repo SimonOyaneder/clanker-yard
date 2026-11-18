@@ -1,5 +1,6 @@
 import type { ErrorReporter } from "../errors/reporter";
 import type { Workspaces } from "./workspaces";
+import type { ChatScratch } from "./scratch";
 
 /** Cada cuánto corre sola: lo que no avisa nadie (el vencimiento de los 7 días) y lo que se haya escapado. */
 export const CLEANUP_EVERY_MS = 60 * 60 * 1000;
@@ -19,11 +20,13 @@ export interface Cleanup {
  */
 export function startCleanup({
   workspaces,
+  scratch,
   errors,
   everyMs = CLEANUP_EVERY_MS,
   initialPass = true,
 }: {
   workspaces: Pick<Workspaces, "cleanup">;
+  scratch?: Pick<ChatScratch, "cleanup">;
   errors: ErrorReporter;
   everyMs?: number;
   initialPass?: boolean;
@@ -39,12 +42,16 @@ export function startCleanup({
       again = true;
       return;
     }
-    running = workspaces
-      .cleanup()
-      .then(
-        () => errors.clear(scope),
-        (error: unknown) => errors.report(scope, error),
-      )
+    const worktrees = workspaces.cleanup().then(
+      () => errors.clear(scope),
+      (error: unknown) => errors.report(scope, error),
+    );
+    const drafts = scratch?.cleanup().then(
+      () => errors.clear("chat.scratch.cleanup"),
+      (error: unknown) => errors.report("chat.scratch.cleanup", error),
+    );
+    running = Promise.all([worktrees, drafts])
+      .then(() => undefined)
       .finally(() => {
         running = undefined;
         if (again) {

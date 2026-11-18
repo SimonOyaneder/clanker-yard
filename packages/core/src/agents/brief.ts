@@ -1,9 +1,8 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { Brief, type ArtifactKind, type IssueDetail, type IssueRef, type Report } from "@clanker/api";
 import type { Artifacts } from "../artifacts/artifacts";
-import { git } from "../git/git";
-import { diffBetween, listHunks, snapshotTree } from "../git/tree";
+import { diffBetween, excludeRunDir, listHunks, RUN_DIR, snapshotTree } from "../git/tree";
 import type { WorkspaceLease, WorkspaceRef, Workspaces } from "../workspaces/workspaces";
 
 /**
@@ -21,8 +20,7 @@ export function briefOfMessage(message: string): Brief | undefined {
   }
 }
 
-/** Carpeta de los artefactos dentro del worktree; el brief los cita con rutas relativas a él. */
-export const RUN_DIR = ".clanker-run";
+export { RUN_DIR } from "../git/tree";
 
 export const MAX_CRITERIA = 5;
 export const MAX_LEARNINGS = 10;
@@ -193,16 +191,6 @@ function issueMarkdown(issue: IssueDetail): string {
     ...(relations.length ? ["## Relaciones", relations.join("\n")] : []),
     ...(comments.length ? ["## Comentarios", ...comments] : []),
   ].join("\n\n") + "\n";
-}
-
-async function excludeRunDir(cwd: string): Promise<void> {
-  // En un worktree `info/exclude` es el del repo común: vale para todos sus worktrees.
-  const exclude = resolve(cwd, (await git(cwd, ["rev-parse", "--git-path", "info/exclude"])).trim());
-  const entry = `/${RUN_DIR}/`;
-  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
-  if (current.split("\n").includes(entry)) return;
-  mkdirSync(dirname(exclude), { recursive: true });
-  appendFileSync(exclude, `${current === "" || current.endsWith("\n") ? "" : "\n"}${entry}\n`);
 }
 
 function writeFile(path: string, content: string): void {

@@ -1,7 +1,37 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { git, gitRaw } from "./git";
+import { dirname, join, resolve } from "node:path";
+import { git, GitError, gitRaw } from "./git";
+
+export const RUN_DIR = ".clanker-run";
+
+export async function excludeRunDir(cwd: string): Promise<void> {
+  const exclude = resolve(cwd, (await git(cwd, ["rev-parse", "--git-path", "info/exclude"])).trim());
+  const entry = `/${RUN_DIR}/`;
+  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+  if (current.split("\n").includes(entry)) return;
+  mkdirSync(dirname(exclude), { recursive: true });
+  appendFileSync(exclude, `${current === "" || current.endsWith("\n") ? "" : "\n"}${entry}\n`);
+}
+
+export async function applyThreeWay(
+  inWorktree: (...args: string[]) => Promise<string>,
+  patch: string,
+): Promise<{ ok: true } | { ok: false; error: GitError; unapplied: string[] }> {
+  const dir = mkdtempSync(join(tmpdir(), "clanker-sync-"));
+  try {
+    const file = join(dir, "changes.patch");
+    writeFileSync(file, patch);
+    await inWorktree("apply", "--3way", file);
+    return { ok: true };
+  } catch (error) {
+    if (!(error instanceof GitError)) throw error;
+    const unapplied = [...error.output.matchAll(/^error: (.+): (?:does not exist in index|patch does not apply)$/gm)].map((m) => m[1]!);
+    return { ok: false, error, unapplied };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 /**
  * El árbol del worktree tal como está (commits, cambios y archivos nuevos), sin tocar su index real:
@@ -22,7 +52,7 @@ export async function snapshotTree(cwd: string): Promise<string> {
 }
 
 /** Con prefijos `a/` `b/` fijos y sin renames: el patch no depende de la config de git de quien lo corra. */
-export async function diffBetween(cwd: string, from: string, to: string): Promise<string> {
+export async function diffBetween(cwd: string, from: string, to: string, files: string[] = []): Promise<string> {
   return gitRaw(cwd, [
     "-c",
     "core.quotePath=false",
@@ -35,6 +65,8 @@ export async function diffBetween(cwd: string, from: string, to: string): Promis
     "--dst-prefix=b/",
     from,
     to,
+    "--",
+    ...files.map((file) => `:(literal)${file}`),
   ]);
 }
 
