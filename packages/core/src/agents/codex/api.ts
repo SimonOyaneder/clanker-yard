@@ -95,7 +95,7 @@ export interface CodexMethods {
     result: { data: { name: string; runtimeStatus: "notStarted" | "starting" | "connected" | "authenticationRequired" | "failed" | "cancelled" | "disabled" | null }[]; nextCursor: string | null };
   };
   "thread/read": { params: { threadId: string }; result: { thread: Thread } };
-  "thread/start": { params: ThreadParams; result: { thread: Thread } };
+  "thread/start": { params: ThreadParams; result: { thread: Thread; instructionSources: string[] } };
   "thread/resume": { params: Omit<ThreadParams, "ephemeral"> & { threadId: string }; result: { thread: Thread } };
   "turn/start": {
     params: { threadId: string; input: { type: "text"; text: string; text_elements?: JsonValue[] }[]; effort?: ReasoningEffort | null; outputSchema?: JsonValue };

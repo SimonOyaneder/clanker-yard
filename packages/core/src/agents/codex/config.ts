@@ -6,7 +6,7 @@ export const CODEX_CONFIG: Record<string, JsonValue> = {
   "features.apps": false,
   "features.codex_hooks": false,
   notify: [],
-  project_doc_max_bytes: 0,
+  project_doc_max_bytes: 32768,
   "skills.include_instructions": false,
   "skills.bundled.enabled": false,
   "cloud.skills.enabled": false,
