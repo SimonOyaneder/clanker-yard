@@ -4,6 +4,7 @@ import { ClaudeMode, ClaudeStatus, Connection, ConnectionProvider, GitHubDeviceF
 import {
   ArtifactHash,
   ArtifactKind,
+  ChatId,
   DecisionId,
   Event,
   EventFilter,
@@ -15,14 +16,15 @@ import {
   StepRunId,
 } from "./domain";
 import { Decision, DecisionFilter } from "./decisions";
-import { AgentOptions } from "./agents";
+import { AgentOptions, AgentRuntimeId, Effort } from "./agents";
+import { ChatMessage, ChatProposal, PrChat } from "./chats";
 import { DEF_WRITE_KINDS, DefArchive, DefCreate, DefExported, DefExportToRepo, DefFilter, DefRecord, DefRef, DefUpdate, DefWrite } from "./defs";
 import { Learning, LearningFilter, LearningPatch, LearningVerdict, NewLearning } from "./learnings";
 import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
 import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
-import { CachedPr, LocalCommitDiff, LocalPrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
+import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync, RepoOverview } from "./repos";
@@ -408,6 +410,29 @@ const prs = {
   republishProgress: base.input(z.object({ id: z.string().min(1) })).output(RepublishProgress),
 };
 
+const chats = {
+  get: base.input(z.object({ prId: z.string().min(1) })).output(z.object({
+    chat: PrChat,
+    messages: z.array(ChatMessage),
+    proposal: ChatProposal.nullable(),
+  })),
+  send: base.input(z.object({
+    chatId: ChatId,
+    text: z.string().min(1),
+    runtime: AgentRuntimeId.optional(),
+    model: z.string().min(1).optional(),
+    effort: Effort.optional(),
+  })).output(PrChat),
+  interrupt: base.input(z.object({ chatId: ChatId })).output(PrChat),
+  reset: base.input(z.object({ chatId: ChatId })).output(PrChat),
+  proposal: base.input(z.object({ chatId: ChatId, rev: z.int().positive() })).output(z.object({
+    patch: z.string(),
+    files: z.array(LocalPrFile),
+  })),
+  discard: base.input(z.object({ chatId: ChatId })).output(PrChat),
+  apply: base.input(z.object({ chatId: ChatId, rev: z.int().positive() })).output(z.object({ runId: RunId })),
+};
+
 const repos = {
   /** Por nombre. */
   list: base.output(z.array(Repo)),
@@ -771,5 +796,5 @@ const defs = {
   exportToRepo: base.input(DefExportToRepo).output(DefExported),
 };
 
-export const contract = { system, events, connections, artifacts, issues, trackers, projects, packs, prs, repos, runs, decisions, learnings, metrics, defs, imports };
+export const contract = { system, events, connections, artifacts, issues, trackers, projects, packs, prs, chats, repos, runs, decisions, learnings, metrics, defs, imports };
 export type Contract = typeof contract;

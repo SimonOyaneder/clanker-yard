@@ -137,6 +137,15 @@ const router = os.router({
     }),
     remove: os.packs.remove.handler(() => {}),
   },
+  chats: {
+    get: os.chats.get.handler(() => { throw new Error("no se usa en este test"); }),
+    send: os.chats.send.handler(() => { throw new Error("no se usa en este test"); }),
+    interrupt: os.chats.interrupt.handler(() => { throw new Error("no se usa en este test"); }),
+    reset: os.chats.reset.handler(() => { throw new Error("no se usa en este test"); }),
+    proposal: os.chats.proposal.handler(() => { throw new Error("no se usa en este test"); }),
+    discard: os.chats.discard.handler(() => { throw new Error("no se usa en este test"); }),
+    apply: os.chats.apply.handler(() => { throw new Error("no se usa en este test"); }),
+  },
   prs: {
     get: os.prs.get.handler(() => {
       throw new Error("no se usa en este test");

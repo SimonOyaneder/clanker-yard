@@ -1,6 +1,6 @@
 import type { ConnectionProvider, ConnectionStatus, LoginFailure } from "./connections";
 import type { DecisionKind, DecisionStatus } from "./decisions";
-import type { DecisionId, Event, EventType, RepoId, RunId } from "./domain";
+import type { ChatId, DecisionId, Event, EventType, RepoId, RunId } from "./domain";
 import type { BreakerCause } from "./runs";
 
 /**
@@ -9,6 +9,12 @@ import type { BreakerCause } from "./runs";
  * silencio. Los demás eventos llevan un registro libre; se suman aquí cuando alguien los lee.
  */
 export interface EventPayloads {
+  "chat.message": { chatId: ChatId; prId: string };
+  "chat.turn_started": { chatId: ChatId; prId: string };
+  "chat.turn_finished": { chatId: ChatId; prId: string };
+  "chat.proposal": { chatId: ChatId; prId: string };
+  "chat.apply_started": { chatId: ChatId; prId: string };
+  "chat.apply_finished": { chatId: ChatId; prId: string };
   "pr.saved_local": { repo: string; branch: string; base: string };
   /** Una corrida devolvió el sujeto que pidió prestado: la dueña (`fromRunId`) relee su branch. */
   "run.returned": { runId: RunId; fromRunId: RunId };
