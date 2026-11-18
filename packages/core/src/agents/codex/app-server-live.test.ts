@@ -35,6 +35,7 @@ test.skipIf(!hasCodex)("aísla MCP de usuario y proyecto, notify, hooks y plugin
   const cwd = join(dir, "project");
   const marker = join(dir, "mcp-started");
   const userConfig = `notify = ["sh", "-c", "exit 99"]
+project_doc_max_bytes = 0
 [features]
 plugins = true
 apps = true
@@ -54,6 +55,7 @@ args = ["-c", ${JSON.stringify(`touch '${marker}'; exit 1`)}]
     await mkdir(join(cwd, ".codex"), { recursive: true });
     await writeFile(join(codexHome, "config.toml"), userConfig);
     await writeFile(join(cwd, ".codex", "config.toml"), projectConfig);
+    await writeFile(join(cwd, "AGENTS.md"), "Usa el reporte solicitado por Clanker Yard.");
     const server = await launchCodexAppServer({ cwd, baseEnv: { PATH: process.env.PATH, HOME: home, CODEX_HOME: codexHome, USER: process.env.USER } });
     try {
       const effective = await server.request("config/read", { cwd });
@@ -62,7 +64,8 @@ args = ["-c", ${JSON.stringify(`touch '${marker}'; exit 1`)}]
         features: { plugins: false, apps: false, codex_hooks: false },
         mcp_servers: { user_sentinel: { command: "sh" }, project_sentinel: { command: "sh" } },
       });
-      const { thread } = await server.request("thread/start", { cwd, sandbox: "read-only" });
+      const { thread, instructionSources } = await server.request("thread/start", { cwd, sandbox: "read-only" });
+      expect(instructionSources).toContain(join(cwd, "AGENTS.md"));
       const inventory = await server.request("mcpServerStatus/list", { threadId: thread.id });
       expect(inventory.data.map(({ name, runtimeStatus }) => ({ name, runtimeStatus }))).toEqual([
         { name: "project_sentinel", runtimeStatus: "disabled" },

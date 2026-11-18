@@ -13,6 +13,7 @@ test("hereda solo el entorno necesario para el login existente, sin secretos, pr
   expect(CODEX_ARGS).toContain("features.apps=false");
   expect(CODEX_ARGS).toContain("features.codex_hooks=false");
   expect(CODEX_ARGS).toContain("notify=[]");
+  expect(CODEX_ARGS).toContain("project_doc_max_bytes=32768");
 });
 
 test("deshabilita los MCP efectivos del cwd y los overrides del caller sin mutar lo leído ni copiar su entorno", () => {

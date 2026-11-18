@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { CodexNotification, JsonValue, RateLimitSnapshot, RpcMessage, Turn, TurnError } from "../../agents/codex/api";
+import type { CodexMethods, CodexNotification, JsonValue, RateLimitSnapshot, RpcMessage, ThreadItem, Turn, TurnError } from "../../agents/codex/api";
 
 export const CODEX_FAKE_EVIDENCE = {
   version: "0.169.1",
@@ -21,6 +21,12 @@ export interface FakeCodexOptions {
   reverseReplies?: boolean;
   malformed?: boolean;
   accountEmail?: string;
+  version?: string;
+  responses?: string[];
+  items?: ThreadItem[];
+  models?: CodexMethods["model/list"]["result"]["data"];
+  modelPageSize?: number;
+  duplicateUsage?: boolean;
 }
 
 export async function createFakeCodex(dir: string, options: FakeCodexOptions = {}) {
@@ -29,17 +35,22 @@ export async function createFakeCodex(dir: string, options: FakeCodexOptions = {
   const childPid = join(dir, "child.pid");
   const pidFile = join(dir, "server.pid");
   const environment = join(dir, "environment.json");
+  const state = join(dir, "state.json");
   await writeFile(script, `import { createInterface } from "node:readline";
 import * as fs from "node:fs/promises";
 import { spawn } from "node:child_process";
-(${fakeProcess.toString()})(${JSON.stringify({ ...options, requests, childPid, pidFile, environment })}, { createInterface, fs, spawn });`);
+(${fakeProcess.toString()})(${JSON.stringify({ ...options, requests, childPid, pidFile, environment, state })}, { createInterface, fs, spawn });`);
   return { executable: process.execPath, args: [script], requests, childPid, pidFile, environment };
 }
 
 async function fakeProcess(
-  options: FakeCodexOptions & { requests: string; childPid: string; pidFile: string; environment: string },
+  options: FakeCodexOptions & { requests: string; childPid: string; pidFile: string; environment: string; state: string },
   { createInterface, fs, spawn }: { createInterface: typeof import("node:readline").createInterface; fs: typeof import("node:fs/promises"); spawn: typeof import("node:child_process").spawn },
 ) {
+  if (process.argv.includes("--version")) {
+    process.stdout.write(`codex-cli ${options.version ?? "0.169.1"}\n`);
+    return;
+  }
   await fs.writeFile(options.pidFile, String(process.pid));
   await fs.writeFile(options.environment, JSON.stringify(process.env));
   let writes = Promise.resolve();
@@ -70,8 +81,13 @@ async function fakeProcess(
   }
   let initialized = false;
   let handshaken = false;
-  let count = 0;
   const threads = new Map<string, { id: string; cwd: string | undefined; turns: Turn[] }>();
+  let state = { threads: 0, turns: 0 };
+  try {
+    state = JSON.parse(await fs.readFile(options.state, "utf8")) as typeof state;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   let currentModel: string | undefined;
   let active: { threadId: string; turn: Turn } | undefined;
   let accountReply: (() => void) | undefined;
@@ -84,6 +100,7 @@ async function fakeProcess(
     const { threadId, turn } = active!;
     emit({ method: "turn/completed", params: { threadId, turn: { ...turn, status, error } } });
   };
+  const usage = { totalTokens: 112, inputTokens: 100, cachedInputTokens: 80, cacheWriteInputTokens: 0, outputTokens: 12, reasoningOutputTokens: 2 };
   const handle = async (message: RpcMessage) => {
     await fs.appendFile(options.requests, `${JSON.stringify(message)}\n`);
     if (message.method === undefined) return;
@@ -95,7 +112,7 @@ async function fakeProcess(
     if (message.id === undefined) return;
     const ok = (result: unknown) => send({ id: message.id, result });
     const error = (code: number, text: string) => send({ id: message.id, error: { code, message: text } });
-    const params = message.params as { cwd?: string; threadId?: string; model?: string; config?: Record<string, JsonValue>; clientInfo?: unknown };
+    const params = message.params as { cwd?: string; threadId?: string; model?: string; config?: Record<string, JsonValue>; clientInfo?: unknown; cursor?: string };
     if (message.method === "initialize") {
       if (handshaken) return error(-32600, "Already initialized");
       handshaken = true;
@@ -114,7 +131,12 @@ async function fakeProcess(
           process.stdout.write("{invalid\n");
           return;
         }
-        ok({ data: [{ id: "gpt-5.6-luna", model: "gpt-5.6-luna", displayName: "Luna", supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }], defaultReasoningEffort: "low", isDefault: true }], nextCursor: null });
+        {
+          const list = options.models ?? [{ id: "gpt-5.6-luna", model: "gpt-5.6-luna", displayName: "Luna", supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }], defaultReasoningEffort: "low", isDefault: true }];
+          const offset = Number(params.cursor ?? 0);
+          const size = options.modelPageSize ?? list.length;
+          ok({ data: list.slice(offset, offset + size), nextCursor: offset + size < list.length ? String(offset + size) : null });
+        }
         if (options.reverseReplies) accountReply!();
         return;
       case "config/read":
@@ -122,9 +144,14 @@ async function fakeProcess(
       case "thread/start":
       case "thread/resume": {
         currentModel = params.model;
-        const thread = { id: params.threadId ?? `thread_${++count}`, cwd: params.cwd, turns: [] };
+        const thread = { id: params.threadId ?? `thread_${++state.threads}`, cwd: params.cwd, turns: [] };
+        await fs.writeFile(options.state, JSON.stringify(state));
         threads.set(thread.id, thread);
-        return ok({ thread });
+        ok({ thread });
+        if (message.method === "thread/resume" && state.turns > 0) {
+          emit({ method: "thread/tokenUsage/updated", params: { threadId: thread.id, turnId: `turn_${state.turns}`, tokenUsage: { total: usage, last: usage, modelContextWindow: 200000 } } });
+        }
+        return;
       }
       case "thread/read":
         return ok({ thread: threads.get(params.threadId!) });
@@ -133,8 +160,10 @@ async function fakeProcess(
         finish("interrupted");
         return;
       case "turn/start": {
+        const responseIndex = state.turns++;
+        await fs.writeFile(options.state, JSON.stringify(state));
         const threadId = params.threadId!;
-        const turn: Turn = { id: `turn_${++count}`, items: [], status: "inProgress", error: null };
+        const turn: Turn = { id: `turn_${state.turns}`, items: [], status: "inProgress", error: null };
         active = { threadId, turn };
         ok({ turn });
         emit({ method: "turn/started", params: { threadId, turn } });
@@ -150,12 +179,16 @@ async function fakeProcess(
           finish("failed", failure);
           return;
         }
-        const item = { type: "agentMessage" as const, id: "item_1", text: "Listo." };
+        for (const tool of options.items ?? []) {
+          emit({ method: "item/started", params: { threadId, turnId: turn.id, item: tool } });
+          emit({ method: "item/completed", params: { threadId, turnId: turn.id, item: tool } });
+        }
+        const item = { type: "agentMessage" as const, id: "item_1", text: options.responses?.[responseIndex] ?? options.responses?.at(-1) ?? "Listo." };
         emit({ method: "item/started", params: { threadId, turnId: turn.id, item: { ...item, text: "" } } });
         emit({ method: "item/agentMessage/delta", params: { threadId, turnId: turn.id, itemId: item.id, delta: item.text } });
         emit({ method: "item/completed", params: { threadId, turnId: turn.id, item } });
-        const usage = { totalTokens: 112, inputTokens: 100, cachedInputTokens: 80, cacheWriteInputTokens: 0, outputTokens: 12, reasoningOutputTokens: 2 };
         emit({ method: "thread/tokenUsage/updated", params: { threadId, turnId: turn.id, tokenUsage: { total: usage, last: usage, modelContextWindow: 200000 } } });
+        if (options.duplicateUsage) emit({ method: "thread/tokenUsage/updated", params: { threadId, turnId: turn.id, tokenUsage: { total: usage, last: usage, modelContextWindow: 200000 } } });
         emit({ method: "account/rateLimits/updated", params: { rateLimits: { ...limits, spendControlReached: null } } });
         finish("completed");
         return;

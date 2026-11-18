@@ -7,6 +7,7 @@ import type { RuntimeRegistry } from "./runtime";
 function unregistered(id: AgentRuntimeId): RuntimeOptions {
   const message = `Este core no tiene el runtime ${id}.`;
   if (id === CLAUDE_RUNTIME_ID) return { ...CLAUDE_OPTIONS, available: false, message };
+  if (id === "codex") return { id, label: "Codex", about: "Codex con el login del binario instalado.", available: false, message, models: [], efforts: [] };
   return {
     id,
     label: "opencode",

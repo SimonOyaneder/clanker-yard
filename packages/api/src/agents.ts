@@ -118,7 +118,7 @@ export type Role = z.infer<typeof Role>;
  * Con qué corre un agente: `claude-sdk` (Claude Code con el Agent SDK) u `opencode` (`opencode serve`, cualquier
  * proveedor que opencode tenga conectado). El modelo de un perfil es del formato de su runtime.
  */
-export const AgentRuntimeId = z.enum(["claude-sdk", "opencode"]);
+export const AgentRuntimeId = z.enum(["claude-sdk", "opencode", "codex"]);
 export type AgentRuntimeId = z.infer<typeof AgentRuntimeId>;
 
 /** El runtime de una entrada de perfil que no lo dice. */
