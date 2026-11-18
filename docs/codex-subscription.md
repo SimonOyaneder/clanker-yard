@@ -338,3 +338,17 @@ Actualización concreta pendiente: revisar esos tres cuerpos y agregar en el seg
 - «Confirmar el encuadre del login delegado frente a SIWC propio antes de distribuirlo; no introducir copia de auth.json como solución de aislamiento».
 
 La propuesta cambia cualquier plan que suponga reportes compatibles sin adaptación o aislamiento completo ya resuelto. **Queda impedida su incorporación a Linear, no realizada.**
+
+## 11. Cliente y falso de CLA-131
+
+El transporte vive en `packages/core/src/agents/codex/app-server.ts`, sin registrar todavía un runtime. `api.ts` contiene proyecciones de los tipos generados por **Codex 0.169.1**: regenerar con `codex app-server generate-ts --out <directorio-temporal>` y conservar solo los campos consumidos. No requiere un paquete de OpenAI.
+
+Cada conexión inicializa con `clanker_yard`, correlaciona requests por id y tiene un timeout de 30 s por request. Las notificaciones usan una cola de un consumidor. Las aprobaciones de comandos y cambios de archivos reciben una decisión negativa; las demás requests del servidor reciben un error RPC, incluyendo cualquier pedido de tokens. El cliente no lee `auth.json`, no recibe tokens y no imprime los mensajes del protocolo. Un cierre rechaza las requests pendientes; un crash incluye los últimos 2000 caracteres de stderr. Con `procs`, se registra y cierra el grupo del agente con su `stepRunId`.
+
+**Aislamiento verificado en esta entrega:** los flags de arranque apagan `notify`, hooks, plugins y apps. Antes de `thread/start` o `thread/resume`, el cliente consulta `config/read` para el cwd efectivo y deshabilita cada MCP por nombre mediante overrides del hilo. Si al reanudar no se pasa cwd, primero lee el del hilo. No permite agregar ni reactivar MCP mediante los overrides del caller. Los nombres se pasan como claves de una tabla, no se interpolan en rutas punteadas. No cambia archivos personales ni usa otro `CODEX_HOME` en producción.
+
+El test de aislamiento usa un **home sintético sin credenciales**, con MCP centinelas en la configuración de usuario y del proyecto: comprueba que ambos aparecen con `runtimeStatus:"disabled"`, que no se ejecutan sus comandos y que la configuración permanece intacta. También comprueba los flags efectivos de `notify`, hooks y plugins. Esto no es una captura de ejecución de hooks ni de un plugin instalado. **No garantiza aislamiento frente a ediciones concurrentes entre la lectura de configuración y la creación del hilo, ni frente a reanudar un hilo ajeno ya activo. Esos casos siguen bloqueando habilitar el runtime como política completa.** Codex no permite reanudar un hilo recién creado sin rollout; el test sin inferencia verifica el inicio real y el falso verifica los overrides de reanudación.
+
+`packages/core/src/testing/codex/fake-codex.ts` genera un proceso Node temporal que habla JSONL real. Su caso de modelo inexistente reproduce la secuencia capturada en §8 (ACK `inProgress`, notificación `error`, turno `failed`), no un rechazo RPC inmediato. Cuota agotada, login vencido y `ordinaryUsageAllowed:false` están marcados en `CODEX_FAKE_EVIDENCE` como **según tipos, sin captura real**. No se agotó cuota ni se alteró ningún login para obtenerlos.
+
+`app-server-live.test.ts` separa esa prueba de aislamiento del smoke con el `HOME` y `CODEX_HOME` habituales: este último ejecuta `codex app-server` mediante `sh`, hace el handshake y `account/read {refreshToken:false}`, sin inferencia ni imprimir la cuenta. Ambos tests se saltan si no hay `codex` en el PATH y esperan el cierre de sus procesos.
