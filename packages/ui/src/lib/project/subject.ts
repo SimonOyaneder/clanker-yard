@@ -9,7 +9,8 @@ export interface SubjectLabel {
 
 /**
  * Nombra el sujeto de cada corrida. Una corrida de issue lleva su clave y su título; una de mantenimiento
- * sobre un PR lleva `repo#número` y el título de la issue que lo abrió. Si el caché ya no la tiene, lo dice.
+ * sobre un PR lleva `repo#número` y el título de la issue que lo abrió (o el del PR), y si el PR ya se cerró o se
+ * mergeó, lo dice. Si el caché no lo tiene, también lo dice.
  */
 export function subjectLabeler(issues: readonly CachedIssue[], prs: readonly CachedPr[]): (run: Pick<Run, "subject">) => SubjectLabel {
   const issueById = new Map<string, CachedIssue>(issues.map((i) => [i.id, i]))
@@ -22,8 +23,10 @@ export function subjectLabeler(issues: readonly CachedIssue[], prs: readonly Cac
     }
     const pr = prById.get(subject.id)
     if (pr?.local) return { key: pr.local.branch, title: pr.local.title }
-    if (!pr?.ref) return { key: "PR", title: "PR que ya no está abierto" }
+    if (!pr?.ref) return { key: "PR", title: "un PR que Clanker Yard ya no tiene" }
     const issue = pr.issueId === null ? undefined : issueById.get(pr.issueId)
-    return { key: `${pr.ref.repo.split("/").pop()}#${pr.ref.number}`, title: issue?.title ?? "PR sin issue en el caché" }
+    const title = issue?.title ?? pr.state?.title ?? "PR sin issue en el caché"
+    const closed = pr.state?.state === "merged" ? " (mergeado)" : pr.state?.state === "closed" ? " (cerrado)" : ""
+    return { key: `${pr.ref.repo.split("/").pop()}#${pr.ref.number}`, title: `${title}${closed}` }
   }
 }

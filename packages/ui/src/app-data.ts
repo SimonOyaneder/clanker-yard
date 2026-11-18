@@ -132,6 +132,8 @@ export interface AppData {
   rebasePr(ref: PrRef): Promise<void>
   /** Publica ya en GitHub un PR local (por su id): sale apilado sobre su padre; la corrida aparece en el proyecto que lo abrió. */
   publishLocalPr(id: string): Promise<void>
+  /** PRs por su id, en cualquier estado: para nombrar el sujeto de una corrida sobre un PR que ya se cerró. */
+  prsByIds(ids: string[]): Promise<CachedPr[]>
   /** Lo que se ve de un PR local sin GitHub (descripción, commits y diff contra su base), leído del repo. */
   localPrDetail(id: string): Promise<LocalPrDetail>
   /** El diff de un commit de un PR local, para revisarlo commit por commit. */

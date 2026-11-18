@@ -95,6 +95,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     rebasePr: async (ref) => void (await client.prs.rebase(ref)),
     publishLocalPr: async (id) => void (await client.prs.publishLocal({ id })),
     localPrDetail: (id) => client.prs.localDetail({ id }),
+    prsByIds: async (ids) => (ids.length === 0 ? [] : client.prs.list({ ids })),
     localCommitDiff: (id, sha) => client.prs.localCommitDiff({ id, sha }),
     issues: (projectId) => client.issues.list({ projectId }),
     queue: (projectId) => client.projects.queue({ id: projectId }),
