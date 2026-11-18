@@ -7,6 +7,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { startCore } from "../core";
 import { createClaudeRuntime } from "../agents/claude/claude-runtime";
 import { createOpencodeRuntime } from "../agents/opencode/opencode-runtime";
+import { createCodexRuntime } from "../agents/codex/codex-runtime";
 import { createConnections } from "../connections/connections";
 import { createFileSecrets } from "../secrets/encrypted-file";
 import { createKeychainSecrets } from "../secrets/keychain";
@@ -114,6 +115,7 @@ export async function runCore(opts: RunCoreOptions): Promise<"running" | "starte
         }),
         // Las entradas de perfil con `runtime: "opencode"`; si opencode no está instalado, su breaker lo dice al primer agente.
         createOpencodeRuntime({ home: opts.dataDir, procs }),
+        createCodexRuntime({ home: opts.dataDir, store, procs }),
       ],
       coreVersion: pkg.version,
       uiKeyHash,
