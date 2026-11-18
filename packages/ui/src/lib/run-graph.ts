@@ -191,7 +191,10 @@ export interface NodeState {
   outcome: string | null
   error: string | null
   costMicros: number
+  /** Lo que duraron sus visitas ya cerradas; `null` si ninguna empezó. */
   durationMs: number | null
+  /** Desde cuándo corre la visita abierta (se suma a `durationMs` con la hora actual), o `null`. */
+  openSince: number | null
   /** Cuántas veces se entró al nodo. */
   visits: number
   /** La vuelta (de un edge con rondas) en que corrió por última vez; 0 si no cuenta. */
@@ -202,11 +205,11 @@ export interface NodeState {
 }
 
 /** Un nodo al que ninguna corrida llegó. */
-export const IDLE_NODE: NodeState = { status: "pending", outcome: null, error: null, costMicros: 0, durationMs: null, visits: 0, round: 0, current: false, stepId: null }
+export const IDLE_NODE: NodeState = { status: "pending", outcome: null, error: null, costMicros: 0, durationMs: null, openSince: null, visits: 0, round: 0, current: false, stepId: null }
 
 const isClosed = (status: StepStatus) => status === "done" || status === "failed" || status === "canceled"
 
-function stateOf(steps: readonly Step[], kind: GraphNodeKind, now: number): NodeState {
+function stateOf(steps: readonly Step[], kind: GraphNodeKind): NodeState {
   const last = steps.at(-1)
   if (!last) return IDLE_NODE
   const timed = steps.filter((s) => s.startedAt !== null)
@@ -215,7 +218,8 @@ function stateOf(steps: readonly Step[], kind: GraphNodeKind, now: number): Node
     outcome: last.outcome,
     error: last.error,
     costMicros: steps.reduce((sum, s) => sum + s.costMicros, 0),
-    durationMs: timed.length ? timed.reduce((sum, s) => sum + ((s.endedAt ?? now) - s.startedAt!), 0) : null,
+    durationMs: timed.length ? timed.reduce((sum, s) => sum + (s.endedAt === null ? 0 : s.endedAt - s.startedAt!), 0) : null,
+    openSince: timed.find((s) => s.endedAt === null)?.startedAt ?? null,
     visits: steps.length,
     round: Math.max(...steps.map((s) => s.round)),
     // Un wait que espera es el paso actual; un parallel o un flow que esperan lo son sus ramas o su hija.
@@ -225,7 +229,7 @@ function stateOf(steps: readonly Step[], kind: GraphNodeKind, now: number): Node
 }
 
 /** El estado de cada nodo del grafo según los pasos de la corrida. */
-export function nodeStates(shape: GraphShape, run: Pick<RunDetail, "steps" | "outcome">, now: number): Map<string, NodeState> {
+export function nodeStates(shape: GraphShape, run: Pick<RunDetail, "steps" | "outcome">): Map<string, NodeState> {
   const byNode = new Map<string, Step[]>()
   for (const step of run.steps) byNode.set(step.nodeId, [...(byNode.get(step.nodeId) ?? []), step])
   const states = new Map<string, NodeState>()
@@ -235,18 +239,18 @@ export function nodeStates(shape: GraphShape, run: Pick<RunDetail, "steps" | "ou
       const reached = END_OUTCOME[n.id as keyof typeof END_OUTCOME] === run.outcome
       states.set(n.id, reached ? { ...IDLE_NODE, status: "done", visits: 1 } : IDLE_NODE)
     } else if (n.kind === "join") {
-      states.set(n.id, joinState(byNode, n.id.slice(0, -"#join".length), now))
+      states.set(n.id, joinState(byNode, n.id.slice(0, -"#join".length)))
     } else {
-      states.set(n.id, stateOf(byNode.get(n.id) ?? [], n.kind, now))
+      states.set(n.id, stateOf(byNode.get(n.id) ?? [], n.kind))
     }
   }
   return states
 }
 
 // El join no tiene paso propio salvo con rol (`nodo#join`): sin él termina cuando cierra el parallel.
-function joinState(byNode: Map<string, Step[]>, parallelId: string, now: number): NodeState {
+function joinState(byNode: Map<string, Step[]>, parallelId: string): NodeState {
   const consolidator = byNode.get(joinId(parallelId))
-  if (consolidator) return stateOf(consolidator, "agent", now)
+  if (consolidator) return stateOf(consolidator, "agent")
   const parallel = byNode.get(parallelId)?.at(-1)
   if (!parallel || !isClosed(parallel.status)) return IDLE_NODE
   return { ...IDLE_NODE, status: parallel.status, outcome: parallel.outcome, visits: 1, round: parallel.round }

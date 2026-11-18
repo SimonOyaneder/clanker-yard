@@ -13,7 +13,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuShortcut, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useNow } from "@/hooks/use-now"
+import { Elapsed } from "@/components/elapsed"
 import { copy } from "@/lib/clipboard"
 import { absolute, compactCount, costUsd, elapsed, issueKey, tone } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
@@ -44,8 +44,6 @@ const PANEL_SIZE_PREF = "stepPanelSize"
 // línea de tiempo de sus pasos en el orden en que se crearon. A la derecha, redimensionable, el panel del
 // paso elegido: qué recibió y qué dijo el agente, o qué comando corrió la acción.
 export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, stepTab, onStepTab }: RunViewProps) {
-  const ticking = run.status === "running" || run.status === "waiting"
-  const now = useNow(ticking)
   const failure = run.status === "failed" ? run.steps.findLast((s) => s.status === "failed" && s.error) : undefined
   const shape = useMemo(() => shapeOf(run.flowDef, run.steps), [run.flowDef, run.steps])
   const copySessionId = useCopySessionId()
@@ -107,7 +105,7 @@ export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, step
 
       <StatBar
         items={[
-          { label: "Tiempo", value: elapsed((run.endedAt ?? now) - run.startedAt), sub: run.endedAt ? "terminó" : "en curso" },
+          { label: "Tiempo", value: run.endedAt ? elapsed(run.endedAt - run.startedAt) : <Elapsed since={run.startedAt} />, sub: run.endedAt ? "terminó" : "en curso" },
           { label: "Costo", value: costUsd(run.costMicros) },
           { label: "Tokens", value: compactCount(run.usage.input + run.usage.output + run.usage.cacheRead + run.usage.cacheWrite), sub: `${compactCount(run.usage.output)} de salida` },
           { label: "Caché", value: cacheHit === null ? "—" : `${cacheHit}%`, sub: "de la entrada leída de caché" },
@@ -141,7 +139,7 @@ export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, step
                 </Hint>
               </TabsList>
               <TabsContent value="graph" className="min-h-0">
-                <RunGraph run={run} now={now} shape={shape} selected={open?.id ?? null} onSelect={onNodeChange} onCopySessionId={copySessionId} />
+                <RunGraph run={run} shape={shape} selected={open?.id ?? null} onSelect={onNodeChange} onCopySessionId={copySessionId} />
               </TabsContent>
               <TabsContent value="timeline" className="min-h-0 overflow-y-auto">
                 <section className="flex flex-col gap-2">
@@ -151,7 +149,7 @@ export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, step
                   ) : (
                     <ol className="overflow-hidden rounded-lg border bg-card">
                       {run.steps.map((step) => (
-                        <StepRow key={step.id} step={step} now={now} selected={step.nodeId === open?.id} kind={shape.nodes.find((n) => n.id === step.nodeId)?.kind} onOpen={() => onNodeChange(step.nodeId)} onCopySessionId={() => copySessionId(step.id)} />
+                        <StepRow key={step.id} step={step} selected={step.nodeId === open?.id} kind={shape.nodes.find((n) => n.id === step.nodeId)?.kind} onOpen={() => onNodeChange(step.nodeId)} onCopySessionId={() => copySessionId(step.id)} />
                       ))}
                     </ol>
                   )}
@@ -226,7 +224,7 @@ function RunActions({ run, caps }: { run: RunDetail; caps: RunCaps }) {
   )
 }
 
-function StepRow({ step, now, selected, kind, onOpen, onCopySessionId }: { step: Step; now: number; selected: boolean; kind: GraphNodeKind | undefined; onOpen: () => void; onCopySessionId: () => void }) {
+function StepRow({ step, selected, kind, onOpen, onCopySessionId }: { step: Step; selected: boolean; kind: GraphNodeKind | undefined; onOpen: () => void; onCopySessionId: () => void }) {
   const look = stepLook(step.status)
   return (
     <li className="border-b last:border-b-0">
@@ -271,7 +269,7 @@ function StepRow({ step, now, selected, kind, onOpen, onCopySessionId }: { step:
                 </Pill>
               )}
               <span className="w-14 flex-none text-right text-xs text-muted-foreground tabular-nums">
-                {step.startedAt !== null ? elapsed((step.endedAt ?? now) - step.startedAt) : ""}
+                {step.startedAt === null ? "" : step.endedAt === null ? <Elapsed since={step.startedAt} /> : elapsed(step.endedAt - step.startedAt)}
               </span>
               <span className="w-16 flex-none text-right text-xs tabular-nums">{step.costMicros ? costUsd(step.costMicros) : ""}</span>
             </div>

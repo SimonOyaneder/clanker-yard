@@ -7,7 +7,7 @@ import { FlowNode, type FlowNodeData, type NodeCommands } from "@/components/gra
 import { type RunCommands, useRunCommands } from "@/components/run/run-commands"
 import { useColorMode } from "@/hooks/use-color-mode"
 import { stepCaps } from "@/lib/project/run-commands"
-import { IDLE_NODE, layoutShape, nodeStates, resolveMax, roundsOf, shapeOf, type GraphEdge, type GraphShape, type NodeState } from "@/lib/run-graph"
+import { IDLE_NODE, layoutShape, nodeStates, resolveMax, roundsOf, shapeOf, type GraphEdge, type GraphShape, type NodeBox, type NodeState } from "@/lib/run-graph"
 
 const nodeTypes = { flow: FlowNode }
 const edgeTypes = { flow: FlowEdge }
@@ -59,9 +59,8 @@ function commandsOf(run: RunDetail, shape: GraphShape, nodeId: string, commands:
   }
 }
 
-function toFlow(shape: GraphShape, run: RunDetail, now: number, { selected, onSelect, onCopySessionId }: Selection, commands: RunCommands): { nodes: Node<FlowNodeData>[]; edges: FlowEdgeType[] } {
-  const boxes = layoutShape(shape)
-  const states = nodeStates(shape, run, now)
+function toFlow(shape: GraphShape, boxes: Map<string, NodeBox>, run: RunDetail, { selected, onSelect, onCopySessionId }: Selection, commands: RunCommands): { nodes: Node<FlowNodeData>[]; edges: FlowEdgeType[] } {
+  const states = nodeStates(shape, run)
   return {
     nodes: shape.nodes.map((node) => {
       const box = boxes.get(node.id)!
@@ -141,9 +140,11 @@ function GraphCanvas({ nodes, edges, label, onSelect }: { nodes: Node<FlowNodeDa
 
 // La corrida como el grafo de su flujo, sea cual sea: solo lectura. Un clic (o ⏎ sobre el nodo enfocado)
 // abre el panel de su paso.
-export function RunGraph({ run, now, shape, selected, onSelect, onCopySessionId }: { run: RunDetail; now: number; shape: GraphShape } & Selection) {
+export function RunGraph({ run, shape, selected, onSelect, onCopySessionId }: { run: RunDetail; shape: GraphShape } & Selection) {
   const commands = useRunCommands()
-  const { nodes, edges } = useMemo(() => toFlow(shape, run, now, { selected, onSelect, onCopySessionId }, commands), [shape, run, now, selected, onSelect, onCopySessionId, commands])
+  // El layout (dagre) depende solo de la forma; el estado de los nodos, de la corrida. El tiempo que corre lo lleva cada nodo.
+  const boxes = useMemo(() => layoutShape(shape), [shape])
+  const { nodes, edges } = useMemo(() => toFlow(shape, boxes, run, { selected, onSelect, onCopySessionId }, commands), [shape, boxes, run, selected, onSelect, onCopySessionId, commands])
   return <GraphCanvas nodes={nodes} edges={edges} label={`Grafo del flujo ${run.flow.slug}`} onSelect={onSelect} />
 }
 

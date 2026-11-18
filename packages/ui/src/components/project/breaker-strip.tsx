@@ -5,6 +5,7 @@ import { Hint, Pill } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useAppActions } from "@/lib/app-context"
+import { useNow } from "@/hooks/use-now"
 import { absolute, tone } from "@/lib/format"
 import { BREAKER_CAUSE, pausedBy } from "@/lib/project/project-ops"
 
@@ -48,18 +49,20 @@ export function RetryBreakerButton({ retrying, onRetry, variant = "outline" }: {
 
 // Un breaker abierto pausa solo lo que depende de su causa: la franja dice qué, por qué y cuándo se vuelve a probar,
 // y deja probar ya cuando la causa se arregló a mano.
-export function BreakerStrip({ breakers, now }: { breakers: readonly Breaker[]; now: number }) {
+export function BreakerStrip({ breakers }: { breakers: readonly Breaker[] }) {
   if (!breakers.length) return null
   return (
     <section aria-label="Breakers abiertos" className="flex flex-col gap-2">
       {breakers.map((b) => (
-        <BreakerRow key={b.scope} breaker={b} now={now} />
+        <BreakerRow key={b.scope} breaker={b} />
       ))}
     </section>
   )
 }
 
-function BreakerRow({ breaker: b, now }: { breaker: Breaker; now: number }) {
+function BreakerRow({ breaker: b }: { breaker: Breaker }) {
+  // La cuenta regresiva al próximo reintento: el reloj vive aquí, no en la vista del proyecto.
+  const now = useNow(true)
   const { retrying, retry } = useRetryBreaker(b.scope)
   return (
     <ContextMenu>

@@ -57,7 +57,7 @@ export function Ago({ at, className }: { at: number | string | null | undefined;
 }
 
 // Fila de métricas en un solo bloque, en vez de cinco tarjetas sueltas.
-export function StatBar({ items }: { items: { label: string; value: string; sub?: string; tone?: string; /** Un control en la esquina de la celda. */ action?: ReactNode }[] }) {
+export function StatBar({ items }: { items: { label: string; value: ReactNode; sub?: string; tone?: string; /** Un control en la esquina de la celda. */ action?: ReactNode }[] }) {
   return (
     <section aria-label="Métricas" className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] overflow-hidden rounded-lg border bg-card">
       {items.map((k, i) => (

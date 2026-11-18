@@ -24,9 +24,9 @@ export interface Stepper {
  * como un paso (sus ramas y su join no se listan) y los fines (`@done`...) tampoco. Nada aquí nombra roles ni
  * nodos: todo sale del `flowDef` que fijó la corrida.
  */
-export function stepperOf(run: Pick<RunDetail, "flowDef" | "steps" | "outcome">, now: number): Stepper {
+export function stepperOf(run: Pick<RunDetail, "flowDef" | "steps" | "outcome">): Stepper {
   const shape = shapeOf(run.flowDef, run.steps)
-  const states = nodeStates(shape, run, now)
+  const states = nodeStates(shape, run)
   // Las ramas de un parallel (y su join) no se listan: el parallel es un solo paso.
   const inBranch = new Set(shape.edges.filter((e) => e.branch).map((e) => e.to))
 

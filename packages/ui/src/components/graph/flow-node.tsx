@@ -14,7 +14,8 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { copy } from "@/lib/clipboard"
-import { costUsd, elapsed, tone } from "@/lib/format"
+import { Elapsed } from "@/components/elapsed"
+import { costUsd, tone } from "@/lib/format"
 import { boxSize, type GraphNode, type GraphNodeKind, type NodeState } from "@/lib/run-graph"
 import { cn } from "@/lib/utils"
 
@@ -192,7 +193,11 @@ function Numbers({ state }: { state: NodeState }) {
   return (
     <span className="flex flex-none items-center gap-1.5 text-muted-foreground">
       {state.costMicros > 0 ? <span>{costUsd(state.costMicros)}</span> : null}
-      {state.durationMs !== null ? <span>{elapsed(state.durationMs)}</span> : null}
+      {state.durationMs !== null ? (
+        <span>
+          <Elapsed base={state.durationMs} since={state.openSince} />
+        </span>
+      ) : null}
     </span>
   )
 }

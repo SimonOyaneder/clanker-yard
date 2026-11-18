@@ -47,7 +47,7 @@ test("las vueltas cuentan sus rondas contra el tope del param de la corrida", as
 test("cada nodo toma el estado de sus pasos: el actual late, las visitas se cuentan y el costo se suma", async () => {
   const [running] = await runs()
   const shape = shapeOf(running!.flowDef, running!.steps)
-  const states = nodeStates(shape, running!, NOW)
+  const states = nodeStates(shape, running!)
 
   expect(states.get("rv-bugs")).toMatchObject({ status: "running", current: true, visits: 2, costMicros: 570_000 })
   expect(states.get("checks")).toMatchObject({ status: "done", current: false, visits: 2 })
@@ -61,7 +61,7 @@ test("cada nodo toma el estado de sus pasos: el actual late, las visitas se cuen
 test("una corrida terminada marca por dónde acabó el flujo", async () => {
   const [, done] = await runs()
   const shape = shapeOf(done!.flowDef, done!.steps)
-  const states = nodeStates(shape, done!, NOW)
+  const states = nodeStates(shape, done!)
 
   expect(states.get("@done")?.status).toBe("done")
   expect(states.get("@failed")?.status).toBe("pending")
@@ -74,7 +74,7 @@ test("una corrida que llega a @failed o @blocked queda failed y marca ese fin", 
 
   for (const end of ["failed", "blocked"] as const) {
     const ended: RunDetail = { ...done!, status: "failed", outcome: end }
-    const states = nodeStates(shape, ended, NOW)
+    const states = nodeStates(shape, ended)
     expect(states.get(`@${end}`)?.status).toBe("done")
     expect(states.get("@done")?.status).toBe("pending")
   }

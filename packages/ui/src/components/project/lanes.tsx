@@ -8,7 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useLiveQuery } from "@/hooks/use-live"
 import { useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
-import { costUsd, elapsed, tone } from "@/lib/format"
+import { useMemo } from "react"
+import { Elapsed } from "@/components/elapsed"
+import { costUsd, tone } from "@/lib/format"
 import { holdsLane, type LaneUsage } from "@/lib/project/project-ops"
 import { type Stepper, stepperOf } from "@/lib/project/stepper"
 import type { SubjectLabel } from "@/lib/project/subject"
@@ -32,12 +34,11 @@ interface BoardProps {
   runs: readonly Run[]
   usage: Record<Lane, LaneUsage>
   subjectOf: (run: Run) => SubjectLabel
-  now: number
 }
 
 // Los dos carriles lado a lado: dev y mantenimiento tienen cupos separados, así que un rebase se ve en
 // mantenimiento aunque dev esté lleno.
-export function LaneBoard({ project, runs, usage, subjectOf, now }: BoardProps) {
+export function LaneBoard({ project, runs, usage, subjectOf }: BoardProps) {
   const lenderOf = (run: Run) => (run.borrowedFromRunId ? runs.find((r) => r.id === run.borrowedFromRunId) : undefined)
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -53,7 +54,6 @@ export function LaneBoard({ project, runs, usage, subjectOf, now }: BoardProps) 
             project={project}
             subjectOf={subjectOf}
             lenderOf={lenderOf}
-            now={now}
           />
         )
       })}
@@ -69,7 +69,6 @@ function LaneColumn({
   project,
   subjectOf,
   lenderOf,
-  now,
 }: {
   lane: Lane
   usage: LaneUsage
@@ -78,7 +77,6 @@ function LaneColumn({
   project: ClankerProject
   subjectOf: (run: Run) => SubjectLabel
   lenderOf: (run: Run) => Run | undefined
-  now: number
 }) {
   const words = LANE[lane]
   const full = usage.active >= usage.capacity
@@ -103,7 +101,7 @@ function LaneColumn({
       {holding.length === 0 && waiting.length === 0 ? <p className="rounded-lg border border-dashed px-3 py-4 text-muted-foreground">{words.empty}</p> : null}
       {holding.map((run) => {
         const lender = lenderOf(run)
-        return <SlotCard key={run.id} run={run} subject={subjectOf(run)} lentBy={lender && subjectOf(lender)} project={project} now={now} />
+        return <SlotCard key={run.id} run={run} subject={subjectOf(run)} lentBy={lender && subjectOf(lender)} project={project} />
       })}
       {waiting.length ? (
         <ul className="overflow-hidden rounded-lg border bg-card">
@@ -136,19 +134,17 @@ function SlotCard({
   subject,
   lentBy,
   project,
-  now,
 }: {
   run: Run
   subject: SubjectLabel
   /** El sujeto de la corrida de dev estacionada que le prestó el suyo, si esta es un préstamo. */
   lentBy: SubjectLabel | undefined
   project: ClankerProject
-  now: number
 }) {
   const data = useAppData()
   const actions = useAppActions()
   const detail = useLiveQuery(`run:${run.id}`, () => data.run(run.id), { on: ["run.*", "step.*"] })
-  const stepper = detail.data ? stepperOf(detail.data, now) : null
+  const stepper = useMemo(() => (detail.data ? stepperOf(detail.data) : null), [detail.data])
   const open = () => actions.openRun(project.slug, run.id)
   return (
     <ContextMenu>
@@ -171,7 +167,7 @@ function SlotCard({
           {stepper ? <FlowStepper stepper={stepper} /> : <Skeleton className="h-1.5 w-full" />}
           <span className="flex w-full items-center gap-3 text-xs text-muted-foreground">
             <span className="min-w-0 flex-1 truncate">{stepper ? whereIs(run, stepper) : " "}</span>
-            <span className="flex-none tabular-nums">{elapsed(now - run.startedAt)}</span>
+            <span className="flex-none tabular-nums"><Elapsed since={run.startedAt} /></span>
             <span className="flex-none text-foreground tabular-nums">{costUsd(run.costMicros)}</span>
           </span>
         </button>

@@ -36,7 +36,7 @@ async function renderGraph(index: number, props: Partial<Pick<Parameters<typeof 
     <AppDataProvider value={createMemoryAppData(NOW)}>
       <RunCommandsProvider>
         <TooltipProvider>
-          <RunGraph run={run} now={NOW} shape={shapeOf(run.flowDef, run.steps)} selected={null} onSelect={() => {}} onCopySessionId={() => {}} {...props} />
+          <RunGraph run={run} shape={shapeOf(run.flowDef, run.steps)} selected={null} onSelect={() => {}} onCopySessionId={() => {}} {...props} />
         </TooltipProvider>
       </RunCommandsProvider>
     </AppDataProvider>,

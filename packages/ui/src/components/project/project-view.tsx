@@ -1,7 +1,7 @@
 import type { Breaker, CachedIssue, CachedPr, ClankerProject, Decision, Lanes, QueueEntry, Run } from "@clanker/api"
 import { PR_TRIGGERS } from "@/lib/live-triggers"
 import { Copy, Ellipsis, ListTodo, Pause, Play } from "lucide-react"
-import { type ReactNode, useRef } from "react"
+import { type ReactNode, useRef, useState } from "react"
 import { BreakerStrip } from "@/components/project/breaker-strip"
 import { Ago, Hint, Pill, SectionTitle, StatBar } from "@/components/common"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -13,7 +13,7 @@ import { RunStatusIcon, RunStatusPill, isLive } from "@/components/project/statu
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { useNow } from "@/hooks/use-now"
+import { Elapsed } from "@/components/elapsed"
 import { useAppActions } from "@/lib/app-context"
 import { copy } from "@/lib/clipboard"
 import { costUsd, elapsed, tone } from "@/lib/format"
@@ -118,11 +118,9 @@ export function ProjectFrame({ project, tab, onTab, children }: { project: Clank
 // Operación: qué corre en cada carril, qué espera a una persona, qué viene y por qué no corre.
 export function ProjectView({ project, runs, issues, queue, queueError, decisions, lanes, breakers, prs }: Props) {
   const roots = runs.filter((r) => r.parentRunId === null)
-  const live = roots.filter((r) => isLive(r.status))
   const parked = parkedRuns(roots)
   const finished = roots.filter((r) => !isLive(r.status))
   const stopped = breakersOf(project, breakers)
-  const now = useNow(live.length > 0 || stopped.length > 0)
   // El sujeto de una corrida sobre un PR que ya se cerró (un restack, por ejemplo) no está entre los abiertos: se pide aparte.
   const appData = useAppData()
   const missing = [...new Set(runs.filter((r) => r.subject.type === "pr" && !prs.some((p) => p.id === r.subject.id)).map((r) => r.subject.id))].sort()
@@ -132,7 +130,7 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
   const pending = decisions.filter((d) => d.status === "pending")
   const queued = queue.filter((e) => e.state !== "blocked")
   const blocked = queue.filter((e) => e.state === "blocked")
-  const spent = spentToday(runs, now)
+  const spent = spentToday(runs, Date.now())
   const actions = useAppActions()
   const unpicked = needsTrackerProject(project)
   const pickTracker = { label: "Elegir el proyecto de Linear", onClick: actions.editTrackerProject }
@@ -160,12 +158,12 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
       />
 
       {unpicked ? <PickTrackerProject project={project} onPick={actions.editTrackerProject} /> : null}
-      <BreakerStrip breakers={stopped} now={now} />
+      <BreakerStrip breakers={stopped} />
 
       {roots.length === 0 && queue.length === 0 ? (
         <EmptyProject project={project} />
       ) : (
-        <LaneBoard project={project} runs={roots} usage={usage} subjectOf={subjectOf} now={now} />
+        <LaneBoard project={project} runs={roots} usage={usage} subjectOf={subjectOf} />
       )}
 
       <ParkedList runs={parked} decisions={decisions} subjectOf={subjectOf} borrowers={borrowersOf(roots)} project={project} />
@@ -179,7 +177,7 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
         />
       ) : null}
       <QueueList title="Bloqueadas" entries={blocked} project={project} />
-      <RunGroup title="Terminadas" runs={finished} subjectOf={subjectOf} now={now} project={project} />
+      <RunGroup title="Terminadas" runs={finished} subjectOf={subjectOf} project={project} />
     </>
   )
 }
@@ -291,24 +289,33 @@ function EmptyProject({ project }: { project: ClankerProject }) {
   )
 }
 
-function RunGroup({ title, runs, subjectOf, now, project }: { title: string; runs: Run[]; subjectOf: (run: Run) => SubjectLabel; now: number; project: ClankerProject }) {
+/** Cuántas terminadas se dibujan de entrada: con el historial importado son cientos de filas con su menú y sus tooltips. */
+const FINISHED_PAGE = 50
+
+function RunGroup({ title, runs, subjectOf, project }: { title: string; runs: Run[]; subjectOf: (run: Run) => SubjectLabel; project: ClankerProject }) {
+  const [shown, setShown] = useState(FINISHED_PAGE)
   if (!runs.length) return null
+  const rest = runs.length - shown
   return (
     <section className="flex flex-col gap-2">
       <SectionTitle count={runs.length}>{title}</SectionTitle>
       <ul className="overflow-hidden rounded-lg border bg-card">
-        {runs.map((run) => (
-          <RunRow key={run.id} run={run} subject={subjectOf(run)} now={now} project={project} />
+        {runs.slice(0, shown).map((run) => (
+          <RunRow key={run.id} run={run} subject={subjectOf(run)} project={project} />
         ))}
       </ul>
+      {rest > 0 ? (
+        <Button variant="ghost" size="sm" className="self-start text-xs text-muted-foreground" onClick={() => setShown((n) => n + FINISHED_PAGE)}>
+          Ver {Math.min(rest, FINISHED_PAGE)} más de {rest}
+        </Button>
+      ) : null}
     </section>
   )
 }
 
-function RunRow({ run, subject, now, project }: { run: Run; subject: SubjectLabel; now: number; project: ClankerProject }) {
+function RunRow({ run, subject, project }: { run: Run; subject: SubjectLabel; project: ClankerProject }) {
   const actions = useAppActions()
   const open = () => actions.openRun(project.slug, run.id)
-  const duration = (run.endedAt ?? now) - run.startedAt
   return (
     <li className="border-b last:border-b-0">
       <ContextMenu>
@@ -321,7 +328,7 @@ function RunRow({ run, subject, now, project }: { run: Run; subject: SubjectLabe
               {run.flow.slug} v{run.flow.version}
             </Pill>
             <RunStatusPill run={run} />
-            <span className="w-20 flex-none text-right text-xs text-muted-foreground tabular-nums">{elapsed(duration)}</span>
+            <span className="w-20 flex-none text-right text-xs text-muted-foreground tabular-nums">{run.endedAt === null ? <Elapsed since={run.startedAt} /> : elapsed(run.endedAt - run.startedAt)}</span>
             <span className="w-16 flex-none text-right text-xs tabular-nums">{costUsd(run.costMicros)}</span>
             <Ago at={run.startedAt} className="w-20 flex-none text-right text-xs text-muted-foreground" />
           </button>
