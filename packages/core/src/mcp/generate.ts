@@ -89,6 +89,11 @@ export function generateMcp(contract: Contract = apiContract, { kindSchemas = MC
     const input = procedure["~orpc"].inputSchema;
     const route = (shared: boolean): McpRoute => ({ path, shared, hasInput: input !== undefined });
 
+    if ("resource" in meta && meta.resource !== undefined) {
+      if (resources.has(meta.resource)) throw new Error(`${where}: el resource "${meta.resource}" ya lo declara otro procedimiento.`);
+      resources.set(meta.resource, route(false));
+    }
+
     if ("tool" in meta) {
       if (isWrite(meta.tool)) {
         const written = writeInputs.get(meta.tool);
@@ -109,17 +114,13 @@ export function generateMcp(contract: Contract = apiContract, { kindSchemas = MC
       }
     } else if ("action" in meta) {
       if (!meta.annotations) throw new Error(`${where}: la acción "${meta.action}" no declara anotaciones (readOnlyHint, destructiveHint...).`);
-      if (!input) throw new Error(`${where}: la acción "${meta.action}" necesita un input.`);
       actions.push({
         name: meta.action,
         description: meta.description,
         annotations: meta.annotations,
-        inputSchema: objectOf(where, input),
+        inputSchema: input === undefined ? z.strictObject({}) : objectOf(where, input),
         routes: new Map([["", route(false)]]),
       });
-    } else {
-      if (resources.has(meta.resource)) throw new Error(`${where}: el resource "${meta.resource}" ya lo declara otro procedimiento.`);
-      resources.set(meta.resource, route(false));
     }
   }
 
@@ -131,7 +132,13 @@ export function generateMcp(contract: Contract = apiContract, { kindSchemas = MC
       schemas.set(kind, z.toJSONSchema(schema, { io }));
     }
   }
-  return { tools: [...tools, ...actions], schemas, resources: requireAll(resources) };
+  const allTools = [...tools, ...actions];
+  const names = new Set<string>();
+  for (const { name } of allTools) {
+    if (names.has(name)) throw new Error(`El MCP ya declara una tool llamada "${name}".`);
+    names.add(name);
+  }
+  return { tools: allTools, schemas, resources: requireAll(resources) };
 }
 
 function crudTool(name: "list" | "get", routes: Map<string, McpRoute>, filters: Map<McpKind, z.ZodObject>): McpTool {
