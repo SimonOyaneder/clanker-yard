@@ -497,6 +497,35 @@ describe("stack.restack con una base combinada", () => {
   const run = (number: number) => restack.run(restack.args.parse({ pr: { account: ACCOUNT, repo: REPO, number } }), ctx());
   const prBase = (number: number) => github.pulls().find((p) => p.number === number)?.base.ref;
 
+  test("un padre republicado (branch y PR nuevos, pr_parents repuntado) sigue siendo padre: la base no se disuelve al mergear el otro", async () => {
+    const { branch, child } = await combinedPr();
+    // Como `prs.republish`: cla-2 sale de nuevo como cla-2b (mismo contenido, PR nuevo), el viejo se cierra y el hijo
+    // pasa a colgar del nuevo; la base combinada sigue guardando la branch vieja.
+    elsewhere((g) => {
+      g("checkout", "--quiet", "-b", "cla-2b", "origin/cla-2");
+      g("push", "--quiet", "origin", "cla-2b");
+    });
+    const fresh = github.openPr({ head: "cla-2b" });
+    github.pr(2).close();
+    elsewhere((g) => g("push", "--quiet", "origin", "--delete", "cla-2"));
+    store.db.$client.prepare("UPDATE pull_requests SET state = 'closed' WHERE number = 2").run();
+    const freshId = newId("pr");
+    store.db.$client
+      .prepare("INSERT INTO pull_requests (id, repo_id, number, node_id, head_ref, base_ref, head_sha, state, is_draft, owned) VALUES (?, 'repo_r1', ?, ?, 'cla-2b', 'main', ?, 'open', 1, 1)")
+      .run(freshId, fresh.number, `PR_${fresh.number}`, remoteSha("cla-2b"));
+    const childId = sql<{ id: string }>(`SELECT id FROM pull_requests WHERE number = ${child}`)[0]!.id;
+    const oldId = sql<{ id: string }>(`SELECT id FROM pull_requests WHERE number = 2`)[0]!.id;
+    store.db.$client.prepare("UPDATE pr_parents SET parent_id = ? WHERE child_id = ? AND parent_id = ?").run(freshId, childId, oldId);
+    github.pr(1).merge({ sha: squashOnMain("cla-1") });
+
+    const result = await run(1);
+
+    expect(result.output).toMatchObject({ children: [{ pr: { number: child }, status: "restacked", base: "cla-2b" }] });
+    expect(row(branch)).toMatchObject({ status: "active" });
+    expect(parentsOf(branch)).toEqual(["cla-2b"]);
+    expect(repo.git("--git-dir", repo.remoteDir!, "merge-base", "--is-ancestor", remoteSha("cla-2b"), "cla-3")).toBe("");
+  });
+
   test("al mergear un padre recalcula la base con el que queda y el PR cambia de base", async () => {
     const { branch, child } = await combinedPr();
     const before = row(branch)!.head_sha;

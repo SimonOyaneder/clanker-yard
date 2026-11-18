@@ -15,6 +15,7 @@ import type { Prs } from "../prs";
 import type { PrRow } from "../pr-cache";
 import { githubPulls } from "../pr-rows";
 import { landedCommit } from "../landed";
+import { liveCombinedParents } from "../combined-parents";
 import type { RepoConfig } from "../../repos/repos";
 
 // El restack de la cadena (`docs/design.html#d-ops`, restack y restackRewritten): `stack.restack` al mergear un
@@ -335,7 +336,7 @@ async function restackChain(
     const combined = combinedBaseOf(child);
     if (!combined) return restackPlain(lease, start);
     try {
-      return await restackCombined(lease, combined, merged);
+      return await restackCombined(lease, child, combined, merged);
     } catch (error) {
       if (!(error instanceof StaleCombinedBaseError)) throw error;
     }
@@ -361,16 +362,10 @@ async function restackChain(
    * ninguno. Si choca no hay `pr.conflict`: el flujo de rebase rebasea sobre una branch y no sabe rehacer la
    * base combinada, así que el conflicto queda como una nota para una persona.
    */
-  async function restackCombined(lease: WorkspaceRef, combined: CombinedBase, merged: string | undefined): Promise<Attempt> {
-    const open = new Set(
-      store.db
-        .select({ headRef: pullRequests.headRef })
-        .from(pullRequests)
-        .where(and(eq(pullRequests.repoId, repoId), inArray(pullRequests.headRef, combined.parents.map((parent) => parent.branch)), inArray(pullRequests.state, ["open", "local"])))
-        .all()
-        .map((row) => row.headRef),
-    );
-    const parents = combined.parents.filter((parent) => parent.branch !== merged && open.has(parent.branch));
+  async function restackCombined(lease: WorkspaceRef, child: PrRow, combined: CombinedBase, merged: string | undefined): Promise<Attempt> {
+    const parents = liveCombinedParents(store, child, combined, merged);
+    // Sin saber quiénes son sus padres no se disuelve nada: el hijo queda como estaba.
+    if (parents === undefined) throw new RebaseError(`no se pudo identificar a los padres de la base combinada ${combined.branch}: ninguno es un PR conocido.`);
     const result = await workspaces.restackCombined(lease, { council: false, branch: combined.branch, parents });
     return { result, base: parents[0]?.branch ?? deps.repoConfig(repoId).defaultBranch, ...(parents.length > 0 && { combinedBranch: combined.branch }) };
   }

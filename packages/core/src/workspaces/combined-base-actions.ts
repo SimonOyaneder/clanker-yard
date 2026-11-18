@@ -5,6 +5,7 @@ import { PermanentActionError, type ActionDef } from "../flows/catalog";
 import { GitError } from "../git/git";
 import { emitOnce } from "../github/marks";
 import { prById } from "../github/pr-rows";
+import { liveCombinedParents } from "../github/combined-parents";
 import type { RepoConfig } from "../repos/repos";
 import { combinedBases, pullRequests, workspaces as workspacesTable } from "../store/schema";
 import type { Store } from "../store/store";
@@ -63,16 +64,18 @@ export function workspaceCombinedBaseMergeAction({ store, workspaces, repoConfig
         }
       };
 
-      // Los padres que siguen vivos, en el orden de la base; un padre que ya se mergeó lo trae la branch por defecto.
-      const live = new Set(
-        store.db
-          .select({ headRef: pullRequests.headRef })
-          .from(pullRequests)
-          .where(and(eq(pullRequests.repoId, row.repoId), inArray(pullRequests.headRef, combined.parents.map((p) => p.branch)), inArray(pullRequests.state, ["open", "local"])))
-          .all()
-          .map((p) => p.headRef),
-      );
-      const parents = combined.parents.filter((p) => live.has(p.branch));
+      // Los padres que siguen vivos, en el orden de la base (los del PR hijo, `liveCombinedParents`); un padre que ya se
+      // mergeó lo trae la branch por defecto.
+      const child = combined.issueId
+        ? store.db
+            .select()
+            .from(pullRequests)
+            .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.issueId, combined.issueId), inArray(pullRequests.state, ["open", "local"])))
+            .get()
+        : undefined;
+      // Sin PR hijo todavía (la issue no se lanzó), los padres salen de las branches de la base.
+      const parents = liveCombinedParents(store, child ?? { id: "", repoId: row.repoId }, combined);
+      if (parents === undefined || parents.length === 0) throw new PermanentActionError(`No se pudo identificar a los padres vivos de ${base}: no hay base que rearmar.`);
 
       if (resume) {
         const marked = await withMarkers(g);
