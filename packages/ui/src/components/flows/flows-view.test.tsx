@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 import type { DefRecord } from "@clanker/api"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { afterEach, beforeAll, beforeEach, expect, test } from "vitest"
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest"
 import { App } from "@/App"
 import type { AppData } from "@/app-data"
 import { browserHost } from "@/browser-host"
 import { createMemoryAppData } from "@/demo/memory-app-data"
+
+// Cada test monta la app entera y recorre el editor: solos tardan 1 a 4 s, y con la suite en paralelo pasaban de los
+// 5 s por defecto.
+vi.setConfig({ testTimeout: 15_000 })
 
 beforeAll(() => {
   window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false })) as typeof window.matchMedia
