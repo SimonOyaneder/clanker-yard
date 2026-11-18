@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Profile, Role, type PrRef, type PrState } from "@clanker/api";
+import { eq } from "drizzle-orm";
 import { createAgents } from "./agents/agents";
 import { createBriefs } from "./agents/brief";
 import { createStepBriefs } from "./agents/step-brief";
@@ -60,6 +61,7 @@ import { createSlots } from "./slots/slots";
 import { startServer, type CoreServer, type StartServerOptions } from "./server/server";
 import { newId } from "./store/conventions";
 import type { Store } from "./store/store";
+import { prChats } from "./store/schema";
 import { createIssues } from "./tracker/issues";
 import { createLocalTracker } from "./tracker/local";
 import { createPrEvents } from "./watch/events";
@@ -69,6 +71,7 @@ import { createTrackerChanges } from "./watch/tracker-changes";
 import { startTriggers } from "./watch/triggers";
 import { createWatch } from "./watch/watch";
 import { startCleanup } from "./workspaces/cleanup";
+import { createChatScratch } from "./workspaces/scratch";
 import { createRepos } from "./repos/repos";
 import {
   createWorkspaces,
@@ -173,6 +176,17 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     remote: gitRemote,
     worktreeSetup: (dir) => readRecipe(dir)?.setup?.worktree ?? [],
   });
+  const scratch = createChatScratch({
+    store,
+    dataDir,
+    repoConfig: repos.config,
+    identityOf,
+    workspaces,
+    chatOf: (chatId) => {
+      const chat = store.db.select().from(prChats).where(eq(prChats.id, chatId)).get();
+      return chat && { prId: chat.prId, active: chat.status === "active" };
+    },
+  });
   const local = createLocalTracker({ store });
   const issues = createIssues({ store, local });
   const projects = createProjects({ store, defs });
@@ -247,7 +261,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   );
   // Un worktree cuyo PR terminó se archiva en cuanto nadie lo tiene: al soltarse el último lease (`pr.merged` y los
   // cierres sin merge llegan por `onPrChange`), y a los 7 días se borra.
-  const cleanup = startCleanup({ workspaces, errors: reporter, initialPass: false });
+  const cleanup = startCleanup({ workspaces, scratch, errors: reporter, initialPass: false });
   const stopCleaningOnRelease = store.events.subscribe(
     ({ payload }) => {
       if (payload.resource === "workspace") cleanup.request();
@@ -446,4 +460,3 @@ function profileRuntimes(defs: Defs, runtimes: RuntimeRegistry, profileSlug: str
   if (!profile.success) return [runtimes.idFor(undefined)];
   return [...new Set(Object.values(profile.data.roles).map((entry) => runtimes.idFor(entry.runtime)))];
 }
-

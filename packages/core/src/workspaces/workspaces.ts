@@ -93,6 +93,7 @@ export interface ExecOptions {
 }
 
 export interface Workspaces {
+  withRepoLock<T>(repoId: RepoId, fn: () => Promise<T>): Promise<T>;
   /**
    * Toma el lease del worktree de `branch`, creándolo si no existe. Si otra corrida lo tiene
    * vigente lanza `WorkspaceBusyError`. Renueva el lease cada ttl/3 hasta `release` o hasta perderlo.
@@ -1426,6 +1427,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
   }
 
   return {
+    withRepoLock,
     acquire,
     attach,
     rebase,

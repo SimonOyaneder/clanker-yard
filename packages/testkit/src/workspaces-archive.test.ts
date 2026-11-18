@@ -26,7 +26,7 @@ import {
   type Workspaces,
 } from "@clanker/core";
 import { seedPr } from "@clanker/core/testing";
-import { afterEach, beforeEach, describe, expect, test} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
@@ -312,6 +312,47 @@ describe("no perder trabajo", () => {
 });
 
 describe("startCleanup", () => {
+  test("espera también a los borradores, agrupa sus pedidos y aísla sus errores de los worktrees", async () => {
+    let worktreeCalls = 0;
+    let scratchCalls = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const loop = startCleanup({
+      workspaces: {
+        async cleanup() {
+          worktreeCalls++;
+          throw new Error("disco lleno");
+        },
+      },
+      scratch: {
+        async cleanup() {
+          scratchCalls++;
+          await gate;
+          throw new Error("borrador inaccesible");
+        },
+      },
+      errors: createErrorReporter({ store }),
+    });
+    try {
+      loop.request();
+      loop.request();
+      expect(scratchCalls).toBe(1);
+      release();
+      await vi.waitFor(() => {
+        expect(scratchCalls).toBe(2);
+        expect(worktreeCalls).toBe(2);
+      }, { timeout: 5_000 });
+    } finally {
+      release();
+      await loop.stop();
+    }
+
+    expect(store.events.since(0, { types: ["error"] }).map((event) => event.payload)).toEqual([
+      { scope: "workspaces.cleanup", message: "disco lleno" },
+      { scope: "chat.scratch.cleanup", message: "borrador inaccesible" },
+    ]);
+  });
+
   test("junta los pedidos que llegan en vuelo en una sola pasada más y anota una vez lo que falla", async () => {
     let calls = 0;
     let release: () => void = () => undefined;

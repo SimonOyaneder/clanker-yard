@@ -1,6 +1,7 @@
 import type {
   ArtifactHash,
   ArtifactKind,
+  ChatId,
   ConnectionProvider,
   ConnectionStatus,
   Conventions,
@@ -18,6 +19,7 @@ import type {
   Person,
   Priority,
   DecisionResolution,
+  PrChat,
   PrState,
   ProjectId,
   ProjectStatus,
@@ -921,6 +923,19 @@ export const pullRequests = sqliteTable(
     check("pull_requests_local_title", sql`${t.state} != 'local' OR ${t.title} IS NOT NULL`),
   ],
 );
+
+export const prChats = sqliteTable("pr_chats", {
+  id: text().$type<ChatId>().primaryKey(),
+  prId: text("pr_id").notNull().references(() => pullRequests.id),
+  status: text().$type<PrChat["status"]>().notNull(),
+});
+
+export const chatScratches = sqliteTable("chat_scratches", {
+  chatId: text("chat_id").$type<ChatId>().primaryKey(),
+  repoId: text("repo_id").$type<RepoId>().notNull(),
+  headSha: text("head_sha").notNull(),
+  syncTarget: text("sync_target"),
+});
 
 /**
  * Lo que Watch ya vio de cada PR (`docs/design.html#d-ops`, "Watch: eventos y qué disparan"). Insertar una

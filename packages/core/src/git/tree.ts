@@ -52,7 +52,7 @@ export async function snapshotTree(cwd: string): Promise<string> {
 }
 
 /** Con prefijos `a/` `b/` fijos y sin renames: el patch no depende de la config de git de quien lo corra. */
-export async function diffBetween(cwd: string, from: string, to: string): Promise<string> {
+export async function diffBetween(cwd: string, from: string, to: string, files: string[] = []): Promise<string> {
   return gitRaw(cwd, [
     "-c",
     "core.quotePath=false",
@@ -65,6 +65,8 @@ export async function diffBetween(cwd: string, from: string, to: string): Promis
     "--dst-prefix=b/",
     from,
     to,
+    "--",
+    ...files.map((file) => `:(literal)${file}`),
   ]);
 }
 

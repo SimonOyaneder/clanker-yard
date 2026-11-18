@@ -101,6 +101,8 @@ export { EXCERPT_MAX_LINES } from "./workspaces/exec";
 export { ARCHIVE_TTL_MS } from "./workspaces/archive";
 export { startCleanup } from "./workspaces/cleanup";
 export type { Cleanup } from "./workspaces/cleanup";
+export { createChatScratch } from "./workspaces/scratch";
+export type { ChatScratch, ScratchSyncResult } from "./workspaces/scratch";
 
 export { createRepos, RepoNotFoundError } from "./repos/repos";
 
