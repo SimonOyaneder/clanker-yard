@@ -2,9 +2,11 @@ name: CI
 
 # Solo PRs que no están en draft: los agentes trabajan en draft y `merge.sh` lo marca listo justo antes de mergear,
 # así la CI corre una vez por PR sobre el main exacto. Sin `push` a main: el squash deja el mismo árbol que ya pasó.
+# Ejecución automática pausada: solo corre a mano desde Actions.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+  # pull_request:
+  #   types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
