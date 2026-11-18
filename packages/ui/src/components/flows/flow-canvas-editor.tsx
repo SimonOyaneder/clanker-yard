@@ -1,4 +1,5 @@
 import { type DefIssue, FlowDef, type Node, Role } from "@clanker/api"
+import { DEF_TRIGGERS } from "@/lib/live-triggers"
 import { Background, BackgroundVariant, Controls, type Connection, type Edge as FlowEdgeType, MarkerType, type NodeChange, ReactFlow, ReactFlowProvider, type EdgeChange } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { ChevronUp, Info, LayoutGrid, TriangleAlert, X } from "lucide-react"
@@ -49,8 +50,8 @@ export function FlowCanvasEditor(props: Props) {
 function Editor({ defId, flow, onChange, errors, warnings }: Props) {
   const appData = useAppData()
   const colorMode = useColorMode()
-  const roleDefs = useLiveQuery("library:role", () => appData.defs("role", { includeArchived: true }))
-  const flowDefs = useLiveQuery("library:flow", () => appData.defs("flow", { includeArchived: true }))
+  const roleDefs = useLiveQuery("library:role", () => appData.defs("role", { includeArchived: true }), { on: DEF_TRIGGERS })
+  const flowDefs = useLiveQuery("library:flow", () => appData.defs("flow", { includeArchived: true }), { on: DEF_TRIGGERS })
   const layoutKey = `flow-layout.${defId}`
   const [saved, setSaved] = useState<Record<string, Point>>(() => readPref(layoutKey, {}))
   const [selection, setSelection] = useState<{ nodes: string[]; edges: string[] }>({ nodes: [], edges: [] })

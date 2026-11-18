@@ -1,4 +1,5 @@
 import type { ClankerProject, DefRecord, DefWriteKind } from "@clanker/api"
+import { DEF_TRIGGERS } from "@/lib/live-triggers"
 import { ChevronRight, Plus } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useAppData } from "@/app-data"
@@ -41,9 +42,9 @@ export function FlowsView({ projects }: { projects: ClankerProject[] }) {
   // Editando un flujo la vista es solo el editor: sin pestañas ni lista.
   const [editingFlow, setEditingFlow] = useState(false)
 
-  const flows = useLiveQuery("library:flow", () => appData.defs("flow", { includeArchived: true }))
-  const roles = useLiveQuery("library:role", () => appData.defs("role", { includeArchived: true }))
-  const profiles = useLiveQuery("library:profile", () => appData.defs("profile", { includeArchived: true }))
+  const flows = useLiveQuery("library:flow", () => appData.defs("flow", { includeArchived: true }), { on: DEF_TRIGGERS })
+  const roles = useLiveQuery("library:role", () => appData.defs("role", { includeArchived: true }), { on: DEF_TRIGGERS })
+  const profiles = useLiveQuery("library:profile", () => appData.defs("profile", { includeArchived: true }), { on: DEF_TRIGGERS })
   const queries = { flow: flows, role: roles, profile: profiles }
   const reloadAll = () => {
     flows.reload()

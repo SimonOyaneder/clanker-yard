@@ -13,9 +13,9 @@ import { alsoInRuns, groupByStep } from "@/lib/notes"
  */
 export function RunNotes({ run }: { run: RunDetail }) {
   const appData = useAppData()
-  const query = useLiveQuery(`run-notes:${run.id}`, () => appData.decisions({ runId: run.id, kind: NOTE_KINDS }))
+  const query = useLiveQuery(`run-notes:${run.id}`, () => appData.decisions({ runId: run.id, kind: NOTE_KINDS }), { on: ["decision.*"] })
   const notes: Decision[] = query.data ?? []
-  const sameProject = useLiveQuery(`project-notes:${run.projectId}`, () => (run.projectId ? appData.decisions({ projectId: run.projectId, kind: NOTE_KINDS }) : Promise.resolve([])))
+  const sameProject = useLiveQuery(`project-notes:${run.projectId}`, () => (run.projectId ? appData.decisions({ projectId: run.projectId, kind: NOTE_KINDS }) : Promise.resolve([])), { on: ["decision.*"] })
   if (notes.length === 0) return null
   const stepName = (id: Decision["stepRunId"]) => run.steps.find((s) => s.id === id)?.nodeId ?? "Sin paso"
   return (

@@ -198,7 +198,7 @@ interface BodyProps extends Pick<Props, "node" | "tab" | "onTab"> {
 
 function StepBody({ step, node, steps, tab, onTab, onPickStep, pickedSession, onPickSession }: BodyProps) {
   const appData = useAppData()
-  const detail = useLiveQuery(`step:${step.id}`, () => appData.step(step.id))
+  const detail = useLiveQuery(`step:${step.id}`, () => appData.step(step.id), { on: ["step.*", "run.*", "agent.started", "agent.usage", "agent.ended"] })
   const sessions = detail.data?.sessions ?? []
   const session = sessions.find((s) => s.id === pickedSession) ?? sessions.at(-1)
   const live = session?.status === "running"

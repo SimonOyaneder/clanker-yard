@@ -40,14 +40,14 @@ export function InboxView({ inbox, decisions, projects, onSelect, onResolve }: P
 
   // Las issues de los proyectos con decisiones, para nombrar la corrida de cada una.
   const projectIds = [...new Set(decisions.flatMap((d) => (d.projectId ? [d.projectId] : [])))].sort()
-  const issueData = useLiveQuery(`inbox-issues:${projectIds.join(",")}`, async () => (await Promise.all(projectIds.map((id) => appData.issues(id)))).flat())
+  const issueData = useLiveQuery(`inbox-issues:${projectIds.join(",")}`, async () => (await Promise.all(projectIds.map((id) => appData.issues(id)))).flat(), { on: ["issue.*"] })
   const issues = useMemo(() => new Map<string, CachedIssue>((issueData.data ?? []).map((i) => [i.id, i])), [issueData.data])
   const scopeOf = (d: Decision): DecisionScope => ({
     project: projects.find((p) => p.id === d.projectId),
     issue: d.subject?.type === "issue" ? issues.get(d.subject.id) : undefined,
   })
   // Las alertas que deja un breaker se pueden reintentar mientras siga abierto.
-  const breakers = useLiveQuery("inbox-breakers", () => appData.breakers())
+  const breakers = useLiveQuery("inbox-breakers", () => appData.breakers(), { on: ["breaker.*"] })
   const breakerOf = (d: Decision): Breaker | undefined => (d.kind === "alert" && d.status === "pending" ? breakers.data?.find((b) => b.decisionId === d.id) : undefined)
   const openRunOf = (d: Decision) => {
     const slug = projects.find((p) => p.id === d.projectId)?.slug

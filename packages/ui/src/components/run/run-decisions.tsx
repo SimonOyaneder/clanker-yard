@@ -14,7 +14,7 @@ import { isTypingTarget, overlayOpen } from "@/lib/keys"
 /** Las decisiones pendientes que tienen estacionada la corrida: una a lo más, porque un paso a la vez la avanza. */
 function useParkingDecision(runId: RunId): Decision | undefined {
   const appData = useAppData()
-  const pending = useLiveQuery(`run-decisions:${runId}`, () => appData.decisions({ runId, status: ["pending"] }))
+  const pending = useLiveQuery(`run-decisions:${runId}`, () => appData.decisions({ runId, status: ["pending"] }), { on: ["decision.*"] })
   return pending.data?.find(parksRun)
 }
 

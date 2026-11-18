@@ -49,9 +49,9 @@ interface TabProps {
 export function ProjectSummaryTab({ project, controls, onOpenOperation }: TabProps) {
   const appData = useAppData()
   const { range, origin } = controls
-  const query = useLiveQuery(`summary:${project.id}:${rangeKey(range, origin)}`, () => appData.projectMetrics(project.id, metricsRange(range, origin, Date.now())))
+  const query = useLiveQuery(`summary:${project.id}:${rangeKey(range, origin)}`, () => appData.projectMetrics(project.id, metricsRange(range, origin, Date.now())), { on: ["run.finished"] })
   // Las issues solo le ponen título a las filas de rondas por issue: sin ellas se muestra el id.
-  const issues = useLiveQuery(`summary-issues:${project.id}`, () => appData.issues(project.id))
+  const issues = useLiveQuery(`summary-issues:${project.id}`, () => appData.issues(project.id), { on: ["issue.*"] })
   return (
     <div className="flex flex-col gap-5">
       <SummaryToolbar controls={controls} />

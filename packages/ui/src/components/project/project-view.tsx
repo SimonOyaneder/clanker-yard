@@ -1,4 +1,5 @@
 import type { Breaker, CachedIssue, CachedPr, ClankerProject, Decision, Lanes, QueueEntry, Run } from "@clanker/api"
+import { PR_TRIGGERS } from "@/lib/live-triggers"
 import { Copy, Ellipsis, ListTodo, Pause, Play } from "lucide-react"
 import { type ReactNode, useRef } from "react"
 import { BreakerStrip } from "@/components/project/breaker-strip"
@@ -125,7 +126,7 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
   // El sujeto de una corrida sobre un PR que ya se cerró (un restack, por ejemplo) no está entre los abiertos: se pide aparte.
   const appData = useAppData()
   const missing = [...new Set(runs.filter((r) => r.subject.type === "pr" && !prs.some((p) => p.id === r.subject.id)).map((r) => r.subject.id))].sort()
-  const closedPrs = useLiveQuery(`subject-prs:${missing.join(",")}`, () => appData.prsByIds(missing))
+  const closedPrs = useLiveQuery(`subject-prs:${missing.join(",")}`, () => appData.prsByIds(missing), { on: PR_TRIGGERS })
   const subjectOf = subjectLabeler(issues, [...prs, ...(closedPrs.data ?? [])])
   const usage = laneUsage(project, roots, lanes)
   const pending = decisions.filter((d) => d.status === "pending")

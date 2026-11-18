@@ -147,7 +147,7 @@ function SlotCard({
 }) {
   const data = useAppData()
   const actions = useAppActions()
-  const detail = useLiveQuery(`run:${run.id}`, () => data.run(run.id))
+  const detail = useLiveQuery(`run:${run.id}`, () => data.run(run.id), { on: ["run.*", "step.*"] })
   const stepper = detail.data ? stepperOf(detail.data, now) : null
   const open = () => actions.openRun(project.slug, run.id)
   return (

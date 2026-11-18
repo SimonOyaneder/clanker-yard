@@ -52,6 +52,7 @@ import { keyOf, openPrsOf } from "@/lib/prs/prs"
 import { runCaps } from "@/lib/project/run-commands"
 import { shapeOf } from "@/lib/run-graph"
 import { withPending } from "@/lib/learnings"
+import { PR_TRIGGERS, REPO_TRIGGERS, RUN_TRIGGERS } from "@/lib/live-triggers"
 import { readPref, writePref } from "@/lib/prefs"
 import { barProjects } from "@/lib/projects"
 import { type SetupStep, type SetupStepId, setupSteps } from "@/lib/setup"
@@ -111,23 +112,23 @@ function Shell() {
   // Con el core caído lo que se ve es lo último que llegó: se atenúa y no se opera sobre eso.
   const stale = !!core && core.status !== "live"
 
-  const projectsQuery = useLiveQuery("projects", () => appData.projects())
-  const liveRunsQuery = useLiveQuery("live-runs", () => appData.runs({ status: [...LIVE_RUN_STATUSES] }))
+  const projectsQuery = useLiveQuery("projects", () => appData.projects(), { on: ["project.*", "repo.added"] })
+  const liveRunsQuery = useLiveQuery("live-runs", () => appData.runs({ status: [...LIVE_RUN_STATUSES] }), { on: ["run.*", "step.*"] })
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
   const commands = useRunCommands()
-  const connectionsQuery = useLiveQuery("connections", () => appData.connections())
+  const connectionsQuery = useLiveQuery("connections", () => appData.connections(), { on: ["connection.*", "breaker.*"] })
   const connections = useMemo(() => connectionsQuery.data ?? [], [connectionsQuery.data])
   const [decisionId, setDecisionId] = useState<DecisionId | null>(null)
   const [prId, setPrId] = useState<string | null>(null)
   const [prControls, setPrControls] = useState<PrControls | null>(null)
-  const decisionsQuery = useLiveQuery("decisions", () => appData.decisions({ kind: ACTIONABLE_KINDS }))
+  const decisionsQuery = useLiveQuery("decisions", () => appData.decisions({ kind: ACTIONABLE_KINDS }), { on: ["decision.*"] })
   const decisions = useMemo(() => decisionsQuery.data ?? [], [decisionsQuery.data])
   const resolver = useDecisionResolver(decisions, decisionsQuery.reload)
   const { undo, resolve: resolveNow } = resolver
   const inbox = useInbox(decisions, resolver.resolving, decisionId)
   const inboxBadge = inbox.pending.length ? { count: inbox.pending.length, parks: inbox.pending.some(parksRun) } : null
   // Los learnings: lo que espera su plazo de deshacer ya cuenta como aprobado o rechazado, en la lista y en el badge.
-  const learningsQuery = useLiveQuery("learnings", () => appData.learnings())
+  const learningsQuery = useLiveQuery("learnings", () => appData.learnings(), { on: ["learning.*"] })
   const triage = useLearningTriage(learningsQuery.data, learningsQuery.reload)
   const learnings = useMemo(() => withPending(learningsQuery.data ?? [], triage.pending), [learningsQuery.data, triage.pending])
   const undoLearnings = triage.undo
@@ -167,9 +168,9 @@ function Shell() {
   const projectData = useProjectData(project)
 
   // Los PRs vienen del caché del core (`prs.list`) y se releen con cada `pr.changed`: nada de polling en la UI.
-  const prsQuery = useLiveQuery("prs", () => appData.openPrs())
-  const notesQuery = useLiveQuery("agent-notes", () => appData.decisions({ kind: NOTE_KINDS }))
-  const reposQuery = useLiveQuery("repos", () => appData.repos())
+  const prsQuery = useLiveQuery("prs", () => appData.openPrs(), { on: PR_TRIGGERS })
+  const notesQuery = useLiveQuery("agent-notes", () => appData.decisions({ kind: NOTE_KINDS }), { on: ["decision.*"] })
+  const reposQuery = useLiveQuery("repos", () => appData.repos(), { on: REPO_TRIGGERS })
   const reloadPrs = prsQuery.reload
   useEffect(() => {
     if (module === "prs") reloadPrs()
@@ -191,7 +192,7 @@ function Shell() {
   const issueKeysQuery = useLiveQuery(`pr-issue-keys:${projects.map((p) => p.id).join(",")}`, async () => {
     const lists = await Promise.all(projects.map((p) => appData.issues(p.id)))
     return new Map(lists.flat().map((issue) => [issue.id, issueKey(issue)]))
-  })
+  }, { on: ["issue.*"] })
 
   const setModule = useCallback((m: Module) => {
     setModuleState(m)
@@ -331,7 +332,7 @@ function Shell() {
   })
 
   // La corrida abierta, leída aquí para que sus atajos y la paleta sepan qué se le puede pedir.
-  const runQuery = useLiveQuery<RunDetail | undefined>(runId ? `run:${runId}` : "no-run", () => (runId ? appData.run(runId) : Promise.resolve(undefined)))
+  const runQuery = useLiveQuery<RunDetail | undefined>(runId ? `run:${runId}` : "no-run", () => (runId ? appData.run(runId) : Promise.resolve(undefined)), { on: RUN_TRIGGERS })
   const openRunDetail = runId ? runQuery.data : undefined
   const caps = useMemo(() => (openRunDetail ? runCaps(openRunDetail, shapeOf(openRunDetail.flowDef, openRunDetail.steps)) : null), [openRunDetail])
 

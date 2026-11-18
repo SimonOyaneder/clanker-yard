@@ -1,4 +1,5 @@
 import type { ClankerProject, Connection } from "@clanker/api"
+import { REPO_TRIGGERS } from "@/lib/live-triggers"
 import { useState } from "react"
 import { useAppData } from "@/app-data"
 import { ClaudeCard } from "@/components/connections/claude-card"
@@ -23,7 +24,7 @@ interface Props {
 // Conexiones: las tres cuentas (GitHub, Linear, Claude) y los repos con su receta.
 export function ConnectionsView({ connections, projects, plan, linearLogin, onChanged }: Props) {
   const appData = useAppData()
-  const repos = useLiveQuery("repos", () => appData.repos())
+  const repos = useLiveQuery("repos", () => appData.repos(), { on: REPO_TRIGGERS })
   const [recipeTest, setRecipeTest] = useState<{ repoId: string; runId: number } | null>(null)
   const testing = recipeTest ? repos.data?.find((r) => r.repo.id === recipeTest.repoId)?.repo ?? null : null
 

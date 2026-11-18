@@ -1,7 +1,7 @@
 import type { AgentSessionId, TranscriptEntry } from "@clanker/api"
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { useAppData } from "@/app-data"
-import { useLive } from "@/hooks/use-live"
+import { useLiveTick } from "@/hooks/use-live"
 import { messageOf } from "@/lib/utils"
 
 interface Loaded {
@@ -18,7 +18,8 @@ interface Loaded {
 // agente escribió desde la última página. Una sesión distinta pide un hook nuevo (`key={sessionId}`).
 export function useTranscript(sessionId: AgentSessionId, live: boolean) {
   const appData = useAppData()
-  const { revision } = useLive()
+  // Lo que el agente escribe llega como `agent.activity`; `step.*` cubre el cierre del paso.
+  const revision = useLiveTick(["agent.*", "step.*"], live)
   const [state, setState] = useState<Loaded>({ entries: [], hasMore: true, loaded: false, error: null })
   const cursor = useRef(0)
   const busy = useRef(false)

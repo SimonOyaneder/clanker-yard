@@ -35,7 +35,7 @@ export function ProjectSettingsTab(props: TabProps) {
   const query = useLiveQuery(`settings:${project.id}`, async () => {
     const [flows, profiles, repos, issues] = await Promise.all([appData.defs("flow"), appData.defs("profile"), appData.repos(), appData.issues(project.id)])
     return { flows, profiles, repos, issues }
-  })
+  }, { on: ["project.*", "def.*", "pack.*", "repo.added", "issue.synced"] })
   if (query.data) return <SettingsForm key={project.id} {...props} {...query.data} />
   if (query.error) {
     return <PageLoadError title="No pude leer los ajustes" message={query.error} onRetry={query.reload} />

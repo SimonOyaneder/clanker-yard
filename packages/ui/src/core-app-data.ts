@@ -24,6 +24,7 @@ const LIVE_EVENTS = [
   "breaker.opened",
   "breaker.closed",
   "pr.changed",
+  "pr.saved_local",
   "pr.merged",
   "run.started",
   "run.status",

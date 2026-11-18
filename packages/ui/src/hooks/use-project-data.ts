@@ -2,6 +2,7 @@ import type { ClankerProject } from "@clanker/api"
 import { useAppData } from "@/app-data"
 import { useLiveQuery } from "@/hooks/use-live"
 import { ACTIONABLE_KINDS } from "@/lib/decisions"
+import { PROJECT_TRIGGERS } from "@/lib/live-triggers"
 import { messageOf } from "@/lib/utils"
 
 /**
@@ -26,5 +27,5 @@ export function useProjectData(project: ClankerProject | null) {
       appData.openPrs(),
     ])
     return { runs, issues, ...queue, decisions, lanes, breakers, prs }
-  })
+  }, { on: PROJECT_TRIGGERS })
 }

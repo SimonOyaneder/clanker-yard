@@ -51,7 +51,7 @@ export function ParallelPage({ open, onOpenChange, project, onBack }: ParallelPr
 export function LanesPage({ open, onOpenChange, onBack }: { open: boolean; onOpenChange: (open: boolean) => void; onBack: () => void }) {
   const actions = useAppActions()
   const data = useAppData()
-  const { data: lanes } = useLiveQuery("lanes", () => data.lanes())
+  const { data: lanes } = useLiveQuery("lanes", () => data.lanes(), { on: ["lanes.changed", "run.*"] })
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} title="Cambiar capacidad de carriles" description="Cuántas corridas caben a la vez en cada carril de la máquina">
       <CommandInput placeholder="Subir o bajar un carril…" />

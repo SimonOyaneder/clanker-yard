@@ -32,7 +32,7 @@ export function AppSettingsView() {
       appData.coreInfo(),
     ])
     return { lanes, packs, repos: repos.map((r) => r.repo), defaults, flows, profiles, info }
-  })
+  }, { on: ["lanes.changed", "pack.*", "def.*", "repo.added", "project.defaults_changed"] })
   const live = useLive()
   if (query.data) return <AppSettingsForm {...query.data} onChanged={live.refresh} />
   if (query.error) {
