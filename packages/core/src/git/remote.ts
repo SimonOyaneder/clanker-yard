@@ -46,8 +46,8 @@ export interface GitRemote {
    * (un push anterior que no alcanzó a registrarse), es `ok`. Un lease rechazado no se reintenta.
    */
   push(request: PushRequest): Promise<PushOutcome>;
-  /** Trae todas las branches a `refs/remotes/origin/*`. */
-  fetch(target: RemoteTarget): Promise<FetchOutcome>;
+  /** Trae todas las branches a `refs/remotes/origin/*`, o solo el refspec pedido. */
+  fetch(target: RemoteTarget, refspec?: string): Promise<FetchOutcome>;
   /**
    * La punta de cada branch del remoto (`git ls-remote --heads`): `{ branch: sha }`. No gasta cuota de la
    * API de GitHub. `unauthorized` si GitHub respondió 401 y la conexión quedó revocada.
@@ -118,8 +118,8 @@ export function createGitRemote({ askpass, connections, procs }: GitRemoteOption
       return listed.stdout.split(/\s+/)[0] === sha ? "ok" : "lease-rejected";
     },
 
-    async fetch(target) {
-      const args = [...NO_HOOKS, "fetch", "--no-tags", target.url, "+refs/heads/*:refs/remotes/origin/*"];
+    async fetch(target, refspec = "+refs/heads/*:refs/remotes/origin/*") {
+      const args = [...NO_HOOKS, "fetch", "--no-tags", target.url, refspec];
       const fetched = await withCredentials(target, args);
       if (fetched.ok) return "ok";
       if (fetched.reason === "unauthorized") return "unauthorized";

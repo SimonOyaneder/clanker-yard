@@ -341,6 +341,41 @@ describe("fetch", () => {
 
     expect(connections.list()).toMatchObject([{ status: "revoked" }]);
   });
+
+  test("trae refs/pull con autenticación sin correr hooks ni mover las branches locales", async () => {
+    await setup();
+    const head = repo.git("rev-parse", "HEAD");
+    repo.git("--git-dir", repo.remoteDir!, "update-ref", "refs/pull/7/head", head);
+    const before = repo.git("show-ref", "--heads");
+    const seen = join(dataDir, "fetch-pr-hook");
+    writeHook("reference-transaction", `touch "${seen}"`);
+    writeHook("pre-auto-gc", `touch "${seen}"`);
+
+    expect(await workspaces.fetchPr("repo_r1", 7)).toBe("ok");
+
+    expect(repo.git("rev-parse", "refs/clanker/pr/7/head")).toBe(head);
+    expect(repo.git("show-ref", "--heads")).toBe(before);
+    expect(repo.git("symbolic-ref", "HEAD")).toBe("refs/heads/main");
+    expect(existsSync(seen)).toBe(false);
+    expect(Buffer.from(server!.authorizations.at(-1)!.replace("Basic ", ""), "base64").toString()).toBe(`${ACCOUNT}:${TOKEN}`);
+  });
+
+  test("un 401 al traer refs/pull revoca la conexión", async () => {
+    await setup("otro-token");
+
+    expect(await workspaces.fetchPr("repo_r1", 7)).toBe("unauthorized");
+
+    expect(connections.list()).toMatchObject([{ status: "revoked" }]);
+  });
+
+  test("un refs/pull ausente falla sin crear una referencia ni cambiar branches", async () => {
+    await setup();
+    const before = repo.git("show-ref");
+
+    await expect(workspaces.fetchPr("repo_r1", 7)).rejects.toThrow("couldn't find remote ref");
+
+    expect(repo.git("show-ref")).toBe(before);
+  });
 });
 
 describe("ls-remote", () => {

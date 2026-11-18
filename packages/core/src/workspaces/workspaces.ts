@@ -175,6 +175,7 @@ export interface Workspaces {
   push(lease: WorkspaceRef, opts?: { council?: boolean }): Promise<PushOutcome>;
   /** Trae las branches del remoto a `refs/remotes/origin/*` con el mismo mecanismo que `push`. */
   fetch(repo: RepoId): Promise<FetchOutcome>;
+  fetchPr(repo: RepoId, number: number): Promise<FetchOutcome>;
   /**
    * La base vigente del worktree: la de `acquire`, o la que dejó el último `syncBase`. Lo que las
    * acciones sobre el worktree deben usar para el diff de la issue, no el `baseSha` de `$ws`, que no se
@@ -840,6 +841,11 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     return withRepoLock(repo, () => remote.fetch({ cwd: repoConfig(repo).path, url, account }));
   }
 
+  async function fetchPr(repo: RepoId, number: number): Promise<FetchOutcome> {
+    const { remote, url, account } = remoteOf(repo);
+    return withRepoLock(repo, () => remote.fetch({ cwd: repoConfig(repo).path, url, account }, `+refs/pull/${number}/head:refs/clanker/pr/${number}/head`));
+  }
+
   async function syncBase(lease: WorkspaceRef): Promise<SyncBaseResult> {
     const row = rowOf(lease);
     const cfg = repoConfig(row.repoId);
@@ -1452,6 +1458,7 @@ export function createWorkspaces(opts: WorkspacesOptions): Workspaces {
     recover,
     extendLeases,
     fetch: fetchRepo,
+    fetchPr,
     baseSha,
     syncBase,
     release,
