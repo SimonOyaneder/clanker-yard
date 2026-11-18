@@ -47,6 +47,7 @@ describe("generateMcp sobre el contrato real", () => {
       update_local_pr: destructive,
       apply_local_pr_patch: { destructiveHint: true, openWorldHint: false },
       request_local_pr_publish: safeIdempotent,
+      read_artifact: readOnly,
       propose_learning: safeIdempotent,
     });
   });

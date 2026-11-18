@@ -79,6 +79,7 @@ const router = os.router({
       size: 2,
       content: new Blob(["ok"]),
     })),
+    text: os.artifacts.text.handler(() => { throw new Error("no se usa en este test"); }),
   },
   issues: {
     list: os.issues.list.handler(() => []),

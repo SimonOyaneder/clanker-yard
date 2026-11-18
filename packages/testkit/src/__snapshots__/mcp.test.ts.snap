@@ -245,6 +245,40 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
   },
   {
     "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Lee un artefacto de texto por hash (parches, reportes y logs). Si \`nextOffset\` no es null, pásalo como \`offset\` para seguir. Los offsets están en bytes UTF-8.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string",
+        },
+        "limit": {
+          "default": 16384,
+          "maximum": 65536,
+          "minimum": 4,
+          "type": "integer",
+        },
+        "offset": {
+          "default": 0,
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "hash",
+      ],
+      "type": "object",
+    },
+    "name": "read_artifact",
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false,

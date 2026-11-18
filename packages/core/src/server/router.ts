@@ -13,6 +13,7 @@ import { type Connections } from "../connections/connections";
 import { createTranscripts} from "../agents/transcripts";
 import type { Breakers } from "../breakers/breakers";
 import type { Artifacts } from "../artifacts/artifacts";
+import { artifactTextPage } from "../artifacts/text";
 import type { Decisions } from "../decisions/decisions";
 import { LearningNotFoundError, type Learnings } from "../learnings/learnings";
 import type { Engine } from "../flows/engine";
@@ -205,6 +206,11 @@ export function createRouter(deps: RouterDeps) {
         }
         const { content, ...meta } = artifact;
         return { ...meta, content: new Blob([content], { type: artifact.mime }) };
+      }),
+      text: os.artifacts.text.handler(({ input }) => {
+        const artifact = artifacts.get(input.hash);
+        if (!artifact) throw new ORPCError("NOT_FOUND", { message: `No existe el artefacto ${input.hash}.` });
+        return artifactTextPage(artifact, input.offset, input.limit);
       }),
     },
     issues: {

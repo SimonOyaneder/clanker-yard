@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { type Event, LocalPrDetail, RunId } from "@clanker/api";
-import { createRepos } from "@clanker/core";
+import { createArtifacts, createRepos } from "@clanker/core";
 import { seedPr } from "@clanker/core/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { startMcpHarness, type McpHarness } from "./mcp-harness";
@@ -34,7 +34,7 @@ describe("tools", () => {
 
     expect(tools.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations }))).toMatchSnapshot();
     expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name))
-      .toEqual(expect.arrayContaining(["list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff"]));
+      .toEqual(expect.arrayContaining(["list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff", "read_artifact"]));
     expect(tools.filter((t) => t.annotations?.destructiveHint).map((t) => t.name))
       .toEqual(expect.arrayContaining(["delete", "archive_project", "update_local_pr", "apply_local_pr_patch", "cancel_run", "interrupt_run", "resolve_decision"]));
   });
@@ -98,6 +98,15 @@ describe("tools", () => {
     }
     expect(await h.api.runs.get({ id: runId })).toMatchObject({ status: "done" });
     expect(h.store.events.since(0, { types: ["project.archived"], projectId: project.id })).toMatchObject([{ origin: "mcp" }]);
+  });
+
+  test("lee artefactos de texto en páginas y rechaza binarios", async () => {
+    const artifacts = createArtifacts({ store: h.store, dir: h.repo.dir });
+    const hash = artifacts.put("ab🙂z", "report");
+    expect(await h.call("read_artifact", { hash, limit: 4 })).toMatchObject({ text: "ab", nextOffset: 2 });
+    expect(await h.call("read_artifact", { hash, offset: 2 })).toMatchObject({ text: "🙂z", nextOffset: null });
+    const binary = artifacts.put(Uint8Array.of(0xff), "snapshot");
+    await expect(h.call("read_artifact", { hash: binary })).rejects.toThrow("BAD_REQUEST: El artefacto no es de texto");
   });
 });
 

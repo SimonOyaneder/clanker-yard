@@ -210,6 +210,25 @@ const artifacts = {
       content: z.instanceof(Blob),
     }),
   ),
+  /** Las interfaces JSON leen artefactos UTF-8 en páginas, sin transportar el Blob de `get`. */
+  text: base.meta({
+    mcp: {
+      action: "read_artifact",
+      description: "Lee un artefacto de texto por hash (parches, reportes y logs). Si `nextOffset` no es null, pásalo como `offset` para seguir. Los offsets están en bytes UTF-8.",
+      annotations: READ_ONLY,
+    },
+  }).input(z.strictObject({
+    hash: ArtifactHash,
+    offset: z.int().nonnegative().default(0),
+    limit: z.int().min(4).max(65_536).default(16_384),
+  })).output(z.object({
+    hash: ArtifactHash,
+    kind: ArtifactKind,
+    mime: z.string(),
+    size: z.int().nonnegative(),
+    text: z.string(),
+    nextOffset: z.int().nonnegative().nullable(),
+  })),
 };
 
 const issues = {
