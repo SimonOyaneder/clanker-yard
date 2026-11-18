@@ -1,12 +1,16 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SLOW_TESTS, testTier } from "../vitest.slow.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("testTier", () => {
+  // `testTier(undefined, ...)` lee `CLANKER_TESTS`, y `npm run test:all` corre con `all`.
+  beforeEach(() => vi.stubEnv("CLANKER_TESTS", undefined));
+  afterEach(() => vi.unstubAllEnvs());
+
   test("sin variable ni filtros la suite deja fuera los lentos", () => {
     expect(testTier(undefined, ["run"])).toBe("fast");
     expect(testTier("", [])).toBe("fast");
