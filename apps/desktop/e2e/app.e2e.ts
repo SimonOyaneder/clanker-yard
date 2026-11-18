@@ -371,7 +371,6 @@ test("Z deshace la respuesta y la corrida sigue estacionada", async ({ window: p
 test("resolver un gate desde la bandeja reencola la corrida y esta termina", async ({ window: page }) => {
   await decision(page, GATE).getByRole("button", { name: /Publicar el saludo/ }).click();
   await expect(inboxList(page).getByRole("listitem")).toHaveCount(3);
-  await page.waitForTimeout(UNDO_WAIT);
 
   await sidebar(page).getByRole("button", { name: "Bandeja de prueba" }).click();
   // Vuelve a la cola de su carril, el agente saluda (unos 7 s) y el flujo llega al final.
@@ -394,7 +393,6 @@ test("las resueltas guardan lo que se eligió y sin pendientes la bandeja dice q
   setDemoControl(home, { clockDays: 40, claude: "login_expired", closeAlert: true });
   await expect(page.getByText("No hay nada esperando tu decisión.")).toBeVisible();
   await snapBoth(page, "bandeja-vacia");
-  await page.waitForTimeout(UNDO_WAIT);
 
   await page.getByRole("button", { name: "Ver las resueltas" }).click();
   await expect(page.getByRole("list", { name: "Decisiones resueltas" }).getByRole("listitem")).toHaveCount(4, { timeout: 15_000 });

@@ -19,7 +19,7 @@ import {
   type WorkspaceLease,
   type Workspaces,
 } from "@clanker/core";
-import { afterEach, beforeEach, describe, expect, test} from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
 import { startGitHttpServer } from "./git-http";
 
@@ -309,11 +309,11 @@ describe("el token solo va al remoto del ticket", () => {
     writeHook("pre-push", `env > "${seen}"`);
     const lease = await acquire();
     await commit(lease, "feat: one");
-    process.env.GH_TOKEN = "ghp_from_the_shell";
+    vi.stubEnv("GH_TOKEN", "ghp_from_the_shell");
     try {
       expect(await workspaces.push(lease)).toBe("ok");
     } finally {
-      delete process.env.GH_TOKEN;
+      vi.unstubAllEnvs();
     }
 
     expect(readFileSync(seen, "utf8")).not.toContain("ghp_from_the_shell");

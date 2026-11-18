@@ -59,6 +59,9 @@ export interface OpenStoreOptions {
 
 const sourceMigrations = fileURLToPath(new URL("../../migrations", import.meta.url));
 
+// Imagen de una base en memoria recién migrada, antes de cualquier escritura del caller.
+let emptyMemoryDb: Uint8Array | undefined;
+
 export function openStore(opts: OpenStoreOptions): Store {
   const now = opts.now ?? Date.now;
   const sqlite = new DatabaseSync(opts.path);
@@ -70,10 +73,16 @@ export function openStore(opts: OpenStoreOptions): Store {
       PRAGMA busy_timeout = 5000;
     `);
     const db = drizzle({ client: sqlite });
-    migrateStore(sqlite, db, {
-      path: opts.path,
-      migrationsFolder: opts.migrationsFolder ?? sourceMigrations,
-    });
+    const reusable = opts.path === ":memory:" && opts.migrationsFolder === undefined && typeof sqlite.serialize === "function";
+    if (reusable && emptyMemoryDb) {
+      sqlite.deserialize(emptyMemoryDb);
+    } else {
+      migrateStore(sqlite, db, {
+        path: opts.path,
+        migrationsFolder: opts.migrationsFolder ?? sourceMigrations,
+      });
+      if (reusable) emptyMemoryDb = sqlite.serialize();
+    }
     return createStore(sqlite, db, now);
   } catch (error) {
     sqlite.close();

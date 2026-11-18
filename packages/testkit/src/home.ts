@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore } from "@clanker/core";
@@ -36,11 +36,19 @@ function writeScenario(scenario: Scenario, dbPath: string): void {
   }
 }
 
+// Una base vacía ya cerrada se puede copiar sin repetir las migraciones ni compartir escrituras entre homes.
+let emptyDb: Buffer | undefined;
+
 /** Un `CLANKER_HOME` temporal con la base sembrada por `scenario`. */
 export function seedDb(scenario: Scenario): TestHome {
   const home = createHome();
   try {
-    writeScenario(scenario, home.dbPath);
+    if (scenario === "empty" && emptyDb) {
+      writeFileSync(home.dbPath, emptyDb);
+    } else {
+      writeScenario(scenario, home.dbPath);
+      if (scenario === "empty") emptyDb = readFileSync(home.dbPath);
+    }
   } catch (error) {
     home.cleanup();
     throw error;

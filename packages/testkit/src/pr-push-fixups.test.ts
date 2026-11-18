@@ -26,7 +26,8 @@ import {
   type Workspaces,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { tempGitRepo, type TempGitRepo } from "./git";
+import type { TempGitRepo } from "./git";
+import { gitFixture } from "./git-fixture";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
 // Como pr-publish.test.ts: repos git reales (tempGitRepo), un remoto bare y el GitHub simulado.
@@ -48,13 +49,15 @@ let lease: WorkspaceLease;
 let publish: ReturnType<typeof prPublishAction>;
 let pushFixups: ReturnType<typeof prPushFixupsAction>;
 
+const freshRepo = gitFixture({
+  remote: true,
+  commits: [{ message: "chore: base", files: { "a.txt": "a\n", "c.txt": file(lines(30)) } }],
+});
+
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-fixups-"));
   store = openStore({ path: ":memory:" });
-  repo = tempGitRepo({
-    remote: true,
-    commits: [{ message: "chore: base", files: { "a.txt": "a\n", "c.txt": file(lines(30)) } }],
-  });
+  repo = freshRepo();
   github = await startGitHubSim({ origin: repo, repo: REPO, token: TOKEN });
 
   askpass = createAskpass();

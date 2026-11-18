@@ -1,9 +1,24 @@
+import { existsSync, globSync, readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
+import { dirname, join } from "node:path";
 import { defineConfig } from "vitest/config";
 
-// Cada app y paquete (y `scripts`, que prueba el chequeo de límites) es un proyecto de Vitest; si necesita config propia, la deja en su carpeta.
-//
-// `maxWorkers`: por defecto Vitest usa núcleos - 1, o sea 1 worker en el runner de 2 vCPU de la CI, y casi todo el tiempo de
-// un test es esperar a procesos hijos (git, el core, node), no CPU: con 4 workers los núcleos no quedan ociosos.
+const maxWorkers = process.env.CI ? 4 : Math.min(6, Math.max(1, availableParallelism() - 1));
+const projects = globSync(["apps/*/package.json", "packages/*/package.json"], { cwd: import.meta.dirname }).map((file) => ({
+  root: dirname(file),
+  name: JSON.parse(readFileSync(join(import.meta.dirname, file), "utf8")).name as string,
+}));
+projects.push({ root: "scripts", name: "scripts" });
+
+// Vitest aplica el paralelismo por proyecto. Los proyectos por ruta no heredan el límite de la raíz.
 export default defineConfig({
-  test: { projects: ["apps/*", "packages/*", "scripts"], ...(process.env.CI && { maxWorkers: 4 }) },
+  root: import.meta.dirname,
+  test: {
+    maxWorkers,
+    projects: projects.map(({ root, name }) => ({
+      root,
+      extends: ["vitest.config.ts", "vite.config.ts"].map((file) => join(import.meta.dirname, root, file)).find(existsSync) ?? false,
+      test: { name, maxWorkers },
+    })),
+  },
 });

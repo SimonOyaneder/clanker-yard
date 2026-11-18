@@ -28,7 +28,9 @@ import {
   type Workspaces,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { tempGitRepo, type TempGitRepo } from "./git";
+import { seedPublishedParents } from "./published-parents";
+import type { TempGitRepo } from "./git";
+import { gitFixture } from "./git-fixture";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
 // `stack.restack` y `stack.restackRewritten` sobre repos git reales, un remoto bare y el GitHub simulado:
@@ -53,12 +55,19 @@ let publish: ReturnType<typeof prPublishAction>;
 let promote: ReturnType<typeof prPromoteAction>;
 let packs: ReturnType<typeof createPacks>;
 
+const freshRepo = gitFixture({
+  remote: true,
+  commits: [{ message: "chore: base", files: BASE_FILES }],
+  branches: { "cla-1": [{ message: "feat: cla-1", files: { "a.txt": "a1\nparent\na3\n" } }] },
+});
+
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-restack-"));
   store = openStore({ path: ":memory:" });
-  repo = tempGitRepo({ remote: true, commits: [{ message: "chore: base", files: BASE_FILES }] });
+  repo = freshRepo();
   github = await startGitHubSim({ origin: repo, repo: REPO, token: TOKEN });
 
+  seedPublishedParents(store, github, ["cla-1"]);
   askpass = createAskpass();
   const connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dataDir, "secrets") }), github: { baseUrl: github.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");
@@ -202,7 +211,6 @@ function dropWorkspace(branch: string) {
 
 describe("stack.restack", () => {
   test("hijo con un merge de release-bot y padre squasheado: queda sobre la base con sus commits propios y el PR cambia de base", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     // Alguien suma un commit al padre y release-bot[bot] lo mergea en el hijo.
     elsewhere((git, dir) => {
@@ -242,7 +250,6 @@ describe("stack.restack", () => {
   });
 
   test("squash distinto a la branch: se avisa pero el hijo queda sobre lo que la base trae", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const squash = squashOnMain("cla-1", { "notes.txt": "editado al mergear\n" });
     github.pr(1).merge({ sha: squash });
@@ -256,7 +263,6 @@ describe("stack.restack", () => {
   });
 
   test("hijo sin worktree: se crea desde la branch remota", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     dropWorkspace("cla-2");
     const squash = squashOnMain("cla-1");
@@ -272,7 +278,6 @@ describe("stack.restack", () => {
   });
 
   test("conflicto: la branch queda como estaba, el hijo sigue colgando y se emite el evento para el flujo de rebase", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "a.txt": "a1\nchild\na3\n" });
     const before = remoteSha("cla-2");
     const squash = squashOnMain("cla-1", { "a.txt": "a1\nmanual\na3\n" });
@@ -298,7 +303,6 @@ describe("stack.restack", () => {
   });
 
   test("un commit propio que la base ya trae cambiaría de patch-id al aplicarse: queda como conflicto sin tocar la branch", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const before = remoteSha("cla-2");
     const squash = squashOnMain("cla-1", { "b.txt": "b1\nchild\n" });
@@ -314,7 +318,6 @@ describe("stack.restack", () => {
   });
 
   test("cadena de 3: cada nieto parte de la punta vieja de su padre y de la nueva", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
     const oldChild = remoteSha("cla-2");
@@ -345,7 +348,6 @@ describe("stack.restack", () => {
   });
 
   test("un hijo con threads [clanker-council] no se fuerza y los demás siguen", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const council = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const other = await openPr("cla-3", "cla-1", { "c.txt": "c1\nother\n" });
     github.pr(council).councilThread("el nombre no calza");
@@ -364,7 +366,6 @@ describe("stack.restack", () => {
   });
 
   test("un merge de otra branch en el hijo no se puede separar: se salta y se avisa", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     elsewhere((git, dir) => {
       git("checkout", "--quiet", "-b", "otra", "main");
@@ -387,7 +388,6 @@ describe("stack.restack", () => {
   });
 
   test("si GitHub ya cambió la base del PR no la vuelve a cambiar; un cuerpo que nombra la base vieja deja una nota", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" }, "Apilado sobre cla-1");
     const squash = squashOnMain("cla-1");
     github.pr(1).merge({ sha: squash });
@@ -411,7 +411,6 @@ describe("stack.restack", () => {
   });
 
   test("un hijo que ya alguien dejó sobre la base solo cambia de base", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     dropWorkspace("cla-2");
     const squash = squashOnMain("cla-1");
@@ -433,7 +432,6 @@ describe("stack.restack", () => {
   });
 
   test("un PR sin mergear no se restackea", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
 
     await expect(run(1)).rejects.toThrow(PermanentActionError);
@@ -441,7 +439,6 @@ describe("stack.restack", () => {
   });
 
   test("un PR mergeado que no tiene hijos no hace nada", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     github.pr(1).merge({ sha: squashOnMain("cla-1") });
 
     const result = await run(1);
@@ -473,7 +470,6 @@ async function localPr(branch: string, base: string, files: Record<string, strin
 
 describe("stack.restack con PRs locales", () => {
   test("cadena remoto → local → local: B queda sobre main y es promovible, C sobre B, sin push ni request por ellos", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const c = await localPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
     const squash = squashOnMain("cla-1");
@@ -509,7 +505,6 @@ describe("stack.restack con PRs locales", () => {
   });
 
   test("un corte después del restack de un hijo local no lo repite al reintentar", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     github.pr(1).merge({ sha: squashOnMain("cla-1") });
     const shared = ctx();
@@ -533,7 +528,6 @@ describe("stack.restack con PRs locales", () => {
   });
 
   test("un hijo local en conflicto queda como estaba, no se pushea y anota pr.conflict con local para su flujo", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const b = await localPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
     const before = repo.git("rev-parse", "cla-2");
     github.pr(1).merge({ sha: squashOnMain("cla-1", { "a.txt": "a1\nparent\nmain\n" }) });
@@ -571,7 +565,6 @@ describe("con una cola de merge que cierra el PR en vez de mergearlo (bors)", ()
 
   test("la base cerrada con su squash ya en main cuenta como mergeada: los hijos locales se restackean sobre ese commit", async () => {
     await withMergeQueue();
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const squash = squashOnMain("cla-1");
     github.pr(1).close();
@@ -585,7 +578,6 @@ describe("con una cola de merge que cierra el PR en vez de mergearlo (bors)", ()
   });
 
   test("sin la estrategia de cola del pack, una base cerrada sigue siendo un PR cerrado", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     squashOnMain("cla-1");
     github.pr(1).close();
@@ -594,7 +586,6 @@ describe("con una cola de merge que cierra el PR en vez de mergearlo (bors)", ()
   });
 
   test("landedCommit da el primer commit de main que trae el PR, y nada antes de que llegue o si el PR no cambia nada", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const head = remoteSha("cla-1");
     repo.git("fetch", "--quiet", "origin");
     expect(await landedCommit(repo.dir, { headSha: head, defaultBranch: "main" })).toBeUndefined();
@@ -624,7 +615,6 @@ describe("pr.promote", () => {
   }
 
   test("el PR local que quedó sobre main sale como draft con su título y cuerpo, en la misma fila", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     github.pr(1).merge({ sha: squashOnMain("cla-1") });
     await run(1);
@@ -640,7 +630,6 @@ describe("pr.promote", () => {
   });
 
   test("publicar ahora sobre un padre abierto apunta a su branch y sigue colgando de él", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const { lease, ws } = await leaseOf("cla-2", "cla-1");
 
@@ -652,7 +641,6 @@ describe("pr.promote", () => {
   });
 
   test("un corte entre el push y el PR retoma sin duplicar", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const b = await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const { lease, ws } = await leaseOf("cla-2", "cla-1");
     const shared = ctx();
@@ -677,7 +665,6 @@ describe("pr.promote", () => {
 
 describe("stack.restackRewritten", () => {
   test("padre reescrito: el hijo queda sobre la nueva punta con el mismo patch-id y sigue colgando de él", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const before = remoteSha("cla-2");
     const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
@@ -705,7 +692,6 @@ describe("stack.restackRewritten", () => {
   });
 
   test("cadena de 3: el nieto parte de la punta vieja de su padre y de la nueva", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
     const [oldChild, oldGrandchild] = [remoteSha("cla-2"), remoteSha("cla-3")];
@@ -726,7 +712,6 @@ describe("stack.restackRewritten", () => {
   });
 
   test("repetirlo no cambia nada: el hijo ya está sobre la punta nueva", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
     await runRewritten(1, rewritten);
@@ -740,7 +725,6 @@ describe("stack.restackRewritten", () => {
   });
 
   test("conflicto: la branch del hijo queda como estaba y se emite el evento para el flujo de rebase", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
     const before = remoteSha("cla-2");
     const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3 v2\n" });
@@ -756,7 +740,6 @@ describe("stack.restackRewritten", () => {
   });
 
   test("los hijos de un hijo que quedó en conflicto se restackean cuando alguien lo resuelve y pushea", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const child = await openPr("cla-2", "cla-1", { "a.txt": "a1\nchild\na3\n" });
     const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
     const [oldChild, oldGrandchild] = [remoteSha("cla-2"), remoteSha("cla-3")];
@@ -786,7 +769,6 @@ describe("stack.restackRewritten", () => {
   });
 
   test("un PR sin hijos no hace nada, ni siquiera fetch", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
     const requests = github.requests.length;
 
@@ -798,7 +780,6 @@ describe("stack.restackRewritten", () => {
   });
 
   test("un PR que ya se mergeó no restackea a sus hijos sobre su branch reescrita", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
     github.pr(1).merge({ sha: squashOnMain("cla-1") });
@@ -808,7 +789,6 @@ describe("stack.restackRewritten", () => {
   });
 
   test("una punta vieja que no está en el repo local no se puede restackear", async () => {
-    await openPr("cla-1", "main", { "a.txt": "a1\nparent\na3\n" });
     await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const { to } = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
 

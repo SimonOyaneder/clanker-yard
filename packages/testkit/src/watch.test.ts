@@ -37,7 +37,8 @@ import { seedPr } from "@clanker/core/testing";
 import * as z from "zod";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
-import { tempGitRepo, type TempGitRepo } from "./git";
+import type { TempGitRepo } from "./git";
+import { gitFixture } from "./git-fixture";
 import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 
 /** El plazo de un `vi.waitFor`: el default de 1 s no alcanza con la suite en paralelo y bajo carga. */
@@ -71,19 +72,21 @@ let clock: number;
 
 const ref = (number: number): PrRef => ({ account: ACCOUNT, repo: REPO, number });
 
+const freshRepo = gitFixture({
+  remote: true,
+  commits: [{ message: "chore: base", files: { "a.txt": "a\n" } }],
+  branches: {
+    one: [{ message: "feat: one", files: { "one.txt": "1\n" } }],
+    two: [{ message: "feat: two", files: { "two.txt": "2\n" } }],
+  },
+});
+
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "clanker-watch-"));
   clock = Date.UTC(2026, 10, 15);
   trackerPolls = [];
   store = openStore({ path: ":memory:" });
-  origin = tempGitRepo({
-    remote: true,
-    commits: [{ message: "chore: base", files: { "a.txt": "a\n" } }],
-    branches: {
-      one: [{ message: "feat: one", files: { "one.txt": "1\n" } }],
-      two: [{ message: "feat: two", files: { "two.txt": "2\n" } }],
-    },
-  });
+  origin = freshRepo();
   sim = await startGitHubSim({ origin, token: TOKEN });
   connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: ACCOUNT, scopes: [], token: TOKEN }, "core");

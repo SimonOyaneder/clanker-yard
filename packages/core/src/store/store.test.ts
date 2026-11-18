@@ -32,6 +32,14 @@ const [run1, run2] = [newId("run"), newId("run")];
 const [prj1, prj2] = [newId("prj"), newId("prj")];
 const runStarted = { type: "run.started", origin: "core", runId: run1 } as const;
 
+test("cada base en memoria parte migrada, vacía y con claves foráneas activas", () => {
+  const first = memoryStore();
+  first.tx((tx) => tx.emit({ type: "core.started", origin: "core" }));
+  const next = memoryStore();
+  expect(next.events.since(0)).toEqual([]);
+  expect(next.db.$client.prepare("PRAGMA foreign_keys").get()).toMatchObject({ foreign_keys: 1 });
+});
+
 describe("tx", () => {
   test("confirma las escrituras y los eventos, y avisa a los suscriptores después del commit", () => {
     // Una segunda conexión solo ve filas confirmadas.

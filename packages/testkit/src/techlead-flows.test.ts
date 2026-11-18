@@ -28,7 +28,7 @@ import {
   type Store,
   createRuntimeRegistry,
 } from "@clanker/core";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { registerFlowStubs, type FlowStubsOptions } from "./flow-stubs";
 import { tempGitRepo } from "./git";
@@ -41,6 +41,13 @@ import { startGitHubSim } from "./github-sim";
 
 const fixtures = (...names: string[]) => names.map((name) => join(dirname(fileURLToPath(import.meta.url)), "../fixtures/runs/techlead-clasico", name));
 const { flows: templates } = clankerLoopTemplate;
+
+// El flujo simula los pushes. Todos los casos leen la misma rama y cada uno tiene su propio GitHubSim.
+let origin: ReturnType<typeof tempGitRepo>;
+beforeAll(() => {
+  origin = tempGitRepo({ remote: true, branches: { "cla-1": [{ message: "feat: algo", files: { "b.txt": "b\n" } }] } });
+});
+afterAll(() => origin.cleanup());
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -77,7 +84,6 @@ async function setup(options: SetupOptions = {}) {
   const store = openStore({ path: ":memory:" });
   const dir = mkdtempSync(join(tmpdir(), "clanker-techlead-"));
 
-  const origin = tempGitRepo({ remote: true, branches: { "cla-1": [{ message: "feat: algo", files: { "b.txt": "b\n" } }] } });
   const sim = await startGitHubSim({ origin, repo: "acme/web", account: "acme", token: "ghp_acme", bot: BOT });
   const connections = createConnections({ store, secrets: createFileSecrets({ dir: join(dir, "secrets") }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: "acme", scopes: [], token: "ghp_acme" }, "core");
@@ -152,7 +158,6 @@ async function setup(options: SetupOptions = {}) {
   cleanups.push(async () => {
     await flows.close();
     await sim.close();
-    origin.cleanup();
     store.close();
     rmSync(dir, { recursive: true, force: true });
   });

@@ -29,7 +29,9 @@ import {
   type Workspaces,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { tempGitRepo, type TempGitRepo } from "./git";
+import { seedPublishedParents } from "./published-parents";
+import type { TempGitRepo } from "./git";
+import { gitFixture } from "./git-fixture";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
 // Las bases combinadas (`docs/design.html#d-ops`, "Bases combinadas"): `workspaces.combineBase`, publicar el PR
@@ -55,10 +57,12 @@ let issues: ReturnType<typeof createIssues>;
 let projectId: CachedIssue["projectId"];
 let combinedMerge: ReturnType<typeof workspaceCombinedBaseMergeAction>;
 
+const freshRepo = gitFixture({ remote: true, commits: [{ message: "chore: base", files: BASE_FILES }] });
+
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-combined-"));
   store = openStore({ path: ":memory:" });
-  repo = tempGitRepo({ remote: true, commits: [{ message: "chore: base", files: BASE_FILES }] });
+  repo = freshRepo();
   github = await startGitHubSim({ origin: repo, repo: REPO, token: TOKEN });
 
   askpass = createAskpass();
@@ -168,15 +172,26 @@ const localRef = (branch: string) => repo.git("rev-parse", "--verify", "--quiet"
 
 /** Dos padres abiertos en ramas distintas (`cla-1` toca a.txt, `cla-2` toca b.txt) y la issue que los combina. */
 async function twoParents() {
-  const one = await openPr("cla-1", "main", { "a.txt": "a1\nuno\na3\n" });
-  const two = await openPr("cla-2", "main", { "b.txt": "b1\ndos\n" });
+  // Los padres ya están publicados al comenzar el caso. Solo el hijo necesita recorrer pr.publish.
+  const changes = [
+    { branch: "cla-1", path: "a.txt", content: "a1\nuno\na3\n" },
+    { branch: "cla-2", path: "b.txt", content: "b1\ndos\n" },
+  ];
+  for (const { branch, path, content } of changes) {
+    git("checkout", "-b", branch, "main");
+    writeFileSync(join(repo.dir, path), content);
+    git("commit", "-am", `feat: ${branch}`);
+  }
+  git("checkout", "main");
+  git("push", "-u", "origin", "cla-1", "cla-2");
+  seedPublishedParents(store, github, ["cla-1", "cla-2"]);
   const issue = await newIssue();
   const branch = combinedBaseBranch(issue.ref.key);
   const parents = [
     { key: "r1#1", branch: "cla-1" },
     { key: "r1#2", branch: "cla-2" },
   ];
-  return { one, two, issue, branch, parents };
+  return { issue, branch, parents };
 }
 
 describe("workspaces.combineBase", () => {

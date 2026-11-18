@@ -34,7 +34,8 @@ import {
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
-import { tempGitRepo, type TempGitRepo } from "./git";
+import type { TempGitRepo } from "./git";
+import { gitFixture } from "./git-fixture";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 import { seedPr } from "@clanker/core/testing";
 
@@ -71,13 +72,15 @@ let deps: PrPublishDeps;
 let publish: ReturnType<typeof prPublishAction>;
 let lease: WorkspaceLease;
 
+const freshRepo = gitFixture({
+  remote: true,
+  commits: [{ message: "chore: base", files: { "a.txt": "a\n" } }],
+});
+
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), "clanker-publish-"));
   store = openStore({ path: ":memory:" });
-  repo = tempGitRepo({
-    remote: true,
-    commits: [{ message: "chore: base", files: { "a.txt": "a\n" } }],
-  });
+  repo = freshRepo();
   github = await startGitHubSim({ origin: repo, repo: REPO, token: TOKEN });
 
   askpass = createAskpass();

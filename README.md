@@ -153,10 +153,12 @@ npm test
 npm run e2e                   # Playwright sobre la app con un core de demo
 ```
 
-En local corre solo los tests afectados; la CI corre la suite completa en los PRs listos:
+Durante el desarrollo puedes acotar Vitest al archivo o a los módulos afectados. La CI corre la suite completa en los PRs listos.
 
 ```bash
-npx vitest related --run $(git diff --name-only origin/main...HEAD)
+npm test -- packages/testkit/src/pr-restack.test.ts  # un archivo
+npm test -- --changed origin/main                    # cambios de la rama y del árbol de trabajo
+npm test -- --maxWorkers=3                           # suite completa con menos procesos
 ```
 
 Antes de tocar código lee [`AGENTS.md`](AGENTS.md): reglas, límites entre paquetes y trampas que el código no dice. El diseño completo está en [`docs/`](docs/) (`docs/design.html`; `python3 scripts/design-section.py <id>` imprime una sección en texto).

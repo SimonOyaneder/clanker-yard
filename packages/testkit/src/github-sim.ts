@@ -313,20 +313,18 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   const branchSha = (branch: string) => rev(`refs/heads/${branch}`);
   const headSha = (pr: PrData): string => (pr.lastSha = branchSha(pr.head) ?? pr.lastSha);
   /** Las líneas que el head agrega y borra contra su base, como `additions` y `deletions` de GraphQL. */
-  function changedLines(pr: PrData): { additions: number; deletions: number } {
-    const base = branchSha(pr.base);
+  function changedLines(base: string | undefined, head: string): { additions: number; deletions: number } {
     if (base === undefined) return { additions: 0, deletions: 0 };
-    const rows = git("diff", "--numstat", base, headSha(pr)).split("\n").filter(Boolean);
+    const rows = git("diff", "--numstat", base, head).split("\n").filter(Boolean);
     const sum = (column: number) => rows.reduce((total, row) => total + (Number(row.split("\t")[column]) || 0), 0);
     return { additions: sum(0), deletions: sum(1) };
   }
   const commitsAhead = (base: string, head: string) => Number(git("rev-list", "--count", `${base}..${head}`));
   /** Si fusionar head en base choca; `git merge-tree` sale con 1 cuando hay conflictos. */
-  function conflicts(pr: PrData): boolean {
-    const base = branchSha(pr.base);
+  function conflicts(base: string | undefined, head: string): boolean {
     if (base === undefined) return false;
     try {
-      git("merge-tree", "--write-tree", "--quiet", base, headSha(pr));
+      git("merge-tree", "--write-tree", "--quiet", base, head);
       return false;
     } catch (error) {
       if ((error as { cause?: { status?: number } }).cause?.status === 1) return true;
@@ -350,9 +348,9 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
   }
 
   /** Aproxima lo que calcula GitHub: draft, conflicto, checks requeridos que faltan, checks que fallan. */
-  function mergeability(pr: PrData): Pick<PrNode, "mergeable" | "mergeStateStatus"> {
-    const dirty = conflicts(pr);
-    const contexts = contextsOf(pr, headSha(pr));
+  function mergeability(pr: PrData, base: string | undefined, head: string): Pick<PrNode, "mergeable" | "mergeStateStatus"> {
+    const dirty = conflicts(base, head);
+    const contexts = contextsOf(pr, head);
     const passing = (c: RawContext) =>
       c.__typename === "CheckRun" ? c.status === "COMPLETED" && ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(c.conclusion ?? "") : c.state === "SUCCESS";
     const mergeable = dirty ? "CONFLICTING" : "MERGEABLE";
@@ -382,12 +380,13 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
 
   function node(pr: PrData): PrNode {
     const sha = headSha(pr);
+    const base = branchSha(pr.base);
     return {
       number: pr.number,
       title: pr.title,
       url: `https://github.com/${repo}/pull/${pr.number}`,
       updatedAt: pr.updatedAt,
-      ...changedLines(pr),
+      ...changedLines(base, sha),
       commentCount: pr.issueComments.length,
       repo: { name, defaultBranch },
       state: pr.merged ? "MERGED" : pr.state === "open" ? "OPEN" : "CLOSED",
@@ -396,7 +395,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       headRefOid: sha,
       baseRefName: pr.base,
       reviewDecision: reviewDecision(pr),
-      ...mergeability(pr),
+      ...mergeability(pr, base, sha),
       mergeCommit: pr.merged ? { oid: pr.merged.sha } : null,
       author: withAvatar(pr.author),
       labels: pr.labels,
@@ -424,27 +423,42 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
     if (!userIds.has(a.login)) userIds.set(a.login, USER_ID + userIds.size);
     return { login: a.login, id: userIds.get(a.login)!, type: a.__typename, site_admin: false };
   };
-  const pullJson = (pr: PrData): SimPull => ({
-    url: `https://api.github.com/repos/${repo}/pulls/${pr.number}`,
-    id: 5_000_000 + pr.number,
-    node_id: pr.nodeId,
-    number: pr.number,
-    state: pr.state,
-    locked: false,
-    draft: pr.draft,
-    title: pr.title,
-    body: pr.body,
-    user: userJson(pr.author),
-    html_url: `https://github.com/${repo}/pull/${pr.number}`,
-    created_at: pr.createdAt,
-    updated_at: pr.updatedAt,
-    closed_at: pr.closedAt,
-    merged_at: pr.merged?.at ?? null,
-    head: { label: `${owner}:${pr.head}`, ref: pr.head, sha: headSha(pr) },
-    base: { label: `${owner}:${pr.base}`, ref: pr.base, sha: branchSha(pr.base) },
-    assignees: pr.assignees.map(({ login }) => ({ login })),
-    commits: pr.state === "open" && branchSha(pr.base) !== undefined ? commitsAhead(pr.base, headSha(pr)) : 0,
-  });
+  // Para una lista, todos los PRs ven las ramas de la misma lectura del bare.
+  function pullList(selected: PrData[]): SimPull[] {
+    if (selected.length === 0) return [];
+    const refs = new Map<string, string>();
+    for (const line of git("for-each-ref", "--format=%(refname:strip=2) %(objectname)", "refs/heads").split("\n")) {
+      const [name, sha] = line.split(" ");
+      if (name && sha) refs.set(name, sha);
+    }
+    return selected.map((pr) => pullJson(pr, refs));
+  }
+
+  function pullJson(pr: PrData, refs?: Map<string, string>): SimPull {
+    const head = refs ? (pr.lastSha = refs.get(pr.head) ?? pr.lastSha) : headSha(pr);
+    const base = refs ? refs.get(pr.base) : branchSha(pr.base);
+    return {
+      url: `https://api.github.com/repos/${repo}/pulls/${pr.number}`,
+      id: 5_000_000 + pr.number,
+      node_id: pr.nodeId,
+      number: pr.number,
+      state: pr.state,
+      locked: false,
+      draft: pr.draft,
+      title: pr.title,
+      body: pr.body,
+      user: userJson(pr.author),
+      html_url: `https://github.com/${repo}/pull/${pr.number}`,
+      created_at: pr.createdAt,
+      updated_at: pr.updatedAt,
+      closed_at: pr.closedAt,
+      merged_at: pr.merged?.at ?? null,
+      head: { label: `${owner}:${pr.head}`, ref: pr.head, sha: head },
+      base: { label: `${owner}:${pr.base}`, ref: pr.base, sha: base },
+      assignees: pr.assignees.map(({ login }) => ({ login })),
+      commits: pr.state === "open" && base !== undefined ? commitsAhead(base, head) : 0,
+    };
+  }
   const commentJson = (c: SimComment, pr: PrData) => ({
     id: c.id,
     node_id: c.nodeId,
@@ -640,7 +654,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
           .filter((p) => (state === "all" || p.state === state) && (head === undefined || `${owner}:${p.head}` === head) && (base === undefined || p.base === base))
           .reverse();
         const size = Number(per_page);
-        return json(200, found.slice((Number(page) - 1) * size, Number(page) * size).map(pullJson));
+        return json(200, pullList(found.slice((Number(page) - 1) * size, Number(page) * size)));
       },
     ],
     [
@@ -668,10 +682,11 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       (_, __, pr) => {
         const found = pr();
         if (!found) return notFound();
-        const { mergeable, mergeStateStatus } = mergeability(found);
+        const pull = pullJson(found);
+        const { mergeable, mergeStateStatus } = mergeability(found, pull.base.sha, pull.head.sha);
         const computing = found.unknownReads > 0;
         return json(200, {
-          ...pullJson(found),
+          ...pull,
           merged: found.merged !== null,
           mergeable: computing ? null : mergeable === "MERGEABLE",
           mergeable_state: computing ? "unknown" : mergeStateStatus.toLowerCase(),
@@ -1003,7 +1018,7 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       if (!pr) throw new Error(`El GitHub simulado no tiene el PR #${number}.`);
       return handle(pr);
     },
-    pulls: () => prs.map(pullJson),
+    pulls: () => pullList(prs),
     openPr({ head, base = defaultBranch, title = head, body = null, draft = false, author = viewer }) {
       return handle(createPr({ head, base, title, body, draft, author: actor(author) }));
     },

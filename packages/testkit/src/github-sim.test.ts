@@ -14,7 +14,8 @@ import {
   type Store,
 } from "@clanker/core";
 import { afterEach, beforeEach, describe, expect, test} from "vitest";
-import { tempGitRepo, type TempGitRepo } from "./git";
+import type { TempGitRepo } from "./git";
+import { gitFixture } from "./git-fixture";
 import { startGitHubSim, type GitHubSim } from "./github-sim";
 
 const TOKEN = "github_pat_UNIQUE-0123456789";
@@ -28,17 +29,19 @@ let sim: GitHubSim;
 let connections: Connections;
 let packs: Packs;
 
+const freshRepo = gitFixture({
+  remote: true,
+  commits: [{ message: "chore: base", files: { "a.txt": "a\n" } }],
+  branches: {
+    [BRANCH]: [{ message: "feat: change", files: { "b.txt": "b\n" } }],
+    "sin-cambios": [],
+  },
+});
+
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "clanker-sim-"));
   store = openStore({ path: ":memory:" });
-  origin = tempGitRepo({
-    remote: true,
-    commits: [{ message: "chore: base", files: { "a.txt": "a\n" } }],
-    branches: {
-      [BRANCH]: [{ message: "feat: change", files: { "b.txt": "b\n" } }],
-      "sin-cambios": [],
-    },
-  });
+  origin = freshRepo();
   sim = await startGitHubSim({ origin, token: TOKEN });
   connections = createConnections({ store, secrets: createFileSecrets({ dir }), github: { baseUrl: sim.baseUrl } });
   await connections.connect({ provider: "github", account: "octocat", scopes: [], token: TOKEN }, "core");

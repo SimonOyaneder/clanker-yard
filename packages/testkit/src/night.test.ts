@@ -50,8 +50,8 @@ describe("la noche", () => {
     night.addIssue({ title: "Agregar b", priority: 2, blockedBy: first });
     night.addIssue({ title: "Agregar shared", priority: 2 });
     await night.until("los tres PRs en draft", async () => {
-      expect(github.pulls()).toHaveLength(3);
       for (const key of ["WEB-1", "WEB-2", "WEB-3"]) expect((await runOf(key)).status).toBe("done");
+      expect(github.pulls()).toHaveLength(3);
     });
     const [prA, prB, prC] = await Promise.all(["WEB-1", "WEB-2", "WEB-3"].map(prOf));
     expect([prA!.draft, prB!.draft, prC!.draft]).toEqual([true, true, true]);

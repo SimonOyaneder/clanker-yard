@@ -118,14 +118,15 @@ export interface FakeWorkspace {
   execute(query: string, variables?: Record<string, unknown>): ReturnType<typeof graphql>;
 }
 
-/** El subconjunto del esquema real; se lee al crear un workspace, no al importar el módulo (`@clanker/core` lo exporta). */
+/** Solo el esquema es compartido. Cada workspace tiene sus propios resolvers y datos. */
+let workspaceSchema: GraphQLSchema | undefined;
 const SCHEMA_URL = new URL("../../linear/fixtures/schema.graphql", import.meta.url);
 const MAX_PAGE = 250;
 const DEFAULT_PAGE = 50;
 const BASE_TIME = Date.UTC(2026, 0, 1);
 
 export function createFakeWorkspace({ workspace = "clanker-yard" }: { workspace?: string } = {}): FakeWorkspace {
-  const schema: GraphQLSchema = buildSchema(readFileSync(SCHEMA_URL, "utf8"));
+  const schema = workspaceSchema ??= buildSchema(readFileSync(SCHEMA_URL, "utf8"));
   const teams: FakeTeam[] = [];
   const projects: FakeProject[] = [];
   const issues: FakeIssue[] = [];

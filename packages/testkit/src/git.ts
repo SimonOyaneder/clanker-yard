@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -57,7 +57,7 @@ function commit(dir: string, { message, files = {} }: CommitSpec): void {
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, content);
   }
-  runGit(dir, ["add", "--all"]);
+  if (Object.keys(files).length) runGit(dir, ["add", "--all"]);
   runGit(dir, ["commit", "--allow-empty", "--message", message]);
 }
 
@@ -81,25 +81,40 @@ export function tempGitRepo(opts: TempGitRepoOptions = {}): TempGitRepo {
       runGit(dir, ["checkout", "-b", branch, "main"]);
       for (const spec of branchCommits) commit(dir, spec);
     }
-    runGit(dir, ["checkout", "main"]);
+    if (Object.keys(branches).length) runGit(dir, ["checkout", "main"]);
 
     let remoteDir: string | undefined;
     if (remote) {
       remoteDir = join(root, "remote.git");
       runGit(root, ["init", "--bare", "--initial-branch=main", remoteDir]);
       runGit(dir, ["remote", "add", "origin", remoteDir]);
-      runGit(dir, ["push", "--set-upstream", "origin", "main"]);
-      for (const branch of Object.keys(branches)) {
-        runGit(dir, ["push", "--set-upstream", "origin", branch]);
-      }
+      runGit(dir, ["push", "--set-upstream", "origin", "main", ...Object.keys(branches)]);
     }
 
-    return {
-      dir,
-      remoteDir,
-      git: (...args) => runGit(dir, args),
-      cleanup: () => rmSync(root, { recursive: true, force: true }),
-    };
+    return repoHandle(root, dir, remoteDir);
+  } catch (error) {
+    rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function repoHandle(root: string, dir: string, remoteDir: string | undefined): TempGitRepo {
+  return { dir, remoteDir, git: (...args) => runGit(dir, args), cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+/** Copia una plantilla recién creada por tempGitRepo, con su índice, ramas locales y remoto privado. */
+export function copyGitTemplate(template: TempGitRepo): TempGitRepo {
+  const root = mkdtempSync(join(tmpdir(), "clanker-git-"));
+  const dir = join(root, "work");
+  try {
+    cpSync(template.dir, dir, { recursive: true, verbatimSymlinks: true });
+    let remoteDir: string | undefined;
+    if (template.remoteDir) {
+      remoteDir = join(root, "remote.git");
+      cpSync(template.remoteDir, remoteDir, { recursive: true, verbatimSymlinks: true });
+      runGit(dir, ["remote", "set-url", "origin", remoteDir]);
+    }
+    return repoHandle(root, dir, remoteDir);
   } catch (error) {
     rmSync(root, { recursive: true, force: true });
     throw error;

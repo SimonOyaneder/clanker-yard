@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { tempGitRepo, type TempGitRepo } from "./git";
+import { copyGitTemplate, tempGitRepo, type TempGitRepo } from "./git";
 
 const repos: TempGitRepo[] = [];
 afterEach(() => {
@@ -77,4 +77,19 @@ test("cleanup borra el repo y su remoto", () => {
   r.cleanup();
   expect(existsSync(r.dir)).toBe(false);
   expect(existsSync(r.remoteDir!)).toBe(false);
+});
+
+test("cada copia puede hacer push sin cambiar el remoto de la plantilla ni el de otra copia", () => {
+  const template = repo({ remote: true });
+  const first = copyGitTemplate(template);
+  repos.push(first);
+  const second = copyGitTemplate(template);
+  repos.push(second);
+  const initial = template.git("rev-parse", "HEAD");
+  first.git("commit", "--allow-empty", "-m", "solo en la primera copia");
+  first.git("push");
+  for (const pristine of [template, second]) {
+    expect(pristine.git("--git-dir", pristine.remoteDir!, "rev-parse", "main")).toBe(initial);
+  }
+  expect(first.git("--git-dir", first.remoteDir!, "rev-parse", "main")).toBe(first.git("rev-parse", "HEAD"));
 });
