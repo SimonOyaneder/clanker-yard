@@ -149,6 +149,7 @@ npm run dev -w apps/desktop   # construye el core y abre Electron
 npm run dev -w packages/ui    # solo la UI en el navegador, con datos de ejemplo
 npm run typecheck
 npm run lint
+npm run test:changed          # solo los tests de lo que cambió la branch
 npm test                      # sin los tests de integración lentos (vitest.slow.ts)
 npm run test:all              # todo; antes de pushear a main
 npm run e2e                   # Playwright sobre la app con un core de demo
@@ -158,7 +159,7 @@ Durante el desarrollo puedes acotar Vitest al archivo o a los módulos afectados
 
 ```bash
 npm test -- packages/testkit/src/pr-restack.test.ts  # un archivo, aunque sea de los lentos
-npm test -- --changed origin/main                    # cambios de la rama y del árbol de trabajo
+node scripts/changed-tests.ts --dry-run <archivos>    # qué tests corre test:changed para esos archivos
 npm run test:slow                                    # solo los lentos
 npm test -- --maxWorkers=3                           # suite rápida con menos procesos
 ```
