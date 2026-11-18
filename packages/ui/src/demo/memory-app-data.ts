@@ -1,13 +1,11 @@
-import { type Breaker, type CachedIssue, type CachedPr, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type NewLearning, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
-import type { AppData, RepoRow } from "@/app-data"
+import { type Breaker, type CachedIssue, type CachedPr, type ChatId, type ClankerProject, type ClaudeStatus, type Connection, type Decision, type DefChange, type DefIssue, type DefRecord, type Event, FlowDef, type IssueId, type Lanes, type Learning, type LearningPatch, type NewLearning, type PackInfo, Profile, type PrRef, ProjectConfig, type ProjectDefaults, type ProjectId, type QueueEntry, type Repo, Role, Run, type RunDetail, type Step } from "@clanker/api"
+import type { AppData, ChatData, RepoRow } from "@/app-data"
+import { seedPrChats, type SeedPrChat } from "@/demo/seed-chats"
 import { SEED_REBASE, SEED_TECHLEAD } from "@/demo/seed-flows"
 import { buildOpenPrs, seedCommitDiff, seedPrDetail } from "@/demo/seed-prs"
 import { openPrsOf } from "@/lib/prs/prs"
 import { aggregate, seedClosedRuns } from "@/demo/seed-metrics"
 import { seedStep, transcriptPage, type StepSeed } from "@/demo/seed-steps"
-
-// Datos de ejemplo en memoria para desarrollar la UI sin core. Nada llega por `events`: lo que se ve es
-// lo del arranque más lo que cambia `createProject` y `startRun`.
 
 // Ids con la forma de los del core (prefijo + 26 caracteres de ULID).
 const id = <P extends string>(prefix: P, n: number) => `${prefix}_${String(n).padStart(26, "0")}` as `${P}_${string}`
@@ -20,7 +18,7 @@ const TRACKER_PROJECTS = [
   { ref: { tracker: "linear" as const, id: "9e72d4a8-6b15-4c39-b0a2-5f8c1d7e4a04" }, name: "Limpieza de feature flags", mine: false },
 ]
 
-export function createMemoryAppData(now = Date.now()): AppData {
+export function createMemoryAppData(now = Date.now()): AppData & ChatData {
   const min = (m: number) => now - m * 60_000
   let nextId = 100
 
@@ -432,6 +430,79 @@ export function createMemoryAppData(now = Date.now()): AppData {
   }
   const OPEN: Step["status"][] = ["pending", "leased", "running", "waiting"]
   const cancelOpen = (steps: Step[]): Step[] => steps.map((st) => (OPEN.includes(st.status) ? { ...st, status: "canceled", error: "Lo canceló una persona." } : st))
+  const chats = seedPrChats(prs, now)
+  const history: Event[] = []
+  const subscribers = new Set<(event: Event) => void>()
+  const timers = new Map<ChatId, ReturnType<typeof setTimeout>>()
+  const turns = new Map<ChatId, number>()
+  const revisions = new Map(chats.map((seed) => [seed.chat.id, seed.proposal?.rev ?? 0]))
+  const snapshot = <T,>(value: T): T => structuredClone(value)
+  const proposalTemplate = snapshot(chats.find((seed) => seed.proposal)!.proposal!)
+  const needChat = (chatId: ChatId) => {
+    const found = chats.find((item) => item.chat.id === chatId)
+    if (!found) throw new Error(`No existe el chat ${chatId}.`)
+    return found
+  }
+  const emitChat = (seed: SeedPrChat, type: Extract<Event["type"], `chat.${string}`>) => {
+    const event: Event = { seq: history.length + 1, ts: Date.now(), type, origin: "core", subject: { type: "pr", id: seed.chat.prId }, payload: { chatId: seed.chat.id, prId: seed.chat.prId } }
+    history.push(event)
+    for (const notify of subscribers) notify(event)
+  }
+  const stopTimer = (chatId: ChatId) => {
+    clearTimeout(timers.get(chatId))
+    timers.delete(chatId)
+  }
+  const addMessage = (seed: SeedPrChat, role: "user" | "assistant" | "system", text: string) => {
+    seed.messages.push({ id: `${seed.chat.id}-message-${nextId++}`, role, text, at: Date.now() })
+  }
+  const resultOf = (seed: SeedPrChat): NonNullable<NonNullable<SeedPrChat["proposal"]>["result"]> => {
+    const parent = prs.find((pr) => pr.id === seed.chat.prId)!
+    const children = prs.filter((pr) => pr.parents.includes(parent.id) || (parent.state && pr.repo === parent.repo && pr.state?.baseRef === parent.state.headRef))
+    return { sha: "c".repeat(40), children: children.map((child, index) => index === 0
+      ? { prId: child.id, status: "restacked", head: "d".repeat(40) }
+      : { prId: child.id, status: "conflict", files: ["app/models/entry_index.rb"], failures: "Conflicto al actualizar la base. La branch del hijo se conservó." }) }
+  }
+  const advanceChat = (seed: SeedPrChat) => {
+    if (seed.proposal?.status === "applying") {
+      seed.proposal = { ...seed.proposal, status: "applied", result: resultOf(seed) }
+      addMessage(seed, "system", "Propuesta aplicada. Revisa el resultado del restack de los hijos antes de continuar.")
+      emitChat(seed, "chat.message")
+      emitChat(seed, "chat.apply_finished")
+      return
+    }
+    if (!seed.chat.busy) return
+    const tick = (turns.get(seed.chat.id) ?? 0) + 1
+    turns.set(seed.chat.id, tick)
+    const last = seed.messages.at(-1)!
+    if (last.role !== "assistant") addMessage(seed, "assistant", "Estoy revisando el diff")
+    else last.text = tick < 3 ? "Estoy revisando el diff y los tests del PR" : "Revisé el diff y los tests del PR. La validación debe cubrir el caso sin entradas."
+    seed.chat.costMicros += 4_000
+    emitChat(seed, "chat.message")
+    if (tick >= 3) {
+      seed.chat.busy = false
+      const request = seed.messages.findLast((message) => message.role === "user")?.text ?? ""
+      if (!/explica|sin (?:modificar|cambios)/i.test(request)) {
+        const pr = prs.find((item) => item.id === seed.chat.prId)!
+        const rev = (revisions.get(seed.chat.id) ?? 0) + 1
+        revisions.set(seed.chat.id, rev)
+        seed.proposal = { ...snapshot(proposalTemplate), rev, baseSha: pr.state?.headSha ?? "9f2c4e1ab7d03c55e18f0b6a2d4c7e9f01b3a5c8", status: "draft", runId: undefined, result: undefined }
+        seed.messages.at(-1)!.proposalRev = seed.proposal.rev
+        emitChat(seed, "chat.proposal")
+      }
+      emitChat(seed, "chat.turn_finished")
+    }
+  }
+  const schedule = () => {
+    if (!subscribers.size) return
+    for (const seed of chats) {
+      if (timers.has(seed.chat.id) || (!seed.chat.busy && seed.proposal?.status !== "applying")) continue
+      timers.set(seed.chat.id, setTimeout(() => {
+        timers.delete(seed.chat.id)
+        advanceChat(seed)
+        schedule()
+      }, seed.proposal?.status === "applying" ? 6000 : 2000))
+    }
+  }
   const ownerOf = (stepId: string) => {
     const owner = runs.find((r) => r.steps.some((st) => st.id === stepId))
     if (!owner) throw new Error(`No existe el paso ${stepId}`)
@@ -446,6 +517,71 @@ export function createMemoryAppData(now = Date.now()): AppData {
   }
 
   return {
+    chat: async ({ prId }) => {
+      const found = chats.find((item) => item.chat.prId === prId)
+      if (!found) throw new Error(`No existe el PR ${prId}.`)
+      return snapshot({ chat: found.chat, messages: found.messages, proposal: found.proposal })
+    },
+    sendChat: async ({ chatId, text, runtime, model, effort }) => {
+      const seed = needChat(chatId)
+      if (seed.runtimeError) throw new Error(seed.runtimeError)
+      if (!text.trim()) throw new Error("Escribe un mensaje para el agente.")
+      if (seed.chat.busy || seed.proposal?.status === "applying") throw new Error("Espera a que termine la operación en curso.")
+      seed.chat = { ...seed.chat, busy: true, ...(runtime ? { runtime } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+      addMessage(seed, "user", text.trim())
+      turns.set(chatId, 0)
+      emitChat(seed, "chat.message")
+      emitChat(seed, "chat.turn_started")
+      schedule()
+      return snapshot(seed.chat)
+    },
+    interruptChat: async ({ chatId }) => {
+      const seed = needChat(chatId)
+      if (seed.chat.busy) {
+        stopTimer(chatId)
+        seed.chat.busy = false
+        addMessage(seed, "system", "Respuesta interrumpida. Puedes enviar otro mensaje para continuar.")
+        emitChat(seed, "chat.message")
+        emitChat(seed, "chat.turn_finished")
+      }
+      return snapshot(seed.chat)
+    },
+    resetChat: async ({ chatId }) => {
+      const seed = needChat(chatId)
+      if (seed.proposal?.status === "applying") throw new Error("Espera a que termine la aplicación antes de reiniciar el chat.")
+      stopTimer(chatId)
+      turns.delete(chatId)
+      seed.messages = []
+      seed.proposal = null
+      seed.chat = { ...seed.chat, busy: false, costMicros: 0 }
+      emitChat(seed, "chat.message")
+      emitChat(seed, "chat.proposal")
+      return snapshot(seed.chat)
+    },
+    chatProposal: async ({ chatId, rev }) => {
+      const seed = needChat(chatId)
+      if (seed.proposal?.rev !== rev) throw new Error("La propuesta cambió. Actualiza el chat y vuelve a abrirla.")
+      return snapshot({ patch: seed.patch, files: seed.proposal.files })
+    },
+    discardProposal: async ({ chatId }) => {
+      const seed = needChat(chatId)
+      if (seed.chat.busy || seed.proposal?.status === "applying") throw new Error("Espera a que termine la operación antes de descartar.")
+      if (seed.proposal) seed.proposal = { ...seed.proposal, status: "discarded" }
+      emitChat(seed, "chat.proposal")
+      return snapshot(seed.chat)
+    },
+    applyProposal: async ({ chatId, rev }) => {
+      const seed = needChat(chatId)
+      if (!seed.chat.canApply) throw new Error(seed.chat.applyReason ?? "No se puede aplicar esta propuesta.")
+      if (seed.chat.busy) throw new Error("Espera a que termine la respuesta.")
+      if (!seed.proposal || seed.proposal.rev !== rev) throw new Error("La propuesta cambió. Actualiza el chat antes de aplicar.")
+      if (seed.proposal.status !== "draft") throw new Error(seed.proposal.status === "stale" ? "El PR cambió. Pide una nueva propuesta antes de aplicar." : "Esta propuesta ya no se puede aplicar.")
+      const runId = id("run", nextId++)
+      seed.proposal = { ...seed.proposal, status: "applying", runId }
+      emitChat(seed, "chat.apply_started")
+      schedule()
+      return { runId }
+    },
     projects: async () => projects.map((p) => ({ ...p })),
     createProject: async (input) => {
       if (projects.some((p) => p.slug === input.slug)) throw new Error(`Ya existe un proyecto con el slug ${input.slug}`)
@@ -640,9 +776,45 @@ export function createMemoryAppData(now = Date.now()): AppData {
     },
     pauseProject: async (projectId) => setProjectStatus(projectId, "paused"),
     resumeProject: async (projectId) => setProjectStatus(projectId, "active"),
-    events: async (_after, signal) => ({
-      async *[Symbol.asyncIterator]() {
-        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }))
+    events: async (after, signal) => ({
+      [Symbol.asyncIterator]() {
+        let closed = signal.aborted
+        const queue = history.filter((event) => event.seq > after)
+        let waiting: ((value: IteratorResult<Event>) => void) | undefined
+        const notify = (event: Event) => {
+          if (event.seq <= after) return
+          if (waiting) {
+            const resolve = waiting
+            waiting = undefined
+            resolve({ done: false, value: snapshot(event) })
+          } else queue.push(event)
+        }
+        const close = () => {
+          closed = true
+          subscribers.delete(notify)
+          signal.removeEventListener("abort", close)
+          waiting?.({ done: true, value: undefined })
+          waiting = undefined
+          queue.length = 0
+          if (!subscribers.size) for (const chatId of timers.keys()) stopTimer(chatId)
+        }
+        if (!closed) {
+          subscribers.add(notify)
+          signal.addEventListener("abort", close, { once: true })
+          schedule()
+        }
+        return {
+          next: async (): Promise<IteratorResult<Event>> => {
+            if (closed) return { done: true, value: undefined }
+            const event = queue.shift()
+            if (event) return { done: false, value: snapshot(event) }
+            return new Promise((resolve) => { waiting = resolve })
+          },
+          return: async (): Promise<IteratorResult<Event>> => {
+            close()
+            return { done: true, value: undefined }
+          },
+        }
       },
     }),
     decisions: async (filter = {}) =>
