@@ -27,6 +27,7 @@ export interface CodexAppServerOptions {
   executable?: string;
   args?: string[];
   baseEnv?: Record<string, string | undefined>;
+  git?: { ghConfigDir: string; gitConfig: string };
   version?: string;
   procs?: Procs;
   stepRunId?: string;
@@ -36,9 +37,9 @@ export interface CodexAppServerOptions {
 
 export async function launchCodexAppServer({
   cwd, executable = "codex", args = CODEX_ARGS, baseEnv = process.env, version = "0.0.0",
-  procs, stepRunId, requestTimeoutMs = REQUEST_TIMEOUT_MS, killAfterMs,
+  procs, stepRunId, requestTimeoutMs = REQUEST_TIMEOUT_MS, killAfterMs, git,
 }: CodexAppServerOptions): Promise<CodexAppServer> {
-  const child = spawn(executable, args, { cwd, env: codexEnv(baseEnv), detached: true, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const child = spawn(executable, args, { cwd, env: codexEnv(baseEnv, git), detached: true, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   const notifications = createEventQueue<CodexNotification>();
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; method: string }>();
   let nextId = 0;

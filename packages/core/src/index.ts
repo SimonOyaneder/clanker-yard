@@ -28,6 +28,7 @@ export type { Briefs } from "./agents/brief";
 export { listHunks } from "./git/tree";
 
 export { createClaudeRuntime } from "./agents/claude/claude-runtime";
+export { createCodexRuntime } from "./agents/codex/codex-runtime";
 
 export type { QueryFn } from "./agents/claude/claude-runtime";
 export { subscriptionCredentials } from "./agents/claude/credentials";
@@ -144,4 +145,3 @@ export {
 } from "./github/actions/pr-feedback";
 
 export { preparePush } from "./commits/prepare-push";
-
