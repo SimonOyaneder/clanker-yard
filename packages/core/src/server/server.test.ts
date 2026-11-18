@@ -172,6 +172,23 @@ describe("auth", () => {
   });
 });
 
+test("chats rechaza sus procedimientos con NOT_IMPLEMENTED hasta implementar el core", async () => {
+  const core = await start();
+  const client = createClient({ url: core.url, token: core.token, origin: "ui", uiKey: UI_KEY });
+  const chatId = "chat_01J0000000000000000000000A";
+  for (const request of [
+    () => client.chats.get({ prId: "pr-1" }),
+    () => client.chats.send({ chatId, text: "Revisa el PR" }),
+    () => client.chats.interrupt({ chatId }),
+    () => client.chats.reset({ chatId }),
+    () => client.chats.proposal({ chatId, rev: 1 }),
+    () => client.chats.discard({ chatId }),
+    () => client.chats.apply({ chatId, rev: 1 }),
+  ]) {
+    await expect(request()).rejects.toMatchObject({ code: "NOT_IMPLEMENTED" });
+  }
+});
+
 describe("connections", () => {
   test("list devuelve las cuentas conectadas y ningún token", async () => {
     const token = "ghp_super-secret-token-value";

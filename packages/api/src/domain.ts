@@ -24,6 +24,8 @@ export const DecisionId = prefixedId("dec");
 export type DecisionId = z.infer<typeof DecisionId>;
 export const LearningId = prefixedId("lrn");
 export type LearningId = z.infer<typeof LearningId>;
+export const ChatId = prefixedId("chat");
+export type ChatId = z.infer<typeof ChatId>;
 
 /** SHA-256 del contenido en hex: la identidad de un artefacto. */
 export const ArtifactHash = z
@@ -129,6 +131,12 @@ export const EventType = z.enum([
   "pr.thread_resolved",
   "pr.hold_changed",
   "pr.overlap",
+  "chat.message",
+  "chat.turn_started",
+  "chat.turn_finished",
+  "chat.proposal",
+  "chat.apply_started",
+  "chat.apply_finished",
   "decision.opened",
   "decision.resolved",
   "learning.proposed",

@@ -1,4 +1,5 @@
 export * from "./agents";
+export * from "./chats";
 export * from "./client";
 export * from "./connections";
 export * from "./contract";

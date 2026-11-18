@@ -267,6 +267,15 @@ export function createRouter(deps: RouterDeps) {
         store.tx((tx) => tx.emit({ type: "pack.removed", origin: context.origin, payload: { packId: input.id } }));
       }),
     },
+    chats: {
+      get: os.chats.get.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
+      send: os.chats.send.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
+      interrupt: os.chats.interrupt.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
+      reset: os.chats.reset.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
+      proposal: os.chats.proposal.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
+      discard: os.chats.discard.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
+      apply: os.chats.apply.handler(() => { throw new ORPCError("NOT_IMPLEMENTED"); }),
+    },
     prs: {
       get: os.prs.get.handler(({ input }) => prs.get(input)),
       list: os.prs.list.handler(({ input }) => prCache.list(input)),
