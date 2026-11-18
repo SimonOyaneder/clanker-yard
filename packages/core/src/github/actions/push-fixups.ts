@@ -1,4 +1,5 @@
 import type { RepoId } from "@clanker/api";
+import { and, eq } from "drizzle-orm";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,14 +9,15 @@ import { preparePush } from "../../commits/prepare-push";
 import { branchCommits, fixupMessage, FIXUP_PREFIX, oldRange, routeHunks, type BranchCommit } from "../../commits/route";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
 import { diffBetween, listHunks, snapshotTree, type Hunk } from "../../git/tree";
+import { pullRequests, workspaces as workspacesTable } from "../../store/schema";
 import type { Store } from "../../store/store";
 import type { RepoConfig } from "../../repos/repos";
-import type { Workspaces } from "../../workspaces/workspaces";
+import type { Workspaces, WorkspaceRef } from "../../workspaces/workspaces";
 import type { Prs } from "../prs";
 import { ownedOpenPr, pushOrThrow, type PrPurpose } from "./push";
 
 /** Para qué toma `pr.pushFixups` el PR de la branch (`ownedOpenPr`). */
-const FIXUPS: PrPurpose = { needsRemote: "pushear", missing: "no hay a qué pushear fixups", notOwned: "no se le pushean fixups" };
+const FIXUPS: PrPurpose = { needsRemote: "pushear", missing: "no hay un PR al que aplicar fixups", notOwned: "no se le aplican fixups" };
 
 const PushFixupsArgs = z.object({
   ws: ApplyArgs.shape.ws,
@@ -56,55 +58,82 @@ interface Made {
   spans: { path: string; from: number; to: number }[];
 }
 
-type Committed = { made: Made[] } | { route: { unrouted: string[]; commits: { sha: string; subject: string }[]; failures?: string } };
+type CommitPlan = {
+  head: string;
+  saved: string;
+  hunks: Hunk[];
+  steps: { message: string; hunks: Hunk[]; lands?: string }[];
+};
+
+type Planned = CommitPlan | { route: { unrouted: string[]; commits: { sha: string; subject: string }[]; failures?: string } };
 
 /**
  * `pr.pushFixups` (`docs/design.html#d-flows`, Fixups): lo que el dev cambió después del triage del bot
  * (o de un thread de council) sale como `fixup!` del commit al que pertenece, y solo se pushea cuando
- * todo tiene destino. Tres etapas con `ctx.once`, así que un reintento tras un corte retoma donde quedó.
+ * todo tiene destino. Las etapas con `ctx.once` conservan la punta inicial y retoman donde quedaron tras un corte.
  *
  * - `council`: si el PR tuvo threads `[clanker-council]` (`PrState.threads.councilEver`), los `fixup!` quedan
  *   visibles: sin autosquash y con un push que nunca fuerza. Si no, `preparePush` hace el autosquash y el
  *   push es con lease.
- * - `commit`: reconcilia los commits que el agente hizo por su cuenta (`preparePush` en modo council, que
+ * - `plan` y `commit`: reconcilia los commits que el agente hizo por su cuenta (`preparePush` en modo council, que
  *   no squashea) y parte el diff de `HEAD` contra el worktree en hunks (`routeHunks`: el destino sale de
  *   `git blame`). Un `fixup!` por commit destino. Con hunks sin destino no commitea nada y devuelve el
  *   outcome `route` con sus ids (`unrouted`) y los commits del PR (`commits`); el flujo llama al committer en
  *   modo route y vuelve a esta acción con su reporte en `route`: los hunks con `into` se suman a los `fixup!`
  *   de ese commit y el resto se vuelven commits nuevos encima. Si algo
  *   falla, la branch vuelve a donde estaba (el worktree no se toca).
- * - `push`: `preparePush` y `workspaces.push` con lease (o sin forzar, con council).
+ * - `push`: `preparePush` y `workspaces.push` con lease (o sin forzar, con council); en un PR local, sin council,
+ *   guarda la punta en la fila sin push.
  *
  * Los commits que el agente haya hecho por su cuenta y no cuadren con el worktree vuelven a ser cambios
  * sin commitear (`reset --mixed`), así que pasan por el mismo ruteo que cualquier otro cambio.
  *
- * Outcomes: `ok` (output `byItem`, id → sha pusheado, y `head`) y `route`.
+ * Outcomes: `ok` (output `byItem`, id → sha final, `head`, `from` inicial y `to` final) y `route`.
  */
 export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof PushFixupsArgs> {
-  const { workspaces } = deps;
+  const { store, workspaces } = deps;
 
   async function pushFixups(args: z.infer<typeof PushFixupsArgs>, ctx: ActionCtx): Promise<ActionResult> {
     const { ws, items } = args;
-    const { remote, ref, remoteSha: knownSha } = ownedOpenPr(deps, ws, FIXUPS);
+    const localPr = store.db
+      .select({ id: pullRequests.id, headSha: pullRequests.headSha })
+      .from(pullRequests)
+      .innerJoin(workspacesTable, eq(workspacesTable.repoId, pullRequests.repoId))
+      .where(and(
+        eq(workspacesTable.id, ws.workspaceId),
+        eq(pullRequests.headRef, ws.branch),
+        eq(pullRequests.state, "local"),
+        eq(pullRequests.owned, true),
+      ))
+      .get();
+    const published = localPr ? undefined : ownedOpenPr(deps, ws, FIXUPS);
+    const knownSha = localPr?.headSha ?? published!.remoteSha;
     const base = workspaces.baseSha(ws);
+    const from = await ctx.once("from", () => workspaces.git(ws, "rev-parse", "HEAD"));
 
     const council = await ctx.once("council", async () => {
-      const state = await deps.prs.get(ref);
-      return state.threads.councilEver;
+      return published ? (await deps.prs.get(published.ref)).threads.councilEver : false;
     });
 
-    const committed = await ctx.once("commit", () => commit(args, { knownSha, base }));
-    if ("route" in committed) return { outcome: "route", output: committed.route };
-    const { made } = committed;
+    const planned = await ctx.once("plan", () => planCommits(args, { knownSha, base }));
+    if ("route" in planned) return { outcome: "route", output: planned.route };
+    const { made } = await ctx.once("commit", async () => ({ made: await commit(ws, planned) }));
+    const before = await ctx.once("before-squash", async () =>
+      (await branchCommits(workspaces, ws, base)).filter((c) => !c.subject.startsWith(FIXUP_PREFIX)),
+    );
 
     const pushed = await ctx.once("push", async () => {
-      const before = (await branchCommits(workspaces, ws, base)).filter((c) => !c.subject.startsWith(FIXUP_PREFIX));
-      // La etapa `commit` ya reconcilió; desde `HEAD` no hay nada que reconciliar (y tras un corte
-      // posterior al squash, la punta de `commit` ya no existe).
       const head = await workspaces.git(ws, "rev-parse", "HEAD");
       const prepared = await preparePush(workspaces, ws, { knownSha: head, base, council });
       if (prepared.outcome !== "ok") throw new PermanentActionError(prepared.failures);
-      await pushOrThrow(workspaces, ws, remote.account, { council });
+      if (localPr) {
+        store.tx(({ db }) => {
+          workspaces.validate(ws);
+          db.update(pullRequests).set({ headSha: prepared.head, headChangedAt: Date.now() }).where(eq(pullRequests.id, localPr.id)).run();
+        });
+      } else {
+        await pushOrThrow(workspaces, ws, published!.remote.account, { council });
+      }
       // El squash reescribe los shas pero deja los commits en orden: el n-ésimo de antes es el n-ésimo de ahora.
       const after = (await branchCommits(workspaces, ws, base)).filter((c) => !c.subject.startsWith(FIXUP_PREFIX));
       if (after.length !== before.length) {
@@ -122,19 +151,19 @@ export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof Pus
       );
       byItem[id] = hit === undefined ? pushed.head : council ? hit.sha : (pushed.rewritten[hit.lands] ?? pushed.head);
     }
-    return { outcome: "ok", output: { byItem, head: pushed.head } };
+    return { outcome: "ok", output: { byItem, head: pushed.head, from, to: pushed.head } };
   }
 
-  async function commit(
+  async function planCommits(
     { ws, route, messagePattern }: z.infer<typeof PushFixupsArgs>,
     { knownSha, base }: { knownSha: string; base: string },
-  ): Promise<Committed> {
+  ): Promise<Planned> {
     // `replan` aquí es "vuelve a la última punta conocida": lo que el agente hizo queda sin commitear y se rutea.
     await preparePush(workspaces, ws, { knownSha, base, council: true, messagePattern });
     const head = await workspaces.git(ws, "rev-parse", "HEAD");
     const saved = await snapshotTree(ws.path);
     const hunks = listHunks(await diffBetween(ws.path, head, saved));
-    if (hunks.length === 0) return { made: [] };
+    if (hunks.length === 0) return { head, saved, hunks, steps: [] };
 
     const commits = await branchCommits(workspaces, ws, base);
     const { fixups, unrouted } = await routeHunks(workspaces, ws, hunks, commits);
@@ -166,15 +195,23 @@ export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof Pus
       fixups.sort((a, b) => commits.indexOf(a.target) - commits.indexOf(b.target));
     }
 
+    return {
+      head,
+      saved,
+      hunks,
+      steps: [
+        ...fixups.map((f) => ({ message: fixupMessage(f.target, commits), hunks: f.hunks, lands: f.target.sha })),
+        ...planned,
+      ],
+    };
+  }
+
+  async function commit(ws: WorkspaceRef, { head, saved, hunks, steps }: CommitPlan): Promise<Made[]> {
+    if (steps.length === 0) return [];
     const dir = mkdtempSync(join(tmpdir(), "clanker-fixups-"));
     const made: Made[] = [];
     try {
-      // El index al estado de `HEAD`: lo que el agente haya dejado en staging no se cuela en un commit.
-      await workspaces.git(ws, "reset", "--quiet", "--mixed", "HEAD");
-      const steps = [
-        ...fixups.map((f) => ({ message: fixupMessage(f.target, commits), hunks: f.hunks, lands: f.target.sha })),
-        ...planned.map((p) => ({ ...p, lands: undefined })),
-      ];
+      await workspaces.git(ws, "reset", "--quiet", "--mixed", head);
       for (const [i, step] of steps.entries()) {
         const patch = join(dir, `${i + 1}.patch`);
         writeFileSync(patch, patchOf(step.hunks, hunks));
@@ -188,7 +225,7 @@ export function prPushFixupsAction(deps: PrPushFixupsDeps): ActionDef<typeof Pus
           `Los commits de ${ws.branch} no dejan el árbol del worktree (¿un hook cambió archivos al commitear?).`,
         );
       }
-      return { made };
+      return made;
     } catch (error) {
       await workspaces.git(ws, "reset", "--quiet", "--mixed", head);
       throw error;
