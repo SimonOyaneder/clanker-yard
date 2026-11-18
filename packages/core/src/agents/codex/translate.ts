@@ -15,6 +15,7 @@ export interface CodexTranslated {
   usage?: Usage;
   end?: Turn;
   error?: CodexFailure;
+  retry?: CodexFailure;
 }
 
 export function statusOfCodexError(error: TurnError): CodexFailure {
@@ -24,11 +25,17 @@ export function statusOfCodexError(error: TurnError): CodexFailure {
       typeof value === "object" && value !== null && "httpStatusCode" in value ? [value.httpStatusCode] : []
     ))
     : [];
-  if (info === "unauthorized" || http.includes(401) || http.includes(403)) {
+  if (info === "unauthorized" || http.includes(401)) {
     return { status: "login_expired", message: `Codex: ${error.message}. Vuelve a iniciar sesión con \`codex login\`.` };
   }
-  if (info === "usageLimitExceeded" || info === "rateLimitExceeded" || http.includes(429)) {
+  if (info === "usageLimitExceeded") {
     return { status: "quota_exhausted", message: `Codex: ${error.message}` };
+  }
+  if (info === "modelNotFound") {
+    return { status: "error", message: `Codex: ${error.message}. Elige un modelo disponible en el perfil.` };
+  }
+  if (info === "contextWindowExceeded") {
+    return { status: "error", message: `Codex: ${error.message}. Abre una sesión nueva o reduce el contexto del rol.` };
   }
   return { status: "error", message: `Codex: ${error.message}` };
 }
@@ -100,7 +107,10 @@ export function createCodexTranslator(threadId: string) {
 
   function fail(out: CodexTranslated, error: TurnError, turnId: string, willRetry: boolean): void {
     const failure = statusOfCodexError(error);
-    if (willRetry && failure.status === "error") return;
+    if (willRetry && failure.status === "error") {
+      out.retry = failure;
+      return;
+    }
     const key = JSON.stringify([turnId, error]);
     if (errors.has(key)) return;
     errors.add(key);

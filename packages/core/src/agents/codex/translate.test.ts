@@ -227,9 +227,10 @@ describe("cierre y errores de Codex", () => {
   test.each([
     ["unauthorized", "login_expired"],
     ["usageLimitExceeded", "quota_exhausted"],
-    ["rateLimitExceeded", "quota_exhausted"],
+    ["rateLimitExceeded", "error"],
     [{ httpConnectionFailed: { httpStatusCode: 401 } }, "login_expired"],
-    [{ responseStreamConnectionFailed: { httpStatusCode: 429 } }, "quota_exhausted"],
+    [{ responseStreamConnectionFailed: { httpStatusCode: 429 } }, "error"],
+    [{ httpConnectionFailed: { httpStatusCode: 403 } }, "error"],
     ["modelNotFound", "error"],
     ["other", "error"],
   ])("%j se clasifica como %s", (info, status) => {
@@ -254,7 +255,7 @@ describe("cierre y errores de Codex", () => {
   test("errores transitorios reintentados no terminan el run, los finales sí", () => {
     const t = createCodexTranslator(THREAD);
     const failure = error("serverOverloaded");
-    expect(t.translate(failed(failure, true))).toEqual(empty);
+    expect(t.translate(failed(failure, true))).toMatchObject({ ...empty, retry: { status: "error", message: expect.stringContaining("falló") } });
     expect(t.translate(finished({ status: "failed", error: failure }))).toMatchObject({
       error: { status: "error" }, end: { status: "failed" },
     });

@@ -1,14 +1,15 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { setTimeout as delay } from "node:timers/promises";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { git } from "../../git/git";
 import { openStore, type Store } from "../../store/store";
 import { createFakeCodex, type FakeCodexOptions } from "../../testing/codex/fake-codex";
 import type { AgentEvent, AgentRun, RunSpec } from "../runtime";
 import { readTranscript } from "../transcripts";
-import type { CodexMethods, RpcMessage } from "./api";
-import { createCodexRuntime, MIN_CODEX_VERSION } from "./codex-runtime";
+import type { CodexMethods, RateLimitSnapshot, RpcMessage, TurnError } from "./api";
+import { createCodexRuntime, MAX_PROVIDER_RETRIES, MIN_CODEX_VERSION } from "./codex-runtime";
 
 let home: string;
 let store: Store;
@@ -35,10 +36,11 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-async function runtimeWith(options: FakeCodexOptions = {}) {
+async function runtimeWith(options: FakeCodexOptions = {}, interruptSettleMs = 100) {
   const fake = await createFakeCodex(home, { responses: [JSON.stringify(report)], ...options });
   const runtime = createCodexRuntime({
     home, store, executable: fake.executable, args: fake.args,
+    interruptSettleMs,
     baseEnv: {
       PATH: process.env.PATH, HOME: home, USER: "user", LANG: "en_US.UTF-8",
       OPENAI_API_KEY: "secret", OPENAI_BASE_URL: "invalid", CODEX_API_KEY: "secret", CODEX_ACCESS_TOKEN: "secret",
@@ -101,7 +103,7 @@ describe("ejecución", () => {
   });
 
   test("retoma el mismo hilo desde otro runtime con esquema y referencias nuevos", async () => {
-    const { runtime, fake } = await runtimeWith();
+    const { runtime, fake } = await runtimeWith({ responses: [JSON.stringify(report), JSON.stringify({ next: "Listo" })] });
     const first = await runtime.start(spec);
     await finish(first);
     const again = createCodexRuntime({ home, store, executable: fake.executable, args: fake.args });
@@ -157,11 +159,12 @@ describe("ejecución", () => {
 });
 
 describe("fallos y topes", () => {
-  test.each([
-    ["login_expired", "login_expired"], ["quota_exhausted", "quota_exhausted"],
-  ] as const)("%s conserva el estado de entorno", async (scenario, status) => {
-    const { runtime } = await runtimeWith({ scenario });
-    expect((await finish(await runtime.start(spec))).result.status).toBe(status);
+  test("sin sesión devuelve login_expired antes de consultar cuota o iniciar inferencia", async () => {
+    const { runtime, fake } = await runtimeWith({ scenario: "login_expired" });
+    expect((await finish(await runtime.start(spec))).result).toMatchObject({ status: "login_expired", message: expect.stringContaining("codex login") });
+    const sent = await requests(fake.requests);
+    expect(sent.some((message) => message.method === "account/read")).toBe(true);
+    expect(sent.some((message) => message.method === "account/rateLimits/read" || message.method === "turn/start")).toBe(false);
   });
 
   test("modelo inexistente es error, no cuota ni login", async () => {
@@ -174,17 +177,39 @@ describe("fallos y topes", () => {
     await expect(finish(await runtime.start(spec))).rejects.toThrow(/falló la configuración/);
   });
 
-  test("interrumpir termina el run y espera que cierre el proceso", async () => {
-    const { runtime } = await runtimeWith({ holdTurn: true });
+  test("interrumpir espera turn/completed antes de cerrar el proceso", async () => {
+    const { runtime, fake } = await runtimeWith({ holdTurn: true, holdInterruptCompletion: true }, 15_000);
     const run = await runtime.start(spec);
-    await run.interrupt();
+    const pid = Number(await readFile(fake.pidFile, "utf8"));
+    const interrupted = run.interrupt();
+    try {
+      await vi.waitFor(async () => expect((await requests(fake.requests)).some((message) => message.method === "turn/interrupt")).toBe(true), { timeout: 5000 });
+      expect(await Promise.race([interrupted.then(() => "closed"), delay(100, "pending")])).toBe("pending");
+      expect(await Promise.race([run.result.then(() => "closed"), delay(100, "pending")])).toBe("pending");
+    } finally {
+      process.kill(pid, "SIGUSR1");
+      const completion = await Promise.race([interrupted.then(() => "closed"), delay(5000, "pending", { ref: false })]);
+      await interrupted;
+      expect(completion).toBe("closed");
+    }
     expect((await finish(run)).result).toMatchObject({ status: "error", message: "El run fue interrumpido." });
     await run.interrupt();
+    expect((await requests(fake.requests)).filter((message) => message.method === "turn/interrupt")).toMatchObject([
+      { params: { threadId: run.ref.sessionId, turnId: expect.any(String) } },
+    ]);
+    expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
   });
 
-  test("el tope de turnos corta cuando todavía no hay reporte", async () => {
-    const { runtime } = await runtimeWith({ responses: ["Sigo trabajando."] });
+  test.each(["Sigo trabajando.", JSON.stringify({ ...report, payload: { saludo: 7 } })])("el tope de turnos corta sin reporte válido: %s", async (response) => {
+    const { runtime, fake } = await runtimeWith({ responses: [response], holdAfterUsage: true });
     expect((await finish(await runtime.start({ ...spec, maxTurns: 1 }))).result.status).toBe("error_max_turns");
+    expect((await requests(fake.requests)).some((message) => message.method === "turn/interrupt")).toBe(true);
+  });
+
+  test("un reporte válido evita cortar por turnos", async () => {
+    const { runtime, fake } = await runtimeWith();
+    expect((await finish(await runtime.start({ ...spec, maxTurns: 1 }))).result).toMatchObject({ status: "success", structured: { outcome: "ok" } });
+    expect((await requests(fake.requests)).some((message) => message.method === "turn/interrupt")).toBe(false);
   });
 
   test("el tope estimado conserva un reporte ya entregado sin reportar costo como si lo supiera Codex", async () => {
@@ -192,6 +217,159 @@ describe("fallos y topes", () => {
     expect((await finish(await runtime.start({ ...spec, maxBudgetUsd: 0.00001 }))).result).toMatchObject({
       status: "error_max_budget_usd", structured: { outcome: "ok" }, usage: { costMicros: 0, costSource: "estimate" },
     });
+  });
+
+  test("el tope de gasto interrumpe aunque todavía no haya reporte", async () => {
+    const { runtime, fake } = await runtimeWith({ responses: ["Sigo trabajando."], holdAfterUsage: true });
+    const { result } = await finish(await runtime.start({ ...spec, maxBudgetUsd: 0.00001 }));
+    expect(result.status).toBe("error_max_budget_usd");
+    expect(result.structured).toBeUndefined();
+    expect((await requests(fake.requests)).some((message) => message.method === "turn/interrupt")).toBe(true);
+  });
+
+  test.each([
+    { silent: ["turn/interrupt"] },
+    { interruptWithoutCompletion: true },
+  ])("interrumpir cierra el proceso aunque no confirme el fin: %j", async (options) => {
+    const { runtime, fake } = await runtimeWith({ holdTurn: true, ...options });
+    const run = await runtime.start(spec);
+    await run.interrupt();
+    expect((await finish(run)).result.status).toBe("error");
+    const pid = Number(await readFile(fake.pidFile, "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+    await run.interrupt();
+  });
+
+  test.each(["failed", "interrupted"] as const)("un turno %s no usa el JSON como éxito", async (turnStatus) => {
+    const { runtime } = await runtimeWith({ turnStatus });
+    const { result } = await finish(await runtime.start(spec));
+    expect(result.status).toBe("error");
+    expect(result.structured).toBeUndefined();
+  });
+
+  test.each(["thread/start", "turn/start", "account/read"])("un error RPC de %s no se inventa un estado de entorno", async (method) => {
+    const { runtime, fake } = await runtimeWith({ requestError: { method, error: { code: -32603, message: "usageLimitExceeded unauthorized" } } });
+    await expect(runtime.start(spec)).rejects.toThrow(/app-server rechazó/);
+    const pid = Number(await readFile(fake.pidFile, "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+  });
+
+  test.each([
+    ["completed", undefined, "success"],
+    ["failed", "unauthorized", "login_expired"],
+    ["failed", "usageLimitExceeded", "quota_exhausted"],
+  ] as const)("un error RPC al leer cuota deja que el turno %s (%s) determine %s", async (turnStatus, codexErrorInfo, status) => {
+    const { runtime, fake } = await runtimeWith({
+      requestError: { method: "account/rateLimits/read", error: { code: -32603, message: "usageLimitExceeded unauthorized" } },
+      turnStatus,
+      ...(codexErrorInfo === undefined ? {} : { turnError: { message: codexErrorInfo, codexErrorInfo, additionalDetails: null } }),
+    });
+    const { result } = await finish(await runtime.start(spec));
+    expect(result.status).toBe(status);
+    expect(result.resetsAt).toBeUndefined();
+    expect((await requests(fake.requests)).filter((message) => message.method === "turn/start")).toHaveLength(1);
+    const pid = Number(await readFile(fake.pidFile, "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
+  });
+
+  test.each(["modelNotFound", "contextWindowExceeded"])("%s indica qué cambiar", async (codexErrorInfo) => {
+    const { runtime } = await runtimeWith({ turnStatus: "failed", turnError: { message: "falló", codexErrorInfo, additionalDetails: null } });
+    expect((await finish(await runtime.start(spec))).result).toMatchObject({
+      status: "error", message: expect.stringMatching(/perfil|sesión nueva/),
+    });
+  });
+});
+
+describe("reintentos del proveedor", () => {
+  const failures: TurnError["codexErrorInfo"][] = [
+    "serverOverloaded", "rateLimitExceeded", { httpConnectionFailed: { httpStatusCode: 503 } },
+    { responseStreamDisconnected: { httpStatusCode: 500 } },
+  ];
+  test.each(failures)("%j puede recuperarse sin reenviar el turno", async (codexErrorInfo) => {
+    const { runtime, fake } = await runtimeWith({ providerRetries: { error: { codexErrorInfo, message: "transitorio", additionalDetails: null }, count: MAX_PROVIDER_RETRIES } });
+    expect((await finish(await runtime.start(spec))).result.status).toBe("success");
+    const sent = await requests(fake.requests);
+    expect(sent.filter((message) => message.method === "turn/start")).toHaveLength(1);
+    expect(sent.some((message) => message.method === "turn/interrupt")).toBe(false);
+  });
+
+  test.each(failures)("%j se corta al superar el límite de reintentos", async (codexErrorInfo) => {
+    const { runtime, fake } = await runtimeWith({
+      providerRetries: { error: { codexErrorInfo, message: "transitorio", additionalDetails: null }, count: MAX_PROVIDER_RETRIES + 1 },
+      holdAfterUsage: true,
+    });
+    expect((await finish(await runtime.start(spec))).result).toMatchObject({ status: "error", message: expect.stringContaining("reintentos") });
+    const sent = await requests(fake.requests);
+    expect(sent.filter((message) => message.method === "turn/start")).toHaveLength(1);
+    expect(sent.some((message) => message.method === "turn/interrupt")).toBe(true);
+  });
+});
+
+describe("cuota y probe sin inferencia", () => {
+  const exhausted: RateLimitSnapshot = {
+    limitId: "codex", primary: { usedPercent: 100, windowDurationMins: 60, resetsAt: 2_000_000_000 },
+    secondary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: 2_000_100_000 },
+    credits: null, spendControlReached: false,
+  };
+
+  test("ordinaryUsageAllowed false corta antes de inferencia y espera todas las ventanas agotadas", async () => {
+    const { runtime, fake } = await runtimeWith({ ordinaryUsageAllowed: false, rateLimits: exhausted });
+    expect((await finish(await runtime.start(spec))).result).toMatchObject({ status: "quota_exhausted", resetsAt: 2_000_100_000_000 });
+    expect((await requests(fake.requests)).some((message) => message.method === "turn/start")).toBe(false);
+  });
+
+  test("usageLimitExceeded relee los límites del run para obtener el reset", async () => {
+    const { runtime, fake } = await runtimeWith({ scenario: "quota_exhausted", ordinaryUsageAllowed: true, rateLimits: exhausted });
+    expect((await finish(await runtime.start(spec))).result).toMatchObject({ status: "quota_exhausted", resetsAt: 2_000_100_000_000 });
+    expect((await requests(fake.requests)).filter((message) => message.method === "account/rateLimits/read")).toHaveLength(2);
+  });
+
+  test("si falla la relectura conserva cuota agotada, pero no inventa un reset", async () => {
+    const { runtime } = await runtimeWith({
+      scenario: "quota_exhausted", ordinaryUsageAllowed: true,
+      requestError: { method: "account/rateLimits/read", after: 1, error: { code: -32603, message: "backend caído" } },
+    });
+    const { result } = await finish(await runtime.start(spec));
+    expect(result.status).toBe("quota_exhausted");
+    expect(result.resetsAt).toBeUndefined();
+  });
+
+  test.each([
+    { rateLimits: { ...exhausted, limitId: null } },
+    { rateLimits: { ...exhausted, primary: { ...exhausted.primary!, resetsAt: null } } },
+    { rateLimits: { ...exhausted, primary: null, secondary: null } },
+    { rateLimits: exhausted, rateLimitsByLimitId: { codex: exhausted, other: { ...exhausted, limitId: "other" } } },
+  ])("no atribuye un reset desconocido o ambiguo: %j", async (options) => {
+    const { runtime } = await runtimeWith({ ordinaryUsageAllowed: false, ...options });
+    const { result } = await finish(await runtime.start(spec));
+    expect(result.status).toBe("quota_exhausted");
+    expect(result.resetsAt).toBeUndefined();
+  });
+
+  test("ordinaryUsageAllowed null no bloquea", async () => {
+    const { runtime } = await runtimeWith({ ordinaryUsageAllowed: null });
+    expect((await finish(await runtime.start(spec))).result.status).toBe("success");
+  });
+
+  test.each([
+    ["ready", undefined], ["quota_exhausted", /cuota/], ["login_expired", /codex login/],
+  ] as const)("probe %s consulta la causa y cierra sin inferencia", async (scenario, problem) => {
+    const { runtime, fake } = await runtimeWith({ scenario });
+    const result = await runtime.probe!();
+    if (problem) expect(result).toMatch(problem);
+    else expect(result).toBeUndefined();
+    const sent = await requests(fake.requests);
+    expect(sent.some((message) => message.method === "account/read")).toBe(true);
+    expect(sent.some((message) => message.method === "turn/start" || message.method === "thread/start")).toBe(false);
+    const pid = Number(await readFile(fake.pidFile, "utf8"));
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(/ESRCH/), { timeout: 5000 });
+  });
+
+  test("un error RPC del probe conserva el diagnóstico sin fingir que la causa se fue", async () => {
+    const { runtime, fake } = await runtimeWith({ requestError: { method: "account/rateLimits/read", error: { code: -32603, message: "backend caído" } } });
+    expect(await runtime.probe!()).toContain("backend caído");
+    const pid = Number(await readFile(fake.pidFile, "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
   });
 });
 

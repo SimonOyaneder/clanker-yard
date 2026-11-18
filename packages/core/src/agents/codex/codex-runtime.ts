@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { Effort, type RuntimeOptions, type TranscriptEntry } from "@clanker/api";
+import { compileJsonSchema, Effort, type RuntimeOptions, type TranscriptEntry } from "@clanker/api";
 import { messageOf } from "../../errors/format";
 import type { Procs } from "../../procs/procs";
 import type { Store } from "../../store/store";
@@ -18,10 +18,21 @@ import { createCodexTranslator, statusOfCodexError } from "./translate";
 
 const exec = promisify(execFile);
 export const MIN_CODEX_VERSION = "0.169.1";
+export const INTERRUPT_SETTLE_MS = 15_000;
+export const MAX_PROVIDER_RETRIES = 6;
 export const RECOMMENDED_CODEX_MODELS = ["gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol"] as const;
 
 type Model = CodexMethods["model/list"]["result"]["data"][number];
-type Stop = { status: Exclude<RunStatus, "success">; message: string };
+type Stop = { status: Exclude<RunStatus, "success">; message: string; resetsAt?: number };
+
+function quotaResetAt(limits: CodexMethods["account/rateLimits/read"]["result"]): number | undefined {
+  const snapshots = limits.rateLimitsByLimitId === null ? [limits.rateLimits] : Object.values(limits.rateLimitsByLimitId);
+  const exhausted = snapshots.filter((snapshot) => [snapshot.primary, snapshot.secondary].some((window) => window !== null && window.usedPercent >= 100));
+  if (exhausted.length !== 1 || exhausted[0]!.limitId === null) return undefined;
+  const windows = [exhausted[0]!.primary, exhausted[0]!.secondary].flatMap((window) => window !== null && window.usedPercent >= 100 ? [window] : []);
+  if (windows.some((window) => window.resetsAt === null)) return undefined;
+  return Math.max(...windows.map((window) => window.resetsAt!)) * 1000;
+}
 
 export interface CodexRuntimeOptions {
   home: string;
@@ -31,6 +42,7 @@ export interface CodexRuntimeOptions {
   args?: string[];
   procs?: Procs;
   killAfterMs?: number;
+  interruptSettleMs?: number;
 }
 
 export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
@@ -43,7 +55,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
   const sessions = createSessionStore(sessionDir, "codex");
   const prepare = agentDirsPreparer({ ghConfigDir, dirs: [gitConfigs, sessionDir, join(home, "transcripts")] });
 
-  async function probe(): Promise<string | undefined> {
+  async function versionProblem(): Promise<string | undefined> {
     try {
       const { stdout } = await exec(executable, [...(options.args ?? []), "--version"], { env: codexEnv(baseEnv), timeout: 20_000 });
       const version = /(\d+)\.(\d+)\.(\d+)/.exec(stdout)?.slice(1).map(Number);
@@ -61,6 +73,25 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
     }
   }
 
+  async function probe(): Promise<string | undefined> {
+    const problem = await versionProblem();
+    if (problem) return problem;
+    await prepare();
+    let server: CodexAppServer | undefined;
+    try {
+      server = await launchCodexAppServer({ cwd: home, executable, args: options.args, baseEnv, procs: options.procs, killAfterMs: options.killAfterMs });
+      const account = await server.request("account/read", { refreshToken: false });
+      if (account.requiresOpenaiAuth && account.account === null) return "Codex no tiene sesión: vuelve a iniciar sesión con `codex login`.";
+      const limits = await server.request("account/rateLimits/read", { excludeResetCreditDetails: true });
+      if (limits.ordinaryUsageAllowed === false) return "Codex no permite uso ordinario: espera a que se restablezca la cuota.";
+      return undefined;
+    } catch (error) {
+      return messageOf(error);
+    } finally {
+      await server?.close();
+    }
+  }
+
   async function models(server: CodexAppServer): Promise<Model[]> {
     const list: Model[] = [];
     let cursor: string | null = null;
@@ -75,6 +106,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
   async function launch(spec: RunSpec, resumeId?: string): Promise<AgentRun> {
     const params = threadOptions(spec);
     const schema = codexReportSchema(spec.outputSchema);
+    const validateReport = compileJsonSchema(spec.outputSchema);
     const gitConfig = await writeGitConfig(gitConfigs, spec.gitIdentity);
     const server = await launchCodexAppServer({
       cwd: spec.cwd, executable, args: options.args, baseEnv, git: { ghConfigDir, gitConfig },
@@ -83,6 +115,8 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
     const events = createEventQueue<AgentEvent>();
     let threadId: string;
     let effort: ReasoningEffort | undefined;
+    let account: CodexMethods["account/read"]["result"];
+    let limits: CodexMethods["account/rateLimits/read"]["result"] | undefined;
     try {
       effort = spec.effort === "max" ? "xhigh" : spec.effort;
       if (spec.effort !== undefined) {
@@ -97,6 +131,10 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
         : await server.request("thread/resume", { ...params, threadId: resumeId });
       threadId = response.thread.id;
       await sessions.save(threadId, spec);
+      account = await server.request("account/read", { refreshToken: false });
+      if (!account.requiresOpenaiAuth || account.account !== null) {
+        limits = await server.request("account/rateLimits/read", { excludeResetCreditDetails: true }).catch(() => undefined);
+      }
     } catch (error) {
       await server.close();
       events.close();
@@ -114,15 +152,28 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
     let turnId: string | undefined;
     let stopped: Stop | undefined;
     let ended = false;
+    let retries = 0;
+    let confirmEnd!: () => void;
+    const turnEnded = new Promise<void>((resolve) => { confirmEnd = resolve; });
+    let interrupting: Promise<void> | undefined;
 
-    const interrupt = async (reason: Stop) => {
-      if (stopped || ended) return;
+    const interrupt = (reason: Stop): Promise<void> => {
+      if (ended) return Promise.resolve();
+      if (interrupting) return interrupting;
       stopped = reason;
-      try {
-        if (turnId) await server.request("turn/interrupt", { threadId, turnId });
-      } finally {
+      interrupting = (async () => {
+        if (turnId) {
+          const timer = setTimeout(confirmEnd, options.interruptSettleMs ?? INTERRUPT_SETTLE_MS);
+          try {
+            void server.request("turn/interrupt", { threadId, turnId }).catch(() => {});
+            await turnEnded;
+          } finally {
+            clearTimeout(timer);
+          }
+        }
         await server.close();
-      }
+      })();
+      return interrupting;
     };
 
     const listening = (async (): Promise<RunResult> => {
@@ -148,15 +199,30 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
               }) ?? 0;
               if (spec.maxBudgetUsd !== undefined && estimatedCost > spec.maxBudgetUsd * 1_000_000) {
                 void interrupt({ status: "error_max_budget_usd", message: `Codex superó el tope de USD ${spec.maxBudgetUsd}.` }).catch(() => {});
-              } else if (spec.maxTurns !== undefined && tally.turns >= spec.maxTurns && report === undefined) {
+              } else if (spec.maxTurns !== undefined && tally.turns >= spec.maxTurns && !validateReport.safeParse(report).success) {
                 void interrupt({ status: "error_max_turns", message: `Codex llegó al tope de ${spec.maxTurns} turnos sin reporte.` }).catch(() => {});
               }
             }
           }
           for (const entry of translated.transcript) record(entry);
           if (notification.method === "turn/started" && notification.params.threadId === threadId) turnId = notification.params.turn.id;
-          if (translated.error && translated.error.status !== "error") void interrupt(translated.error).catch(() => {});
+          if (translated.retry && ++retries > MAX_PROVIDER_RETRIES) {
+            void interrupt({ status: "error", message: `Codex superó ${MAX_PROVIDER_RETRIES} reintentos del proveedor: ${translated.retry.message}` }).catch(() => {});
+          }
+          if (translated.error && translated.error.status !== "error") {
+            const reason: Stop = { ...translated.error };
+            if (reason.status === "quota_exhausted") {
+              try {
+                limits = await server.request("account/rateLimits/read", { excludeResetCreditDetails: true });
+                reason.resetsAt = quotaResetAt(limits);
+              } catch {
+                reason.resetsAt = undefined;
+              }
+            }
+            void interrupt(reason).catch(() => {});
+          }
           if (translated.end) {
+            confirmEnd();
             const turn = translated.end;
             if (turn.status === "completed") terminal = "success";
             else {
@@ -174,6 +240,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
           text,
           usage: tally,
           ...(stopped?.message || failure ? { message: stopped?.message ?? failure } : {}),
+          ...(stopped?.resetsAt === undefined ? {} : { resetsAt: stopped.resetsAt }),
           ...((status === "success" || status === "error_max_budget_usd") && report !== undefined ? { structured: report } : {}),
         };
         record({ kind: "result", subtype: result.status, isError: result.status !== "success", turns: tally.turns, costUsd: estimatedCost / 1_000_000, text: result.message ?? (text || null) });
@@ -181,14 +248,21 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
         return result;
       } finally {
         ended = true;
+        confirmEnd();
         await server.close();
         events.close();
       }
     })();
     listening.catch(() => {});
     try {
-      const { turn } = await server.request("turn/start", { threadId, input: [{ type: "text", text: spec.prompt }], effort, outputSchema: schema as JsonValue });
-      turnId = turn.id;
+      if (account.requiresOpenaiAuth && account.account === null) {
+        await interrupt({ status: "login_expired", message: "Codex no tiene sesión: vuelve a iniciar sesión con `codex login`." });
+      } else if (limits?.ordinaryUsageAllowed === false) {
+        await interrupt({ status: "quota_exhausted", message: "Codex no permite uso ordinario: espera a que se restablezca la cuota.", resetsAt: quotaResetAt(limits) });
+      } else {
+        const { turn } = await server.request("turn/start", { threadId, input: [{ type: "text", text: spec.prompt }], effort, outputSchema: schema as JsonValue });
+        turnId = turn.id;
+      }
     } catch (error) {
       await server.close();
       await listening.catch(() => {});
@@ -203,7 +277,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions): AgentRuntime {
     probe,
     async describe(): Promise<RuntimeOptions> {
       const base = { id: "codex" as const, label: "Codex", about: "Codex con el login del binario instalado.", models: [], efforts: [] };
-      const problem = await probe();
+      const problem = await versionProblem();
       if (problem) return { ...base, available: false, message: problem };
       await prepare();
       const server = await launchCodexAppServer({ cwd: home, executable, args: options.args, baseEnv, procs: options.procs, killAfterMs: options.killAfterMs });

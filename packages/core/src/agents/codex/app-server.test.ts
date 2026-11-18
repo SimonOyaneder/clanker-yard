@@ -20,6 +20,7 @@ beforeEach(async () => {
   servers = [];
 });
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(servers.map((server) => server.close()));
   await rm(dir, { recursive: true, force: true });
 });
@@ -158,7 +159,12 @@ test.each([
   expect(events).toContainEqual(expect.objectContaining({ method: "error", params: expect.objectContaining({ willRetry: false, error: expect.objectContaining({ codexErrorInfo: kind }) }) }));
   expect(events.at(-1)).toMatchObject({ params: { turn: { status: "failed", error: { codexErrorInfo: kind } } } });
   if (scenario === "quota_exhausted") expect((await server.request("account/rateLimits/read", {})).ordinaryUsageAllowed).toBe(false);
-  if (scenario === "login_expired") expect((await server.request("account/read", {})).account).toBeNull();
+  if (scenario === "login_expired") {
+    expect((await server.request("account/read", {})).account).toBeNull();
+    await expect(server.request("account/rateLimits/read", {})).rejects.toMatchObject({
+      rpc: { code: -32600, message: "codex account authentication required to read rate limits" },
+    });
+  }
 });
 
 test("interrumpe un turno pendiente", async () => {
@@ -170,15 +176,26 @@ test("interrumpe un turno pendiente", async () => {
 });
 
 test("el timeout rechaza solo la request y permite seguir usando el cliente", async () => {
-  const { server } = await start({ silent: ["model/list"] }, { requestTimeoutMs: 500 });
-  await expect(server.request("model/list", {})).rejects.toThrow(/no respondió model\/list/);
+  const { server } = await start({ silent: ["model/list"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const timedOut = expect(server.request("model/list", {})).rejects.toThrow(/no respondió model\/list/);
+  await vi.advanceTimersByTimeAsync(30_000);
+  await timedOut;
+  vi.useRealTimers();
   expect((await server.request("account/read", {})).account?.type).toBe("chatgpt");
 });
 
 test("el timeout del handshake cierra el proceso", async () => {
   const fake = await createFakeCodex(dir, { silent: ["initialize"] });
-  await expect(launchCodexAppServer({ ...fake, cwd: dir, requestTimeoutMs: 500 })).rejects.toThrow(/no respondió initialize/);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const timedOut = expect(launchCodexAppServer({ ...fake, cwd: dir })).rejects.toThrow(/no respondió initialize/);
+  await vi.waitFor(async () => {
+    expect(await messages(fake.requests)).toContainEqual(expect.objectContaining({ method: "initialize" }));
+  }, { timeout: 5000 });
   const pid = Number(await readFile(fake.pidFile, "utf8"));
+  await vi.advanceTimersByTimeAsync(30_000);
+  await timedOut;
+  vi.useRealTimers();
   await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(/ESRCH/), { timeout: 5000 });
 });
 
