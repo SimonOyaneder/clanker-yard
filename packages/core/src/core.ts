@@ -372,7 +372,6 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     repoConfigExport: createRepoConfigExporter({ store, defs, repos, config: repos.config, remote: gitRemote, connections: opts.connections, dataDir, identityOf }),
     projectConfigs: createProjectConfigs({ projects, repos, defs }),
     recipeTester: createRecipeTester({ store, repos, slots, dataDir, procs }),
-    runs,
     queue: scheduler.queue,
     trackerProjects,
     // Con el Scheduler apagado (los tests que lanzan a mano, el core de demo) `system.setLanes` no lanza nada.

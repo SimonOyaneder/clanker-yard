@@ -11,7 +11,7 @@ import { createRepos } from "../repos/repos";
 import type { CombineRequest, CombineResult, Workspaces } from "../workspaces/workspaces";
 import { createLaneSettings } from "./lanes";
 import { createProjectQueue, type ProjectQueue } from "./project-queue";
-import { createScheduler, SCHEDULER_TICK_MS, type Breakers, type SchedulerDeps } from "./scheduler";
+import { createScheduler, IssueNotReadyError, SCHEDULER_TICK_MS, type Breakers, type SchedulerDeps } from "./scheduler";
 import { seedPr } from "../testing/pull-requests";
 
 /** `vi.waitFor` con holgura: la suite entera corre en paralelo y un tick puede tardar más de 1 s. */
@@ -329,6 +329,43 @@ describe("lanzar issues por carril", () => {
     expect(h.status(issue)).toBe("running");
   });
 
+  test("runNow no lanza a mano una issue que la cola deja bloqueada, y dice por qué", async () => {
+    const h = setup();
+    const blocker = await h.local.createIssue(h.projectId, { title: "bloqueante", status: "in_progress" });
+    const issue = await h.create("bloqueada");
+    await h.local.relate(blocker.ref, "blocks", issue.ref);
+    await h.issues.sync(h.local, { projectId: h.projectId, project: { tracker: "local", id: h.projectId } });
+
+    const launch = h.scheduler.runNow({ projectId: h.projectId, issueId: issue.id, params: {} }, "ui");
+
+    await expect(launch).rejects.toThrow(IssueNotReadyError);
+    await expect(launch).rejects.toThrow(`${issue.ref.key} no se puede lanzar todavía: bloqueada por ${blocker.ref.key}`);
+    expect(h.starts).toEqual([]);
+  });
+
+  test("runNow acepta una issue ready aunque el proyecto llenó su parallel: espera cupo en el carril como cualquier corrida", async () => {
+    const h = setup({ parallel: 1 });
+    const first = await h.create("primera", 1);
+    const second = await h.create("segunda", 2);
+    await h.scheduler.tick();
+
+    await h.scheduler.runNow({ projectId: h.projectId, issueId: second.id, params: {} }, "ui");
+
+    expect([first, second].map(h.status)).toEqual(["running", "queued"]);
+  });
+
+  test("runNow de una issue que no está en la cola va directo a runs.start, como un reintento a mano", async () => {
+    const h = setup();
+    const issue = await h.local.createIssue(h.projectId, { title: "ya empezada", status: "in_progress" });
+    await h.issues.sync(h.local, { projectId: h.projectId, project: { tracker: "local", id: h.projectId } });
+    const cached = h.issues.list({ projectId: h.projectId }).find((i) => i.ref.id === issue.ref.id)!;
+
+    await h.scheduler.runNow({ projectId: h.projectId, issueId: cached.id, params: {} }, "ui");
+
+    expect(h.starts).toEqual([{ projectId: h.projectId, issueId: cached.id, params: {} }]);
+    expect(h.status(cached)).toBe("running");
+  });
+
   test("projects.skipIssue saca la issue de la cola y devolverla la deja lanzar", async () => {
     const h = setup({ parallel: 2 });
     const skipped = await h.create("saltada", 1);
@@ -546,5 +583,28 @@ describe("bases combinadas", () => {
 
     expect(h.runOf(child)).toMatchObject({ status: "running", params: { base: "cla-1" } });
     expect(dissolved).toEqual([[expect.any(String), `clanker/base/${child.ref.key}`]]);
+  });
+
+  test("runNow lanza a mano sobre la base combinada de la cola, no sobre la branch por defecto", async () => {
+    const combineBase = (request: CombineRequest): Promise<CombineResult> => Promise.resolve({ outcome: "combined", branch: request.branch, head: "abc", parents: [] });
+    const { h, child } = await blockedByTwo({ combineBase, dissolveBase: dissolve });
+
+    await h.scheduler.runNow({ projectId: h.projectId, issueId: child.id, params: {} }, "ui");
+
+    expect(h.starts).toEqual([{ projectId: h.projectId, issueId: child.id, params: { base: `clanker/base/${child.ref.key}` } }]);
+    expect(h.runOf(child)).toMatchObject({ status: "running", params: { base: `clanker/base/${child.ref.key}` } });
+  });
+
+  test("runNow no lanza a mano una issue cuyos padres chocan: dice por qué y no sale sobre la branch por defecto", async () => {
+    const combineBase = (): Promise<CombineResult> =>
+      Promise.resolve({ outcome: "base-conflict", parent: "app#11", merged: ["app#10"], files: ["a.txt"], failures: "Conflicto en a.txt.", changed: true });
+    const { h, child } = await blockedByTwo({ combineBase, dissolveBase: dissolve });
+
+    const launch = h.scheduler.runNow({ projectId: h.projectId, issueId: child.id, params: {} }, "ui");
+
+    await expect(launch).rejects.toThrow(IssueNotReadyError);
+    await expect(launch).rejects.toThrow(`${child.ref.key} no se puede lanzar todavía: los padres de su base combinada (app#10 y app#11) chocan`);
+    expect(h.starts).toEqual([]);
+    expect(h.status(child)).toBeUndefined();
   });
 });

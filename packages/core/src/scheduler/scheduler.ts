@@ -1,8 +1,9 @@
-import { LIVE_RUN_STATUSES, type CachedIssue, type ClankerProject, type IssueId, type Origin, type ProjectId, type QueueEntry, type RepoId } from "@clanker/api";
+import { LIVE_RUN_STATUSES, type CachedIssue, type ClankerProject, type IssueId, type Origin, type ProjectId, type QueueEntry, type RepoId, type StartRun } from "@clanker/api";
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import type * as z from "zod";
 import type { Breakers as AllBreakers } from "../breakers/breakers";
 import { openDecision } from "../decisions/decisions";
-import type { Engine } from "../flows/engine";
+import type { Engine, RunView } from "../flows/engine";
 import { hasRoom } from "../flows/lanes";
 import type { Projects } from "../projects/projects";
 import { ProjectNotFoundError } from "../projects/projects";
@@ -96,6 +97,15 @@ export interface Scheduler {
    * chocan) sale `waiting` con ese motivo.
    */
   queue: ProjectQueue;
+  /**
+   * `runs.start`, la corrida que una persona pide a mano: pasa por la misma cola que el tick. Una issue de la cola
+   * que no está `ready` (o que el tick dejaría esperando: relacionada en vuelo, repo o runtime en pausa, padres de su
+   * base combinada que chocan) lanza `IssueNotReadyError` con el motivo; una `ready` sale sobre la base y con los
+   * `dependsOn` de la cola, que `params` pisa. Una issue que no está en la cola (ya corrió, o su estado no es el del
+   * filtro) va directo a `runs.start` sobre la branch por defecto, como un reintento a mano; una de repo ambiguo
+   * también, porque sin repo no hay base que calcular (`runs.start` pide `params.repo`).
+   */
+  runNow(input: z.output<typeof StartRun>, origin: Origin): Promise<RunView>;
   /** Pide (o devuelve) que el Scheduler no lance la issue. Lanza `ProjectNotFoundError` o `IssueNotInProjectError`. */
   skipIssue(input: { projectId: ProjectId; issueId: IssueId; skipped: boolean }, origin: Origin): void;
   /** Sube la issue al principio de la cola (o la devuelve a su lugar con `boosted: false`) y emite `issue.queued`. */
@@ -108,6 +118,9 @@ export interface Scheduler {
 
 /** La issue no existe o no es del proyecto. */
 export class IssueNotInProjectError extends BadRequestError {}
+
+/** Una corrida a mano de una issue que la cola todavía no lanzaría: el mensaje dice por qué. */
+export class IssueNotReadyError extends BadRequestError {}
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
   const { store, projects, issues, repos, lanes, breakers } = deps;
@@ -320,6 +333,22 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   return {
     tick,
     queue,
+
+    async runNow(input, origin) {
+      const project = projects.get(input.projectId);
+      if (!project) throw new ProjectNotFoundError(input.projectId);
+      const entry = (await deps.queue.of(project.id)).find((e) => e.issue.id === input.issueId);
+      // Sin repo no hay base que calcular: `runs.start` pide `params.repo` o corre en el que se eligió.
+      if (entry === undefined || issuePlan(store, repos, project, entry.issue).kind === "ambiguous") return deps.runs.start(input, origin);
+      const notReady = (reason: string) => new IssueNotReadyError(`${entry.issue.ref.key} no se puede lanzar todavía: ${reason}`);
+      if (entry.state !== "ready") throw notReady(entry.reason);
+      const held = holdBack(project, entry.issue, issues.list(), issuesInFlight());
+      if (held !== undefined) throw notReady(held);
+      const resolved = await baseParams(project, entry.issue, entry.base);
+      if (resolved.held !== undefined) throw notReady(resolved.held);
+      const params = { ...resolved.params, ...(entry.dependsOn.length > 0 ? { dependsOn: entry.dependsOn } : {}), ...input.params };
+      return deps.runs.start({ ...input, params }, origin);
+    },
 
     skipIssue({ projectId, issueId, skipped: skip }, origin) {
       store.tx((tx) => {

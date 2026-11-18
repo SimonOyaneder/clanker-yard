@@ -45,7 +45,7 @@ const noRuntime: AgentRuntime = {
 export function apiDeps(
   store: Store,
   dataDir: string,
-): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "runs" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher" | "agentOptions" | "workspaces"> & { flows: Flows } {
+): Pick<RouterDeps, "projects" | "packs" | "repos" | "repoConfigSync" | "repoConfigExport" | "projectConfigs" | "recipeTester" | "queue" | "trackerProjects" | "scheduler" | "lanes" | "breakers" | "artifacts" | "decisions" | "learnings" | "defs" | "legacyImport" | "republisher" | "agentOptions" | "workspaces"> & { flows: Flows } {
   const defs = createDefs({ store });
   const artifacts = createArtifacts({ store, dir: join(dataDir, "artifacts") });
   const flows = createFlows({
@@ -95,7 +95,6 @@ export function apiDeps(
     repoConfigExport: { exportDef: () => Promise.reject(new Error("este core de pruebas no exporta al repo")) },
     projectConfigs: createProjectConfigs({ projects, repos, defs }),
     recipeTester: createRecipeTester({ store, repos, slots: createSlots({ store }), dataDir }),
-    runs,
     queue: scheduler.queue,
     // Sin Linear: los trackerRef se guardan tal cual, como los tests de proyectos los escriben.
     trackerProjects: { list: () => Promise.reject(new Error("este core de pruebas no lista proyectos")), resolve: (_tracker, ref) => Promise.resolve(ref), normalize: (id) => Promise.resolve(projects.get(id)!), binding: storedBinding },

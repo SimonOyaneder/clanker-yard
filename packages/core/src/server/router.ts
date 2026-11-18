@@ -26,7 +26,6 @@ import { ProjectNotFoundError, type Projects } from "../projects/projects";
 import type { ProjectConfigs } from "../projects/config";
 import { type RepoConfigExporter } from "../repo-config/export";
 import type { RepoConfigSyncer } from "../repo-config/sync";
-import { type RunStarter } from "../projects/start-run";
 import type { LaneSettings } from "../scheduler/lanes";
 import { type ProjectQueue } from "../scheduler/project-queue";
 import { type Scheduler } from "../scheduler/scheduler";
@@ -63,14 +62,12 @@ export interface RouterDeps {
   /** `projects.exportConfig` y `projects.importConfig`. */
   projectConfigs: ProjectConfigs;
   recipeTester: RecipeTester;
-  /** `runs.start`: reclama la issue y lanza el flujo. */
-  runs: RunStarter;
   /** `projects.queue`. */
   queue: ProjectQueue;
   /** `trackers.projects`. */
   trackerProjects: TrackerProjects;
   /** `projects.skipIssue`, y el tick que `system.setLanes` pide para repartir el cupo que liberó. */
-  scheduler: Pick<Scheduler, "skipIssue" | "boostIssue" | "tick">;
+  scheduler: Pick<Scheduler, "runNow" | "skipIssue" | "boostIssue" | "tick">;
   /** `system.lanes` y `system.setLanes`. */
   lanes: LaneSettings;
   /** `system.breakers` y `system.retryBreaker`. */
@@ -105,7 +102,7 @@ const os = implement(contract).$context<CoreContext>().use(mapApiErrors);
 export function createRouter(deps: RouterDeps) {
   const { store } = deps;
   const schemaVersion = readSchemaVersion(store.db.$client);
-  const { artifacts, flows, projects, repos, recipeTester, runs } = deps;
+  const { artifacts, flows, projects, repos, recipeTester } = deps;
   const metrics = createMetrics({ store });
   const defWriter = createDefWriter({ defs: deps.defs, flows: deps.flows });
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
@@ -315,9 +312,7 @@ export function createRouter(deps: RouterDeps) {
       get: os.runs.get.handler(({ input }) => flows.getRun(input.id)),
       step: os.runs.step.handler(({ input }) => stepDetails.get(input.id)),
       transcript: os.runs.transcript.handler(({ input }) => transcripts.read(input)),
-      start: os.runs.start.handler(({ input, context }) =>
-        runs.start(input, context.origin),
-      ),
+      start: os.runs.start.handler(({ input, context }) => deps.scheduler.runNow(input, context.origin)),
       pause: os.runs.pause.handler(({ input, context }) => controlRun(input.id, "pause", context.origin, input.now)),
       resume: os.runs.resume.handler(({ input, context }) => controlRun(input.id, "resume", context.origin)),
       cancel: os.runs.cancel.handler(({ input, context }) => controlRun(input.id, "cancel", context.origin)),
