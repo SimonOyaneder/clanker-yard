@@ -1,12 +1,13 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react"
 import { Repeat2 } from "lucide-react"
+import { memo } from "react"
 import { absolute, ago } from "@/lib/format"
 import { draftTone, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
 import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/lib/prs/prs"
 import { cn } from "@/lib/utils"
 import { Hint, Pill } from "../common"
 import { CiBadge, CombinedBaseChip, Labels, LocalChip, MergePill, mergeRing, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
-import { usePrCommands } from "./pr-commands"
+import { usePrActions } from "./pr-commands"
 import { PrContextMenu } from "./pr-menu"
 import { PrNotes } from "./pr-notes"
 
@@ -23,8 +24,9 @@ export interface PrNodeData extends Record<string, unknown> {
 export const NODE_WIDTH = 296
 export const NODE_HEIGHT = 196
 
-export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
-  const commands = usePrCommands()
+// xyflow re-renderiza un nodo cuando cambia su objeto; con los datos y las acciones estables, solo cuando cambia su PR.
+export const PrNode = memo(function PrNode({ data }: NodeProps & { data: PrNodeData }) {
+  const commands = usePrActions()
   const { pr, dimmed, issueKey, combined } = data
   const { state } = pr
   const review = reviewStatus(pr)
@@ -129,4 +131,4 @@ export function PrNode({ data }: NodeProps & { data: PrNodeData }) {
       </div>
     </PrContextMenu>
   )
-}
+})

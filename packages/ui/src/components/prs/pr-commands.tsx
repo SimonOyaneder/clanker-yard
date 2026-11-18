@@ -1,5 +1,5 @@
 import type { ClankerProject, RunId } from "@clanker/api"
-import { createContext, type ReactNode, useContext, useMemo, useState } from "react"
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useAppData } from "@/app-data"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -13,9 +13,8 @@ import { messageOf } from "@/lib/utils"
 // bot, rebasear, marcar hold y abrir la corrida que lo abrió. Cada comando le habla al core, avisa el resultado
 // con un toast y hace releer lo que se ve. Mergear pide confirmación: comenta en GitHub con tu cuenta.
 
-export interface PrCommands {
-  /** El PR sobre el que actúan los atajos y la paleta: el último que se enfocó, si sigue abierto. */
-  selected: OpenPr | null
+/** Lo que se le puede pedir a un PR. No cambia con los datos ni con la selección: una tarjeta que solo actúa no se re-renderiza. */
+export interface PrActions {
   select: (id: string | null) => void
   caps: (pr: OpenPr) => PrCaps
   /** Con la estrategia `comment` confirma antes; con `button` abre el PR en GitHub, donde se mergea. */
@@ -32,7 +31,20 @@ export interface PrCommands {
   openGithub: (pr: GithubPr) => void
 }
 
+export interface PrCommands extends PrActions {
+  /** El PR sobre el que actúan los atajos y la paleta: el último que se enfocó, si sigue abierto. */
+  selected: OpenPr | null
+}
+
+const PrActionsContext = createContext<PrActions | null>(null)
 const PrCommandsContext = createContext<PrCommands | null>(null)
+
+/** Las acciones sin la selección: para lo que se dibuja una vez por PR (tarjetas, menús). */
+export function usePrActions(): PrActions {
+  const actions = useContext(PrActionsContext)
+  if (!actions) throw new Error("usePrActions fuera de PrCommandsProvider")
+  return actions
+}
 
 export function usePrCommands(): PrCommands {
   const commands = useContext(PrCommandsContext)
@@ -56,10 +68,14 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, childre
   const [confirming, setConfirming] = useState<GithubPr | null>(null)
 
   const perform = useToastedCommand()
+  // Lo que viene de la app se lee al usarse: así las acciones no cambian cada vez que App se re-renderiza.
+  const latest = useRef({ projects, onOpenRun, onOpenPr })
+  useEffect(() => {
+    latest.current = { projects, onOpenRun, onOpenPr }
+  })
 
-  const commands = useMemo<PrCommands>(
+  const actions = useMemo<PrActions>(
     () => ({
-      selected: prs.find((p) => p.id === selectedId) ?? null,
       select,
       caps: prCaps,
       merge: (pr) => (prCaps(pr).merge === "button" ? host.openExternal(pr.state.url) : setConfirming(pr)),
@@ -67,7 +83,7 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, childre
       rebase: (pr) => void perform(() => appData.rebasePr(pr.ref), `Rebase de ${pr.state.key} en marcha: corre en el carril de mantenimiento`),
       view: (pr) => {
         select(pr.id)
-        onOpenPr(pr.id)
+        latest.current.onOpenPr(pr.id)
       },
       openGithub: (pr) => host.openExternal(pr.state.url),
       publishLocal: (pr) => void perform(() => appData.publishLocalPr(pr.id), `Publicando ${branchOf(pr)} en GitHub: corre en el carril de mantenimiento`),
@@ -81,18 +97,20 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, childre
         if (runId === null) return
         appData.run(runId).then(
           (run) => {
-            const project = projects.find((p) => p.id === run.projectId)
-            if (project) onOpenRun(project.slug, runId)
+            const project = latest.current.projects.find((p) => p.id === run.projectId)
+            if (project) latest.current.onOpenRun(project.slug, runId)
             else toast.error("La corrida que abrió este PR no es de ningún proyecto")
           },
           (e: unknown) => toast.error(messageOf(e)),
         )
       },
     }),
-    [prs, selectedId, appData, host, perform, projects, onOpenRun, onOpenPr],
+    [appData, host, perform],
   )
+  const commands = useMemo<PrCommands>(() => ({ ...actions, selected: prs.find((p) => p.id === selectedId) ?? null }), [actions, prs, selectedId])
 
   return (
+    <PrActionsContext.Provider value={actions}>
     <PrCommandsContext.Provider value={commands}>
       {children}
       <AlertDialog open={confirming !== null} onOpenChange={(open) => !open && setConfirming(null)}>
@@ -117,5 +135,6 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, childre
         </AlertDialogContent>
       </AlertDialog>
     </PrCommandsContext.Provider>
+    </PrActionsContext.Provider>
   )
 }

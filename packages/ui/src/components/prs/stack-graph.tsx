@@ -11,12 +11,12 @@ import {
   useReactFlow,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { OpenPr } from "@/lib/prs/prs"
 import { useColorMode } from "@/hooks/use-color-mode"
 import { buildStackForest, layoutStackGroups, listStackGroups } from "@/lib/prs/stack"
 import { NODE_HEIGHT, NODE_WIDTH, PrNode, type PrNodeData } from "./pr-node"
-import { usePrCommands } from "./pr-commands"
+import { usePrActions } from "./pr-commands"
 
 const nodeTypes = { pr: PrNode }
 
@@ -30,6 +30,7 @@ function layoutStacks(
   dimmed: Set<string>,
   issueKeys: ReadonlyMap<string, string>,
   heights: ReadonlyMap<string, number>,
+  previous: Map<string, PrNodeData>,
 ): { nodes: Node<PrNodeData>[]; edges: Edge[] } {
   const forest = buildStackForest(prs)
   const positions = layoutStackGroups(forest, listStackGroups(forest), {
@@ -42,7 +43,7 @@ function layoutStacks(
     id,
     type: "pr",
     position,
-    data: { pr: forest.byId.get(id)!, dimmed: dimmed.has(id), issueKey: issueKeyOf(forest.byId.get(id)!, issueKeys), combined: forest.combined.get(id) },
+    data: reuse(previous, id, { pr: forest.byId.get(id)!, dimmed: dimmed.has(id), issueKey: issueKeyOf(forest.byId.get(id)!, issueKeys), combined: forest.combined.get(id) }),
     draggable: false,
   }))
 
@@ -51,11 +52,23 @@ function layoutStacks(
     source: e.parentId,
     target: e.childId,
     type: "smoothstep",
-    animated: true,
     style: { stroke: "var(--primary)", strokeWidth: 1.75 },
     markerEnd: { type: MarkerType.ArrowClosed, color: "var(--primary)", width: 16, height: 16 },
   }))
   return { nodes, edges }
+}
+
+/**
+ * Los datos de la tarjeta de antes si nada de lo que muestra cambió (el PR conserva su identidad entre lecturas iguales):
+ * `PrNode` es `memo` y así no se vuelve a dibujar cada tarjeta cuando cambia un solo PR o se re-acomoda el grafo.
+ */
+function reuse(previous: Map<string, PrNodeData>, id: string, next: PrNodeData): PrNodeData {
+  const old = previous.get(id)
+  const same =
+    old !== undefined && old.pr === next.pr && old.dimmed === next.dimmed && old.issueKey === next.issueKey && old.combined?.join() === next.combined?.join()
+  const data = same ? old : next
+  previous.set(id, data)
+  return data
 }
 
 /** Guarda la altura que xyflow midió de cada tarjeta; devuelve el mismo mapa si nada cambió, para no re-acomodar. */
@@ -72,10 +85,11 @@ function withMeasuredHeights(prev: ReadonlyMap<string, number>, changes: NodeCha
 }
 
 function GraphInner({ prs, dimmed, issueKeys, layoutKey }: { prs: OpenPr[]; dimmed: Set<string>; issueKeys: ReadonlyMap<string, string>; layoutKey: string }) {
-  const commands = usePrCommands()
+  const commands = usePrActions()
+  const previous = useRef(new Map<string, PrNodeData>())
   // Primero se dibuja con una altura estimada; cuando xyflow mide cada tarjeta, se vuelve a acomodar con la real.
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map())
-  const { nodes, edges } = useMemo(() => layoutStacks(prs, dimmed, issueKeys, heights), [prs, dimmed, issueKeys, heights])
+  const { nodes, edges } = useMemo(() => layoutStacks(prs, dimmed, issueKeys, heights, previous.current), [prs, dimmed, issueKeys, heights])
   const measured = prs.every((p) => heights.has(p.id))
   const colorMode = useColorMode()
   const { fitView } = useReactFlow()

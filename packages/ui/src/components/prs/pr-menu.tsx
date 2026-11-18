@@ -4,7 +4,7 @@ import { isTypingTarget } from "@/lib/keys"
 import { whyNotMerge } from "@/lib/prs/pr-commands"
 import { branchOf, type OpenPr } from "@/lib/prs/prs"
 import { copy } from "./pr-bits"
-import { usePrCommands } from "./pr-commands"
+import { usePrActions, usePrCommands } from "./pr-commands"
 
 /** Los atajos de las acciones de un PR, con el PR enfocado: la vista de PRs, el menú contextual y la paleta los comparten. */
 export const PR_KEYS = { merge: "M", requestReview: "B", rebase: "R", hold: "H", run: "V", publishLocal: "P", view: "↵", openGithub: "O" } as const
@@ -36,7 +36,7 @@ export function usePrShortcuts() {
 
 /** El menú contextual de un PR (tarjeta del grafo y fila de la lista): lo que se puede abrir, pedirle al core y copiar. */
 export function PrContextMenu({ pr, children }: { pr: OpenPr; children: ReactNode }) {
-  const commands = usePrCommands()
+  const commands = usePrActions()
   const caps = commands.caps(pr)
   const blocked = pr.local ? undefined : whyNotMerge(pr)
   return (
