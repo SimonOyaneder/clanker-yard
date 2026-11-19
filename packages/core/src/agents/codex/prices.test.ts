@@ -19,6 +19,8 @@ describe.each([
   { model: "gpt-6-luna", standard: 1630, atLimit: 27_700, aboveLimit: 55_150, cachedAtLimit: 20_500, cachedAboveLimit: 40_750 },
   { model: "gpt-6.1-terra", standard: 16_150, atLimit: 277_000, aboveLimit: 551_502, cachedAtLimit: 200_000, cachedAboveLimit: 397_503 },
   { model: "gpt-6.1-sol", standard: 32_300, atLimit: 554_000, aboveLimit: 1_103_004, cachedAtLimit: 400_000, cachedAboveLimit: 795_005 },
+  { model: "gpt-6.2-sol", standard: 32_300, atLimit: 554_000, aboveLimit: 1_103_004, cachedAtLimit: 400_000, cachedAboveLimit: 795_005 },
+  { model: "gpt-6.2-astra", standard: 129_200, atLimit: 2_216_000, aboveLimit: 4_412_016, cachedAtLimit: 1_600_000, cachedAboveLimit: 3_180_020 },
   { model: "gpt-5.6-luna", standard: 3660, atLimit: 55_600, aboveLimit: 110_600, cachedAtLimit: 41_200, cachedAboveLimit: 81_801 },
 ])("precios migrados de Codex: $model", ({ model, standard, atLimit, aboveLimit, cachedAtLimit, cachedAboveLimit }) => {
   test("cobra entrada, salida, lectura y escritura de caché sin inferir otra duración", () => {
