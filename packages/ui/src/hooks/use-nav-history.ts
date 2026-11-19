@@ -8,6 +8,8 @@ export interface NavHistory<L> {
   go(to: Partial<L>): void
   /** Cambia el lugar sin sumarlo al historial (J y K en una lista no llenan el atrás). */
   replace(to: Partial<L>): void
+  canGoBack: boolean
+  canGoForward: boolean
   goBack(): void
   goForward(): void
 }
@@ -96,5 +98,5 @@ export function useNavHistory<L extends object>(here: L, apply: (to: L) => void,
     }
   }, [goBack, goForward])
 
-  return { go, replace, goBack, goForward }
+  return { go, replace, goBack, goForward, canGoBack: back.current.length > 0, canGoForward: forward.current.length > 0 }
 }

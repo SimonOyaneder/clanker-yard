@@ -13,6 +13,7 @@ export interface AppActions {
   openShortcuts: () => void
   toggleSidebar: () => void
   selectProject: (slug: string) => void
+  openIssue: (issue: CachedIssue) => void
   openRun: (slug: string, runId: RunId) => void
   /** Abre la decisión en la bandeja (`/inbox/:decision`). */
   openDecision: (id: DecisionId) => void

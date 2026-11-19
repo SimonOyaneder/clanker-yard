@@ -1,5 +1,6 @@
 import { PackSettings, type PrRef, type PrState, type RepoId } from "@clanker/api";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { newId } from "../store/conventions";
 import { prParents, pullRequests } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createRepos, type Repos } from "../repos/repos";
@@ -112,6 +113,15 @@ describe("refresh", () => {
 });
 
 describe("list", () => {
+  test("por issue incluye PRs locales y mergeados y descarta los ajenos", () => {
+    const issueId = newId("iss");
+    const merged = seedPr(store, { repoId, issueId, number: 9, state: "merged" });
+    const local = seedPr(store, { repoId, issueId, number: null, state: "local", headRef: "feat/y", title: "PR local" });
+    seedPr(store, { repoId, issueId: newId("iss"), number: 10 });
+
+    expect(cache.list({ issueId }).map((pr) => pr.id)).toEqual([local, merged]);
+  });
+
   test("filtra por repo, dueño y estado, y salta repos sin remoto", async () => {
     cache.saveRest(repoId, pull(), NOW);
     cache.saveRest(repoId, pull({ number: 8, state: "closed", merged: true }), NOW);

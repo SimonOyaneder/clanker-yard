@@ -1,4 +1,4 @@
-import type { ClankerProject, DecisionId, RunDetail, RunId } from "@clanker/api"
+import type { ClankerProject, DecisionId, IssueId, RunDetail, RunId } from "@clanker/api"
 import { useEffect, useRef } from "react"
 import { toast } from "sonner"
 import { PROJECT_TABS, type ProjectTab } from "@/components/project/project-view"
@@ -36,7 +36,8 @@ export interface ShellShortcuts {
   project: ClankerProject | null
   stepNode: string | null
   closeStep(): void
-  closeRun(): void
+  issueId: IssueId | null
+  closeDetail(): void
   setRunTab(tab: RunTab): void
   setStepTab(tab: StepTab): void
 }
@@ -109,9 +110,9 @@ export function useShellShortcuts(shortcuts: ShellShortcuts): void {
       },
       // Esc sube un nivel: del panel del paso a la corrida y de la corrida al proyecto, salvo que haya un diálogo o menú abierto.
       (e, s) => {
-        if (e.key !== "Escape" || !s.runId || s.module !== "projects" || overlayOpen()) return
+        if (e.key !== "Escape" || (!s.runId && !s.issueId) || s.module !== "projects" || overlayOpen()) return
         if (s.stepNode) s.closeStep()
-        else s.closeRun()
+        else s.closeDetail()
       },
       // G y L cambian entre el grafo y la línea de tiempo de la corrida abierta; con el panel de un paso, T, B, R, A e I eligen su pestaña.
       (e, s) => {

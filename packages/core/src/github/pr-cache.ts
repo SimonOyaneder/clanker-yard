@@ -115,12 +115,13 @@ export function createPrCache({ store, repos, packs, prs, onChange, now = Date.n
   return {
     refresh,
 
-    list({ repo, owned, state, ids } = {}) {
+    list({ repo, owned, state, ids, issueId } = {}) {
       const rows = store.db
         .select()
         .from(pullRequests)
         .where(
           and(
+            issueId === undefined ? undefined : eq(pullRequests.issueId, issueId),
             owned === undefined ? undefined : eq(pullRequests.owned, owned),
             state === undefined ? undefined : eq(pullRequests.state, state),
             ids === undefined ? undefined : inArray(pullRequests.id, ids),

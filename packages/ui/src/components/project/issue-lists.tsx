@@ -65,7 +65,7 @@ function QueueRow({ entry, project }: { entry: QueueEntry; project: ClankerProje
         <ContextMenuTrigger asChild>
           <div className="flex items-center gap-3 px-3 py-1.5">
             <span className="size-3.5 flex-none rounded-full border border-muted-foreground/50" />
-            <span className="w-20 flex-none truncate font-mono text-xs text-muted-foreground">{issueKey(issue)}</span>
+            <Button size="xs" variant="link" className="w-20 justify-start truncate px-0 font-mono" aria-label={`Ver issue ${issueKey(issue)}`} onClick={() => actions.openIssue(issue)}>{issueKey(issue)}</Button>
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="truncate">{issue.title}</span>
               <span className="truncate text-xs text-muted-foreground">{entry.reason}</span>
@@ -99,6 +99,7 @@ function QueueRow({ entry, project }: { entry: QueueEntry; project: ClankerProje
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-56">
+          <ContextMenuItem onSelect={() => actions.openIssue(issue)}>Ver issue</ContextMenuItem>
           <ContextMenuItem disabled={!runnable} onSelect={run}>
             <Play /> Correr ahora
           </ContextMenuItem>

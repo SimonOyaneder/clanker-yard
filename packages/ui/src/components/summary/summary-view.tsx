@@ -256,7 +256,8 @@ function IssueRounds({ metrics, issues }: { metrics: ProjectMetrics; issues: Cac
         </TableHeader>
         <TableBody className="tabular-nums">
           {shown.map((r) => {
-            const key = r.issue ? issueKey(r.issue) : r.issueId
+            const issue = r.issue
+            const key = issue ? issueKey(issue) : r.issueId
             const detail = Object.entries(r.rounds).map(([counter, n]) => `${counter} ${n}`).join(" · ")
             return (
               <ContextMenu key={r.issueId}>
@@ -264,7 +265,7 @@ function IssueRounds({ metrics, issues }: { metrics: ProjectMetrics; issues: Cac
                   <TableRow>
                     <TableCell className="max-w-[360px] px-0 py-2">
                       <div className="flex min-w-0 items-baseline gap-2">
-                        <span className="flex-none font-mono text-xs text-primary">{key}</span>
+                        {issue ? <Button size="xs" variant="link" className="px-0 font-mono" onClick={() => actions.openIssue(issue)}>{key}</Button> : <span className="font-mono text-xs">{key}</span>}
                         <span className="truncate">{r.issue?.title ?? "issue fuera del caché"}</span>
                       </div>
                     </TableCell>

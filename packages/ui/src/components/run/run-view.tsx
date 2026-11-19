@@ -1,5 +1,8 @@
 import type { CachedIssue, RunDetail, Step } from "@clanker/api"
 import { Copy, Ellipsis, GitBranch, GitMerge, ListTree, Network, Octagon, Pause, Play, RotateCcw, Square } from "lucide-react"
+import { IssueLink } from "@/components/project/issue-link"
+import { PrLink } from "@/components/prs/pr-link"
+import { type OpenPr, titleOf } from "@/lib/prs/prs"
 import { useMemo } from "react"
 import { Hint, Pill, SectionTitle, StatBar } from "@/components/common"
 import { useRunCommands } from "@/components/run/run-commands"
@@ -15,7 +18,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Elapsed } from "@/components/elapsed"
 import { copy } from "@/lib/clipboard"
-import { absolute, compactCount, costUsd, elapsed, issueKey, tone } from "@/lib/format"
+import { absolute, compactCount, costUsd, elapsed, tone } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
 import { currentRound, type GraphNodeKind, shapeOf } from "@/lib/run-graph"
 import { RUN_KEYS, type RunCaps, runCaps } from "@/lib/project/run-commands"
@@ -27,6 +30,7 @@ export type RunTab = "graph" | "timeline"
 
 interface RunViewProps {
   run: RunDetail
+  pr?: OpenPr | undefined
   issue: CachedIssue | undefined
   tab: RunTab
   onTabChange: (tab: RunTab) => void
@@ -43,7 +47,7 @@ const PANEL_SIZE_PREF = "stepPanelSize"
 // Una corrida de una issue: el grafo del flujo que corre, con dónde va y cuánto costó cada paso, y la
 // línea de tiempo de sus pasos en el orden en que se crearon. A la derecha, redimensionable, el panel del
 // paso elegido: qué recibió y qué dijo el agente, o qué comando corrió la acción.
-export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, stepTab, onStepTab }: RunViewProps) {
+export function RunView({ run, issue, pr, tab, onTabChange, node, onNodeChange, stepTab, onStepTab }: RunViewProps) {
   const failure = run.status === "failed" ? run.steps.findLast((s) => s.status === "failed" && s.error) : undefined
   const shape = useMemo(() => shapeOf(run.flowDef, run.steps), [run.flowDef, run.steps])
   const copySessionId = useCopySessionId()
@@ -57,12 +61,13 @@ export function RunView({ run, issue, tab, onTabChange, node, onNodeChange, step
     <div className="flex flex-col gap-5">
       <header className="flex flex-col gap-2">
         <div className="flex items-center gap-2.5">
-          <span className="font-mono text-xs text-muted-foreground">{issue ? issueKey(issue) : `${run.subject.type}:${run.subject.id}`}</span>
+          {issue ? <IssueLink issue={issue} /> : !pr ? <span className="font-mono text-xs text-muted-foreground">{run.subject.id}</span> : null}
+          {pr ? <PrLink pr={pr} /> : null}
           <RunStatusPill run={run} />
           {run.outcome ? <span className="text-xs text-muted-foreground">{OUTCOME[run.outcome as keyof typeof OUTCOME] ?? run.outcome}</span> : null}
           <RunActions run={run} caps={caps} />
         </div>
-        <h1 className="text-lg font-semibold">{issue?.title ?? "Issue fuera del caché"}</h1>
+        <h1 className="text-lg font-semibold">{issue?.title ?? (pr ? titleOf(pr) : run.subject.type === "pr" ? "Corrida de PR" : "Issue fuera del caché")}</h1>
         <div className="flex flex-wrap items-center gap-1.5">
           <Pill className={tone.neutral} hint="Carril en que corre: dev toma issues nuevas, mantenimiento atiende PRs ya abiertos.">
             carril {run.lane === "dev" ? "dev" : "mantenimiento"}

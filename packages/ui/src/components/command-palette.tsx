@@ -43,6 +43,7 @@ interface Props {
   projects: ClankerProject[]
   current: ClankerProject | null
   runs: Run[]
+  contextIssue?: CachedIssue | undefined
   issues: CachedIssue[]
   /** La cola del proyecto que se ve; `null` si la vista actual no es la del proyecto. */
   queue: QueueEntry[] | null
@@ -73,7 +74,7 @@ interface Props {
 }
 
 // ⌘K: ir a cualquier proyecto o corrida y correr cualquier acción sin tocar el mouse.
-export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, queue, prs, prsActive, pr = null, learnings, pendingDecisions, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
+export function CommandPalette({ open, onOpenChange, projects, current, runs, issues, contextIssue, queue, prs, prsActive, pr = null, learnings, pendingDecisions, onUndoDecision, onDecision, projectTab, settings, summary, onRunTab, runCaps, onStep }: Props) {
   const actions = useAppActions()
   const commands = useRunCommands()
   const prCommands = usePrCommands()
@@ -107,6 +108,19 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
       <CommandInput placeholder="Busca un proyecto, una corrida o una acción…" />
       <CommandList className="max-h-[420px]">
         <CommandEmpty>Sin resultados.</CommandEmpty>
+
+        {contextIssue ? (
+          <CommandGroup heading={issueKey(contextIssue)}>
+            <CommandItem onSelect={run(() => actions.openIssue(contextIssue))}>
+              <ListTodo /> Ver ficha de {issueKey(contextIssue)}
+            </CommandItem>
+            {contextIssue.ref.tracker !== "local" ? (
+              <CommandItem onSelect={run(() => actions.openExternal(contextIssue.ref.url))}>
+                <ExternalLink /> Abrir {issueKey(contextIssue)} en {contextIssue.ref.tracker === "linear" ? "Linear" : contextIssue.ref.tracker}
+              </CommandItem>
+            ) : null}
+          </CommandGroup>
+        ) : null}
 
         {onDecision ? (
           <CommandGroup heading="Esta decisión">
@@ -420,6 +434,16 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             </CommandItem>
           ))}
         </CommandGroup>
+
+        {current && issues.length ? (
+          <CommandGroup heading={`Issues de ${current.name}`}>
+            {issues.map((i) => (
+              <CommandItem key={i.id} value={`ver issue ${issueKey(i)} ${i.title}`} onSelect={run(() => actions.openIssue(i))}>
+                <ListTodo /><span className="font-mono text-xs">{issueKey(i)}</span><span className="truncate">{i.title}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
 
         {runs.length && current ? (
           <>
