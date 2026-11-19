@@ -1,5 +1,5 @@
 import { LIVE_RUN_STATUSES, type CachedIssue, type Decision, type DecisionId, type RunDetail, type RunId, type Repo } from "@clanker/api"
-import { ChevronRight, Search } from "lucide-react"
+import { ChevronLeft, ChevronRight, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast, Toaster } from "sonner"
 import { type AppData, AppDataProvider, useAppData } from "@/app-data"
@@ -224,7 +224,7 @@ function Shell() {
     },
     [setModule],
   )
-  const { go, replace, goBack, goForward } = useNavHistory<Loc>({ module, slug, runId, decision: decisionId, tab, prId }, apply, sameLoc)
+  const { go, replace, goBack, goForward, canGoBack, canGoForward } = useNavHistory<Loc>({ module, slug, runId, decision: decisionId, tab, prId }, apply, sameLoc)
 
   const selectProject = useCallback((s: string) => go({ module: "projects", slug: s, runId: null }), [go])
   const barSlugs = barProjects(projects).map((p) => p.slug)
@@ -408,6 +408,14 @@ function Shell() {
             <Hint label={sidebarOpen ? "Ocultar barra lateral" : "Mostrar barra lateral"} keys="⌘B" side="bottom">
               <SidebarTrigger className="size-7 text-muted-foreground" />
             </Hint>
+            <div className="flex items-center" role="group" aria-label="Historial">
+              <Hint label="Atrás" keys="⌘←" side="bottom">
+                <Button size="icon-xs" variant="ghost" aria-label="Atrás" disabled={!canGoBack} onClick={goBack}><ChevronLeft /></Button>
+              </Hint>
+              <Hint label="Adelante" keys="⌘→" side="bottom">
+                <Button size="icon-xs" variant="ghost" aria-label="Adelante" disabled={!canGoForward} onClick={goForward}><ChevronRight /></Button>
+              </Hint>
+            </div>
             <nav aria-label="Ubicación" className="flex min-w-0 flex-1 items-center gap-1 text-[13px]">
               {module === "inbox" ? (
                 inbox.current && decisionId ? (
