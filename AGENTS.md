@@ -29,7 +29,7 @@ npm test               # vitest desde la raíz (un proyecto por app y paquete), 
 npm run test:all       # todo, también los lentos de vitest.slow.ts
 ```
 
-Para dar algo por listo pasan `typecheck`, `lint` y `test:changed`, y nadie más los corre por ti: la CI (`.github/workflows/ci.yml`) está pausada y solo corre a mano desde Actions. Antes de pushear a `main`, `test:all`. Un test de un paquete va junto a su código como `src/**/*.test.ts`.
+Para dar algo por listo pasan `typecheck`, `lint` y `test:changed`, y nadie más los corre por ti: la CI (`.github/workflows/ci.yml`) está pausada y solo corre a mano desde Actions. `test:all` (y `npm test`) solo se corren si Simón lo pide textual, también antes de pushear a `main`. Un test de un paquete va junto a su código como `src/**/*.test.ts`.
 
 `test:changed` (`scripts/changed-tests.ts`, también con archivos: `node scripts/changed-tests.ts <archivos>`, y `--dry-run` para solo listar) corre los tests que cambiaron, el que vive al lado de cada archivo (`x.ts` → `x.test.ts`) y, si un archivo no tiene uno al lado, los tests que lo importan directo. No sigue el grafo: lo que se rompe más lejos lo ve `typecheck`, y lo que solo prueba un test del testkit a través de `@clanker/core` (las acciones de `github/actions/`, por ejemplo) no corre: si tocas eso, nombra su test (`npx vitest run pr-publish`). Por eso un módulo nuevo lleva su test al lado.
 
