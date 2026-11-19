@@ -210,6 +210,7 @@ export const CachedPr = z.object({
 export type CachedPr = z.infer<typeof CachedPr>;
 
 export const PrFilter = z.object({
+  issueId: IssueId.optional(),
   /** `owner/repo` */
   repo: z.string().optional(),
   owned: z.boolean().optional(),
