@@ -171,6 +171,24 @@ describe("review.requestBot", () => {
     expect(again).toEqual(first);
     expect(conversation(pr)).toHaveLength(1);
   });
+
+  test("antes de comentar resuelve los threads resolubles ya respondidos con [clanker], y nada más", async () => {
+    const { sim, pr, ref, requestBot } = await setup();
+    const [answeredBot, pendingBot] = pr.botFindings(["Falta validar el monto", "Renombra esto"]);
+    const answeredCoverage = pr.thread("coverage-bot", "Not covered lines: 17");
+    const human = pr.thread("alice", "por qué esto?");
+    const council = pr.councilThread("agrega un test");
+    for (const thread of [answeredBot!, answeredCoverage, human, council]) pr.reply(thread.id, ACCOUNT, "[clanker] aplicado en abc1234");
+
+    await requestBot.run(requestBot.args.parse({ pr: ref }), ctx("run_1:bot-req:1"));
+
+    const resolved = (thread: { commentId: number }) => threadOf(pr, thread.commentId).isResolved;
+    expect([answeredBot!, answeredCoverage, pendingBot!, human, council].map(resolved)).toEqual([true, true, false, false, false]);
+    expect(conversation(pr)).toEqual(["/review"]);
+    const mutations = new Set(graphqlWrites(sim));
+    const writes = sim.requests.filter((r) => r.method === "POST" && (r.path !== "/graphql" || mutations.has(r)));
+    expect(writes.map((r) => (r.path === "/graphql" ? "resolve" : "comment")).slice(-3)).toEqual(["resolve", "resolve", "comment"]);
+  });
 });
 
 describe("pr.reply", () => {

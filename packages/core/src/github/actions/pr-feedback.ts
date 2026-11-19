@@ -101,14 +101,28 @@ async function ensureComment(
  * disparador puede exigir apenas que lo contenga). Sin marca no se puede buscar antes de publicar:
  * que un reintento no lo duplique lo da `ctx.once`, y si el proceso muere entre el comentario y el
  * guardado, el reintento comenta otra vez. `undefined`: el pack no tiene bot.
+ *
+ * Antes de pedirla resuelve los threads de autores resolubles que ya tienen una respuesta con el prefijo de
+ * comentarios y siguen abiertos (una respuesta a mano, o un paso que respondió y murió antes de resolver): el
+ * bot no vuelve a revisar mientras sus threads sigan abiertos y contesta que los anteriores siguen vigentes.
  */
 async function requestBot(target: Target, ctx: ActionCtx, write: ReturnType<typeof spaced>): Promise<{ requestedAt: number } | undefined> {
   const bot = target.pack.reviewBot;
   if (!bot) return undefined;
   return ctx.once("requestBot", async () => {
+    await resolveAnswered(target, write);
     const comment = await postComment(target, bot.request.body, write);
     return { requestedAt: Date.parse(comment.created_at) };
   });
+}
+
+async function resolveAnswered(target: Target, write: ReturnType<typeof spaced>): Promise<void> {
+  const { client, owner, name, number, pack } = target;
+  const node = await fetchPr(client, { owner, name }, number);
+  for (const thread of node.reviewThreads) {
+    if (thread.isResolved || ownerOf(thread, pack) !== "resolvable" || !answered(thread, pack.conventions.commentPrefix)) continue;
+    await resolveThread(client, thread, write);
+  }
 }
 
 export const RESOLVE_THREAD = `mutation ResolveThread($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id isResolved } } }`;
