@@ -199,6 +199,13 @@ function Shell() {
   }, { on: ["issue.*"] })
 
   const issueKeys = useMemo(() => new Map(allIssues.data?.map((i) => [i.id, issueKey(i)])), [allIssues.data])
+  const issueProjects = useMemo(() => {
+    const byId = new Map(projects.map((p) => [p.id, { id: p.id, name: p.name }]))
+    return new Map(allIssues.data?.flatMap((i) => {
+      const owner = byId.get(i.projectId)
+      return owner ? [[i.id, owner] as const] : []
+    }))
+  }, [projects, allIssues.data])
   const prIssue = viewedPr?.issueId ? allIssues.data?.find((i) => i.id === viewedPr.issueId) : undefined
 
   const setModule = useCallback((m: Module) => {
@@ -508,7 +515,7 @@ function Shell() {
             </main>
           ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              {viewedPr ? <PrView key={viewedPr.id} pr={viewedPr} issue={prIssue} onBack={closePr} onControls={setPrControls} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeys} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
+              {viewedPr ? <PrView key={viewedPr.id} pr={viewedPr} issue={prIssue} onBack={closePr} onControls={setPrControls} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeys} issueProjects={issueProjects} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
             </main>
           ) : module === "flows" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>

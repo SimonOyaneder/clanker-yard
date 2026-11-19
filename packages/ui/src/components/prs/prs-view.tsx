@@ -18,6 +18,7 @@ import { absolute, ago } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
 import { mergeMark, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
 import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/lib/prs/prs"
+import { groupByProject, type PrProject } from "@/lib/prs/by-project"
 import { buildStackForest, listStackGroups, type StackGroup } from "@/lib/prs/stack"
 import { cn } from "@/lib/utils"
 import { Ago, Hint, Pill } from "../common"
@@ -75,6 +76,8 @@ interface Props {
   unread: number
   /** La clave de la issue que originó cada PR del sistema (`CachedPr.issueId`). */
   issueKeys: ReadonlyMap<string, string>
+  /** El proyecto de cada issue (por `issueId`): la lista agrupa los PRs por el proyecto de la issue que los originó. */
+  issueProjects?: ReadonlyMap<string, PrProject>
   loaded: boolean
   error: string | null
   /** Los repos registrados: Watch solo descubre PRs en ellos. */
@@ -86,8 +89,9 @@ interface Props {
 }
 
 const NO_NOTES: readonly Decision[] = []
+const NO_PROJECTS: ReadonlyMap<string, PrProject> = new Map()
 
-export function PrsView({ prs, unread, issueKeys, loaded, error, registered, notes = NO_NOTES, onOpenConnections, onRefresh }: Props) {
+export function PrsView({ prs, unread, issueKeys, issueProjects = NO_PROJECTS, loaded, error, registered, notes = NO_NOTES, onOpenConnections, onRefresh }: Props) {
   const [filter, setFilterState] = useState<Filter>(() => readPref<Filter>("prs.filter", "all"))
   const [mode, setModeState] = useState<Mode>(() => readPref<Mode>("prs.mode", "graph"))
   const [hiddenRepos, setHiddenRepos] = useState<string[]>(() => readPref<string[]>("prs.hiddenRepos", []))
@@ -134,7 +138,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
       scoped
         .filter((p) => matcher(p, stacked))
         .filter((p) => !picked || p.state?.signals[picked.id] === picked.level)
-        .filter((p) => !q || `${p.id} ${p.ref ? `#${p.ref.number}` : ""} ${titleOf(p)} ${branchOf(p)} ${repoNameOf(p)} ${p.issueId === null ? "" : (issueKeys.get(p.issueId) ?? "")}`.toLowerCase().includes(q))
+        .filter((p) => !q || `${p.id} ${p.ref ? `#${p.ref.number}` : ""} ${titleOf(p)} ${branchOf(p)} ${repoNameOf(p)} ${p.issueId === null ? "" : `${issueKeys.get(p.issueId) ?? ""} ${issueProjects.get(p.issueId)?.name ?? ""}`}`.toLowerCase().includes(q))
         .map((p) => p.id),
     )
     const vg = groups.filter((g) => g.prIds.some((id) => matches.has(id)))
@@ -144,7 +148,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
       dimmed: new Set([...ids].filter((id) => !matches.has(id))),
       visibleGroups: vg,
     }
-  }, [scoped, stacked, groups, filter, query, picked, issueKeys])
+  }, [scoped, stacked, groups, filter, query, picked, issueKeys, issueProjects])
 
   usePrShortcuts()
 
@@ -306,7 +310,7 @@ export function PrsView({ prs, unread, issueKeys, loaded, error, registered, not
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-          <PrList groups={visibleGroups} forest={forest} dimmed={dimmed} issueKeys={issueKeys} hasSignals={signals.length > 0} />
+          <PrList groups={visibleGroups} forest={forest} dimmed={dimmed} issueKeys={issueKeys} issueProjects={issueProjects} hasSignals={signals.length > 0} />
         </div>
       )}
     </div>
@@ -326,8 +330,41 @@ function Section({ title, sub, children }: { title: string; sub: string; childre
   )
 }
 
-// Stacks primero, cada uno con su sección; los PRs sueltos van juntos por repo.
+// Con PRs de más de un proyecto, cada proyecto lleva su encabezado y debajo sus stacks y PRs sueltos.
 function PrList({
+  groups,
+  forest,
+  dimmed,
+  issueKeys,
+  issueProjects,
+  hasSignals,
+}: {
+  groups: StackGroup[]
+  forest: ReturnType<typeof buildStackForest>
+  dimmed: Set<string>
+  issueKeys: ReadonlyMap<string, string>
+  issueProjects: ReadonlyMap<string, PrProject>
+  hasSignals: boolean
+}) {
+  const byProject = groupByProject(groups, forest.byId, issueProjects)
+  if (byProject.length < 2) return <StackSections groups={groups} forest={forest} dimmed={dimmed} issueKeys={issueKeys} hasSignals={hasSignals} />
+  return (
+    <div className="flex flex-col gap-6">
+      {byProject.map(({ project, groups: projectGroups, prCount }) => (
+        <section key={project?.id ?? "sin-proyecto"} aria-label={project?.name ?? "Sin proyecto"} className="flex flex-col gap-2">
+          <h2 className="flex items-baseline gap-2 text-[13px]">
+            <span className="font-semibold">{project?.name ?? "Sin proyecto"}</span>
+            <span className="text-xs text-muted-foreground">{prCount === 1 ? "1 PR" : `${prCount} PRs`}</span>
+          </h2>
+          <StackSections groups={projectGroups} forest={forest} dimmed={dimmed} issueKeys={issueKeys} hasSignals={hasSignals} />
+        </section>
+      ))}
+    </div>
+  )
+}
+
+// Stacks primero, cada uno con su sección; los PRs sueltos van juntos por repo.
+function StackSections({
   groups,
   forest,
   dimmed,

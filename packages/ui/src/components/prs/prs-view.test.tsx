@@ -7,6 +7,7 @@ import { PrsView } from "@/components/prs/prs-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { HostProvider, type Host } from "@/host"
+import type { PrProject } from "@/lib/prs/by-project"
 import { openPrsOf, titleOf, type LocalPr, type OpenPr } from "@/lib/prs/prs"
 import { createMemoryAppData } from "@/demo/memory-app-data"
 
@@ -29,7 +30,7 @@ afterEach(() => {
   localStorage.clear()
 })
 
-async function setup(override?: OpenPr[]) {
+async function setup(override?: OpenPr[], issueProjects?: ReadonlyMap<string, PrProject>) {
   const data = createMemoryAppData(NOW)
   const prs = override ?? openPrsOf(await data.openPrs())
   const spies = {
@@ -45,7 +46,7 @@ async function setup(override?: OpenPr[]) {
       <HostProvider value={host}>
         <TooltipProvider>
           <PrCommandsProvider prs={prs} projects={[]} onOpenRun={() => {}} onOpenPr={openPr}>
-            <PrsView prs={prs} unread={0} issueKeys={new Map()} loaded error={null} registered={[]} onOpenConnections={() => {}} onRefresh={() => {}} />
+            <PrsView prs={prs} unread={0} issueKeys={new Map()} issueProjects={issueProjects} loaded error={null} registered={[]} onOpenConnections={() => {}} onRefresh={() => {}} />
           </PrCommandsProvider>
         </TooltipProvider>
       </HostProvider>
@@ -55,6 +56,25 @@ async function setup(override?: OpenPr[]) {
 }
 
 const rowOf = (title: string) => screen.getByText(title).closest("li")!
+
+test("con PRs de varios proyectos, la lista agrupa cada stack bajo el proyecto de su issue", async () => {
+  await setup(undefined, new Map([
+    ["iss_eng_9167", { id: "prj_b", name: "Boundaries de engines" }],
+    ["iss_tw_33", { id: "prj_s", name: "SOPORTE" }],
+  ]))
+
+  const boundaries = screen.getByRole("region", { name: "Boundaries de engines" })
+  expect(within(boundaries).getByText("Prohibir imports cruzados entre engines")).toBeTruthy()
+  expect(within(boundaries).getByText("Lint de imports entre engines")).toBeTruthy()
+  expect(within(screen.getByRole("region", { name: "SOPORTE" })).getByText("Quitar el modal duplicado de confirmación")).toBeTruthy()
+  expect(within(screen.getByRole("region", { name: "Sin proyecto" })).getByText("Arreglar el scroll del listado de cuentas")).toBeTruthy()
+})
+
+test("sin proyectos conocidos la lista no muestra encabezados de proyecto", async () => {
+  await setup()
+
+  expect(screen.queryByRole("region", { name: "Sin proyecto" })).toBeNull()
+})
 
 test("cada PR muestra lo que el pack dice: riesgo alto, en cola, la cola falló y la base combinada", async () => {
   await setup()
