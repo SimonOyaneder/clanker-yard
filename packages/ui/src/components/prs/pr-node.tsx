@@ -7,7 +7,7 @@ import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/l
 import { cn } from "@/lib/utils"
 import { Hint, Pill } from "../common"
 import { ChatProposalChip, CiBadge, CombinedBaseChip, Labels, LocalChip, MergePill, mergeRing, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, Signals } from "./pr-bits"
-import { usePrActions } from "./pr-commands"
+import { OPEN_HINT, usePrActions } from "./pr-commands"
 import { PrContextMenu } from "./pr-menu"
 import { PrNotes } from "./pr-notes"
 
@@ -39,6 +39,7 @@ export const PrNode = memo(function PrNode({ data }: NodeProps & { data: PrNodeD
         role="group"
         tabIndex={0}
         aria-label={`${pr.ref ? `#${pr.ref.number}` : branchOf(pr)} ${titleOf(pr)}`}
+        title={pr.local ? undefined : OPEN_HINT}
         onFocus={() => commands.select(pr.id)}
         onClick={() => commands.select(pr.id)}
         onKeyDown={(e) => {

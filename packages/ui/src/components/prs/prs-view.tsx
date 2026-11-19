@@ -23,7 +23,7 @@ import { buildStackForest, listStackGroups, type StackGroup } from "@/lib/prs/st
 import { cn } from "@/lib/utils"
 import { Ago, Hint, Pill } from "../common"
 import { ChatProposalChip, CiBadge, CombinedBaseChip, LocalChip, MergePill, PrStateIcon, Reviewer, ReviewPill, ReviewSignals, SIGNAL_TONE, Signals } from "./pr-bits"
-import { usePrCommands } from "./pr-commands"
+import { OPEN_HINT, usePrCommands } from "./pr-commands"
 import { PrContextMenu, usePrShortcuts } from "./pr-menu"
 import { PrNotes, PrNotesContext } from "./pr-notes"
 import { StackGraph } from "./stack-graph"
@@ -456,13 +456,14 @@ function PrRow({ pr, depth, dimmed, issueKey, combined, hasSignals }: { pr: Open
       <PrContextMenu pr={pr}>
         <button
           type="button"
-          onClick={() => commands.view(pr)}
+          onClick={(e) => commands.open(pr, e.metaKey)}
           onKeyDown={(e) => {
             if (e.key !== "Enter") return
             e.preventDefault()
             commands.view(pr)
           }}
           onFocus={() => commands.select(pr.id)}
+          title={pr.local ? undefined : OPEN_HINT}
           className={cn("flex h-10 w-full items-center gap-3 px-3 text-left hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-none", selected && "bg-accent/40")}
         >
           <span className="flex flex-none items-center" style={{ width: depth * 18 }}>

@@ -193,15 +193,10 @@ test.each(["list", "graph"])("el modo %s muestra locales sin número, link ni ac
   expect(screen.queryByRole("menuitem", { name: /GitHub|Mergear|hold|review del bot|Rebasear|Copiar link/ })).toBeNull()
 })
 
-test.each([
-  ["list", true],
-  ["graph", true],
-  ["list", false],
-  ["graph", false],
-] as const)("en el modo %s, local=%s, el click, Enter y el menú abren la vista interna", async (mode, isLocal) => {
+test.each(["list", "graph"])("en el modo %s, un local se abre en la app con clic, Enter y el menú", async (mode) => {
   localStorage.setItem("clanker.prs.mode", JSON.stringify(mode))
   const { prs, openPr, host } = await setup()
-  const pr = prs.find((p) => (p.local !== null) === isLocal)!
+  const pr = prs.find((p) => p.local !== null)!
   const title = titleOf(pr)
   const card = mode === "list" ? within(rowOf(title)).getByRole("button") : screen.getByText(title).closest<HTMLDivElement>("[role='group']")!
 
@@ -212,6 +207,26 @@ test.each([
 
   expect(openPr.mock.calls).toEqual([[pr.id], [pr.id], [pr.id]])
   expect(host.openExternal).not.toHaveBeenCalled()
+})
+
+test.each(["list", "graph"])("en el modo %s, un remoto se abre en GitHub con clic y en la app con ⌘+clic, Enter y el menú", async (mode) => {
+  localStorage.setItem("clanker.prs.mode", JSON.stringify(mode))
+  const { prs, openPr, host } = await setup()
+  const pr = prs.find((p) => p.state !== null)!
+  const title = titleOf(pr)
+  const card = mode === "list" ? within(rowOf(title)).getByRole("button") : screen.getByText(title).closest<HTMLDivElement>("[role='group']")!
+
+  fireEvent.click(screen.getByText(title))
+  expect(host.openExternal).toHaveBeenCalledWith(pr.state!.url)
+  expect(openPr).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByText(title), { metaKey: true })
+  fireEvent.keyDown(card, { key: "Enter" })
+  fireEvent.contextMenu(screen.getByText(title))
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Ver PR/ }))
+
+  expect(openPr.mock.calls).toEqual([[pr.id], [pr.id], [pr.id]])
+  expect(host.openExternal).toHaveBeenCalledTimes(1)
 })
 
 test.each(["list", "graph"])("en el modo %s, O y el menú abren un PR remoto en GitHub", async (mode) => {

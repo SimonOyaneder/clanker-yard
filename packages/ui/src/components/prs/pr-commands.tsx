@@ -14,6 +14,9 @@ import { messageOf } from "@/lib/utils"
 // bot, rebasear, marcar hold y abrir la corrida que lo abrió. Cada comando le habla al core, avisa el resultado
 // con un toast y hace releer lo que se ve. Mergear pide confirmación: comenta en GitHub con tu cuenta.
 
+/** El clic en un PR que ya está en GitHub abre GitHub; la vista interna queda en ⌘+clic y Enter. */
+export const OPEN_HINT = "Clic: abrir en GitHub · ⌘+clic o Enter: ver en la app"
+
 /** Lo que se le puede pedir a un PR. No cambia con los datos ni con la selección: una tarjeta que solo actúa no se re-renderiza. */
 export interface PrActions {
   select: (id: string | null) => void
@@ -31,6 +34,8 @@ export interface PrActions {
   /** Publica ya en GitHub un PR local, para pedir review temprano. */
   publishLocal: (pr: LocalPr) => void
   view: (pr: OpenPr) => void
+  /** El clic en un PR: uno que ya está en GitHub abre GitHub; uno local, o con `internal` (⌘+clic), abre la vista interna. */
+  open: (pr: OpenPr, internal: boolean) => void
   /** Abre el PR con su chat enfocado. */
   chat: (pr: OpenPr) => void
   openGithub: (pr: GithubPr) => void
@@ -110,6 +115,11 @@ export function PrCommandsProvider({ prs, projects, onOpenRun, onOpenPr, childre
         latest.current.onOpenPr(pr.id)
       },
       openGithub: (pr) => host.openExternal(pr.state.url),
+      open: (pr, internal) => {
+        select(pr.id)
+        if (pr.local || internal) latest.current.onOpenPr(pr.id)
+        else host.openExternal(pr.state.url)
+      },
       publishLocal: (pr) => void perform(() => appData.publishLocalPr(pr.id), `Publicando ${branchOf(pr)} en GitHub: corre en el carril de mantenimiento`),
       toggleHold: (pr) =>
         void perform(

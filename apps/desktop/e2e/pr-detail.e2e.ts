@@ -42,6 +42,13 @@ test.beforeAll(async ({ app }) => {
   });
 });
 
+// La app es del worker: cada test cuenta solo lo que abrió él.
+test.beforeEach(async ({ app }) => {
+  await app.evaluate(() => {
+    (globalThis as { remotePrOpenedUrls?: string[] }).remotePrOpenedUrls = [];
+  });
+});
+
 test("Enter abre el remoto dentro de la app con su descripción y número en el breadcrumb; Esc vuelve", async ({ app, window: page }) => {
   await openRemotePr(page);
 
@@ -60,9 +67,13 @@ test("Enter abre el remoto dentro de la app con su descripción y número en el 
   await expect(heading(page)).toHaveCount(0);
 });
 
-test("un clic en el grafo abre el detalle y atrás y adelante recuperan la ubicación interna", async ({ app, window: page }) => {
+test("en el grafo un clic abre GitHub, ⌘+clic el detalle, y atrás y adelante recuperan la ubicación interna", async ({ app, window: page }) => {
   await openStacks(page);
   await card(page).getByRole("heading", { name: TITLE, exact: true }).click();
+  await expect.poll(() => openedUrls(app)).toEqual([URL]);
+  await expect(heading(page)).toHaveCount(0);
+
+  await card(page).getByRole("heading", { name: TITLE, exact: true }).click({ modifiers: ["Meta"] });
   await expect(heading(page)).toBeVisible();
 
   await page.keyboard.press("Meta+ArrowLeft");
@@ -72,15 +83,19 @@ test("un clic en el grafo abre el detalle y atrás y adelante recuperan la ubica
   await page.keyboard.press("Meta+ArrowRight");
   await expect(heading(page)).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Ubicación" })).toContainText("demo#1");
-  expect(await openedUrls(app)).toEqual([]);
+  expect(await openedUrls(app)).toEqual([URL]);
 });
 
-test("la lista abre el mismo remoto con clic y con Enter, sin abrir GitHub", async ({ app, window: page }) => {
+test("en la lista un clic abre el remoto en GitHub, y ⌘+clic y Enter en la app", async ({ app, window: page }) => {
   await openStacks(page);
   await page.getByRole("tab", { name: "Lista", exact: true }).click();
   const row = page.getByRole("listitem").filter({ hasText: TITLE });
   const button = row.getByRole("button");
   await button.click();
+  await expect.poll(() => openedUrls(app)).toEqual([URL]);
+  await expect(heading(page)).toHaveCount(0);
+
+  await button.click({ modifiers: ["Meta"] });
   await expect(heading(page)).toBeVisible();
 
   await page.keyboard.press("Escape");
@@ -88,7 +103,7 @@ test("la lista abre el mismo remoto con clic y con Enter, sin abrir GitHub", asy
   await button.focus();
   await button.press("Enter");
   await expect(heading(page)).toBeVisible();
-  expect(await openedUrls(app)).toEqual([]);
+  expect(await openedUrls(app)).toEqual([URL]);
 });
 
 test("el commit remoto se puede revisar por separado y A vuelve al diff completo", async ({ window: page }) => {
