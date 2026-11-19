@@ -43,7 +43,7 @@ function reportFor(name: string, mode: RoleMode, learnings: boolean, optionals: 
     outcome: mode.outcomes[0],
     summary: "Reporte de prueba.",
     ...optional("decisions", [{ title: "Mantener la API", body: "No necesita cambios." }]),
-    ...(learnings && optional("learnings", ["La API mantiene su contrato."])),
+    ...(learnings && optional("learnings", [{ text: "La API mantiene su contrato.", scope: "repo" }])),
     payload: payloadFor(name, optionals),
   };
 }

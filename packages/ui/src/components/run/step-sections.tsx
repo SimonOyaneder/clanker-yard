@@ -91,7 +91,9 @@ export function ReportSection({ detail, session, step }: { detail: StepDetail; s
           <Section title="Aprendizajes propuestos">
             <ul className="list-disc pl-5">
               {report.learnings.map((l) => (
-                <li key={l}>{l}</li>
+                <li key={l.text}>
+                  {l.text} <span className="text-muted-foreground">({l.scope === "repo" ? "repo" : "proyecto"})</span>
+                </li>
               ))}
             </ul>
           </Section>

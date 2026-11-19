@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import * as z from "zod";
 import { Brief, ContextPackage, ContextRef, ContextSource, Profile, Report, Role } from "./index";
 
 const mode = {
@@ -112,5 +113,18 @@ describe("Profile, Brief y Report", () => {
   test("el reporte lleva outcome, summary y un payload libre", () => {
     expect(Report.safeParse({ outcome: "lgtm", summary: "ok", payload: { a: 1 } }).success).toBe(true);
     expect(Report.safeParse({ summary: "ok", payload: {} }).success).toBe(false);
+  });
+
+  test("cada learning lleva su alcance, y los guardados como texto se leen como del proyecto", () => {
+    const report = { outcome: "ok", summary: "ok", payload: {} };
+    expect(Report.parse({ ...report, learnings: [{ text: "Usa x", scope: "repo" }] }).learnings).toEqual([{ text: "Usa x", scope: "repo" }]);
+    expect(Report.parse({ ...report, learnings: ["Usa y"] }).learnings).toEqual([{ text: "Usa y", scope: "project" }]);
+    expect(Report.safeParse({ ...report, learnings: [{ text: "Usa z", scope: "org" }] }).success).toBe(false);
+  });
+
+  test("el esquema que ve el agente pide learnings como objetos con alcance, no texto suelto", () => {
+    expect(z.toJSONSchema(Report)).toMatchObject({
+      properties: { learnings: { type: "array", items: { type: "object", required: ["text", "scope"] } } },
+    });
   });
 });

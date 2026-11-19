@@ -204,7 +204,7 @@ describe("run", () => {
   });
 
   test("solo un modo con learnings los pide en el prompt y el esquema, y su reporte los conserva", async () => {
-    const withLearning = { outcome: "done", summary: "ok", learnings: ["Usa `x`"], payload: { done: true } };
+    const withLearning = { outcome: "done", summary: "ok", learnings: [{ text: "Usa `x`", scope: "repo" }], payload: { done: true } };
     const { agents, calls } = setup([{ result: { structured: withLearning } }, { result: { structured: withLearning } }]);
 
     const proposing = await agents.run({ ...request(), brief: brief("learn", {}), mode: "learn" });
@@ -214,7 +214,7 @@ describe("run", () => {
     expect(calls.starts[0]?.outputSchema.properties).toHaveProperty("learnings");
     expect(calls.starts[1]?.prompt).not.toContain("Learnings (`learnings` del reporte)");
     expect(calls.starts[1]?.outputSchema.properties).not.toHaveProperty("learnings");
-    expect(proposing).toMatchObject({ status: "success", report: { learnings: ["Usa `x`"] } });
+    expect(proposing).toMatchObject({ status: "success", report: { learnings: [{ text: "Usa `x`", scope: "repo" }] } });
     // Un modelo que los manda sin que se los pidan: no cuentan.
     expect(quiet).toMatchObject({ status: "success", report: { learnings: undefined } });
   });

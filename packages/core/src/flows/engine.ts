@@ -1109,14 +1109,19 @@ export function createEngine(deps: EngineDeps): Engine {
     if (signal.reason instanceof StepTimeout) return timedOut(signal.reason);
     const overspent = result.status === "error_max_turns" || result.status === "error_max_budget_usd";
     if (overspent && node.escalate && !escalated) return { kind: "escalate" };
-    return fromAgentResult(result, () => runtimeOfNode(run, node));
+    return fromAgentResult(result, () => runtimeOfNode(run, node), workspace.repoId);
   }
 
-  /** `runtimeOf`: el runtime del nodo, por si el resultado no dice cuál falló. */
-  function fromAgentResult(result: AgentResult, runtimeOf: () => string): Settled {
+  /** `runtimeOf`: el runtime del nodo, por si el resultado no dice cuál falló. `repoId`: el del worktree, el alcance `repo` de los learnings. */
+  function fromAgentResult(result: AgentResult, runtimeOf: () => string, repoId: RepoId | undefined): Settled {
     switch (result.status) {
       case "success":
-        return { kind: "outcome", outcome: result.report.outcome, output: result.report.payload, reported: { notes: result.report.decisions ?? [], learnings: result.report.learnings ?? [] } };
+        return {
+          kind: "outcome",
+          outcome: result.report.outcome,
+          output: result.report.payload,
+          reported: { notes: result.report.decisions ?? [], learnings: result.report.learnings ?? [], ...(repoId && { repoId }) },
+        };
       case "error":
         return { kind: "failed", error: result.message };
       case "login_expired":
@@ -1409,12 +1414,14 @@ export function createEngine(deps: EngineDeps): Engine {
     const scope = scopeOf(run, step.id);
     if (closing.note !== undefined) openEdgeNote(tx, run, step, closing.outcome, closing.note);
     for (const note of closing.reported?.notes ?? []) openDecision(tx, { ...scope, kind: "review_note", ...note });
-    // Un learning aplica a un proyecto: la corrida sin uno no tiene a quién proponérselo.
-    const { projectId } = run;
-    if (projectId) {
-      const texts = (closing.reported?.learnings ?? []).map((raw) => raw.trim()).filter((text) => text !== "");
-      for (const text of texts.slice(0, MAX_PROPOSED_PER_STEP)) {
-        proposeLearning(tx, { projectId, text, source: "agent", sourceRunId: run.id, origin: "core" });
+    // El agente elige el alcance: el repo del worktree o el proyecto de la corrida. Si falta ese, va al otro; sin ninguno, no se guarda.
+    const repoId = closing.reported?.repoId;
+    const projectId = run.projectId ?? undefined;
+    if (repoId || projectId) {
+      const texts = (closing.reported?.learnings ?? []).map((learning) => ({ ...learning, text: learning.text.trim() })).filter(({ text }) => text !== "");
+      for (const learning of texts.slice(0, MAX_PROPOSED_PER_STEP)) {
+        const inRepo = learning.scope === "repo" ? repoId !== undefined : projectId === undefined;
+        proposeLearning(tx, { ...(inRepo ? { repoId } : { projectId }), text: learning.text, source: "agent", sourceRunId: run.id, origin: "core" });
       }
       if (texts.length > MAX_PROPOSED_PER_STEP) {
         tx.emit({

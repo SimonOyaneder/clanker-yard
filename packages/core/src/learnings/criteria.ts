@@ -14,4 +14,8 @@ Malo: "\`Dashboard::ReportExport::UploadJob\` se mantiene como está" (un dato d
 /** Lo que el prompt de un agente que propone agrega sobre \`learnings\` del reporte. */
 export const LEARNING_PROMPT = `Learnings (\`learnings\` del reporte): máximo 1 por corrida; si dudas, no lo propongas y deja el arreglo vacío. El brief trae en \`learnings\` y \`proposedLearnings\` los que ya existen: no repitas ninguno.
 
-${LEARNING_CRITERIA}`;
+${LEARNING_CRITERIA}
+
+Cada learning lleva \`scope\`, a quién le sirve:
+- \`repo\`: a cualquier agente que trabaje en este repo, sea cual sea el proyecto (comandos, tooling, lint, tests, trampas del framework o del código compartido). La mayoría son de este tipo.
+- \`project\`: solo a quien trabaje en el mismo proyecto, porque depende de lo que el proyecto está cambiando (sus piezas nuevas, sus decisiones, una migración a medio camino).`;

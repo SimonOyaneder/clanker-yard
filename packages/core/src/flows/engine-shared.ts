@@ -1,4 +1,4 @@
-import type { ArtifactHash, DecisionId, FlowDef, Node, ParkReason, RunId, StepRunId } from "@clanker/api";
+import type { ArtifactHash, DecisionId, FlowDef, Node, ParkReason, ProposedLearning, RepoId, RunId, StepRunId } from "@clanker/api";
 import { BadRequestError, NotFoundError } from "../errors/domain";
 import type { runs, stepRuns } from "../store/schema";
 import type { Tx } from "../store/store";
@@ -120,7 +120,9 @@ export type Settled =
 /** Lo que un agente dejó en su reporte para una persona (`Report.decisions` y `Report.learnings`): ninguna cosa bloquea a la corrida. */
 export interface Reported {
   notes: { title: string; body: string }[];
-  learnings: string[];
+  learnings: ProposedLearning[];
+  /** El repo del worktree donde corrió el agente: el alcance `repo` de sus learnings. */
+  repoId?: RepoId;
 }
 
 export interface Job {

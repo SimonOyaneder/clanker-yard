@@ -90,7 +90,7 @@ export const RoleMode = z.object({
   session: SessionPolicy,
   budget: Budget.optional(),
   /**
-   * El modo propone learnings: su prompt trae el criterio y su brief los aprobados y propuestos del proyecto. En los
+   * El modo propone learnings: su prompt trae el criterio y su brief los aprobados y propuestos del proyecto y del repo. En los
    * demás modos el reporte no admite `learnings` y el core ignora los que lleguen.
    */
   learnings: z.boolean().optional(),
@@ -201,6 +201,20 @@ export const Brief = z.object({
 });
 export type Brief = z.infer<typeof Brief>;
 
+/**
+ * Un learning que propone un agente. `scope` lo decide él: `repo` vale para cualquier trabajo en el repo del
+ * worktree, `project` solo dentro del proyecto de la corrida. Si falta ese alcance, el core usa el otro.
+ */
+export const ProposedLearning = z.object({
+  text: z.string(),
+  scope: z.enum(["repo", "project"]),
+});
+export type ProposedLearning = z.infer<typeof ProposedLearning>;
+
+/** Antes `learnings` era `string[]` y así quedó en los reportes guardados: se leen como `project`, donde se guardaron. */
+const legacyLearnings = (value: unknown) =>
+  Array.isArray(value) ? value.map((item: unknown) => (typeof item === "string" ? { text: item, scope: "project" } : item)) : value;
+
 /** El sobre que devuelve cualquier agente. */
 export const Report = z.object({
   /** Uno de `modes[mode].outcomes`. */
@@ -209,7 +223,7 @@ export const Report = z.object({
   /** Van a la bandeja como notas que no bloquean. */
   decisions: z.array(z.object({ title: z.string(), body: z.string() })).optional(),
   /** Propuestas: las aprueba una persona. Solo un modo con `learnings: true` las lleva; el core guarda como mucho 1 por corrida. */
-  learnings: z.array(z.string()).optional(),
+  learnings: z.preprocess(legacyLearnings, z.array(ProposedLearning)).optional(),
   /** Lo valida `modes[mode].report`. */
   payload: z.unknown(),
 });
