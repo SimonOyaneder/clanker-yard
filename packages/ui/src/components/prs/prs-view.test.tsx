@@ -70,6 +70,31 @@ test("con PRs de varios proyectos, la lista agrupa cada stack bajo el proyecto d
   expect(within(screen.getByRole("region", { name: "Sin proyecto" })).getByText("Arreglar el scroll del listado de cuentas")).toBeTruthy()
 })
 
+test("el filtro de proyectos oculta los stacks de un proyecto y recuerda la elección", async () => {
+  const projects = new Map([
+    ["iss_eng_9167", { id: "prj_b", name: "Boundaries de engines" }],
+    ["iss_tw_33", { id: "prj_s", name: "SOPORTE" }],
+  ])
+  await setup(undefined, projects)
+
+  fireEvent.keyDown(screen.getByRole("button", { name: /Proyectos/ }), { key: "Enter" })
+  expect((await screen.findAllByRole("menuitemcheckbox")).map((i) => i.textContent)).toEqual(["Boundaries de engines", "SOPORTE", "Sin proyecto"])
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Boundaries de engines" }))
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
+
+  expect(screen.queryByText("Prohibir imports cruzados entre engines")).toBeNull()
+  expect(screen.queryByText("Lint de imports entre engines")).toBeNull()
+  expect(screen.getByText("Quitar el modal duplicado de confirmación")).toBeTruthy()
+  expect(screen.getByRole("button", { name: /Proyectos\s*2\/3/ })).toBeTruthy()
+  expect(JSON.parse(localStorage.getItem("clanker.prs.hiddenProjects")!)).toEqual(["prj_b"])
+})
+
+test("sin proyectos conocidos no hay filtro de proyectos", async () => {
+  await setup()
+
+  expect(screen.queryByRole("button", { name: /Proyectos/ })).toBeNull()
+})
+
 test("sin proyectos conocidos la lista no muestra encabezados de proyecto", async () => {
   await setup()
 

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 import { buildOpenPrs } from "@/demo/seed-prs"
-import { groupByProject, type PrProject } from "./by-project"
+import { groupByProject, projectByPr, type PrProject } from "./by-project"
 import { keyOf, openPrsOf } from "./prs"
 import { buildStackForest, listStackGroups } from "./stack"
 
@@ -30,4 +30,14 @@ test("los proyectos van por nombre y los PRs sin proyecto al final", () => {
   expect(groups.map((g) => g.project)).toEqual(["Alfa", "Zeta", null])
   expect(groups[0]?.keys).toEqual(["dashboard#979"])
   expect(groups.reduce((n, g) => n + g.prCount, 0)).toBe(openPrsOf(buildOpenPrs(NOW)).length)
+})
+
+test("cada PR toma el proyecto de su stack, también la base sin issue", () => {
+  const forest = buildStackForest(openPrsOf(buildOpenPrs(NOW)))
+  const byPr = projectByPr(listStackGroups(forest), forest.byId, new Map([["iss_eng_9167", { id: "prj_b", name: "Boundaries" }]]))
+  const projectOf = (key: string) => byPr.get([...forest.byId.values()].find((p) => keyOf(p) === key)!.id)?.name ?? null
+
+  expect(projectOf("ledger#421")).toBe("Boundaries")
+  expect(projectOf("ledger#426")).toBe("Boundaries")
+  expect(projectOf("dashboard#979")).toBeNull()
 })

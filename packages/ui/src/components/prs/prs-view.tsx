@@ -18,7 +18,7 @@ import { absolute, ago } from "@/lib/format"
 import { readPref, writePref } from "@/lib/prefs"
 import { mergeMark, reviewStatus, reviewTone } from "@/lib/prs/pr-status"
 import { baseOf, branchOf, isDraft, type OpenPr, repoNameOf, titleOf } from "@/lib/prs/prs"
-import { groupByProject, type PrProject } from "@/lib/prs/by-project"
+import { groupByProject, projectByPr, type PrProject } from "@/lib/prs/by-project"
 import { buildStackForest, listStackGroups, type StackGroup } from "@/lib/prs/stack"
 import { cn } from "@/lib/utils"
 import { Ago, Hint, Pill } from "../common"
@@ -90,11 +90,14 @@ interface Props {
 
 const NO_NOTES: readonly Decision[] = []
 const NO_PROJECTS: ReadonlyMap<string, PrProject> = new Map()
+/** La clave de los PRs sin proyecto en el filtro de proyectos (los ids de proyecto son `prj_...`). */
+const NO_PROJECT = "sin-proyecto"
 
 export function PrsView({ prs, unread, issueKeys, issueProjects = NO_PROJECTS, loaded, error, registered, notes = NO_NOTES, onOpenConnections, onRefresh }: Props) {
   const [filter, setFilterState] = useState<Filter>(() => readPref<Filter>("prs.filter", "all"))
   const [mode, setModeState] = useState<Mode>(() => readPref<Mode>("prs.mode", "graph"))
   const [hiddenRepos, setHiddenRepos] = useState<string[]>(() => readPref<string[]>("prs.hiddenRepos", []))
+  const [hiddenProjects, setHiddenProjects] = useState<string[]>(() => readPref<string[]>("prs.hiddenProjects", []))
   const [query, setQuery] = useState("")
   const [signal, setSignalState] = useState<string>(() => readPref<string>("prs.signal", "all"))
   const setSignal = (key: string) => {
@@ -112,14 +115,31 @@ export function PrsView({ prs, unread, issueKeys, issueProjects = NO_PROJECTS, l
     setModeState(m)
     writePref("prs.mode", m)
   }
-  const toggleRepo = (repo: string) => {
-    const next = hiddenRepos.includes(repo) ? hiddenRepos.filter((r) => r !== repo) : [...hiddenRepos, repo]
+  const setRepos = (next: string[]) => {
     setHiddenRepos(next)
     writePref("prs.hiddenRepos", next)
   }
+  const setProjects = (next: string[]) => {
+    setHiddenProjects(next)
+    writePref("prs.hiddenProjects", next)
+  }
 
-  const repos = useMemo(() => [...new Set(prs.map((p) => p.repo))].sort(), [prs])
-  const scoped = useMemo(() => prs.filter((p) => !hiddenRepos.includes(p.repo)), [prs, hiddenRepos])
+  const repos = useMemo(() => [...new Set(prs.map((p) => p.repo))].sort().map((r) => ({ key: r, label: r.split("/")[1] ?? r })), [prs])
+  const byRepo = useMemo(() => prs.filter((p) => !hiddenRepos.includes(p.repo)), [prs, hiddenRepos])
+  // El proyecto se calcula sobre todos los PRs, no solo los de los repos visibles: un repo oculto no cambia el proyecto de un stack.
+  const prProject = useMemo(() => {
+    const all = buildStackForest(prs)
+    return projectByPr(listStackGroups(all), all.byId, issueProjects)
+  }, [prs, issueProjects])
+  const projects = useMemo(() => {
+    const found = new Map<string, string>()
+    for (const p of prs) {
+      const project = prProject.get(p.id) ?? null
+      found.set(project?.id ?? NO_PROJECT, project?.name ?? "Sin proyecto")
+    }
+    return [...found.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => (a.key === NO_PROJECT ? 1 : b.key === NO_PROJECT ? -1 : a.label.localeCompare(b.label)))
+  }, [prs, prProject])
+  const scoped = useMemo(() => byRepo.filter((p) => !hiddenProjects.includes(prProject.get(p.id)?.id ?? NO_PROJECT)), [byRepo, hiddenProjects, prProject])
   const signals = useMemo(() => signalFilters(prs), [prs])
   const forest = useMemo(() => buildStackForest(scoped), [scoped])
   const groups = useMemo(() => listStackGroups(forest), [forest])
@@ -266,36 +286,8 @@ export function PrsView({ prs, unread, issueKeys, issueProjects = NO_PROJECTS, l
               <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filtrar por título, #, branch…" className="h-7 w-56 pl-7 text-xs" />
             </div>
-            {repos.length > 1 ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="outline" className="h-7 text-xs">
-                    Repos {hiddenRepos.length ? `${repos.length - hiddenRepos.length}/${repos.length}` : ""} <ChevronDown />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-60">
-                  <DropdownMenuLabel>Repos visibles</DropdownMenuLabel>
-                  {repos.map((r) => (
-                    <DropdownMenuCheckboxItem key={r} checked={!hiddenRepos.includes(r)} onCheckedChange={() => toggleRepo(r)} onSelect={(e) => e.preventDefault()}>
-                      {r.split("/")[1]}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                  {hiddenRepos.length ? (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          setHiddenRepos([])
-                          writePref("prs.hiddenRepos", [])
-                        }}
-                      >
-                        Mostrar todos
-                      </DropdownMenuItem>
-                    </>
-                  ) : null}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
+            {projects.length > 1 ? <VisibilityMenu name="Proyectos" title="Proyectos visibles" options={projects} hidden={hiddenProjects} onChange={setProjects} /> : null}
+            {repos.length > 1 ? <VisibilityMenu name="Repos" title="Repos visibles" options={repos} hidden={hiddenRepos} onChange={setRepos} /> : null}
           </div>
         </div>
       </header>
@@ -315,6 +307,35 @@ export function PrsView({ prs, unread, issueKeys, issueProjects = NO_PROJECTS, l
       )}
     </div>
     </PrNotesContext.Provider>
+  )
+}
+
+/** Un menú de casillas para ocultar opciones de la lista; el botón dice cuántas quedan visibles. */
+function VisibilityMenu({ name, title, options, hidden, onChange }: { name: string; title: string; options: readonly { key: string; label: string }[]; hidden: readonly string[]; onChange: (hidden: string[]) => void }) {
+  const hiddenCount = options.filter((o) => hidden.includes(o.key)).length
+  const toggle = (key: string) => onChange(hidden.includes(key) ? hidden.filter((k) => k !== key) : [...hidden, key])
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" className="h-7 text-xs">
+          {name} {hiddenCount ? `${options.length - hiddenCount}/${options.length}` : ""} <ChevronDown />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuLabel>{title}</DropdownMenuLabel>
+        {options.map((o) => (
+          <DropdownMenuCheckboxItem key={o.key} checked={!hidden.includes(o.key)} onCheckedChange={() => toggle(o.key)} onSelect={(e) => e.preventDefault()}>
+            {o.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+        {hidden.length ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => onChange([])}>Mostrar todos</DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

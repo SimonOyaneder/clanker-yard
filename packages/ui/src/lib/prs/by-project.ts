@@ -22,7 +22,7 @@ export interface ProjectPrGroup {
 export function groupByProject(groups: readonly StackGroup[], byId: ReadonlyMap<string, OpenPr>, issueProjects: ReadonlyMap<string, PrProject>): ProjectPrGroup[] {
   const buckets = new Map<string | null, ProjectPrGroup>()
   for (const group of groups) {
-    const project = group.prIds.map((id) => byId.get(id)?.issueId).map((issueId) => (issueId ? issueProjects.get(issueId) : undefined)).find((p) => p !== undefined) ?? null
+    const project = stackProject(group, byId, issueProjects)
     const key = project?.id ?? null
     const bucket = buckets.get(key) ?? { project, groups: [], prCount: 0 }
     bucket.groups.push(group)
@@ -30,4 +30,18 @@ export function groupByProject(groups: readonly StackGroup[], byId: ReadonlyMap<
     buckets.set(key, bucket)
   }
   return [...buckets.values()].sort((a, b) => (a.project === null ? 1 : b.project === null ? -1 : a.project.name.localeCompare(b.project.name)))
+}
+
+/** El proyecto de cada PR es el de su stack, el mismo que usa `groupByProject`: filtrar por proyecto nunca parte un stack. */
+export function projectByPr(groups: readonly StackGroup[], byId: ReadonlyMap<string, OpenPr>, issueProjects: ReadonlyMap<string, PrProject>): Map<string, PrProject | null> {
+  const out = new Map<string, PrProject | null>()
+  for (const group of groups) {
+    const project = stackProject(group, byId, issueProjects)
+    for (const id of group.prIds) out.set(id, project)
+  }
+  return out
+}
+
+function stackProject(group: StackGroup, byId: ReadonlyMap<string, OpenPr>, issueProjects: ReadonlyMap<string, PrProject>): PrProject | null {
+  return group.prIds.map((id) => byId.get(id)?.issueId).map((issueId) => (issueId ? issueProjects.get(issueId) : undefined)).find((p) => p !== undefined) ?? null
 }
