@@ -11,6 +11,7 @@ import { procs as procsTable } from "../../store/schema";
 import { openStore } from "../../store/store";
 import { createFakeCodex, type FakeCodexOptions } from "../../testing/codex/fake-codex";
 import type { CodexNotification, RpcMessage } from "./api";
+import { CODEX_CONFIG } from "./config";
 import { launchCodexAppServer, type CodexAppServer, type CodexAppServerOptions } from "./app-server";
 
 let dir: string;
@@ -99,22 +100,16 @@ test("handshake y requests por id sobre JSONL fragmentado, sin credenciales en e
   await server.close();
 });
 
-test("lee la config del cwd al iniciar y reanudar, y deshabilita cada MCP antes de crear el hilo", async () => {
+test("inicia y retoma en el cwd del hilo sin sobrescribir los MCP nativos", async () => {
   const { server, fake } = await start();
   const cwd = join(dir, "project");
-  const { thread } = await server.request("thread/start", { cwd });
-  await server.request("thread/resume", { threadId: thread.id });
+  const config = { "shell_environment_policy.set": { GIT_AUTHOR_NAME: "Test" }, notify: ["false"] };
+  const { thread } = await server.request("thread/start", { cwd, config });
+  await server.request("thread/resume", { threadId: thread.id, config });
   const requests = await messages(fake.requests);
-  expect(requests.filter((m) => m.method === "config/read")).toEqual([
-    { id: 2, method: "config/read", params: { cwd } },
-    { id: 5, method: "config/read", params: { cwd } },
-  ]);
-  expect(requests.find((m) => m.method === "thread/start")).toMatchObject({
-    params: { approvalPolicy: "never", config: { mcp_servers: { sentinel: { enabled: false }, project_sentinel: { enabled: false } } } },
-  });
-  expect(requests.find((m) => m.method === "thread/resume")).toMatchObject({
-    params: { cwd, approvalPolicy: "never", config: { mcp_servers: { sentinel: { enabled: false }, project_sentinel: { enabled: false } } } },
-  });
+  const params = { cwd, approvalPolicy: "never", config: { ...config, ...CODEX_CONFIG } };
+  expect(requests.find((m) => m.method === "thread/start")).toEqual({ id: expect.any(Number), method: "thread/start", params });
+  expect(requests.find((m) => m.method === "thread/resume")).toEqual({ id: expect.any(Number), method: "thread/resume", params: { ...params, threadId: thread.id } });
 });
 
 test("conserva notificaciones de items, uso y cierre, separadas de la respuesta de turn/start", async () => {

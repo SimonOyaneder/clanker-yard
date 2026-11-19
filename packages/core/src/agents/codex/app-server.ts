@@ -4,7 +4,7 @@ import { BadRequestError } from "../../errors/domain";
 import { KILL_GROUP_AFTER_MS, killGroup, type Procs } from "../../procs/procs";
 import { createEventQueue } from "../event-queue";
 import type { CodexMethods, CodexNotification, RpcError, RpcMessage, ThreadParams } from "./api";
-import { CODEX_ARGS, codexEnv, isolatedThreadConfig } from "./config";
+import { CODEX_ARGS, CODEX_CONFIG, codexEnv } from "./config";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const STDERR_TAIL_CHARS = 2000;
@@ -148,8 +148,7 @@ export async function launchCodexAppServer({
           const threadCwd = input.cwd ?? (method === "thread/resume"
             ? (await call<{ thread: { cwd: string } }>("thread/read", { threadId: input.threadId })).thread.cwd
             : cwd);
-          const effective = await call<CodexMethods["config/read"]["result"]>("config/read", { cwd: threadCwd });
-          return call(method, { ...input, cwd: threadCwd, approvalPolicy: "never", config: isolatedThreadConfig(effective.config, input.config) });
+          return call(method, { ...input, cwd: threadCwd, approvalPolicy: "never", config: { ...input.config, ...CODEX_CONFIG } });
         }
         return call(method, params);
       },

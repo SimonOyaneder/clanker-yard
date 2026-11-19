@@ -97,6 +97,10 @@ export interface CodexMethods {
     params: { threadId?: string; cursor?: string | null };
     result: { data: { name: string; runtimeStatus: "notStarted" | "starting" | "connected" | "authenticationRequired" | "failed" | "cancelled" | "disabled" | null }[]; nextCursor: string | null };
   };
+  "mcpServer/tool/call": {
+    params: { threadId: string; server: string; tool: string; arguments?: JsonValue };
+    result: { content: JsonValue[]; isError?: boolean };
+  };
   "thread/read": { params: { threadId: string }; result: { thread: Thread } };
   "thread/start": { params: ThreadParams; result: { thread: Thread; instructionSources: string[] } };
   "thread/resume": { params: Omit<ThreadParams, "ephemeral"> & { threadId: string }; result: { thread: Thread } };
