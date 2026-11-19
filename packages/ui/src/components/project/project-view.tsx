@@ -55,9 +55,6 @@ interface Props {
   prs: CachedPr[]
 }
 
-/** Las issues de un proyecto por su id, para ponerle clave y título a cada corrida. */
-export const issuesById = (issues: CachedIssue[]) => new Map<string, CachedIssue>(issues.map((i) => [i.id, i]))
-
 // El proyecto: su encabezado, sus pestañas y, debajo, la vista de la pestaña elegida. Las pestañas cargan sus propios
 // datos, así que una que no se puede leer (la cola de un proyecto importado sin su tracker conectado) no esconde a las otras.
 export function ProjectFrame({ project, tab, onTab, children }: { project: ClankerProject; tab: ProjectTab; onTab: (tab: ProjectTab) => void; children: ReactNode }) {

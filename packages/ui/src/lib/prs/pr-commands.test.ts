@@ -32,7 +32,7 @@ test("rebasear solo se ofrece en PRs del sistema sin threads de council, y la co
   expect(prCaps(find("dashboard#955")).rebase).toBe(false)
   const council: GithubPr = { ...owned, state: { ...owned.state, threads: { ...owned.state.threads, councilEver: true } } }
   expect(prCaps(council).rebase).toBe(false)
-  expect(prCaps(owned).run).toBe(false)
+  expect(prCaps({ ...owned, runId: null }).run).toBe(false)
   expect(prCaps({ ...owned, runId: "run_00000000000000000000000001" }).run).toBe(true)
 })
 

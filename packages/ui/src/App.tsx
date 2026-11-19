@@ -1,4 +1,4 @@
-import { LIVE_RUN_STATUSES, type CachedIssue, type Decision, type DecisionId, type RunDetail, type RunId, type Repo } from "@clanker/api"
+import { LIVE_RUN_STATUSES, type CachedIssue, type Decision, type DecisionId, type IssueId, type RunDetail, type RunId, type Repo } from "@clanker/api"
 import { ChevronLeft, ChevronRight, Search } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast, Toaster } from "sonner"
@@ -12,7 +12,8 @@ import { AppSettingsView } from "@/components/app-settings/app-settings-view"
 import { FlowsView } from "@/components/flows/flows-view"
 import { LearningsView } from "@/components/learnings/learnings-view"
 import { NewProjectDialog } from "@/components/new-project-dialog"
-import { type ProjectTab, ProjectFrame, ProjectView, issuesById } from "@/components/project/project-view"
+import { type ProjectTab, ProjectFrame, ProjectView } from "@/components/project/project-view"
+import { IssueView } from "@/components/project/issue-view"
 import { ProjectSettingsTab, type SettingsControls } from "@/components/project-settings/settings-view"
 import { ProjectSummaryTab } from "@/components/summary/summary-view"
 import { RunCommandsProvider, useRunCommands } from "@/components/run/run-commands"
@@ -49,7 +50,7 @@ import { useCoreState } from "@/lib/core-status"
 import { ACTIONABLE_KINDS, NOTE_KINDS, parksRun } from "@/lib/decisions"
 import { issueKey } from "@/lib/format"
 import { reviewStatus } from "@/lib/prs/pr-status"
-import { keyOf, openPrsOf } from "@/lib/prs/prs"
+import { keyOf, openPrsOf, type OpenPr } from "@/lib/prs/prs"
 import { runCaps } from "@/lib/project/run-commands"
 import { shapeOf } from "@/lib/run-graph"
 import { withPending } from "@/lib/learnings"
@@ -63,7 +64,7 @@ import { PageLoadError } from "@/components/page-load-error"
 
 // Dónde está el usuario: lo que guarda el historial de atrás/adelante. `decision` es el `:decision?` de `/inbox/:decision?`,
 // `tab` el `:tab` de `/p/:proyecto/:tab` y `prId` el PR abierto en Stacks de PR.
-type Loc = { module: Module; slug: string | null; runId: RunId | null; decision: DecisionId | null; tab: ProjectTab; prId: string | null }
+type Loc = { module: Module; slug: string | null; issueId: IssueId | null; runId: RunId | null; decision: DecisionId | null; tab: ProjectTab; prId: string | null }
 
 const sameLoc = (a: Loc, b: Loc) =>
   a.module === b.module &&
@@ -71,12 +72,10 @@ const sameLoc = (a: Loc, b: Loc) =>
     ? a.decision === b.decision
     : a.module === "prs"
       ? a.prId === b.prId
-      : a.module !== "projects" || (a.slug === b.slug && a.runId === b.runId && a.tab === b.tab))
+      : a.module !== "projects" || (a.slug === b.slug && a.issueId === b.issueId && a.runId === b.runId && a.tab === b.tab))
 
 
 const NO_REPOS: readonly Repo[] = []
-const NO_ISSUE_KEYS: ReadonlyMap<string, string> = new Map()
-
 
 // La UI no sabe de dónde vienen los datos ni quién la aloja: `appData` y `host` se los da quien la monta.
 export function App({ appData, host }: { appData: AppData; host: Host }) {
@@ -147,6 +146,7 @@ function Shell() {
   const connectionsAlert = needsAttention(connections, claudePlan.status, codexPlan.status)
 
   const [slug, setSlug] = useState<string | null>(() => readPref<string | null>("slug", null))
+  const [issueId, setIssueId] = useState<IssueId | null>(null)
   const [runId, setRunId] = useState<RunId | null>(null)
   const [tab, setTab] = useState<ProjectTab>("operation")
   const [module, setModuleState] = useState<Module>(() => MODULES.find((m) => m === readPref<string>("module", "projects")) ?? "projects")
@@ -167,7 +167,7 @@ function Shell() {
 
   // El proyecto guardado puede ya no existir: se cae al primero de la barra.
   const project = projects.find((p) => p.slug === slug) ?? barProjects(projects)[0] ?? projects[0] ?? null
-  const summaryVisible = module === "projects" && !runId && tab === "summary" && !!project
+  const summaryVisible = module === "projects" && !runId && !issueId && tab === "summary" && !!project
   const summaryControls = useSummaryControls(summaryVisible)
   const projectData = useProjectData(project)
 
@@ -192,11 +192,14 @@ function Shell() {
   const unreadPrs = (prsQuery.data?.length ?? 0) - openPrs.length
   const prsNeedingAction = openPrs.filter((p) => reviewStatus(p) === "changes").length
   const prsReady = openPrs.filter((p) => p.state?.merge.ready && !p.state.hold).length
-  // La clave de la issue que originó cada PR del sistema: se pide de todos los proyectos, no del abierto.
-  const issueKeysQuery = useLiveQuery(`pr-issue-keys:${projects.map((p) => p.id).join(",")}`, async () => {
+  // Un PR o una relación puede llevar a una issue de otro proyecto.
+  const allIssues = useLiveQuery(`issue-index:${projects.map((p) => p.id).join(",")}`, async () => {
     const lists = await Promise.all(projects.map((p) => appData.issues(p.id)))
-    return new Map(lists.flat().map((issue) => [issue.id, issueKey(issue)]))
+    return lists.flat()
   }, { on: ["issue.*"] })
+
+  const issueKeys = useMemo(() => new Map(allIssues.data?.map((i) => [i.id, issueKey(i)])), [allIssues.data])
+  const prIssue = viewedPr?.issueId ? allIssues.data?.find((i) => i.id === viewedPr.issueId) : undefined
 
   const setModule = useCallback((m: Module) => {
     setModuleState(m)
@@ -217,6 +220,7 @@ function Shell() {
       setModule(l.module)
       setSlug(l.slug)
       if (l.slug) writePref("slug", l.slug)
+      setIssueId(l.issueId)
       setRunId(l.runId)
       setDecisionId(l.decision)
       setTab(l.tab)
@@ -224,9 +228,9 @@ function Shell() {
     },
     [setModule],
   )
-  const { go, replace, goBack, goForward, canGoBack, canGoForward } = useNavHistory<Loc>({ module, slug, runId, decision: decisionId, tab, prId }, apply, sameLoc)
+  const { go, replace, goBack, goForward, canGoBack, canGoForward } = useNavHistory<Loc>({ module, slug, issueId, runId, decision: decisionId, tab, prId }, apply, sameLoc)
 
-  const selectProject = useCallback((s: string) => go({ module: "projects", slug: s, runId: null }), [go])
+  const selectProject = useCallback((s: string) => go({ module: "projects", slug: s, issueId: null, runId: null }), [go])
   const barSlugs = barProjects(projects).map((p) => p.slug)
 
   const goConnections = useCallback(() => go({ module: "connections" }), [go])
@@ -267,7 +271,7 @@ function Shell() {
     setCodexDisconnect(true)
   }, [goConnections])
 
-  const goTab = useCallback((to: ProjectTab) => go({ module: "projects", runId: null, tab: to }), [go])
+  const goTab = useCallback((to: ProjectTab) => go({ module: "projects", runId: null, issueId: null, tab: to }), [go])
   // Cada paso de la configuración lleva a donde se hace: Linear y Claude además arrancan el login o la prueba.
   const runSetupStep = useCallback(
     (id: SetupStepId) => {
@@ -291,7 +295,8 @@ function Shell() {
     }
   }, [module, reloadPrs, live, appData, openPrs, viewedPr, prControls])
 
-  const projectActions = useProjectActions(useCallback((s: string, id: RunId) => go({ module: "projects", slug: s, runId: id }), [go]))
+  const openRun = useCallback((s: string, id: RunId) => go({ module: "projects", slug: s, issueId: null, runId: id }), [go])
+  const projectActions = useProjectActions(openRun)
   const actions = useMemo<AppActions>(
     () => ({
       goModule: (to) => (to === "inbox" ? goInbox() : go({ module: to, prId: null })),
@@ -299,7 +304,11 @@ function Shell() {
       openShortcuts: () => setShortcutsOpen(true),
       toggleSidebar: () => setSidebarOpen(!sidebarOpen),
       selectProject,
-      openRun: (s, id) => go({ module: "projects", slug: s, runId: id }),
+      openIssue: (issue) => {
+        const owner = projects.find((p) => p.id === issue.projectId)
+        if (owner) go({ module: "projects", slug: owner.slug, runId: null, issueId: issue.id })
+      },
+      openRun,
       openDecision,
       openNewProject: () => setNewProjectOpen(true),
       goConnections,
@@ -310,20 +319,20 @@ function Shell() {
       ...projectActions,
       editQueueFilters: () => {
         setSettingsFocus("queue")
-        go({ module: "projects", runId: null, tab: "settings" })
+        go({ module: "projects", runId: null, issueId: null, tab: "settings" })
       },
       editFlow: () => {
         setSettingsFocus("flow")
-        go({ module: "projects", runId: null, tab: "settings" })
+        go({ module: "projects", runId: null, issueId: null, tab: "settings" })
       },
       editTrackerProject: () => {
         setSettingsFocus("tracker")
-        go({ module: "projects", runId: null, tab: "settings" })
+        go({ module: "projects", runId: null, issueId: null, tab: "settings" })
       },
       openExternal: host.openExternal,
       refresh,
     }),
-    [selectProject, go, goInbox, host, refresh, goConnections, connectLinear, probeClaude, probeCodex, disconnectCodex, openDecision, setSidebarOpen, sidebarOpen, projectActions],
+    [projects, selectProject, openRun, go, goInbox, host, refresh, goConnections, connectLinear, probeClaude, probeCodex, disconnectCodex, openDecision, setSidebarOpen, sidebarOpen, projectActions],
   )
 
   useHostBridge({
@@ -373,14 +382,19 @@ function Shell() {
     project,
     stepNode,
     closeStep: () => setStepNode(null),
-    closeRun: () => go({ runId: null }),
+    issueId,
+    closeDetail: () => go({ runId: null, issueId: null }),
     setRunTab,
     setStepTab,
   })
 
   const detail = projectData.data
-  const openRun = runId && detail ? detail.runs.find((r) => r.id === runId) : undefined
-  const openRunIssue = openRun && detail ? issuesById(detail.issues).get(openRun.subject.id) : undefined
+  const runPr = openRunDetail?.subject.type === "pr"
+    ? openPrs.find((p) => p.id === openRunDetail.subject.id)
+    : openPrs.find((p) => p.runId === runId && runId !== null)
+  const runIssueId = openRunDetail?.subject.type === "issue" ? openRunDetail.subject.id : runPr?.issueId
+  const openRunIssue = detail?.issues.find((i) => i.id === runIssueId)
+  const currentIssue = detail?.issues.find((i) => i.id === issueId)
 
   return (
     <AppActionsContext.Provider value={actions}>
@@ -450,14 +464,19 @@ function Shell() {
               ) : module === "settings" ? (
                 <span className="truncate px-1.5 font-medium">Ajustes</span>
               ) : project ? (
-                runId ? (
+                runId || issueId ? (
                   <>
-                    <button type="button" onClick={() => go({ runId: null })} className="truncate rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                    <button type="button" onClick={() => selectProject(project.slug)} className="truncate rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
                       {project.name}
                     </button>
                     <ChevronRight className="size-3.5 flex-none text-muted-foreground" />
-                    <span className="flex-none font-mono text-xs text-muted-foreground">{openRunIssue ? issueKey(openRunIssue) : "corrida"}</span>
-                    {openRunIssue ? <span className="truncate px-1 font-medium">{openRunIssue.title}</span> : null}
+                    {runId && openRunIssue ? (
+                      <>
+                        <Button size="xs" variant="ghost" onClick={() => actions.openIssue(openRunIssue)}>{issueKey(openRunIssue)}</Button>
+                        <ChevronRight className="size-3.5 flex-none text-muted-foreground" />
+                      </>
+                    ) : null}
+                    <span aria-current="page" className="truncate px-1 font-medium">{issueId ? (currentIssue ? issueKey(currentIssue) : "Issue") : "Corrida"}</span>
                   </>
                 ) : (
                   <span className="truncate px-1.5 font-medium">{project.name}</span>
@@ -489,7 +508,7 @@ function Shell() {
             </main>
           ) : module === "prs" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
-              {viewedPr ? <PrView key={viewedPr.id} pr={viewedPr} onBack={closePr} onControls={setPrControls} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeysQuery.data ?? NO_ISSUE_KEYS} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
+              {viewedPr ? <PrView key={viewedPr.id} pr={viewedPr} issue={prIssue} onBack={closePr} onControls={setPrControls} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeys} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
             </main>
           ) : module === "flows" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
@@ -516,9 +535,13 @@ function Shell() {
                   <QueryGate query={projectsQuery}>{() => null}</QueryGate>
                 ) : !project ? (
                   <Welcome steps={setup} onStep={runSetupStep} />
+                ) : issueId ? (
+                  <QueryGate query={projectData}>
+                    {(data) => <IssueView id={issueId} slug={project.slug} issues={allIssues.data ?? data.issues} runs={data.runs} openPrs={openPrs} />}
+                  </QueryGate>
                 ) : runId ? (
                   <QueryGate query={projectData}>
-                    {() => <RunPane key={runId} query={runQuery} issue={openRunIssue} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />}
+                    {() => <RunPane key={runId} query={runQuery} issue={openRunIssue} pr={runPr} tab={runTab} onTab={setRunTab} node={stepNode} onNode={setStepNode} stepTab={stepTab} onStepTab={setStepTab} onBack={() => go({ runId: null })} />}
                   </QueryGate>
                 ) : (
                   <ProjectFrame project={project} tab={tab} onTab={goTab}>
@@ -544,8 +567,9 @@ function Shell() {
         current={project}
         runs={detail?.runs ?? []}
         issues={detail?.issues ?? []}
-        queue={module === "projects" && !runId ? (detail?.queue ?? []) : null}
+        queue={module === "projects" && !runId && !issueId ? (detail?.queue ?? []) : null}
         prs={openPrs}
+        contextIssue={module === "prs" ? prIssue : module === "projects" ? currentIssue ?? openRunIssue : undefined}
         prsActive={module === "prs"}
         pr={module === "prs" && viewedPr ? prControls : null}
         learnings={module === "learnings" ? { view: learningsView, onUndo: triage.canUndo ? () => void triage.undo() : null } : null}
@@ -553,7 +577,7 @@ function Shell() {
         onUndoDecision={resolver.canUndo ? () => void undo() : null}
         onDecision={module === "inbox" && inbox.current?.status === "pending" ? { decision: inbox.current, onResolve: resolveDecision, onRespond: () => inbox.setResponding(true) } : null}
         projectTab={project && module === "projects" ? { tab, onTab: goTab } : null}
-        settings={module === "projects" && !runId && tab === "settings" ? settingsControls : null}
+        settings={module === "projects" && !runId && !issueId && tab === "settings" ? settingsControls : null}
         summary={summaryVisible ? summaryControls : null}
         onRunTab={runId && module === "projects" ? setRunTab : null}
         runCaps={runId && module === "projects" && openRunDetail ? { id: openRunDetail.id, caps: caps! } : null}
@@ -582,6 +606,7 @@ function Shell() {
 function RunPane({
   query: run,
   issue,
+  pr,
   tab,
   onTab,
   node,
@@ -592,6 +617,7 @@ function RunPane({
 }: {
   query: { data: RunDetail | undefined; error: string | null; reload: () => void }
   issue: CachedIssue | undefined
+  pr: OpenPr | undefined
   tab: RunTab
   onTab: (tab: RunTab) => void
   node: string | null
@@ -600,7 +626,7 @@ function RunPane({
   onStepTab: (tab: StepTab) => void
   onBack: () => void
 }) {
-  if (run.data) return <RunView run={run.data} issue={issue} tab={tab} onTabChange={onTab} node={node} onNodeChange={onNode} stepTab={stepTab} onStepTab={onStepTab} />
+  if (run.data) return <RunView run={run.data} issue={issue} pr={pr} tab={tab} onTabChange={onTab} node={node} onNodeChange={onNode} stepTab={stepTab} onStepTab={onStepTab} />
   if (run.error) {
     return (
       <Problem

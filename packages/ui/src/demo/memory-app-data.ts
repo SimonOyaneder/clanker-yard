@@ -702,6 +702,12 @@ export function createMemoryAppData(now = Date.now()): AppData & ChatData {
     // Solo el primer proyecto tiene corridas cerradas de ejemplo; el otro trae su Resumen vacío.
     projectMetrics: async (projectId, range) =>
       aggregate(projectId === projects[0]!.id ? seedClosedRuns(issues.slice(0, 4).map((i) => i.id)) : [], range, now),
+    issue: async (id) => {
+      const found = issues.find((i) => i.id === id)
+      if (!found) throw new Error("La issue ya no está en el proyecto")
+      return found
+    },
+    issuePrs: async (issueId) => prs.filter((p) => p.issueId === issueId),
     issues: async (projectId) => issues.filter((i) => i.projectId === projectId),
     // Sin bloqueos en los datos de ejemplo: la cola son las issues en todo que ninguna corrida tomó; las saltadas salen bloqueadas.
     queue: async (projectId) => {

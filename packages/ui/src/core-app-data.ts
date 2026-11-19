@@ -106,6 +106,8 @@ export function createCoreAppData(client: CoreClient): AppData {
     prsByIds: async (ids) => (ids.length === 0 ? [] : client.prs.list({ ids })),
     prCommitDiff: (input) => client.prs.commitDiff(input),
     // Ninguna vista muestra la descripción de una issue de una lista: sin ella cada lectura pesa una fracción.
+    issue: (id) => client.issues.get({ id }),
+    issuePrs: (issueId) => client.prs.list({ issueId }),
     issues: (projectId) => client.issues.list({ projectId, withBody: false }),
     queue: (projectId) => client.projects.queue({ id: projectId }),
     projectMetrics: async (projectId, range) => {

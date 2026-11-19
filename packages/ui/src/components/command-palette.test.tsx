@@ -115,7 +115,7 @@ test("buscar un remoto abre el detalle interno, no GitHub", async () => {
   const { host, openPr } = await setup({ prs: [remote] })
 
   fireEvent.change(screen.getByRole("combobox"), { target: { value: titleOf(remote) } })
-  fireEvent.click(screen.getByText(titleOf(remote)))
+  fireEvent.click(within(screen.getByRole("group", { name: "PRs abiertos" })).getByText(titleOf(remote)))
 
   expect(openPr).toHaveBeenCalledWith(remote.id)
   expect(host.openExternal).not.toHaveBeenCalled()

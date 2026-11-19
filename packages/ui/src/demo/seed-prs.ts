@@ -85,7 +85,8 @@ export function buildOpenPrs(now: number): CachedPr[] {
   // ─── Un stack de 4 sobre `ledger`, con un PR hijo que sale de una base combinada más abajo ──────────────────
   const stackBase = pr("ledger", 421, "Prohibir imports cruzados entre engines", "eng-9160-no-cross-imports", {
     owned: true,
-    issueId: "iss_eng_9160",
+    issueId: "iss_00000000000000000000000002",
+    runId: "run_00000000000000000000000002",
     reviewers: [human("marta", "approved")],
     reviewDecision: "approved",
     approvers: ["marta"],
@@ -217,7 +218,7 @@ export function buildOpenPrs(now: number): CachedPr[] {
     combined,
     pr("dashboard", 977, "Arreglar el scroll del listado de cuentas", "tw-31-accounts-scroll", {
       owned: true,
-      issueId: "iss_tw_31",
+      issueId: "iss_00000000000000000000000005",
       reviewers: [human("sofia", "approved")],
       reviewDecision: "approved",
       approvers: ["sofia"],

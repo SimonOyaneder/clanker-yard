@@ -1,8 +1,9 @@
-import type { BotFinding, LocalPrCommit, PrDetail } from "@clanker/api"
-import { Columns2, ExternalLink, FileCode2, GitCommitHorizontal, MessageSquareDiff, Rows2, ScrollText } from "lucide-react"
+import type { BotFinding, CachedIssue, LocalPrCommit, PrDetail } from "@clanker/api"
+import { Columns2, ExternalLink, FileCode2, GitCommitHorizontal, History, MessageSquareDiff, Rows2, ScrollText } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAppData } from "@/app-data"
 import { Hint } from "@/components/common"
+import { IssueLink } from "@/components/project/issue-link"
 import { ChatPanel } from "./chat-panel"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { CHAT_KEYS, type PrChatController, usePrChat } from "@/hooks/use-pr-chat"
@@ -69,7 +70,7 @@ function usePrefSet(key: string) {
   return [set, toggle] as const
 }
 
-export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => void; onControls?: (controls: PrControls | null) => void }) {
+export function PrView({ pr, issue, onBack, onControls }: { pr: OpenPr; issue?: CachedIssue | undefined; onBack: () => void; onControls?: (controls: PrControls | null) => void }) {
   const appData = useAppData()
   const chat = usePrChat(pr.id, appData)
   const commands = usePrCommands()
@@ -186,7 +187,7 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
               ) : null}
             </div>
           </div>
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[12px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[12px] text-muted-foreground">
             <span>{detail?.base ?? baseOf(pr)}</span>
             <span aria-hidden>←</span>
             <span className="text-foreground">{detail?.branch ?? branchOf(pr)}</span>
@@ -199,12 +200,20 @@ export function PrView({ pr, onBack, onControls }: { pr: OpenPr; onBack: () => v
                 <span className="text-destructive">−{deletions}</span>
               </>
             ) : null}
-          </p>
-          {!pr.local ? (
+          </div>
+          {issue || pr.runId || !pr.local ? (
             <div className="flex flex-wrap items-center gap-2">
-              <CiBadge ci={pr.state.ci} />
-              <ReviewPill pr={pr} review={reviewStatus(pr)} />
-              <MergePill pr={pr} />
+              {issue ? <IssueLink issue={issue} /> : null}
+              {pr.runId ? (
+                <Button size="xs" variant="ghost" onClick={() => commands.openRun(pr)}><History /> Ver corrida</Button>
+              ) : null}
+              {!pr.local ? (
+                <>
+                  <CiBadge ci={pr.state.ci} />
+                  <ReviewPill pr={pr} review={reviewStatus(pr)} />
+                  <MergePill pr={pr} />
+                </>
+              ) : null}
             </div>
           ) : null}
         </header>

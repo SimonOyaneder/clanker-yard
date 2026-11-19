@@ -150,6 +150,8 @@ export interface AppData extends Partial<ChatData> {
   prCommitDiff(input: { id: string; sha: string; head: string; base: string }): Promise<PrCommitDiff>
   /** Las issues del caché de un proyecto, sin su `body` (va vacío): ninguna lista lo muestra. */
   issues(projectId: ProjectId): Promise<CachedIssue[]>
+  issue(id: IssueId): Promise<CachedIssue>
+  issuePrs(issueId: IssueId): Promise<CachedPr[]>
   /** La cola del proyecto, calculada por el core: ready primero, luego waiting y blocked, cada una con su motivo. */
   queue(projectId: ProjectId): Promise<QueueEntry[]>
   /** Las métricas del proyecto para su Resumen; los días son del huso de la máquina. */
