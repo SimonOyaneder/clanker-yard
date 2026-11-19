@@ -46,13 +46,3 @@ export function threadOptions(spec: RunSpec) {
     }),
   };
 }
-
-export function isolatedThreadConfig(config: Record<string, JsonValue>, overrides?: Record<string, JsonValue> | null): Record<string, JsonValue> {
-  const servers = config.mcp_servers;
-  const names = Object.keys(servers ?? {});
-  return {
-    ...Object.fromEntries(Object.entries(overrides ?? {}).filter(([key]) => key !== "mcp_servers" && !key.startsWith("mcp_servers."))),
-    ...CODEX_CONFIG,
-    mcp_servers: Object.fromEntries(names.map((name) => [name, { enabled: false }])),
-  };
-}

@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { fileURLToPath } from "node:url";
+import { expect, test, vi } from "vitest";
 import { launchCodexAppServer } from "./app-server";
 import { CODEX_ARGS } from "./config";
 
@@ -28,12 +29,14 @@ test.skipIf(!hasCodex)("initialize y account/read con sh y el home habitual, sin
   }
 });
 
-test.skipIf(!hasCodex)("aísla MCP de usuario y proyecto, notify, hooks y plugins en un home sin credenciales", { timeout: 60_000 }, async () => {
+test.skipIf(!hasCodex)("usa herramientas MCP de usuario y proyecto y respeta los servidores deshabilitados", { timeout: 60_000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "codex-isolation-"));
   const home = join(dir, "home");
   const codexHome = join(home, ".codex");
   const cwd = join(dir, "project");
-  const marker = join(dir, "mcp-started");
+  const fixture = fileURLToPath(new URL("./mcp-server.fixture.ts", import.meta.url));
+  const command = `command = ${JSON.stringify(process.execPath)}
+args = [${JSON.stringify(fixture)}]`;
   const userConfig = `notify = ["sh", "-c", "exit 99"]
 project_doc_max_bytes = 0
 [features]
@@ -43,12 +46,13 @@ codex_hooks = true
 [projects.${JSON.stringify(cwd)}]
 trust_level = "trusted"
 [mcp_servers.user_sentinel]
-command = "sh"
-args = ["-c", ${JSON.stringify(`touch '${marker}'; exit 1`)}]
+${command}
+[mcp_servers.disabled_sentinel]
+enabled = false
+${command}
 `;
   const projectConfig = `[mcp_servers.project_sentinel]
-command = "sh"
-args = ["-c", ${JSON.stringify(`touch '${marker}'; exit 1`)}]
+${command}
 `;
   try {
     await mkdir(codexHome, { recursive: true });
@@ -62,16 +66,19 @@ args = ["-c", ${JSON.stringify(`touch '${marker}'; exit 1`)}]
       expect(effective.config).toMatchObject({
         notify: [],
         features: { plugins: false, apps: false, codex_hooks: false },
-        mcp_servers: { user_sentinel: { command: "sh" }, project_sentinel: { command: "sh" } },
       });
       const { thread, instructionSources } = await server.request("thread/start", { cwd, sandbox: "read-only" });
       expect(instructionSources).toContain(join(cwd, "AGENTS.md"));
-      const inventory = await server.request("mcpServerStatus/list", { threadId: thread.id });
-      expect(inventory.data.map(({ name, runtimeStatus }) => ({ name, runtimeStatus }))).toEqual([
-        { name: "project_sentinel", runtimeStatus: "disabled" },
-        { name: "user_sentinel", runtimeStatus: "disabled" },
-      ]);
-      expect(existsSync(marker)).toBe(false);
+      await vi.waitFor(async () => {
+        const inventory = await server.request("mcpServerStatus/list", { threadId: thread.id });
+        expect(Object.fromEntries(inventory.data.map((entry) => [entry.name, entry.runtimeStatus]))).toMatchObject({
+          project_sentinel: "connected", user_sentinel: "connected", disabled_sentinel: "disabled",
+        });
+      }, { timeout: 15_000 });
+      for (const name of ["user_sentinel", "project_sentinel"]) {
+        const result = await server.request("mcpServer/tool/call", { threadId: thread.id, server: name, tool: "ping", arguments: {} });
+        expect(result.content).toEqual([{ type: "text", text: "pong" }]);
+      }
       expect(existsSync(join(codexHome, "auth.json"))).toBe(false);
       expect(await readFile(join(codexHome, "config.toml"), "utf8")).toBe(userConfig);
       expect(await readFile(join(cwd, ".codex", "config.toml"), "utf8")).toBe(projectConfig);
