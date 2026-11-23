@@ -54,7 +54,7 @@ test("⇧⌘3 abre Ajustes, y cambiar reviewRounds se ve en el siguiente runs.st
   await expect(section(page, "Flujo y parámetros").getByText("El flujo juguete no declara parámetros con default.")).toBeVisible();
 
   // El flujo por defecto trae sus parámetros con el default como placeholder.
-  await select(page, "Flujo por defecto", /techlead-clasico/);
+  await select(page, "Flujo por defecto", /de-issue-a-pr/);
   await expect(page.getByLabel("Rondas de review")).toHaveAttribute("placeholder", "3");
   await expect(page.getByText(/También lo leen: council \(default 2\), rebase-conflicto/).first()).toBeVisible();
 
@@ -72,7 +72,7 @@ test("⇧⌘3 abre Ajustes, y cambiar reviewRounds se ve en el siguiente runs.st
   // La siguiente corrida arranca con las 5 rondas; los defaults del flujo quedaron intactos.
   const [issue] = await client.issues.list({ projectId: project.id });
   const run = await client.runs.start({ projectId: project.id, issueId: issue!.id });
-  expect(run.flow.slug).toBe("techlead-clasico");
+  expect(run.flow.slug).toBe("de-issue-a-pr");
   expect(run.params).toMatchObject({ reviewRounds: 5, checkRounds: 3, externalRounds: 3, base: expect.any(String) });
   await client.runs.cancel({ id: run.id });
 

@@ -78,6 +78,6 @@ test("el flujo de las corridas se puede leer completo (stepper de la UI)", async
 
   const detail = await client.runs.get({ id: running.id });
 
-  expect(detail.flowDef.id).toBe("techlead-clasico");
+  expect(detail.flowDef.id).toBe("de-issue-a-pr");
   expect(detail.steps.map((s) => [s.nodeId, s.status])).toContainEqual(["rv-bugs", "running"]);
 });

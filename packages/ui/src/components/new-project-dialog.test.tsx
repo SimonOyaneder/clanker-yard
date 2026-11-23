@@ -49,7 +49,7 @@ const chooseTracker = async (label: string) => {
   fireEvent.click(await screen.findByRole("option", { name: label }))
 }
 
-test("flujo y perfil llegan preseleccionados: techlead-clasico y eco", async () => {
+test("flujo y perfil llegan preseleccionados: de-issue-a-pr y eco", async () => {
   const { createProject } = setup()
   await waitFor(() => expect(screen.getByRole("combobox", { name: "Flujo por defecto" }).textContent).toBe(SEED_TECHLEAD.name))
   expect(screen.getByRole("combobox", { name: "Perfil por defecto" }).textContent).toBe("eco")
@@ -59,7 +59,7 @@ test("flujo y perfil llegan preseleccionados: techlead-clasico y eco", async () 
   create()
 
   await waitFor(() => expect(createProject).toHaveBeenCalled())
-  expect(sent(createProject)).toMatchObject({ defaultFlowId: "techlead-clasico", defaultProfileId: "eco" })
+  expect(sent(createProject)).toMatchObject({ defaultFlowId: "de-issue-a-pr", defaultProfileId: "eco" })
 })
 
 test("elegir otro flujo muestra su nombre y su slug en mono, y es el que se manda", async () => {
@@ -69,7 +69,7 @@ test("elegir otro flujo muestra su nombre y su slug en mono, y es el que se mand
 
   fireEvent.keyDown(trigger, { key: "Enter" })
   const option = await screen.findByRole("option", { name: /Juguete/ })
-  expect(screen.getByRole("option", { name: new RegExp(SEED_TECHLEAD.name) }).textContent).toContain("techlead-clasico")
+  expect(screen.getByRole("option", { name: new RegExp(SEED_TECHLEAD.name) }).textContent).toContain("de-issue-a-pr")
   expect(within(option).getByText("juguete").className).toContain("font-mono")
   fireEvent.click(option)
   await chooseTracker("Local (para probar)")

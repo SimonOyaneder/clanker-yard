@@ -4,7 +4,7 @@ import { createDefs, newId, recordRunMetrics, type Store } from "@clanker/core";
 
 // El escenario de `DEMO_SCENARIO=summary` (ver `demo-core.ts`): el proyecto de las capturas del Resumen. Importa el
 // fixture del clanker-loop (`packages/core/fixtures/legacy`: 9 corridas con costo por rol y rondas, sin pasos) y le suma
-// corridas de Yard del flujo `techlead-clasico`, con sus pasos, sesiones y uso, en el mismo proyecto: así el Resumen
+// corridas de Yard del flujo `de-issue-a-pr`, con sus pasos, sesiones y uso, en el mismo proyecto: así el Resumen
 // mezcla lo importado y lo nuevo, y el filtro de origen los separa.
 //
 // Las corridas de Yard se escriben directo en la base con las sesiones y el uso que dejaría el motor, y sus métricas las
@@ -92,8 +92,8 @@ export async function seedSummary({ client, store, now = Date.UTC(2026, 10, 15, 
   if (!project) throw new Error(`El fixture importado no trajo el proyecto ${SUMMARY_PROJECT_SLUG}.`);
   const sql = store.db.$client;
   const defs = createDefs({ store });
-  const flow = defs.resolve("flow", "techlead-clasico");
-  if (!flow) throw new Error("El core no instaló la plantilla techlead-clasico.");
+  const flow = defs.resolve("flow", "de-issue-a-pr");
+  if (!flow) throw new Error("El core no instaló la plantilla de-issue-a-pr.");
 
   const rename = sql.prepare("UPDATE issues SET title = ? WHERE project_id = ? AND key = ?");
   for (const [key, title] of Object.entries(TITLES)) rename.run(title, project.id, key);

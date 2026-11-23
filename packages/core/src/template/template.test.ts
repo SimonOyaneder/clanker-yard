@@ -126,7 +126,7 @@ describe("prompts", () => {
   });
 });
 
-// Lo que los flujos de la plantilla (D1: techlead-clasico, pr-feedback, council, rebase-conflicto) piden a los roles.
+// Lo que los flujos de la plantilla (D1: de-issue-a-pr, pr-feedback, council, rebase-conflicto) piden a los roles.
 const flowNodes = [
   { role: "dev", mode: "plan", on: ["ok"], brief: { issue: "$run.subject", ws: "$ws" } },
   { role: "plan-check", mode: "check", on: ["ok", "changes"], brief: { plan: "$plan" } },
@@ -151,8 +151,8 @@ const flowNodes = [
 ];
 
 describe("calza con los flujos de la plantilla", () => {
-  test("un PR local termina techlead-clasico sin feedback y deja una nota", () => {
-    expect(clankerLoopTemplate.flows["techlead-clasico"]!.nodes.publish?.on?.local).toEqual({
+  test("un PR local termina de-issue-a-pr sin feedback y deja una nota", () => {
+    expect(clankerLoopTemplate.flows["de-issue-a-pr"]!.nodes.publish?.on?.local).toEqual({
       to: "@done",
       note: "PR local: se publica cuando se mergee su base",
     });

@@ -44,7 +44,7 @@ describe("tools", () => {
 
     const juguete = flows.find((f) => f.slug === "juguete");
 
-    expect(flows.map((f) => f.slug)).toEqual(expect.arrayContaining(["juguete", "techlead-clasico", "pr-feedback"]));
+    expect(flows.map((f) => f.slug)).toEqual(expect.arrayContaining(["juguete", "de-issue-a-pr", "pr-feedback"]));
     expect(juguete).toMatchObject({ scope: "builtin", body: { id: "juguete" } });
     expect(await h.call("get", { kind: "flow", id: juguete!.id })).toEqual(juguete);
     expect(await h.call("get", { kind: "flow", id: juguete!.id, version: 1 })).toMatchObject({ version: 1 });

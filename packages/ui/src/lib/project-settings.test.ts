@@ -16,7 +16,7 @@ const flow = (body: object, slug: string): DefRecord => ({
   source: "builtin",
   createdAt: 0,
 })
-const flows = [flow(SEED_TECHLEAD, "techlead-clasico"), flow(SEED_TOY, "juguete"), flow(SEED_REBASE, "rebase-conflicto")]
+const flows = [flow(SEED_TECHLEAD, "de-issue-a-pr"), flow(SEED_TOY, "juguete"), flow(SEED_REBASE, "rebase-conflicto")]
 
 const project = (extra: Partial<ClankerProject> = {}): ClankerProject => ({
   id: "prj_00000000000000000000000001",
@@ -25,7 +25,7 @@ const project = (extra: Partial<ClankerProject> = {}): ClankerProject => ({
   tracker: "linear",
   trackerRef: "boundaries",
   trackerAccount: "clanker-yard",
-  defaultFlowId: "techlead-clasico",
+  defaultFlowId: "de-issue-a-pr",
   defaultProfileId: "medio",
   repos: [{ repoId: "repo_00000000000000000000000001", labels: ["api"] }],
   queueFilter: {},
@@ -40,11 +40,11 @@ const project = (extra: Partial<ClankerProject> = {}): ClankerProject => ({
   ...extra,
 })
 
-const specs = allParamSpecs(flows, "techlead-clasico")
+const specs = allParamSpecs(flows, "de-issue-a-pr")
 const base = (p: ClankerProject) => draftOf(p, managedParams(flows))
 
 test("los parámetros del flujo por defecto salen con su default y los de los flujos que arrancan solos aparecen aparte", () => {
-  const groups = flowParamGroups(flows, "techlead-clasico")
+  const groups = flowParamGroups(flows, "de-issue-a-pr")
 
   expect(groups.own.map((s) => [s.name, s.default])).toEqual([
     ["checkRounds", 3],
@@ -53,7 +53,7 @@ test("los parámetros del flujo por defecto salen con su default y los de los fl
   ])
   // checkRounds lo lee también el flujo de rebase, con otro default: se dice para que no sorprenda.
   expect(groups.own[0]!.flows).toEqual([
-    { slug: "techlead-clasico", default: 3 },
+    { slug: "de-issue-a-pr", default: 3 },
     { slug: "rebase-conflicto", default: 2 },
   ])
   expect(groups.triggered.map((s) => s.name)).toEqual(["conflictRounds", "rebaseNonDraft"])
@@ -165,7 +165,7 @@ test("un label en dos repos, en pedidos y excluidos, un parámetro inválido y u
     conventions: { ...b.conventions, prTemplate: "/etc/pr.md" },
   }
 
-  const problems = validateProjectDraft(draft, [...flowParamGroups(flows, "techlead-clasico").own, ...flowParamGroups(flows, "techlead-clasico").triggered])
+  const problems = validateProjectDraft(draft, [...flowParamGroups(flows, "de-issue-a-pr").own, ...flowParamGroups(flows, "de-issue-a-pr").triggered])
 
   expect(problems["repo:repo_b"]).toContain('"api"')
   expect(problems.excludeLabels).toContain('"clanker"')

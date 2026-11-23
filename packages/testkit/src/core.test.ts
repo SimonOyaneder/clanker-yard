@@ -325,6 +325,7 @@ describe("arranque", () => {
       { slug: "chat-aplicar" },
       { slug: "chat-aplicar-local" },
       { slug: "council" },
+      { slug: "de-issue-a-pr" },
       { slug: "juguete" },
       { slug: "pr-feedback" },
       { slug: "promote-approved-local" },
@@ -335,19 +336,18 @@ describe("arranque", () => {
       { slug: "restack" },
       { slug: "restack-feedback" },
       { slug: "restack-rewritten" },
-      { slug: "techlead-clasico" },
     ]);
   });
 
-  test("un proyecto con `techlead-clasico` sigue resolviendo su flujo (Techlead clásico) tras reiniciar el core", async () => {
+  test("un proyecto con `de-issue-a-pr` sigue resolviendo su flujo (De issue a PR) tras reiniciar el core", async () => {
     const client = await boot();
-    const project = await client.projects.create({ slug: "equipo", name: "Equipo", tracker: "local", defaultFlowId: "techlead-clasico", defaultProfileId: "juguete" });
+    const project = await client.projects.create({ slug: "equipo", name: "Equipo", tracker: "local", defaultFlowId: "de-issue-a-pr", defaultProfileId: "juguete" });
     await core?.close();
     core = undefined;
     const again = await boot();
 
-    expect(await again.projects.get({ id: project.id })).toMatchObject({ defaultFlowId: "techlead-clasico" });
-    expect((await again.defs.list({ kind: "flow" })).find((d) => d.slug === "techlead-clasico")?.body).toMatchObject({ name: "Techlead clásico" });
+    expect(await again.projects.get({ id: project.id })).toMatchObject({ defaultFlowId: "de-issue-a-pr" });
+    expect((await again.defs.list({ kind: "flow" })).find((d) => d.slug === "de-issue-a-pr")?.body).toMatchObject({ name: "De issue a PR" });
   });
 
   test("al devolverse un sujeto prestado, la dueña relee el head_sha de su worktree", async () => {

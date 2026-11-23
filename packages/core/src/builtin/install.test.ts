@@ -87,14 +87,14 @@ function setup() {
 const builtin = (defs: Defs, kind: "role" | "flow", slug: string) =>
   defs.list(kind, { includeArchived: true }).find((d) => d.scope === "builtin" && d.slug === slug)!;
 
-test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-clasico, pr-feedback, rebase-conflicto, rebase-conflicto-local, base-combinada-conflicto, restack-feedback, promote-local, restack, restack-rewritten, council y republish-pr) y repetirlo no suma versiones", () => {
+test("instala el equipo clanker-loop (sus roles, perfiles y los flujos de-issue-a-pr, pr-feedback, rebase-conflicto, rebase-conflicto-local, base-combinada-conflicto, restack-feedback, promote-local, restack, restack-rewritten, council y republish-pr) y repetirlo no suma versiones", () => {
   const { defs, flows } = setup();
 
   installBuiltins({ defs, flows });
   const versions = store!.events.since(0, { types: ["def.versioned"] }).length;
   installBuiltins({ defs, flows });
 
-  expect(defs.resolve("flow", "techlead-clasico")).toMatchObject({ scope: "builtin" });
+  expect(defs.resolve("flow", "de-issue-a-pr")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "pr-feedback")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "rebase-conflicto")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "restack-feedback")).toMatchObject({ scope: "builtin" });
@@ -106,8 +106,8 @@ test("instala el equipo clanker-loop (sus roles, perfiles y los flujos techlead-
   expect(defs.resolve("flow", "council")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "republish-pr")).toMatchObject({ scope: "builtin" });
   expect(defs.resolve("flow", "juguete")).toBeUndefined();
-  expect(defs.resolve("flow", "techlead-clasico")?.body).toMatchObject({ name: "Techlead clásico", description: expect.any(String) });
-  expect(defs.resolve("flow", "techlead-clasico")?.body).not.toHaveProperty("internal");
+  expect(defs.resolve("flow", "de-issue-a-pr")?.body).toMatchObject({ name: "De issue a PR", description: expect.any(String) });
+  expect(defs.resolve("flow", "de-issue-a-pr")?.body).not.toHaveProperty("internal");
   const internal = defs.list("flow").filter((d) => (d.body as { internal?: boolean }).internal === true).map((d) => d.slug).sort();
   expect(internal).toEqual(["apply-local-patch", "base-combinada-conflicto", "chat-aplicar", "chat-aplicar-local", "council", "pr-feedback", "promote-approved-local", "promote-local", "rebase-conflicto", "rebase-conflicto-local", "republish-pr", "restack", "restack-feedback", "restack-rewritten"]);
   expect(defs.resolve("role", "committer")).toMatchObject({ scope: "builtin" });

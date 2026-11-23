@@ -113,7 +113,7 @@ describe("clanker import legacy", () => {
       { repoId: dashboard, ord: 1 },
     ]);
 
-    // Una corrida: flujo histórico archivado, outcome del core, contadores del flujo techlead-clasico y costo por rol.
+    // Una corrida: flujo histórico archivado, outcome del core, contadores del flujo de-issue-a-pr y costo por rol.
     const demo4 = store.db.select().from(runs).where(eq(runs.sourceKey, `legacy:metrics:${slugA}:DEMO-4:2026-11-03T15:30:00Z`)).get()!;
     expect(demo4).toMatchObject({
       projectId: a.id,

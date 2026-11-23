@@ -18,10 +18,10 @@ async function snapBoth(page: Page, view: string): Promise<void> {
 test("los flujos incluidos se ven con su grafo y su historial de versiones", async ({ window: page }) => {
   await sidebar(page).getByRole("button", { name: /^Flujos/ }).click();
   const list = page.getByRole("list", { name: "Flujos", exact: true });
-  const row = list.getByRole("listitem").filter({ hasText: "techlead-clasico" });
+  const row = list.getByRole("listitem").filter({ hasText: "de-issue-a-pr" });
   await expect(row).toContainText("incluido");
   await row.getByRole("button").click();
-  await expect(page.getByRole("group", { name: "Grafo del flujo techlead-clasico" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Grafo del flujo de-issue-a-pr" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Versiones" })).toContainText("vigente");
   await snapBoth(page, "flujos-biblioteca");
 });

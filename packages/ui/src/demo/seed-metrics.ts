@@ -98,7 +98,7 @@ export function aggregate(runs: readonly Closed[], range: MetricsRange, now: num
     summary,
     byDay: [...days].sort(([x], [y]) => x.localeCompare(y)).map(([day, v]) => ({ day, ...v })),
     byModel,
-    byStep: [...steps].sort((x, y) => y[1].costMicros - x[1].costMicros).map(([node, v]) => ({ flow: "techlead-clasico", node, ...v })),
+    byStep: [...steps].sort((x, y) => y[1].costMicros - x[1].costMicros).map(([node, v]) => ({ flow: "de-issue-a-pr", node, ...v })),
     byIssue: [...issues].sort((x, y) => y[1].costMicros - x[1].costMicros).map(([issueId, v]) => ({ issueId, ...v })),
     roles: [...new Set(runs.flatMap((r) => r.roles.map((s) => s[0])))].sort(),
   }

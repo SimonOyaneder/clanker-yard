@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { REPO, startTechleadScenario, type BotTurn, type TechleadScenario } from "./techlead-scenario";
 
 // La plantilla "Rebase por conflicto" (`rebase-conflicto`, `docs/design.html#d-flows`) de punta a punta: una
-// issue publica su PR con `techlead-clasico`, la base se mueve y deja el PR en conflicto, el evento
+// issue publica su PR con `de-issue-a-pr`, la base se mueve y deja el PR en conflicto, el evento
 // `pr.conflict` arranca el flujo en el core real y el dev fake (`fixtures/runs/rebase-conflicto`) lo resuelve.
 // Todo contra el GitHub simulado y un remoto git real, sin ningún LLM.
 

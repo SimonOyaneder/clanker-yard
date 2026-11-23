@@ -653,7 +653,7 @@ function prRepoByNumber(state: LegacyState, rows: LegacyMetricsRow[]): Map<numbe
   return found;
 }
 
-/** `review`, `bot` y `ci` son los contadores del flujo `techlead-clasico`: así `projects.summary` suma lo importado con lo nuevo. */
+/** `review`, `bot` y `ci` son los contadores del flujo `de-issue-a-pr`: así `projects.summary` suma lo importado con lo nuevo. */
 function counters(row: LegacyMetricsRow): Record<string, number> {
   const rounds: Record<string, number> = {};
   if (row["review-rounds"] !== undefined) rounds.review = row["review-rounds"];

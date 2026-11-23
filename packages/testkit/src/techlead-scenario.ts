@@ -12,7 +12,7 @@ import { startGitHubSim, type GitHubSim, type SimPr } from "./github-sim";
 import { seedDb, type TestHome } from "./home";
 
 // El escenario de la fase 1 (`docs/design.html#fases`): una issue de un proyecto con tracker local corre
-// `techlead-clasico` en el core real (`startCore`) con el runtime fake hasta un PR draft en el GitHub
+// `de-issue-a-pr` en el core real (`startCore`) con el runtime fake hasta un PR draft en el GitHub
 // simulado, pasando por reviews, commits, checks, `/review` y `pr-feedback`, sin ningún LLM. Lo usan
 // el test de punta a punta y la fixture `.sqlite` con el resultado.
 
@@ -97,7 +97,7 @@ export interface TechleadScenario {
   team: FakeTeam | undefined;
   linearProject: FakeProject | undefined;
   project: ClankerProject;
-  /** Crea una issue en el tracker del proyecto y lanza `techlead-clasico` sobre ella, con `params` del flujo si se piden. */
+  /** Crea una issue en el tracker del proyecto y lanza `de-issue-a-pr` sobre ella, con `params` del flujo si se piden. */
   run(params?: Record<string, unknown>): Promise<{ issueId: IssueId; run: Run }>;
   /** La corrida hija (el subflujo `pr-feedback`) de `runId`. */
   feedback(runId: string): Promise<RunDetail>;
@@ -202,7 +202,7 @@ export async function startTechleadScenario(options: TechleadScenarioOptions = {
     name: "Web",
     tracker: linearProject ? "linear" : "local",
     ...(linearProject && { trackerRef: linearProject.id }),
-    defaultFlowId: "techlead-clasico",
+    defaultFlowId: "de-issue-a-pr",
     defaultProfileId: "eco",
     repos: [{ repoId }],
     ...options.project,

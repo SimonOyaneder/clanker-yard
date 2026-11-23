@@ -35,9 +35,9 @@ export function selectableFlows(flows: DefRecord[], keep?: string | null): DefRe
   return flows.filter((f) => !isInternal(f) || f.slug === keep)
 }
 
-/** El flujo que se preselecciona al crear un proyecto: `techlead-clasico` si existe y si no el primero ("" si no hay ninguno). */
+/** El flujo que se preselecciona al crear un proyecto: `de-issue-a-pr` si existe y si no el primero ("" si no hay ninguno). */
 export function defaultFlowSlug(flows: DefRecord[]): string {
-  return (flows.find((f) => f.slug === "techlead-clasico") ?? flows[0])?.slug ?? ""
+  return (flows.find((f) => f.slug === "de-issue-a-pr") ?? flows[0])?.slug ?? ""
 }
 
 /** El perfil que se preselecciona: `eco` si existe y si no el primero. No hay relación entre un flujo y un perfil que lo prefiera. */

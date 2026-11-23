@@ -34,12 +34,12 @@ import { registerFlowStubs, type FlowStubsOptions } from "./flow-stubs";
 import { tempGitRepo } from "./git";
 import { startGitHubSim } from "./github-sim";
 
-// Las plantillas de flujo de "equipo clanker-loop" (`techlead-clasico` y `pr-feedback`) con los roles de la
+// Las plantillas de flujo de "equipo clanker-loop" (`de-issue-a-pr` y `pr-feedback`) con los roles de la
 // plantilla, el runtime fake y acciones y waits stub: lo que ninguna implementación real todavía cubre.
 // `pr.reply` y `review.requestBot` son las reales, contra el GitHub simulado (`startGitHubSim`) con un pack
 // que tiene bot de review: el PR de los stubs (`acme/web#1`) existe ahí.
 
-const fixtures = (...names: string[]) => names.map((name) => join(dirname(fileURLToPath(import.meta.url)), "../fixtures/runs/techlead-clasico", name));
+const fixtures = (...names: string[]) => names.map((name) => join(dirname(fileURLToPath(import.meta.url)), "../fixtures/runs/de-issue-a-pr", name));
 const { flows: templates } = clankerLoopTemplate;
 
 // El flujo simula los pushes. Todos los casos leen la misma rama y cada uno tiene su propio GitHubSim.
@@ -164,9 +164,9 @@ async function setup(options: SetupOptions = {}) {
   return { flows, store, stubs, pr };
 }
 
-/** Guarda `pr-feedback` y después `techlead-clasico`, que lo llama. */
+/** Guarda `pr-feedback` y después `de-issue-a-pr`, que lo llama. */
 function saveTemplates(flows: Flows) {
-  return [flows.save(templates["pr-feedback"]!, { scope: "builtin", source: "import" }), flows.save(templates["techlead-clasico"]!, { scope: "builtin", source: "import" })];
+  return [flows.save(templates["pr-feedback"]!, { scope: "builtin", source: "import" }), flows.save(templates["de-issue-a-pr"]!, { scope: "builtin", source: "import" })];
 }
 
 function finished(store: Store, runId: RunId): Promise<void> {
@@ -181,7 +181,7 @@ function finished(store: Store, runId: RunId): Promise<void> {
 }
 
 async function runTechlead(flows: Flows, store: Store, params: Record<string, unknown> = {}) {
-  const runId = flows.start("techlead-clasico", { type: "issue", id: "CLA-1" }, { repo: "rep_1", base: "main", branch: "cla-1", ...params }, { profile: "eco" });
+  const runId = flows.start("de-issue-a-pr", { type: "issue", id: "CLA-1" }, { repo: "rep_1", base: "main", branch: "cla-1", ...params }, { profile: "eco" });
   await finished(store, runId);
   return { runId, run: flows.getRun(runId), nodes: topLevel(flows.getRun(runId)) };
 }
@@ -201,10 +201,10 @@ describe("validación", () => {
     expect(saved.map((s) => [s.version, s.warnings])).toEqual([[1, []], [1, []]]);
   });
 
-  test("techlead-clasico pide pr-feedback: sin él no valida", async () => {
+  test("de-issue-a-pr pide pr-feedback: sin él no valida", async () => {
     const { flows } = await setup();
 
-    expect(flows.validate(templates["techlead-clasico"]).errors).toContainEqual({ path: "nodes.feedback.flow", message: 'el flujo "pr-feedback" no existe' });
+    expect(flows.validate(templates["de-issue-a-pr"]).errors).toContainEqual({ path: "nodes.feedback.flow", message: 'el flujo "pr-feedback" no existe' });
   });
 
   test.each([false, true])("council valida, es de mantenimiento y no pide ni bot ni squash (acciones y waits reales donde existen: %s)", async (real) => {
@@ -220,7 +220,7 @@ describe("validación", () => {
   });
 
   test("params con 3 rondas por defecto y maxSteps 200", () => {
-    const { params, limits } = templates["techlead-clasico"]!;
+    const { params, limits } = templates["de-issue-a-pr"]!;
 
     expect(params).toMatchObject({ reviewRounds: { default: 3 }, checkRounds: { default: 3 }, externalRounds: { default: 3 } });
     expect(limits).toEqual({ maxCostUsd: null, maxSteps: 200 });
@@ -228,7 +228,7 @@ describe("validación", () => {
   });
 });
 
-describe("techlead-clasico con el runtime fake", () => {
+describe("de-issue-a-pr con el runtime fake", () => {
   test("camino feliz: de la issue al PR draft, con el bot en LGTM y el CI verde", async () => {
     const { flows, store, stubs, pr } = await setup({ fixtures: fixtures("base", "reviews-ok") });
     saveTemplates(flows);

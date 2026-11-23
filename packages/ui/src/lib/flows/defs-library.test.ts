@@ -21,9 +21,9 @@ const def = (kind: DefRecord["kind"], slug: string, body: unknown, extra: Partia
 const project = (slug: string, flow: string | null, profile: string | null = null) => ({ slug, name: slug, defaultFlowId: flow, defaultProfileId: profile }) as ClankerProject
 
 test("un flujo tuyo con el mismo slug manda: el incluido queda de respaldo y los proyectos cuentan en el tuyo", () => {
-  const builtin = def("flow", "techlead-clasico", SEED_TECHLEAD)
-  const mine = def("flow", "techlead-clasico", SEED_TECHLEAD, { scope: "user" })
-  const rows = libraryRows("flow", [builtin, mine], [builtin, mine], [project("a", "techlead-clasico")])
+  const builtin = def("flow", "de-issue-a-pr", SEED_TECHLEAD)
+  const mine = def("flow", "de-issue-a-pr", SEED_TECHLEAD, { scope: "user" })
+  const rows = libraryRows("flow", [builtin, mine], [builtin, mine], [project("a", "de-issue-a-pr")])
   const [b, m] = rows
   expect(b).toMatchObject({ overriddenBy: "user", overrides: null, projects: [] })
   expect(m).toMatchObject({ overriddenBy: null, overrides: "builtin" })
@@ -61,9 +61,9 @@ test("interno solo si el flujo lo declara", () => {
 })
 
 test("duplicar un incluido da uno tuyo con el mismo slug", () => {
-  const builtin = def("flow", "techlead-clasico", SEED_TECHLEAD)
+  const builtin = def("flow", "de-issue-a-pr", SEED_TECHLEAD)
   const copy = duplicateOf(builtin, [builtin])
-  expect(copy).toMatchObject({ slug: "techlead-clasico", overrides: true, body: { id: "techlead-clasico", name: SEED_TECHLEAD.name } })
+  expect(copy).toMatchObject({ slug: "de-issue-a-pr", overrides: true, body: { id: "de-issue-a-pr", name: SEED_TECHLEAD.name } })
 })
 
 test("duplicar uno tuyo da una copia con slug libre, que el flujo lleva en su id", () => {

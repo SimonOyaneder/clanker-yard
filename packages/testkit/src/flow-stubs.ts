@@ -1,7 +1,7 @@
 import type { Flows } from "@clanker/core";
 import { z } from "zod";
 
-// Las acciones y waits de las plantillas de flujo (`techlead-clasico`, `pr-feedback`, `council`) con los outcomes del
+// Las acciones y waits de las plantillas de flujo (`de-issue-a-pr`, `pr-feedback`, `council`) con los outcomes del
 // diseño (`docs/design.html#d-flows`): sirven para validar un flujo y recorrerlo con el runtime fake
 // guionando lo que la implementación real no produce a pedido (un check rojo, un conflicto con la base). Las
 // demás las registra el test con su acción real (`pr.reply`, `review.requestBot`, `pr.pushFixups`...).

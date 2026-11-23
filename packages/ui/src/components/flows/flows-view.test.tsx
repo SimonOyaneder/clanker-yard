@@ -36,12 +36,12 @@ const rowOf = (slug: string) => screen.getByText(slug, { selector: "span.font-mo
 
 test("la vista lista los flujos con su origen, versión y proyectos, y abre el grafo del primero", async () => {
   await openFlows()
-  const row = await waitFor(() => rowOf("techlead-clasico"))
+  const row = await waitFor(() => rowOf("de-issue-a-pr"))
   expect(within(row).getByText("incluido")).toBeTruthy()
   expect(within(row).getByText("v3")).toBeTruthy()
   expect(within(row).getByText(/Boundaries de engines, SOPORTE/)).toBeTruthy()
   fireEvent.click(within(row).getByRole("button"))
-  expect(await screen.findByRole("group", { name: "Grafo del flujo techlead-clasico" })).toBeTruthy()
+  expect(await screen.findByRole("group", { name: "Grafo del flujo de-issue-a-pr" })).toBeTruthy()
   expect(await screen.findByText("versión 2")).toBeTruthy()
 })
 
@@ -88,7 +88,7 @@ test("sin flujos explica por qué y qué revisar", async () => {
 // Duplica el flujo incluido (queda uno tuyo, editable) y abre el editor, en el canvas.
 async function openCanvas() {
   await openFlows()
-  fireEvent.click(within(await waitFor(() => rowOf("techlead-clasico"))).getByRole("button"))
+  fireEvent.click(within(await waitFor(() => rowOf("de-issue-a-pr"))).getByRole("button"))
   fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
   fireEvent.click(await screen.findByRole("button", { name: /^Editar$/ }))
   return await screen.findByRole("group", { name: /^Canvas del flujo/ })
@@ -357,7 +357,7 @@ test("Exportar al repo explica .clanker/, deja elegir el repo y abre el PR en dr
 })
 
 test("si el core rechaza la exportación, el motivo queda en el diálogo", async () => {
-  await openFlows({ exportDefToRepo: () => Promise.reject(new Error("techlead-clasico.json ya está igual en main de api: no hay nada que exportar.")) })
+  await openFlows({ exportDefToRepo: () => Promise.reject(new Error("de-issue-a-pr.json ya está igual en main de api: no hay nada que exportar.")) })
   fireEvent.click(await screen.findByRole("button", { name: /Duplicar para editar/ }))
   fireEvent.click(await screen.findByRole("button", { name: /Exportar al repo/ }))
   const dialog = await screen.findByRole("dialog")

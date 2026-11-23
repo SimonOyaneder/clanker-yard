@@ -11,7 +11,7 @@ import { seedDb, type TestHome } from "./home";
 import { startCore } from "./start-core";
 import { ACCOUNT, BOT, FIXTURES, REPO, TOKEN } from "./techlead-scenario";
 
-describe.skipIf(process.env.CLANKER_LIVE_CODEX !== "1")("techlead-clasico con Codex en vivo", () => {
+describe.skipIf(process.env.CLANKER_LIVE_CODEX !== "1")("de-issue-a-pr con Codex en vivo", () => {
   let home: TestHome;
   let store: Store;
   let repo: TempGitRepo;
@@ -125,7 +125,7 @@ describe.skipIf(process.env.CLANKER_LIVE_CODEX !== "1")("techlead-clasico con Co
     const repoId = createRepos({ store }).add({ name: "web", path: repo.dir, remote: REPO });
     const project = await client.projects.create({
       slug: "codex-live", name: "Codex en vivo", tracker: "local",
-      defaultFlowId: "techlead-clasico", defaultProfileId: "codex-live", repos: [{ repoId }],
+      defaultFlowId: "de-issue-a-pr", defaultProfileId: "codex-live", repos: [{ repoId }],
     });
     const issue = await client.issues.createLocal({
       projectId: project.id, title: "Validar el monto de una transfer",
@@ -137,7 +137,7 @@ describe.skipIf(process.env.CLANKER_LIVE_CODEX !== "1")("techlead-clasico con Co
       expect(["done", "parked", "failed", "canceled"]).toContain(current.status);
       return current;
     }, { timeout: 240_000, interval: 250 });
-    expect(run).toMatchObject({ status: "done", outcome: "done", flow: { slug: "techlead-clasico" } });
+    expect(run).toMatchObject({ status: "done", outcome: "done", flow: { slug: "de-issue-a-pr" } });
     const lore = run.steps.find((step) => step.nodeId === "rv-lore")!;
     const detail = await client.runs.step({ id: lore.id });
     expect(detail.sessions, JSON.stringify(detail.sessions.map(({ status, error }) => ({ status, error })))).toHaveLength(1);

@@ -26,14 +26,14 @@ export async function seedLanes({ client, store, repoId, now = Date.now() }: { c
     if (!def) throw new Error(`El core no instaló la plantilla ${slug}.`);
     return def;
   };
-  const techlead = template("techlead-clasico");
+  const techlead = template("de-issue-a-pr");
   const rebase = template("rebase-conflicto");
 
   const project = await client.projects.create({
     slug: "boundaries",
     name: "Boundaries de engines",
     tracker: "local",
-    defaultFlowId: "techlead-clasico",
+    defaultFlowId: "de-issue-a-pr",
     parallel: 1,
     repos: [{ repoId, labels: [] }],
     flowParams: { repo: repoId },

@@ -18,7 +18,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createFakeRuntime } from "./fake-runtime";
 
-// Los reviews en paralelo de "Techlead clásico" con los roles de la plantilla clanker-loop y el
+// Los reviews en paralelo de "De issue a PR" con los roles de la plantilla clanker-loop y el
 // runtime fake: el parallel, items.merge y rerun not-ok de punta a punta.
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/runs/parallel-reviews");
@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-/** El tramo de reviews de "Techlead clásico": checks → reviews (4 en paralelo) → fix → checks. */
+/** El tramo de reviews de "De issue a PR": checks → reviews (4 en paralelo) → fix → checks. */
 const reviewsFlow = {
   schema: 1,
   id: "reviews",

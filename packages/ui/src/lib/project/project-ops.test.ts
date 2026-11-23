@@ -10,7 +10,7 @@ function run(n: number, extra: Partial<Run> = {}): Run {
     projectId: id("prj", 1) as Run["projectId"],
     parentRunId: null,
     borrowedFromRunId: null,
-    flow: { slug: "techlead-clasico", version: 1 },
+    flow: { slug: "de-issue-a-pr", version: 1 },
     subject: { type: "issue", id: id("iss", n) },
     lane: "dev",
     status: "running",

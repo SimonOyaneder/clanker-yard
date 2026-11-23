@@ -55,7 +55,7 @@ test("la ficha abre Linear, el PR local, el mergeado en GitHub, su corrida y la 
   expect(actions.openExternal).toHaveBeenCalledWith(closed.state!.url)
   fireEvent.click(screen.getByRole("button", { name: /Relacionada con/ }))
   expect(actions.openIssue).toHaveBeenCalledWith(related)
-  fireEvent.click(screen.getAllByRole("button", { name: /techlead-clasico/ })[0]!)
+  fireEvent.click(screen.getAllByRole("button", { name: /de-issue-a-pr/ })[0]!)
   expect(actions.openRun).toHaveBeenCalledWith(project.slug, runs.find((r) => r.subject.id === issue.id)!.id)
 })
 

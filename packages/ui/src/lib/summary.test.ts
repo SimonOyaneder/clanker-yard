@@ -57,9 +57,9 @@ test("las tarjetas de arriba son lo que dice projects.summary", () => {
 })
 
 test("los pasos llevan su flujo solo si hay más de un flujo", () => {
-  const one = [{ flow: "techlead-clasico", node: "implement", steps: 2, costMicros: 5 }]
+  const one = [{ flow: "de-issue-a-pr", node: "implement", steps: 2, costMicros: 5 }]
   expect(stepRows(one).map((r) => r.label)).toEqual(["implement"])
-  expect(stepRows([...one, { flow: "rebase", node: "resolve", steps: 1, costMicros: 3 }]).map((r) => r.label)).toEqual(["techlead-clasico · implement", "rebase · resolve"])
+  expect(stepRows([...one, { flow: "rebase", node: "resolve", steps: 1, costMicros: 3 }]).map((r) => r.label)).toEqual(["de-issue-a-pr · implement", "rebase · resolve"])
 })
 
 test("las issues con más rondas van primero, y a igual número la más cara", () => {

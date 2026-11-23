@@ -26,17 +26,17 @@ test("un perfil se resume con el modelo del dev y los de los reviews, sin repeti
 })
 
 test("un flujo se llama por su nombre y se resume con su descripción si la trae", () => {
-  const flow = def("flow", "techlead-clasico", { name: "Techlead clásico" })
-  expect(defName(flow)).toBe("Techlead clásico")
+  const flow = def("flow", "de-issue-a-pr", { name: "De issue a PR" })
+  expect(defName(flow)).toBe("De issue a PR")
   expect(defSummary(flow)).toBeUndefined()
   expect(defSummary(def("flow", "x", { name: "X", description: "Hace x" }))).toBe("Hace x")
   expect(defName(profile("eco", {}))).toBe("eco")
 })
 
-test("los defaults son techlead-clasico y eco, y si faltan el primero", () => {
-  const flows = [def("flow", "juguete", {}), def("flow", "techlead-clasico", {})]
+test("los defaults son de-issue-a-pr y eco, y si faltan el primero", () => {
+  const flows = [def("flow", "juguete", {}), def("flow", "de-issue-a-pr", {})]
   const profiles = [profile("medio", {}), profile("eco", {})]
-  expect(defaultFlowSlug(flows)).toBe("techlead-clasico")
+  expect(defaultFlowSlug(flows)).toBe("de-issue-a-pr")
   expect(defaultFlowSlug(flows.slice(0, 1))).toBe("juguete")
   expect(defaultProfileSlug(profiles)).toBe("eco")
   expect(defaultProfileSlug(profiles.slice(0, 1))).toBe("medio")
@@ -44,8 +44,8 @@ test("los defaults son techlead-clasico y eco, y si faltan el primero", () => {
 })
 
 test("selectableFlows oculta los internos, salvo el que el proyecto ya tiene", () => {
-  const flows = [def("flow", "techlead-clasico", { name: "Flujo principal" }), def("flow", "council", { internal: true }), def("flow", "restack", { internal: true })]
+  const flows = [def("flow", "de-issue-a-pr", { name: "Flujo principal" }), def("flow", "council", { internal: true }), def("flow", "restack", { internal: true })]
 
-  expect(selectableFlows(flows).map((f) => f.slug)).toEqual(["techlead-clasico"])
-  expect(selectableFlows(flows, "council").map((f) => f.slug)).toEqual(["techlead-clasico", "council"])
+  expect(selectableFlows(flows).map((f) => f.slug)).toEqual(["de-issue-a-pr"])
+  expect(selectableFlows(flows, "council").map((f) => f.slug)).toEqual(["de-issue-a-pr", "council"])
 })

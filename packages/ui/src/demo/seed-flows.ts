@@ -5,8 +5,8 @@ import type { FlowDef } from "@clanker/api"
 
 export const SEED_TECHLEAD: FlowDef = {
   schema: 1,
-  id: "techlead-clasico",
-  name: "Techlead clásico",
+  id: "de-issue-a-pr",
+  name: "De issue a PR",
   description: "De la issue al PR con review: implementa, revisa en rondas, corre los checks, abre el PR y atiende el feedback hasta dejarlo listo.",
   trigger: { type: "issue.queued" },
   lane: "dev",

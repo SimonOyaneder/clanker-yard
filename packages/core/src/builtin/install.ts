@@ -16,7 +16,7 @@ const TEMPLATES: BuiltinTemplate[] = [
     profiles: clankerLoopTemplate.profiles,
     flows: [
       clankerLoopTemplate.flows["pr-feedback"]!,
-      clankerLoopTemplate.flows["techlead-clasico"]!,
+      clankerLoopTemplate.flows["de-issue-a-pr"]!,
       clankerLoopTemplate.flows["rebase-conflicto"]!,
       clankerLoopTemplate.flows["rebase-conflicto-local"]!,
       clankerLoopTemplate.flows["base-combinada-conflicto"]!,

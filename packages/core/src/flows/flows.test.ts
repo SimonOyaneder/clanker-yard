@@ -115,9 +115,9 @@ const linear = {
 
 const techlead = FlowDef.parse({
   schema: 1,
-  id: "techlead-clasico",
+  id: "de-issue-a-pr",
   version: 1,
-  name: "Techlead clásico",
+  name: "De issue a PR",
   trigger: { type: "issue.queued" },
   lane: "dev",
   params: {
@@ -326,7 +326,7 @@ const prFeedback = FlowDef.parse({
 });
 
 describe("flujos de ejemplo", () => {
-  test("la plantilla Techlead clásico y su subflujo pr-feedback validan sin errores ni avisos", () => {
+  test("la plantilla De issue a PR y su subflujo pr-feedback validan sin errores ni avisos", () => {
     const { flows } = setup();
 
     expect(flows.validate(prFeedback)).toEqual({ errors: [], warnings: [] });

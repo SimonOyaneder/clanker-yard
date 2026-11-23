@@ -69,7 +69,7 @@ function harness(script: ReturnType<typeof replies>, options: { maxAgents?: numb
 
 const mergeJoin = { fn: "items.merge", args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"], idKeys: ["branch", "path", "claim"] } };
 
-/** El flujo de reviews de "Techlead clásico": reviewers en paralelo, items.merge y vuelta al dev mientras haya 🔴/🟡. */
+/** El flujo de reviews de "De issue a PR": reviewers en paralelo, items.merge y vuelta al dev mientras haya 🔴/🟡. */
 const reviewsFlow = (parallel: Record<string, unknown> = {}, branchNode: Record<string, unknown> = {}) => ({
   schema: 1,
   id: "reviews-flow",

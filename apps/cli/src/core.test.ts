@@ -101,7 +101,7 @@ describe("el binario clanker", () => {
     expect(tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name)).toEqual(expect.arrayContaining([
       "list", "get", "project_queue", "list_prs", "get_local_pr", "get_local_pr_commit_diff", "list_events", "read_artifact",
     ]));
-    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "flow", slug: "techlead-clasico" })]));
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "flow", slug: "de-issue-a-pr" })]));
     expect(resources.map((r) => r.uri)).toContain("clanker://schema/run");
     expect(isPidAlive(readCoreJson(home)!.pid)).toBe(true);
   }, 30_000);
@@ -128,7 +128,7 @@ describe("el binario clanker", () => {
     expect(after.pid).not.toBe(before.pid);
     expect(after.token).not.toBe(before.token);
     expect(result.isError).toBeFalsy();
-    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toEqual(expect.arrayContaining([expect.objectContaining({ slug: "techlead-clasico" })]));
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toEqual(expect.arrayContaining([expect.objectContaining({ slug: "de-issue-a-pr" })]));
   }, 60_000);
 
   test("sin core y sin el bundle del core explica cómo construirlo y sale con 1", async () => {

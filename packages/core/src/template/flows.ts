@@ -7,11 +7,11 @@ import type { FlowDef, Node } from "@clanker/api";
 //
 // Desvío del diseño: `workspace.acquire` recibe `branch` (`$run.params.branch`, que pone el core) en lugar de `issue`.
 
-/** "Techlead clásico": el flujo del techlead sin LLM orquestador (el slug sigue siendo `techlead-clasico`: los proyectos lo citan). Llama a `pr-feedback` para el tramo externo. */
-export const TECHLEAD_CLASICO: FlowDef = {
+/** De issue a PR delega el feedback del bot y la CI al subflujo `pr-feedback`. */
+export const DE_ISSUE_A_PR: FlowDef = {
   schema: 1,
-  id: "techlead-clasico",
-  name: "Techlead clásico",
+  id: "de-issue-a-pr",
+  name: "De issue a PR",
   description: "De la issue al PR con review: implementa, revisa en rondas, corre los checks, abre el PR y atiende el feedback hasta dejarlo listo.",
   trigger: { type: "issue.queued" },
   lane: "dev",
@@ -138,7 +138,7 @@ export const TECHLEAD_CLASICO: FlowDef = {
 };
 
 /**
- * El tramo de feedback externo (bot de review y CI) de un PR, como subflujo: lo reusan "Techlead clásico",
+ * El tramo de feedback externo (bot de review y CI) de un PR, como subflujo: lo reusan "De issue a PR",
  * rebase y restack. Las rondas con el bot y con el CI comparten el contador `external`.
  */
 export const PR_FEEDBACK: FlowDef = {
@@ -1369,7 +1369,7 @@ const PROMOTE_APPROVED_LOCAL: FlowDef = {
 };
 
 export const flows: Record<string, FlowDef> = {
-  "techlead-clasico": TECHLEAD_CLASICO,
+  "de-issue-a-pr": DE_ISSUE_A_PR,
   "pr-feedback": PR_FEEDBACK,
   "rebase-conflicto": REBASE_CONFLICTO,
   "rebase-conflicto-local": REBASE_CONFLICTO_LOCAL,

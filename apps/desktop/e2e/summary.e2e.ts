@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import { expect, setTheme, snap, test } from "./harness";
 
 // El Resumen contra el escenario `summary` del core de demo (`packages/testkit/src/summary-scenario.ts`): lo importado del
-// clanker-loop (`fixtures/legacy`) y corridas de Yard del flujo `techlead-clasico` en el mismo proyecto.
+// clanker-loop (`fixtures/legacy`) y corridas de Yard del flujo `de-issue-a-pr` en el mismo proyecto.
 test.use({ scenario: "summary" });
 test.describe.configure({ mode: "serial" });
 

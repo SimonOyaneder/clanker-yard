@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { REPO, startTechleadScenario, TOKEN, type TechleadScenario } from "./techlead-scenario";
 
-// Criterio de la fase 1 sin gastar tokens: una issue del tracker local corre `techlead-clasico` en el core
+// Criterio de la fase 1 sin gastar tokens: una issue del tracker local corre `de-issue-a-pr` en el core
 // real (`startCore`) con el runtime fake hasta un PR draft con LGTM del bot, sin ningún LLM orquestador.
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -14,7 +14,7 @@ afterEach(async () => {
   scenario = undefined;
 });
 
-describe("techlead-clasico de punta a punta", () => {
+describe("de-issue-a-pr de punta a punta", () => {
   test.each(["local", "linear"] as const)("una issue del tracker %s termina en done con el PR draft, sin fixup! en el remoto y con una respuesta [clanker] por hallazgo", async (tracker) => {
     scenario = await startTechleadScenario({ tracker });
     const { client, store } = scenario;
@@ -22,7 +22,7 @@ describe("techlead-clasico de punta a punta", () => {
     const { issueId, run: started } = await scenario.run();
     const run = await scenario.finished(started.id);
 
-    expect(run).toMatchObject({ status: "done", outcome: "done", flow: { slug: "techlead-clasico" } });
+    expect(run).toMatchObject({ status: "done", outcome: "done", flow: { slug: "de-issue-a-pr" } });
     const nodes = run.steps.filter((s) => !/^(rv|lr)-/.test(s.nodeId)).map((s) => [s.nodeId, s.outcome]);
     expect(nodes).toEqual([
       ["ws", "ok"],
