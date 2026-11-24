@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as z from "zod";
-import { ApplyArgs, cleanMessage, CONVENTIONAL_COMMIT, patchOf } from "../../commits/apply";
+import { ApplyArgs, cleanMessage, commitBodyProblem, CONVENTIONAL_COMMIT, patchOf } from "../../commits/apply";
 import { preparePush } from "../../commits/prepare-push";
 import { branchCommits, fixupMessage, FIXUP_PREFIX, hunkOwners, oldRange, routeHunks, type BranchCommit } from "../../commits/route";
 import { PermanentActionError, type ActionCtx, type ActionDef, type ActionResult } from "../../flows/catalog";
@@ -270,13 +270,16 @@ async function routeProblems(
   const subjects = new Set(targets.map((c) => c.subject));
   const assigned = new Set<string>();
   for (const [i, commit] of route.entries()) {
-    const subject = cleanMessage(commit.message).split("\n")[0]!;
+    const message = cleanMessage(commit.message);
+    const subject = message.split("\n")[0]!;
     const label = commit.into === undefined ? `commit ${i + 1} "${subject}"` : `commit ${i + 1} (into ${commit.into})`;
     const target = commit.into === undefined ? undefined : intoTarget(targets, commit.into);
     if (commit.into !== undefined) {
       if (target === undefined) problems.push(`[${label}] ${commit.into} no es el sha de un único commit del PR`);
     } else {
       if (!pattern.test(subject)) problems.push(`[${label}] el mensaje no cumple ${pattern}`);
+      const bodyProblem = commitBodyProblem(message);
+      if (bodyProblem) problems.push(`[${label}] ${bodyProblem}`);
       if (subjects.has(subject)) problems.push(`[${label}] repite el título de un commit del PR: si sus hunks son de ese commit, usa \`into\` con su sha`);
     }
     if (commit.hunks.length === 0) problems.push(`[${label}] no tiene hunks`);

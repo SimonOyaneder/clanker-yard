@@ -13,6 +13,6 @@ result:
     summary: "Un commit"
     payload:
       commits:
-        - { message: "feat(d): add the d helper", hunks: [h1], tests: [], whyAtomic: "Es un solo archivo nuevo" }
+        - { message: "feat(d): add the d helper\n\nIsolate the behavior needed by the fourth issue.", hunks: [h1], tests: [], whyAtomic: "Es un solo archivo nuevo" }
       pr: { title: "feat(d): add the d helper", body: "Agrega src/d.ts." }
       notes: []

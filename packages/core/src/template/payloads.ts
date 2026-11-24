@@ -94,6 +94,7 @@ export type ReviewBrief = z.infer<typeof ReviewBrief>;
 
 
 export const CommitBrief = z.object({
+  failures: z.string().nullish(),
   cuts: DevWorkReport.shape.cuts,
   notForThisPr: z.array(z.string()).optional().describe("Lo que la issue deja para otras issues."),
 });
@@ -115,6 +116,7 @@ export type CommitPlan = z.infer<typeof CommitPlan>;
 
 /** Extensión del diseño: el modo `route` decide a qué commit van los hunks sin commit al que atarse. */
 export const RouteBrief = z.object({
+  failures: z.string().nullish(),
   hunks: z.array(z.string()).describe("Ids de hunks.json."),
   commits: z
     .array(z.object({ sha: z.string(), subject: z.string() }))

@@ -170,9 +170,17 @@ describe("squash", () => {
 });
 
 describe("commits del agente", () => {
+  test("un commit propio sin cuerpo vuelve al committer con el cambio intacto", async () => {
+    const known = head();
+    commit("feat: agrega y", "y.txt", "2\n");
+    expect(await prepare(known)).toMatchObject({ outcome: "replan", failures: expect.stringContaining("explica en el cuerpo") });
+    expect(head()).toBe(known);
+    expect(git("status", "--porcelain")).toBe("?? y.txt");
+  });
+
   test("se aceptan si descienden del último sha conocido y su árbol es el del worktree", async () => {
     const known = commit("feat: uno", "x.txt", "1\n");
-    commit("feat: dos", "y.txt", "2\n");
+    commit("feat: dos\n\nPermite extender el cambio de x.", "y.txt", "2\n");
     const agentHead = head();
 
     expect(await prepare(known)).toEqual({ outcome: "ok", head: agentHead, squashed: false });
@@ -226,7 +234,7 @@ describe("commits del agente", () => {
 
   test("con el patrón del pack, se acepta un mensaje que lo cumple", async () => {
     const known = commit("feat: uno", "x.txt", "1\n");
-    commit("CLA-1 dos", "y.txt", "2\n");
+    commit("CLA-1 dos\n\nExtiende el cambio de x.", "y.txt", "2\n");
 
     const result = await preparePush(workspaces, lease, { knownSha: known, base: lease.baseSha, council: false, messagePattern: "^CLA-\\d+ " });
 

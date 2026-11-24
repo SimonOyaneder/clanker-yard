@@ -13,6 +13,6 @@ result:
     summary: "Un commit"
     payload:
       commits:
-        - { message: "feat(a): add the a helper", hunks: [h1], tests: [], whyAtomic: "Es un solo archivo nuevo" }
+        - { message: "feat(a): add the a helper\n\nProvide the first dependency for the stacked change.", hunks: [h1], tests: [], whyAtomic: "Es un solo archivo nuevo" }
       pr: { title: "feat(a): add the a helper", body: "Agrega src/a.ts." }
       notes: []

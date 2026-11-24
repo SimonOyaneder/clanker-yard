@@ -344,7 +344,7 @@ describe("tras un rebase", () => {
     const result = await commitsApplyAction({ workspaces, recipes }).run(
       {
         ws: { workspaceId, path, branch, baseSha, fencingToken },
-        plan: { commits: [{ message: "feat: mine", hunks: ["h1"], tests: [] }] },
+        plan: { commits: [{ message: "feat: mine\n\nKeep the local change when the base advances.", hunks: ["h1"], tests: [] }] },
       },
       { runId: run, stepId: "stp_1", key: "k", signal: new AbortController().signal, once: (_stage, fn) => fn() },
     );

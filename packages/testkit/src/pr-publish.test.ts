@@ -143,7 +143,7 @@ type Plan = { commits: { message: string; hunks: string[]; tests: string[] }[]; 
 
 function plan(overrides: Partial<Plan> = {}): Plan {
   return {
-    commits: [{ message: "feat: add feature", hunks: ["h1"], tests: [] }],
+    commits: [{ message: "feat: add feature\n\nExpose the new behavior on the feature branch.", hunks: ["h1"], tests: [] }],
     pr: { title: "[CLA-53] Add feature", body: BODY },
     ...overrides,
   };
@@ -536,7 +536,7 @@ describe("pr.publish local", () => {
     const input = publish.args.parse({
       ...args(), messagePattern: "^(feat:|fixup! feat:)",
       plan: plan({ commits: [
-        { message: "feat: add feature", hunks: ["h1"], tests: [] },
+        { message: "feat: add feature\n\nExpose the new behavior on the feature branch.", hunks: ["h1"], tests: [] },
         { message: "fixup! feat: add feature", hunks: ["h2"], tests: [] },
       ] }),
     });

@@ -106,6 +106,8 @@ async function hunkIds(): Promise<Record<string, string>> {
 
 type PlanCommit = { message: string; hunks: string[]; tests?: string[] };
 
+const withBody = (subject: string) => `${subject}\n\nPermite verificar este cambio por separado.`;
+
 function run(commits: PlanCommit[], extra: { messagePattern?: string } = {}) {
   const { workspaceId, path, branch, baseSha, fencingToken } = lease;
   return apply.run(
@@ -157,8 +159,8 @@ describe("un plan válido", () => {
     const [first, second] = [ids["a.txt @@ -1,5 +1,5 @@"]!, ids["a.txt @@ -25,6 +25,6 @@"]!];
 
     const result = await run([
-      { message: "feat(a): edita la linea 2", hunks: [first] },
-      { message: "feat(a): edita la linea 28 y agrega c.txt", hunks: [second, ids["c.txt @@ -0,0 +1 @@"]!] },
+      { message: withBody("feat(a): edita la linea 2"), hunks: [first] },
+      { message: withBody("feat(a): edita la linea 28 y agrega c.txt"), hunks: [second, ids["c.txt @@ -0,0 +1 @@"]!] },
     ]);
 
     expect(result.outcome).toBe("ok");
@@ -188,8 +190,8 @@ describe("un plan válido", () => {
     expect(Object.keys(ids).sort()).toEqual(["empty.txt (archivo vacío nuevo)", "img.bin (binario)", "run.sh (cambio de modo)"]);
 
     const result = await run([
-      { message: "chore: assets", hunks: [ids["img.bin (binario)"]!, ids["empty.txt (archivo vacío nuevo)"]!] },
-      { message: "chore: run.sh ejecutable", hunks: [ids["run.sh (cambio de modo)"]!] },
+      { message: withBody("chore: assets"), hunks: [ids["img.bin (binario)"]!, ids["empty.txt (archivo vacío nuevo)"]!] },
+      { message: withBody("chore: run.sh ejecutable"), hunks: [ids["run.sh (cambio de modo)"]!] },
     ]);
 
     expect(result.outcome).toBe("ok");
@@ -216,13 +218,22 @@ describe("un plan válido", () => {
 });
 
 describe("un plan que no se puede aplicar da replan", () => {
+  test.each(["", "\nSin separación.", "\n\n  ", "\n\nClaude-Session: abc"])("un cuerpo ausente tras limpiar el mensaje pide replan: %j", async (suffix) => {
+    await setup();
+    write("b.txt", "b2\n");
+    const result = await run([{ message: `fix: corrige b${suffix}`, hunks: Object.values(await hunkIds()) }]);
+
+    expect(result).toMatchObject({ outcome: "replan", output: { failures: expect.stringContaining("explica en el cuerpo") } });
+    expect(git("rev-parse", "HEAD")).toBe(base);
+  });
+
   test("un hunk sin asignar, y nada cambia", async () => {
     await setup();
     changeThreeThings();
     const ids = await hunkIds();
     const before = git("status", "--porcelain", "--untracked-files=all");
 
-    const result = await run([{ message: "feat(a): solo la linea 2", hunks: [ids["a.txt @@ -1,5 +1,5 @@"]!] }]);
+    const result = await run([{ message: withBody("feat(a): solo la linea 2"), hunks: [ids["a.txt @@ -1,5 +1,5 @@"]!] }]);
 
     expect(result.outcome).toBe("replan");
     expect(result.output).toEqual({
@@ -239,9 +250,9 @@ describe("un plan que no se puede aplicar da replan", () => {
     const [id] = Object.values(await hunkIds());
 
     const result = await run([
-      { message: "feat: uno", hunks: [id!, "h99"] },
-      { message: "feat: dos", hunks: [id!] },
-      { message: "feat: tres", hunks: [] },
+      { message: withBody("feat: uno"), hunks: [id!, "h99"] },
+      { message: withBody("feat: dos"), hunks: [id!] },
+      { message: withBody("feat: tres"), hunks: [] },
       { message: "arreglé cosas", hunks: [] },
     ]);
 
@@ -265,8 +276,8 @@ describe("un plan que no se puede aplicar da replan", () => {
     const created = ids["new/generator.txt @@ -0,0 +1,10 @@"]!;
 
     const result = await run([
-      { message: "feat: crea el generador nuevo", hunks: [created] },
-      { message: "refactor: borra el generador viejo", hunks: [removed] },
+      { message: withBody("feat: crea el generador nuevo"), hunks: [created] },
+      { message: withBody("refactor: borra el generador viejo"), hunks: [removed] },
     ]);
 
     expect(result.outcome).toBe("replan");
@@ -287,10 +298,10 @@ describe("un plan que no se puede aplicar da replan", () => {
 
     const result = await run([
       {
-        message: "refactor: mueve el generador",
+        message: withBody("refactor: mueve el generador"),
         hunks: [ids["old/generator.txt @@ -1,10 +0,0 @@"]!, ids["new/generator.txt @@ -0,0 +1,10 @@"]!],
       },
-      { message: "feat: c", hunks: [ids["c.txt @@ -0,0 +1 @@"]!] },
+      { message: withBody("feat: c"), hunks: [ids["c.txt @@ -0,0 +1 @@"]!] },
     ]);
 
     expect(result.outcome).toBe("ok");
@@ -302,8 +313,8 @@ describe("un plan que no se puede aplicar da replan", () => {
     write("b.txt", "b2\n");
     const [id] = Object.values(await hunkIds());
 
-    expect((await run([{ message: "feat: uno", hunks: [id!] }], { messagePattern: "^\\[CLA-\\d+\\] " })).outcome).toBe("replan");
-    expect((await run([{ message: "[CLA-43] uno", hunks: [id!] }], { messagePattern: "^\\[CLA-\\d+\\] " })).outcome).toBe("ok");
+    expect((await run([{ message: withBody("feat: uno"), hunks: [id!] }], { messagePattern: "^\\[CLA-\\d+\\] " })).outcome).toBe("replan");
+    expect((await run([{ message: withBody("[CLA-43] uno"), hunks: [id!] }], { messagePattern: "^\\[CLA-\\d+\\] " })).outcome).toBe("ok");
   });
 
   test("hunks que ya no se aplican sobre los commits anteriores dicen cuál commit y por qué", async () => {
@@ -318,8 +329,8 @@ describe("un plan que no se puede aplicar da replan", () => {
     chmodSync(hook, 0o755);
 
     const result = await run([
-      { message: "feat: a", hunks: [ids["a.txt @@ -1,5 +1,5 @@"]!] },
-      { message: "feat: b", hunks: [ids["b.txt @@ -1 +1 @@"]!] },
+      { message: withBody("feat: a"), hunks: [ids["a.txt @@ -1,5 +1,5 @@"]!] },
+      { message: withBody("feat: b"), hunks: [ids["b.txt @@ -1 +1 @@"]!] },
     ]);
 
     expect(result.outcome).toBe("replan");
@@ -336,17 +347,17 @@ describe("un plan que no se puede aplicar da replan", () => {
     git("add", "b.txt");
     git("commit", "-m", "feat: ya commiteado");
 
-    await expect(run([{ message: "feat: uno", hunks: [id!] }])).rejects.toThrow(PermanentActionError);
-    await expect(run([{ message: "feat: uno", hunks: [id!] }])).rejects.toThrow(/ya está en/);
+    await expect(run([{ message: withBody("feat: uno"), hunks: [id!] }])).rejects.toThrow(PermanentActionError);
+    await expect(run([{ message: withBody("feat: uno"), hunks: [id!] }])).rejects.toThrow(/ya está en/);
   });
 
   test("un reintento con los commits del plan ya hechos (el corte llegó antes de guardar la etapa) devuelve esos commits", async () => {
     await setup();
     write("b.txt", "b2\n");
     const [id] = Object.values(await hunkIds());
-    const first = await run([{ message: "feat: uno", hunks: [id!] }]);
+    const first = await run([{ message: withBody("feat: uno"), hunks: [id!] }]);
 
-    const retry = await run([{ message: "feat: uno", hunks: [id!] }]);
+    const retry = await run([{ message: withBody("feat: uno"), hunks: [id!] }]);
 
     expect(first.outcome).toBe("ok");
     expect(retry).toEqual(first);
@@ -358,7 +369,7 @@ describe("un plan que no se puede aplicar da replan", () => {
     write("b.txt", "b2\n");
     const [id] = Object.values(await hunkIds());
 
-    await expect(run([{ message: "feat: b", hunks: [id!] }])).rejects.toThrow(PermanentActionError);
+    await expect(run([{ message: withBody("feat: b"), hunks: [id!] }])).rejects.toThrow(PermanentActionError);
     expect(git("rev-parse", "HEAD")).toBe(base);
     expect(verifyWorktrees()).toEqual([]);
   });
@@ -377,8 +388,8 @@ describe("tests por commit", () => {
     const ids = await hunkIds();
 
     const result = await run([
-      { message: "feat: uno", hunks: [ids["ok1.txt @@ -1 +1 @@"]!], tests: ["ok1.txt"] },
-      { message: "feat: dos", hunks: [ids["ok2.txt @@ -1 +1 @@"]!, ids["c.txt @@ -0,0 +1 @@"]!], tests: ["ok2.txt"] },
+      { message: withBody("feat: uno"), hunks: [ids["ok1.txt @@ -1 +1 @@"]!], tests: ["ok1.txt"] },
+      { message: withBody("feat: dos"), hunks: [ids["ok2.txt @@ -1 +1 @@"]!, ids["c.txt @@ -0,0 +1 @@"]!], tests: ["ok2.txt"] },
     ]);
 
     expect(result.outcome).toBe("replan");
@@ -397,8 +408,8 @@ describe("tests por commit", () => {
     const ids = await hunkIds();
 
     const result = await run([
-      { message: "feat: b", hunks: [ids["b.txt @@ -1 +1 @@"]!], tests: ["b.txt"] },
-      { message: "feat: later", hunks: [ids["later.txt @@ -0,0 +1 @@"]!] },
+      { message: withBody("feat: b"), hunks: [ids["b.txt @@ -1 +1 @@"]!], tests: ["b.txt"] },
+      { message: withBody("feat: later"), hunks: [ids["later.txt @@ -0,0 +1 @@"]!] },
     ]);
 
     expect(result.outcome).toBe("ok");
@@ -413,7 +424,7 @@ describe("tests por commit", () => {
     write("b.txt", "b2\n");
     const [id] = Object.values(await hunkIds());
 
-    const result = await run([{ message: "feat: b", hunks: [id!], tests: ["x"] }]);
+    const result = await run([{ message: withBody("feat: b"), hunks: [id!], tests: ["x"] }]);
 
     expect(result.outcome).toBe("ok");
     expect(existsSync(join(lease.path, "installed.flag"))).toBe(false);
@@ -431,7 +442,7 @@ describe("hooks del repo", () => {
     chmodSync(hook, 0o755);
     const before = git("status", "--porcelain", "--untracked-files=all");
 
-    const result = await run([{ message: "feat: b", hunks: [id!] }]);
+    const result = await run([{ message: withBody("feat: b"), hunks: [id!] }]);
 
     expect(result.outcome).toBe("hook-failed");
     expect(result.output).toEqual({
@@ -454,7 +465,7 @@ describe("hooks del repo", () => {
     writeFileSync(hook, `#!/bin/sh\necho "gh=$GH_TOKEN anthropic=$ANTHROPIC_API_KEY" > ${seen}\n`);
     chmodSync(hook, 0o755);
 
-    const result = await run([{ message: "feat: b", hunks: [id!] }]);
+    const result = await run([{ message: withBody("feat: b"), hunks: [id!] }]);
 
     expect(result.outcome).toBe("ok");
     expect(readFileSync(seen, "utf8")).toBe("gh= anthropic=\n");
@@ -469,7 +480,7 @@ describe("hooks del repo", () => {
     writeFileSync(hook, "#!/bin/sh\necho formateado > fmt.txt\ngit add fmt.txt\n");
     chmodSync(hook, 0o755);
 
-    const result = await run([{ message: "feat: b", hunks: [id!] }]);
+    const result = await run([{ message: withBody("feat: b"), hunks: [id!] }]);
 
     expect(result.outcome).toBe("replan");
     expect(result.output).toEqual({ failures: expect.stringMatching(/^El árbol de los commits no es el del worktree.*\n.*fmt\.txt/) });
@@ -484,7 +495,7 @@ test("el lease vence antes de aplicar: no se hace nada", async () => {
   workspaces.release(lease);
   const other = await workspaces.acquire({ repo: "repo_r1", branch: "cla-43", base: "main", runId: newId("run") as RunId });
   try {
-    await expect(run([{ message: "feat: b", hunks: [id!] }])).rejects.toThrow(/ya no es el vigente/);
+    await expect(run([{ message: withBody("feat: b"), hunks: [id!] }])).rejects.toThrow(/ya no es el vigente/);
     expect(git("rev-parse", "HEAD")).toBe(base);
   } finally {
     workspaces.release(other);

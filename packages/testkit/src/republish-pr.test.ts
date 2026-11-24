@@ -233,8 +233,8 @@ result:
     summary: "Dos commits"
     payload:
       commits:
-        - { message: "feat(transfers): validate and round the transfer amount", hunks: [h2], tests: [], whyAtomic: "uno" }
-        - { message: "test(transfers): log a created transfer", hunks: [h1], tests: [], whyAtomic: "dos" }
+        - { message: "feat(transfers): validate and round the transfer amount\\n\\nReject nonpositive transfers before rounding the amount.", hunks: [h2], tests: [], whyAtomic: "uno" }
+        - { message: "test(transfers): log a created transfer\\n\\nMake the created transfer observable in the test.", hunks: [h1], tests: [], whyAtomic: "dos" }
       pr: { title: "feat: x", body: "x" }
       notes: []
 `,

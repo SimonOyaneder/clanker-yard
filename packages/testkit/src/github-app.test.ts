@@ -128,7 +128,7 @@ function publishArgs() {
   return publish.args.parse({
     ws: { workspaceId, path, branch, baseSha, fencingToken },
     plan: {
-      commits: [{ message: "feat: add feature", hunks: ["h1"], tests: [] }],
+      commits: [{ message: "feat: add feature\n\nExpose the new behavior on the feature branch.", hunks: ["h1"], tests: [] }],
       pr: { title: "[CLA-100] Add feature", body: "## Contexto\n\nPor qué se hace.\n\n## Tests\n\n- [x] Tests unitarios" },
     },
   });

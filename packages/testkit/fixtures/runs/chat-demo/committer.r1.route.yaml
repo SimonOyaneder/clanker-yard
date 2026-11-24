@@ -7,4 +7,4 @@ result:
     summary: "Un commit con los cambios del chat"
     payload:
       commits:
-        - { message: "docs: notas pedidas en el chat", hunks: "$brief.payload.hunks", tests: [], whyAtomic: "Solo agrega las notas que pidió la persona en el chat." }
+        - { message: "docs: notas pedidas en el chat\n\nConserva las instrucciones para quien revise el PR.", hunks: "$brief.payload.hunks", tests: [], whyAtomic: "Solo agrega las notas que pidió la persona en el chat." }

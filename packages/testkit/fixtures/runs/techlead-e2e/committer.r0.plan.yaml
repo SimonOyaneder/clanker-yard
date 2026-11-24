@@ -14,7 +14,7 @@ result:
     summary: "Dos commits"
     payload:
       commits:
-        - { message: "feat(transfers): validate and round the transfer amount", hunks: [h2], tests: [], whyAtomic: "La implementación es un solo cambio" }
-        - { message: "test(transfers): log a created transfer", hunks: [h1], tests: [src/transfer.test.ts], whyAtomic: "La prueba se puede revertir sola" }
+        - { message: "feat(transfers): validate and round the transfer amount\n\nReject nonpositive transfers before rounding the amount.", hunks: [h2], tests: [], whyAtomic: "La implementación es un solo cambio" }
+        - { message: "test(transfers): log a created transfer\n\nMake the created transfer observable in the test.", hunks: [h1], tests: [src/transfer.test.ts], whyAtomic: "La prueba se puede revertir sola" }
       pr: { title: "feat(transfers): validate and round the transfer amount", body: "Agrega createTransfer: valida que el monto sea positivo y lo redondea." }
       notes: []

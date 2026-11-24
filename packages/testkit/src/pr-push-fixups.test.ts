@@ -103,8 +103,8 @@ beforeEach(async () => {
       ws: { workspaceId, path, branch, baseSha, fencingToken },
       plan: {
         commits: [
-          { message: "feat: top", hunks: ["h1"], tests: [] },
-          { message: "feat: bottom", hunks: ["h2"], tests: [] },
+          { message: "feat: top\n\nKeep the change near the top independent of the bottom edit.", hunks: ["h1"], tests: [] },
+          { message: "feat: bottom\n\nAllow the last lines to be updated independently.", hunks: ["h2"], tests: [] },
         ],
         pr: { title: "[CLA-56] fixups", body: "" },
       },
@@ -140,7 +140,7 @@ const inCommit = (sha: string) => local("show", "--format=", sha);
 async function commitAndPush(content: string, message: string) {
   write("c.txt", content);
   local("add", "c.txt");
-  local("commit", "--quiet", "--message", message);
+  local("commit", "--quiet", "--message", message, "--message", "Keep this edit independently addressable.");
   await workspaces.push(args().ws);
 }
 
@@ -243,12 +243,13 @@ describe("pr.pushFixups", () => {
   test("con el reporte del committer, los hunks sin dueño salen como commits nuevos y se pushea todo", async () => {
     write("c.txt", fixed());
     write("nuevo.txt", "algo nuevo\n");
-    const route = { commits: [{ message: "feat: add nuevo", hunks: ["h3"] }] };
+    const route = { commits: [{ message: "feat: add nuevo\n\nEl archivo nuevo cubre un caso distinto de los arreglos existentes.", hunks: ["h3"] }] };
 
     const result = await pushFixups.run(args({ route, items: [{ id: "nuevo", path: "nuevo.txt" }] }), durableCtx());
 
     expect(subjects("HEAD")).toEqual(["feat: top", "feat: bottom", "feat: add nuevo"]);
     expect(inCommit(shaOf("feat: add nuevo"))).toContain("+algo nuevo");
+    expect(remote("log", "-1", "--format=%b", remoteSha())).toBe("El archivo nuevo cubre un caso distinto de los arreglos existentes.");
     expect(remoteSha()).toBe(local("rev-parse", "HEAD"));
     expect(result).toMatchObject({ outcome: "ok", output: { byItem: { nuevo: shaOf("feat: add nuevo") } } });
   });
@@ -265,13 +266,24 @@ describe("pr.pushFixups", () => {
     expect(result).toMatchObject({ outcome: "ok", output: { byItem: { nuevo: shaOf("feat: top") } } });
   });
 
+  test("sin cuerpo para un commit nuevo devuelve el motivo al committer antes de pushear", async () => {
+    const head = remoteSha();
+    write("nuevo.txt", "algo nuevo\n");
+    const route = { commits: [{ message: "feat: add nuevo", hunks: ["h1"] }] };
+    const result = await pushFixups.run(args({ route }), durableCtx());
+
+    expect(result).toMatchObject({ outcome: "route", output: { failures: expect.stringContaining("explica en el cuerpo") } });
+    expect(remoteSha()).toBe(head);
+    expect(local("rev-parse", "HEAD")).toBe(head);
+  });
+
   test("un commit nuevo que repite el título de uno del PR, o un into que no nombra uno, vuelve a route con el motivo", async () => {
     write("nuevo.txt", "algo nuevo\n");
     write("otro.txt", "otro\n");
     const head = local("rev-parse", "HEAD");
     const route = {
       commits: [
-        { message: "feat: top", hunks: ["h1"] },
+        { message: "feat: top\n\nKeep the change near the top independent of the bottom edit.", hunks: ["h1"] },
         { message: "", hunks: ["h2"], into: "0000000" },
       ],
     };
@@ -345,7 +357,7 @@ describe("pr.pushFixups", () => {
     // Un tercer commit con el subject del primero, hecho a mano y pusheado como lo dejó la corrida.
     write("c.txt", file(lines(30)).replace("l2\n", "top\n").replace("l28\n", "bottom\n").replace("l10\n", "ten\n"));
     local("add", "c.txt");
-    local("commit", "--quiet", "--message", "feat: top");
+    local("commit", "--quiet", "--message", "feat: top", "--message", "Exercise routing with a duplicate subject.");
     await workspaces.push(args().ws);
     expect(shaOf("feat: top").split("\n")).toHaveLength(2);
     write("c.txt", file(lines(30)).replace("l2\n", "top\n").replace("l28\n", "bottom\n").replace("l10\n", "ten fixed\n"));
@@ -392,10 +404,10 @@ describe("pr.pushFixups", () => {
     const mx = file(lines(20, "m"));
     write("mx.txt", mx);
     local("add", "mx.txt");
-    local("commit", "--quiet", "--message", "feat: mx");
+    local("commit", "--quiet", "--message", "feat: mx", "--message", "Give the file an identifiable creator.");
     write("mx.txt", mx + file(lines(5, "t")));
     local("add", "mx.txt");
-    local("commit", "--quiet", "--message", "feat: tail");
+    local("commit", "--quiet", "--message", "feat: tail", "--message", "Assign the adjacent lines to a later commit.");
     await commitAndPush(file(lines(30)).replace("l2\n", "top\n").replace("l28\n", "bottom\n").replace("l15\n", "later\n"), "feat: later");
     write("mx.txt", mx.replace("m1\n", "m1\nm added\n") + file(lines(5, "t")).replace("t3\n", "t3\nt added\n"));
 
@@ -559,7 +571,7 @@ describe("pr.pushFixups con un PR local", () => {
     expect(local("rev-parse", "HEAD")).toBe(from);
     expect(store.db.$client.prepare("SELECT head_sha FROM pull_requests").get()).toEqual({ head_sha: from });
 
-    const route = { commits: [{ message: "feat: add nuevo", hunks: ["h1"], ...(destination === "into" && { into: top }) }] };
+    const route = { commits: [{ message: "feat: add nuevo\n\nEl archivo nuevo cubre un caso distinto de los arreglos existentes.", hunks: ["h1"], ...(destination === "into" && { into: top }) }] };
     const result = await pushFixups.run(args({ route, items: [{ id: "nuevo", path: "nuevo.txt" }] }), durableCtx());
 
     const head = local("rev-parse", "HEAD");

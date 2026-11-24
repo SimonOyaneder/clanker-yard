@@ -1,6 +1,6 @@
 import { GitError, isAncestor } from "../git/git";
 import { snapshotTree } from "../git/tree";
-import { cleanMessage, CONVENTIONAL_COMMIT } from "./apply";
+import { cleanMessage, commitBodyProblem, CONVENTIONAL_COMMIT } from "./apply";
 import { FIXUP_PREFIX } from "./route";
 import { excerpt } from "../workspaces/exec";
 import type { Workspaces, WorkspaceRef } from "../workspaces/workspaces";
@@ -97,6 +97,10 @@ async function messageProblems(workspaces: Workspaces, ws: WorkspaceRef, knownSh
     while (target.startsWith(FIXUP_PREFIX)) target = target.slice(FIXUP_PREFIX.length);
     if (!pattern.test(target)) problems.push(`${sha} "${subject}": el mensaje no cumple ${pattern}`);
     else if (cleanMessage(message) !== message) problems.push(`${sha} "${subject}": el mensaje firma el commit como hecho por una IA`);
+    else {
+      const bodyProblem = commitBodyProblem(message);
+      if (bodyProblem) problems.push(`${sha} "${subject}": ${bodyProblem}`);
+    }
   }
   if (problems.length === 0) return undefined;
   return `Commits del agente con un mensaje que no se puede pushear; su trabajo vuelve sin commitear:\n${problems.join("\n")}`;

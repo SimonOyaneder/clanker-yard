@@ -107,7 +107,7 @@ beforeEach(async () => {
   const published = await publish.run(
     publish.args.parse({
       ws: { workspaceId, path, branch, baseSha, fencingToken },
-      plan: { commits: [{ message: "feat: mine", hunks: ["h1"], tests: [] }], pr: { title: "[CLA-75] rebase", body: "" } },
+      plan: { commits: [{ message: "feat: mine\n\nKeep the local change when the base advances.", hunks: ["h1"], tests: [] }], pr: { title: "[CLA-75] rebase", body: "" } },
     }),
     ctx(),
   );

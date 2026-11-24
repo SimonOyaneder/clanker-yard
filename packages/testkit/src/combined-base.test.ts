@@ -136,7 +136,7 @@ async function publishPr(branch: string, base: string, files: Record<string, str
   const published = await publish.run(
     publish.args.parse({
       ws: { workspaceId, path, branch, baseSha, fencingToken },
-      plan: { commits: [{ message: `feat: ${branch}`, hunks: ["h1"], tests: [] }], pr: { title: `[${branch}] cambio`, body: "Cambia cosas." } },
+      plan: { commits: [{ message: `feat: ${branch}\n\nKeep the change to ${branch} independently reviewable.`, hunks: ["h1"], tests: [] }], pr: { title: `[${branch}] cambio`, body: "Cambia cosas." } },
     }),
     actionCtx,
   );

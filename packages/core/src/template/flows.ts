@@ -156,7 +156,7 @@ export const DE_ISSUE_A_PR: FlowDef = {
       type: "agent",
       role: "committer",
       mode: "plan",
-      brief: { ws: "$ws", cuts: "$implement.cuts", issue: "$run.subject" },
+      brief: { ws: "$ws", cuts: "$implement.cuts", issue: "$run.subject", failures: "$prev.failures" },
       on: { ok: "publish" },
     },
     publish: {
@@ -253,7 +253,7 @@ export const PR_FEEDBACK: FlowDef = {
       type: "agent",
       role: "committer",
       mode: "route",
-      brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits" },
+      brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits", failures: "$fixups.failures" },
       on: { ok: "fixups" },
     },
     "reply-fixed": {
@@ -329,7 +329,7 @@ export const PR_FEEDBACK: FlowDef = {
       type: "agent",
       role: "committer",
       mode: "route",
-      brief: { hunks: "$ci-bots-fixups.unrouted", commits: "$ci-bots-fixups.commits" },
+      brief: { hunks: "$ci-bots-fixups.unrouted", commits: "$ci-bots-fixups.commits", failures: "$ci-bots-fixups.failures" },
       on: { ok: "ci-bots-fixups" },
     },
     "ci-bots-reply-fixed": {
@@ -1028,7 +1028,7 @@ export const COUNCIL: FlowDef = {
       type: "agent",
       role: "committer",
       mode: "route",
-      brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits" },
+      brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits", failures: "$fixups.failures" },
       on: { ok: "fixups" },
     },
     reply: {
@@ -1149,7 +1149,7 @@ export const REPUBLISH_PR: FlowDef = {
       type: "agent",
       role: "committer",
       mode: "plan",
-      brief: { ws: "$ws", cuts: [], issue: "$run.subject" },
+      brief: { ws: "$ws", cuts: [], issue: "$run.subject", failures: "$prev.failures" },
       on: { ok: "publish", error: "discard" },
     },
     publish: {
@@ -1252,7 +1252,7 @@ const chatApplyNodes = (next: string): Record<string, Node> => ({
     type: "agent",
     role: "committer",
     mode: "route",
-    brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits" },
+    brief: { hunks: "$fixups.unrouted", commits: "$fixups.commits", failures: "$fixups.failures" },
     on: { ok: "fixups" },
   },
   restack: {

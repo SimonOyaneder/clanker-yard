@@ -137,7 +137,7 @@ async function openPr(branch: string, base: string, files: Record<string, string
   const published = await publish.run(
     publish.args.parse({
       ws: { workspaceId, path, branch, baseSha, fencingToken },
-      plan: { commits: [{ message: `feat: ${branch}`, hunks: ["h1"], tests: [] }], pr: { title: `[${branch}] cambio`, body } },
+      plan: { commits: [{ message: `feat: ${branch}\n\nKeep the change to ${branch} independently reviewable.`, hunks: ["h1"], tests: [] }], pr: { title: `[${branch}] cambio`, body } },
     }),
     ctx(),
   );

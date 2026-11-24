@@ -8,6 +8,7 @@ import { diffBetween, listHunks, snapshotTree, type Hunk } from "../git/tree";
 import type { Recipes } from "../recipe/recipe";
 import { excerpt } from "../workspaces/exec";
 import { splitMoves } from "./split-moves";
+import { FIXUP_PREFIX } from "./route";
 import { WorkspaceOutput, type Workspaces, type WorkspaceRef } from "../workspaces/workspaces";
 import { messageOf } from "../errors/format";
 
@@ -201,6 +202,14 @@ export function cleanMessage(message: string): string {
     .trim();
 }
 
+export function commitBodyProblem(message: string): string | undefined {
+  if (message.startsWith(FIXUP_PREFIX)) return;
+  const [, separator, ...body] = message.split("\n");
+  if (separator?.trim() !== "" || !body.some((line) => line.trim() !== "")) {
+    return "separa el título con una línea en blanco y explica en el cuerpo por qué hace falta el cambio";
+  }
+}
+
 /** Lo que impide aplicar el plan, una línea por problema. Vacío: el plan cubre cada hunk una vez. */
 function planProblems(
   commits: { hunks: string[] }[],
@@ -215,6 +224,8 @@ function planProblems(
     const subject = messages[i]!.split("\n")[0]!;
     const label = `commit ${i + 1} "${subject}"`;
     if (!pattern.test(subject)) problems.push(`[${label}] el mensaje no cumple ${pattern}`);
+    const bodyProblem = commitBodyProblem(messages[i]!);
+    if (bodyProblem) problems.push(`[${label}] ${bodyProblem}`);
     if (commit.hunks.length === 0) problems.push(`[${label}] no tiene hunks`);
     for (const id of commit.hunks) {
       const owner = assigned.get(id);
