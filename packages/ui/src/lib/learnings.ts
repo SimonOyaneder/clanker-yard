@@ -31,9 +31,6 @@ export const SOURCE_HINT: Record<LearningSource, string> = {
 
 export const SOURCES = Object.keys(SOURCE_LABEL) as LearningSource[]
 
-/** Cuántos learnings aprobados caben en un brief (`MAX_LEARNINGS` del core): los del repo primero, luego los más recientes. */
-export const BRIEF_LIMIT = 10
-
 /** Una decisión que todavía se puede deshacer: se manda al core recién al pasar `UNDO_MS`. */
 export type TriageAction = "approve" | "reject"
 

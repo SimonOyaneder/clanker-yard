@@ -1,6 +1,9 @@
 import * as z from "zod";
 import { LearningId, ProjectId, RepoId, RunId } from "./domain";
 
+export const MAX_BRIEF_LEARNINGS = 10;
+export const RESERVED_PROJECT_LEARNINGS = 2;
+
 export const LearningStatus = z.enum(["proposed", "approved", "rejected", "archived"]);
 export type LearningStatus = z.infer<typeof LearningStatus>;
 

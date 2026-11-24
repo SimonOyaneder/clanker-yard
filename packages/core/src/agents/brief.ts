@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { Brief, type ArtifactKind, type IssueDetail, type IssueRef, type Report } from "@clanker/api";
+import { Brief, MAX_BRIEF_LEARNINGS, type ArtifactKind, type IssueDetail, type IssueRef, type Report } from "@clanker/api";
 import type { Artifacts } from "../artifacts/artifacts";
 import { diffBetween, excludeRunDir, listHunks, RUN_DIR, snapshotTree } from "../git/tree";
 import type { WorkspaceLease, WorkspaceRef, Workspaces } from "../workspaces/workspaces";
@@ -23,7 +23,6 @@ export function briefOfMessage(message: string): Brief | undefined {
 export { RUN_DIR } from "../git/tree";
 
 export const MAX_CRITERIA = 5;
-export const MAX_LEARNINGS = 10;
 export const MAX_PROPOSED_LEARNINGS = 30;
 const MAX_CRITERION_CHARS = 200;
 
@@ -47,7 +46,7 @@ export interface BriefRequest {
    * primera ronda) ese archivo no existe.
    */
   since?: string;
-  /** Aprobados del proyecto. Pasan los primeros `MAX_LEARNINGS`. */
+  /** Aprobados elegidos para este repo, proyecto y rol. */
   learnings?: string[];
   /** Propuestos pendientes, solo para un rol que propone. Pasan los primeros `MAX_PROPOSED_LEARNINGS`. */
   proposedLearnings?: string[];
@@ -124,7 +123,7 @@ export function createBriefs({
         base: `origin/${lease.baseRef}`,
         mode,
         artifacts: paths,
-        ...(learnings?.length && { learnings: learnings.slice(0, MAX_LEARNINGS) }),
+        ...(learnings?.length && { learnings: learnings.slice(0, MAX_BRIEF_LEARNINGS) }),
         ...(proposedLearnings?.length && { proposedLearnings: proposedLearnings.slice(0, MAX_PROPOSED_LEARNINGS) }),
         payload,
       };

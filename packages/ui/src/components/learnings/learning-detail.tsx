@@ -1,4 +1,4 @@
-import type { Learning } from "@clanker/api"
+import { MAX_BRIEF_LEARNINGS, RESERVED_PROJECT_LEARNINGS, type Learning } from "@clanker/api"
 import { Check, Copy, MoreHorizontal, Pencil, ScrollText, Undo2, X } from "lucide-react"
 import { useState } from "react"
 import { Ago, Hint, Shortcut } from "@/components/common"
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ChipsInput } from "@/components/settings-form/settings-fields"
 import { copy } from "@/lib/clipboard"
-import { approveLabel, BRIEF_LIMIT, capsOf, rejectLabel } from "@/lib/learnings"
+import { approveLabel, capsOf, rejectLabel } from "@/lib/learnings"
 
 export interface LearningPatchInput {
   text: string
@@ -65,7 +65,7 @@ export function LearningDetail({ learning, scope, knownRoles, editing, onEditing
           </dl>
           <p className="text-[13px] text-muted-foreground">
             {learning.status === "approved"
-              ? `Entra al brief de las corridas de ${scope} que lo necesiten. Cada brief lleva a lo más ${BRIEF_LIMIT} aprobados: los del repo primero y luego los más recientes.`
+              ? `Puede entrar al brief de las corridas de ${scope}. De los ${MAX_BRIEF_LEARNINGS} cupos, se reservan hasta ${RESERVED_PROJECT_LEARNINGS} para el proyecto cuando hay learnings propios. En cada alcance tienen prioridad los específicos del rol.`
               : learning.status === "proposed"
                 ? `Al aprobarlo entra, desde la próxima corrida, al brief de ${scope}. Mientras tanto ningún agente lo ve.`
                 : learning.status === "rejected"

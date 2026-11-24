@@ -152,6 +152,20 @@ describe("forBrief", () => {
     expect(learnings.forBrief({ projectId: project, role: "dev" })).toEqual(["del proyecto"]);
     expect(learnings.forBrief({ role: "dev" })).toEqual([]);
   });
+
+  test("un repo lleno conserva las excepciones del proyecto y las del rol; sin ellas aprovecha los diez cupos", () => {
+    approve("Solo en este proyecto");
+    approve("Excepción del dev", { repoId: repo, roles: ["dev"] });
+    for (let i = 1; i <= 12; i++) approve(`General ${i}`, { repoId: repo });
+    approve("general 12.");
+    approve("Caso al borrar un miembro");
+
+    expect(learnings.forBrief({ projectId: project, repoId: repo, role: "dev" })).toEqual([
+      "Excepción del dev", "General 12", "General 11", "General 10", "General 9", "General 8", "General 7", "General 6",
+      "Caso al borrar un miembro", "Solo en este proyecto",
+    ]);
+    expect(learnings.forBrief({ repoId: repo, role: "review-tests" })).toHaveLength(10);
+  });
 });
 
 describe("archive", () => {

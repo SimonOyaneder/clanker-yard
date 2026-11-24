@@ -1,4 +1,5 @@
 import type { Learning, LearningFilter, LearningVerdict, LearningId, LearningPatch, LearningSource, Origin, ProjectId, RepoId, RunId } from "@clanker/api";
+import { MAX_BRIEF_LEARNINGS, RESERVED_PROJECT_LEARNINGS } from "@clanker/api";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { AgentRuntime } from "../agents/runtime";
 import { newId } from "../store/conventions";
@@ -45,8 +46,8 @@ export interface Learnings {
    */
   update(patch: LearningPatch, by: Origin): Learning;
   /**
-   * Los textos `approved` que entran al brief de ese alcance: los del repo primero y luego los del
-   * proyecto, cada grupo del más reciente al más antiguo. El brief corta en `MAX_LEARNINGS`.
+   * Los aprobados del rol, sin repetir texto entre alcances. En cada alcance van primero los elegidos
+   * para ese rol, luego por recencia. Un repo lleno no desplaza todas las excepciones del proyecto.
    */
   forBrief(scope: BriefScope): string[];
   /** Los textos `proposed` del alcance, del más reciente al más antiguo: el brief de quien propone los lleva para no repetirlos. */
@@ -156,15 +157,23 @@ export function createLearnings({ store, runtime }: { store: Store; runtime?: Ag
       // Sin proyecto ni repo no hay alcance: un `or` vacío no filtraría nada y traería los de todos.
       const scope = inScope({ projectId, repoId });
       if (scope.length === 0) return [];
-      return store.db
+      const eligible = store.db
         .select()
         .from(learnings)
         .where(and(eq(learnings.status, "approved"), or(...scope)))
         .orderBy(desc(learnings.id))
         .all()
         .filter((l) => l.roles.length === 0 || l.roles.includes(role))
-        .sort((a, b) => Number(b.repoId !== null) - Number(a.repoId !== null))
-        .map((l) => l.text);
+        .sort((a, b) => Number(b.roles.length > 0) - Number(a.roles.length > 0));
+      const repo = eligible.filter((l) => l.repoId !== null).map((l) => l.text);
+      const project = eligible.filter((l) => l.projectId !== null).map((l) => l.text);
+      const first = repo.slice(0, MAX_BRIEF_LEARNINGS - RESERVED_PROJECT_LEARNINGS);
+      const seen = new Set(first.map(normalizeLearning));
+      const fromProject = project.filter((text) => !seen.has(normalizeLearning(text)));
+      const reserved = fromProject.slice(0, RESERVED_PROJECT_LEARNINGS);
+      for (const text of reserved) seen.add(normalizeLearning(text));
+      const extraRepo = repo.slice(first.length).filter((text) => !seen.has(normalizeLearning(text)));
+      return [...first, ...reserved, ...extraRepo, ...fromProject.slice(reserved.length)].slice(0, MAX_BRIEF_LEARNINGS);
     },
   };
 }
