@@ -292,13 +292,13 @@ test("sin breakers no hay franja", async () => {
 test("el botón principal pausa el proyecto activo y reanuda el pausado", async () => {
   const active = await setup()
   const pause = vi.spyOn(active.data, "pauseProject")
-  fireEvent.click(screen.getByRole("button", { name: /Pausar/ }))
+  fireEvent.click(screen.getByRole("button", { name: "Pausar desarrollo" }))
   expect(pause).toHaveBeenCalledWith(active.project.id)
 
   cleanup()
   const paused = await setup({ project: { status: "paused" } })
   const resume = vi.spyOn(paused.data, "resumeProject")
-  fireEvent.click(screen.getByRole("button", { name: /Reanudar/ }))
+  fireEvent.click(screen.getByRole("button", { name: "Reanudar desarrollo" }))
   expect(resume).toHaveBeenCalledWith(paused.project.id)
 })
 

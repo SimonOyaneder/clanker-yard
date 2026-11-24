@@ -357,8 +357,12 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
         {current && !onRunTab && current.status !== "archived" ? (
           <CommandGroup heading="Este proyecto">
             <CommandItem onSelect={run(() => (current.status === "active" ? commands.pauseProject(current) : commands.resumeProject(current)))}>
-              {current.status === "active" ? <Pause /> : <Play />} {current.status === "active" ? "Pausar el proyecto" : "Reanudar el proyecto"}
+              {current.status === "active" ? <Pause /> : <Play />} {current.status === "active" ? "Pausar desarrollo" : "Reanudar desarrollo"}
               <CommandShortcut>⇧⌘Y</CommandShortcut>
+            </CommandItem>
+            <CommandItem onSelect={run(() => void actions.toggleMaintenance(current))}>
+              {current.maintenancePaused ? <Play /> : <Pause />} {current.maintenancePaused ? "Reanudar mantenimiento" : "Pausar mantenimiento"}
+              <CommandShortcut>⇧⌘U</CommandShortcut>
             </CommandItem>
             {queue ? (
               <CommandItem value="cambiar paralelismo" onSelect={() => setParallelPage(true)}>

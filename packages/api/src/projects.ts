@@ -84,6 +84,8 @@ export const ClankerProject = z.object({
   /** Categorías que el proyecto ajusta a mano sobre las del adapter. */
   statusMapping: StatusMapping,
   status: ProjectStatus,
+  /** Impide admitir nuevas corridas de mantenimiento del proyecto, independientemente de su cola dev. */
+  maintenancePaused: z.boolean(),
   /** Pisa los defaults de `params` del flujo (por ejemplo `reviewRounds`) sin crear una versión del flujo. */
   flowParams: z.record(z.string(), z.unknown()),
   /** Tope de gasto por corrida; `null` es sin tope. */
@@ -167,6 +169,7 @@ const patchShape = {
   /** Reemplaza el mapeo entero; cambiarlo hace que la próxima sincronización relea todas las issues del proyecto. */
   statusMapping: StatusMapping.optional(),
   status: ProjectStatus.optional(),
+  maintenancePaused: z.boolean().optional(),
   flowParams: z.record(z.string(), z.unknown()).optional(),
   maxCostUsd: MaxCostUsd.optional(),
 };

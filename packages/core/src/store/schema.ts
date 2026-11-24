@@ -368,6 +368,7 @@ export const projects = sqliteTable(
     maxStackDepth: integer("max_stack_depth"),
     stackMode: text("stack_mode").$type<StackMode>().notNull().default("remote"),
     status: text().$type<ProjectStatus>().notNull().default("active"),
+    maintenancePaused: integer("maintenance_paused", { mode: "boolean" }).notNull().default(false),
     flowParams: text("flow_params", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
     queueFilter: text("queue_filter", { mode: "json" }).$type<IssueFilter>().notNull().default({}),
     conventions: text({ mode: "json" }).$type<Conventions>().notNull().default({}),

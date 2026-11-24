@@ -188,6 +188,7 @@ export function createProjects({ store, defs }: { store: Store; defs: Defs }): P
           stackMode: input.stackMode,
           statusMapping: input.statusMapping,
           status: "active",
+          maintenancePaused: false,
           flowParams: input.flowParams,
           queueFilter: input.queueFilter,
           conventions: input.conventions,

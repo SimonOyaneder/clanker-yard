@@ -368,6 +368,7 @@ function Shell() {
   const caps = useMemo(() => (openRunDetail ? runCaps(openRunDetail, shapeOf(openRunDetail.flowDef, openRunDetail.steps)) : null), [openRunDetail])
 
   useShellShortcuts({
+    toggleMaintenance: projectActions.toggleMaintenance,
     module,
     barSlugs,
     selectProject,

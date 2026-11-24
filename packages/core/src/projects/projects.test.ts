@@ -56,6 +56,7 @@ describe("create", () => {
       stackMode: "local",
       statusMapping: {},
       status: "active",
+      maintenancePaused: false,
       flowParams: {},
       maxCostUsd: null,
     });
