@@ -184,6 +184,7 @@ export function createProjects({ store, defs }: { store: Store; defs: Defs }): P
           defaultProfileId,
           parallel: input.parallel ?? fallback.parallel,
           stackOn: input.stackOn,
+          maxStackDepth: input.maxStackDepth ?? null,
           stackMode: input.stackMode,
           statusMapping: input.statusMapping,
           status: "active",

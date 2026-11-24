@@ -11,7 +11,7 @@ import type { Tracker } from "../tracker/tracker";
 import type { Trackers } from "../tracker/trackers";
 import type { Repos } from "../repos/repos";
 import { type QueuePrFact, tickDev } from "./queue";
-import { openOwnedPrsOfIssues, prRefOf } from "../github/pr-rows";
+import { openOwnedPrsOfIssues, openPrDepths, prRefOf } from "../github/pr-rows";
 import { BadRequestError } from "../errors/domain";
 import { messageOf } from "../errors/format";
 
@@ -44,9 +44,10 @@ export interface ProjectQueue {
 
 export function createProjectQueue({ store, projects, issues, repos, trackers, prs }: ProjectQueueDeps): ProjectQueue {
   /** Los PRs abiertos del sistema de estas issues, con el CI de cada uno si el proyecto apila sobre CI verde. */
-  async function prFacts(issueIds: readonly IssueId[], readCi: boolean): Promise<QueuePrFact[]> {
+  async function prFacts(issueIds: readonly IssueId[], readCi: boolean, readDepth = false): Promise<QueuePrFact[]> {
     if (issueIds.length === 0) return [];
     const rows = openOwnedPrsOfIssues(store.db, [...issueIds]);
+    const depths = readDepth && rows.length ? openPrDepths(store.db, [...new Set(rows.map((row) => row.repoId))]) : undefined;
     const facts = await Promise.all(
       rows.map(async (row): Promise<QueuePrFact | undefined> => {
         const repo = repos.get(row.repoId);
@@ -57,6 +58,7 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
           key: row.state === "local" ? `${repo?.name ?? row.repoId}@${row.headRef}` : `${repo?.name ?? row.repoId}#${row.number}`,
           headRef: row.headRef,
           baseRef: row.baseRef,
+          depth: depths?.get(row.id) ?? 0,
         };
         if (fact.local || !readCi) return { ...fact, ci: "not_green" };
         const ref = prRefOf(repos, row);
@@ -106,7 +108,11 @@ export function createProjectQueue({ store, projects, issues, repos, trackers, p
       // Las issues con corridas siguen una cadena entre repos: de ellas solo importa qué PRs siguen abiertos.
       const ran = new Set(devRuns.map((run) => run.issueId));
       const chainIds = all.map((issue) => issue.id).filter((id) => ran.has(id) && !blockerIds.has(id));
-      const [me, prs, chainPrs] = await Promise.all([viewer, prFacts([...blockerIds], project.stackOn === "ci_green"), prFacts(chainIds, false)]);
+      const [me, prs, chainPrs] = await Promise.all([
+        viewer,
+        prFacts([...blockerIds], project.stackOn === "ci_green", (project.maxStackDepth ?? 0) > 0),
+        prFacts(chainIds, false),
+      ]);
       const skipped = new Set(store.db.select({ issueId: issueSkips.issueId }).from(issueSkips).all().map((row) => row.issueId));
       const boosted = new Map(store.db.select().from(issueBoosts).all().map((row) => [row.issueId, row.createdAt]));
       const repoNames = new Map(project.repos.map(({ repoId }) => [repoId, repos.get(repoId)?.name ?? repoId]));

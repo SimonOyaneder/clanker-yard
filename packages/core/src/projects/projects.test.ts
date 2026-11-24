@@ -52,6 +52,7 @@ describe("create", () => {
       conventions: {},
       parallel: 1,
       stackOn: "ci_green",
+      maxStackDepth: null,
       stackMode: "local",
       statusMapping: {},
       status: "active",

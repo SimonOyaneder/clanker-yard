@@ -365,6 +365,7 @@ export const projects = sqliteTable(
     defaultProfileId: text("default_profile_id"),
     parallel: integer().notNull().default(1),
     stackOn: text("stack_on").$type<StackOn>().notNull().default("ci_green"),
+    maxStackDepth: integer("max_stack_depth"),
     stackMode: text("stack_mode").$type<StackMode>().notNull().default("remote"),
     status: text().$type<ProjectStatus>().notNull().default("active"),
     flowParams: text("flow_params", { mode: "json" }).$type<Record<string, unknown>>().notNull(),

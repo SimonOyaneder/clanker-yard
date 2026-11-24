@@ -35,6 +35,7 @@ describe("exportar e importar la configuración de un proyecto", () => {
       statusMapping: { Blocked: "in_review" },
       defaultProfileId: "barato",
       parallel: 3,
+      maxStackDepth: 0,
       stackMode: "local",
       flowParams: { reviewRounds: 2 },
     }, origin);
@@ -52,6 +53,7 @@ describe("exportar e importar la configuración de un proyecto", () => {
       statusMapping: { Blocked: "in_review" },
       defaultProfileId: "barato",
       parallel: 3,
+      maxStackDepth: 0,
       stackMode: "local",
       flowParams: { reviewRounds: 2 },
       // No viaja la identidad del proyecto: ni su proyecto del tracker ni su cuenta.

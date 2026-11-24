@@ -131,6 +131,7 @@ export interface ProjectDraft {
   conventions: ConventionsDraft
   stackOn: StackOn
   stackMode: StackMode
+  maxStackDepth: string
   /** Cuántas corridas del proyecto a la vez; el core exige un entero de 1 en adelante. */
   parallel: string
   /** Vacío es sin tope. */
@@ -163,6 +164,7 @@ export function draftOf(project: ClankerProject, managed: readonly string[]): Pr
     },
     stackOn: project.stackOn,
     stackMode: project.stackMode,
+    maxStackDepth: project.maxStackDepth === null ? "" : String(project.maxStackDepth),
     parallel: String(project.parallel),
     maxCostUsd: project.maxCostUsd === null ? "" : String(project.maxCostUsd),
   }
@@ -230,6 +232,10 @@ export function validateProjectDraft(draft: ProjectDraft, params: readonly Param
 
   const parallel = parallelProblem(draft.parallel)
   if (parallel) problems.parallel = parallel
+  const depth = draft.maxStackDepth.trim()
+  if (depth && (!/^\d+$/.test(depth) || !Number.isSafeInteger(Number(depth)))) {
+    problems.maxStackDepth = "Escribe un entero de 0 en adelante o deja el campo vacío."
+  }
   const cost = maxCostProblem(draft.maxCostUsd)
   if (cost) problems.maxCostUsd = cost
 
@@ -298,6 +304,7 @@ export function patchOf(draft: ProjectDraft, base: ProjectDraft, project: Clanke
   if (!sameValue(draft.conventions, base.conventions)) patch.conventions = conventionsOf(draft.conventions, project.conventions)
   if (draft.stackOn !== base.stackOn) patch.stackOn = draft.stackOn
   if (draft.stackMode !== base.stackMode) patch.stackMode = draft.stackMode
+  if (draft.maxStackDepth.trim() !== base.maxStackDepth) patch.maxStackDepth = draft.maxStackDepth.trim() === "" ? null : Number(draft.maxStackDepth)
   if (draft.parallel.trim() !== base.parallel) patch.parallel = Number(draft.parallel)
   if (draft.maxCostUsd !== base.maxCostUsd) patch.maxCostUsd = draft.maxCostUsd.trim() === "" ? null : Number(draft.maxCostUsd)
   return patch
@@ -328,6 +335,7 @@ export function changedSections(patch: ProjectPatch): string[] {
     ["conventions", "convenciones"],
     ["stackOn", "apilado"],
     ["stackMode", "PRs apilados"],
+    ["maxStackDepth", "pisos del stack"],
     ["parallel", "corridas a la vez"],
     ["maxCostUsd", "tope de gasto"],
   ]

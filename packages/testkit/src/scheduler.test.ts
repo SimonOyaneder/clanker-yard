@@ -134,7 +134,7 @@ describe("el Scheduler del core", () => {
     expect(store.db.$client.prepare("SELECT status FROM combined_bases WHERE branch = ?").all(branch)).toEqual([{ status: "active" }]);
   });
 
-  test("una issue bloqueada por un PR local sale de su branch con stackOn ci_green", async () => {
+  test("una issue espera con tope 0 y sale de la branch del PR local al permitir el primer piso", async () => {
     repo.cleanup();
     repo = tempGitRepo({
       branches: { "cla-1-padre": [{ message: "feat: padre", files: { "padre.txt": "padre\n" } }] },
@@ -159,7 +159,13 @@ describe("el Scheduler del core", () => {
     const child = await client.issues.createLocal({ projectId: project.id, title: "Hijo" });
     await createLocalTracker({ store }).relate(parent.ref, "blocks", child.ref);
 
-    await client.projects.update({ id: project.id, status: "active", repos: [{ repoId, labels: [] }] });
+    await client.projects.update({ id: project.id, status: "active", maxStackDepth: 0, repos: [{ repoId, labels: [] }] });
+    await until(async () => {
+      expect(await client.projects.queue({ id: project.id })).toMatchObject([{ issue: { id: child.id }, state: "waiting", reason: expect.stringContaining("no apila PRs") }]);
+    });
+    await expect(client.runs.start({ projectId: project.id, issueId: child.id })).rejects.toThrow(/no apila PRs/);
+    expect(eventsOf(["issue.claimed"]).map((e) => e.payload.issueId)).not.toContain(child.id);
+    await client.projects.update({ id: project.id, maxStackDepth: 1 });
 
     await until(async () => {
       const runs = await client.runs.list({ projectId: project.id });

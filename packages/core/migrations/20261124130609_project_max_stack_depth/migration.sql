@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `max_stack_depth` integer;

@@ -43,6 +43,8 @@ export type StatusMapping = z.infer<typeof StatusMapping>;
 
 const ProjectRepos = z.array(ProjectRepo);
 const MaxCostUsd = z.number().positive().nullable();
+/** Pisos sobre el PR raíz (piso 0); `null` permite cualquier profundidad. */
+const MaxStackDepth = z.int().nonnegative().nullable();
 
 /**
  * Un proyecto de Clanker: una cola de issues de un tracker y el flujo con que se trabajan
@@ -76,6 +78,7 @@ export const ClankerProject = z.object({
   parallel: z.int().positive(),
   /** Cuándo una issue se apila sobre el PR de su bloqueante. */
   stackOn: StackOn,
+  maxStackDepth: MaxStackDepth,
   /** Si los PRs apilados se abren en GitHub o quedan locales hasta que se mergea su base. */
   stackMode: StackMode,
   /** Categorías que el proyecto ajusta a mano sobre las del adapter. */
@@ -110,6 +113,7 @@ export const NewProject = z
     /** Sin valor rige el default de proyectos nuevos de Ajustes (`ProjectDefaults`). */
     parallel: z.int().positive().optional(),
     stackOn: StackOn.default("ci_green"),
+    maxStackDepth: MaxStackDepth.optional(),
     stackMode: StackMode.default("local"),
     statusMapping: StatusMapping.default({}),
     flowParams: z.record(z.string(), z.unknown()).default({}),
@@ -158,6 +162,7 @@ const patchShape = {
   conventions: Conventions.optional(),
   parallel: z.int().positive().optional(),
   stackOn: StackOn.optional(),
+  maxStackDepth: MaxStackDepth.optional(),
   stackMode: StackMode.optional(),
   /** Reemplaza el mapeo entero; cambiarlo hace que la próxima sincronización relea todas las issues del proyecto. */
   statusMapping: StatusMapping.optional(),
@@ -214,6 +219,7 @@ export const ProjectConfig = z.strictObject({
   conventions: Conventions.default({}),
   parallel: z.int().positive().default(1),
   stackOn: StackOn.default("ci_green"),
+  maxStackDepth: MaxStackDepth.optional(),
   /** Sin valor, importar no lo cambia. */
   stackMode: StackMode.optional(),
   statusMapping: StatusMapping.default({}),

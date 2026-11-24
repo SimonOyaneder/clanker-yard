@@ -342,6 +342,8 @@ Carril maintenance (`docs/design.html#d-ops`, rebasePr, y la plantilla de rebase
 
 ## Stacks locales
 
+`maxStackDepth` en Ajustes del proyecto limita los pisos de la cola (`docs/design.html#d-ops`): la raíz vale 0; `null` es sin límite. Sobre una base combinada cuenta la cadena abierta más larga, también con PRs locales. Al superar el tope, la issue espera en la cola antes de reclamarla.
+
 Con `projects.stack_mode` en `local` (el default) un PR solo existe en GitHub si su base es la branch por defecto: el resto vive en la máquina como fila `local` de `pull_requests` (sin `number` ni `node_id`, con `title` y `body` guardados) hasta que se mergea su base, para no gastar CI. `pr.publish` lo guarda (outcome `local`), `stack.restack` lo restackea sin push (`promotable` son los que quedaron sobre la branch por defecto) y `pr.promote` lo publica en la misma fila: el id no cambia al publicarse. Nada de un PR local se pushea: el único push es el de `pr.promote`. Un conflicto al restackear emite `pr.conflict` con `local: true` y lo toma `rebase-conflicto-local` (`startTriggers` agrega `local` al payload antes de comparar el `filter`); `prs.publishLocal` (solo `ui`) adelanta la publicación apilado sobre su padre. En la cola, un padre local cumple cualquier `stackOn` si su corrida terminó `done`.
 
 - CLI y MCP editan título/cuerpo o agregan un commit por patch con lease y SHA explícito, sin push ni restack. Para publicar abren una solicitud (`github/local-publish.ts`): solo la app la aprueba, y un cambio de head, de metadatos o de destino invalida la aprobación. Es una extensión de `docs/design.html#d-ops` y `docs/design.html#mcp`; no cambia la publicación automática del stack.

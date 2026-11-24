@@ -36,13 +36,15 @@ export interface QueuePrFact {
   key: string;
   headRef: string;
   baseRef: string;
+  /** Profundidad en el stack abierto; solo se calcula con un tope positivo. */
+  depth: number;
   /** Solo se lee con `stackOn: "ci_green"`; `unread` es que GitHub no se pudo consultar (`ciError` dice por qué). */
   ci: "green" | "not_green" | "unread";
   ciError?: string;
 }
 
 export interface TickDevInput {
-  project: Pick<ClankerProject, "id" | "queueFilter" | "stackOn" | "repos">;
+  project: Pick<ClankerProject, "id" | "queueFilter" | "stackOn" | "maxStackDepth" | "repos">;
   /** La persona del tracker: sus issues y las sin dueño son elegibles. */
   me: Person;
   capabilities: TrackerCapabilities;
@@ -224,7 +226,12 @@ function judge(ref: IssueRef, repo: string | undefined, world: World): Verdict {
   if (cross.some((pr) => pr.local)) {
     return { kind: "waiting", reason: `espera a ${blocker.ref.key}: su PR es local, se publica cuando se mergee su base` };
   }
-  const stack = open.filter((pr) => pr.repoId === repo && stacksOn(pr, runs, world.project.stackOn));
+  const sameRepo = open.filter((pr) => pr.repoId === repo);
+  const limit = world.project.maxStackDepth;
+  if (limit === 0 && sameRepo.length) return { kind: "waiting", reason: `espera a ${blocker.ref.key}: este proyecto no apila PRs` };
+  const stack = sameRepo.filter((pr) => stacksOn(pr, runs, world.project.stackOn));
+  const full = limit !== null && stack.find((pr) => pr.depth >= limit);
+  if (full) return { kind: "waiting", reason: `apilar sobre ${full.key} superaría el máximo de pisos del proyecto (${limit})` };
   if (stack.length > 0 || cross.length > 0) return { kind: "pr", stack, cross };
 
   // Aquí todo PR abierto del bloqueante es del mismo repo y no cumple `stackOn`: los que sirven ya volvieron arriba.

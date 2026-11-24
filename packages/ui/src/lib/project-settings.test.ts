@@ -33,6 +33,7 @@ const project = (extra: Partial<ClankerProject> = {}): ClankerProject => ({
   parallel: 1,
   stackOn: "ci_green",
   stackMode: "remote",
+  maxStackDepth: null,
   statusMapping: {},
   status: "active",
   flowParams: {},
@@ -88,6 +89,17 @@ test("sin cambios no hay patch; cada sección cambiada produce solo su campo", (
   expect(patchOf({ ...b, stackMode: "local" }, b, p, specs)).toEqual({ stackMode: "local" })
   expect(changedSections({ stackMode: "local" })).toEqual(["PRs apilados"])
   expect(patchOf({ ...b, maxCostUsd: "" }, { ...b, maxCostUsd: "3" }, project({ maxCostUsd: 3 }), specs)).toEqual({ maxCostUsd: null })
+})
+
+test("el tope de pisos distingue 0 de vacío y rechaza negativos y fracciones", () => {
+  const p = project({ maxStackDepth: 2 })
+  const b = base(p)
+  for (const bad of ["-1", "1.5", "dos"]) expect(validateProjectDraft({ ...b, maxStackDepth: bad }, specs).maxStackDepth).toBeDefined()
+  for (const [text, value] of [["0", 0], ["", null]] as const) {
+    const draft = { ...b, maxStackDepth: text }
+    expect(validateProjectDraft(draft, specs)).toEqual({})
+    expect(patchOf(draft, b, p, specs)).toEqual({ maxStackDepth: value })
+  }
 })
 
 test("las corridas a la vez del proyecto piden un entero de 1 en adelante y se guardan como número", () => {
