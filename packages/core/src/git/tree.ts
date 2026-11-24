@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { git, GitError, gitRaw } from "./git";
+import { git, GitError, gitRaw, tryGit } from "./git";
 
 export const RUN_DIR = ".clanker-run";
 
@@ -49,6 +49,14 @@ export async function snapshotTree(cwd: string): Promise<string> {
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** Sin base previa (o si git ya la podó), se revisa. No se ignora la indentación: puede cambiar el comportamiento. */
+export async function roundChange(cwd: string, previous?: string) {
+  const snapshot = await snapshotTree(cwd);
+  const changed = previous === undefined || (snapshot !== previous &&
+    await tryGit(cwd, ["diff", "--quiet", "--no-ext-diff", "--no-textconv", "--ignore-space-at-eol", previous, snapshot, "--"]) === undefined);
+  return { snapshot, changed };
 }
 
 /** Con prefijos `a/` `b/` fijos y sin renames: el patch no depende de la config de git de quien lo corra. */

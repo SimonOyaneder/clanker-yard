@@ -1,0 +1,17 @@
+match: { mode: plan, round: "*" }
+result:
+  status: success
+  structured:
+    outcome: ok
+    summary: El caller usa el validador existente
+    payload:
+      approach: Verificar el objetivo antes de agregar otra validación
+      files: []
+      tests: []
+      mold: src/request.ts
+      assumptions: []
+      issueDoubts:
+        - says: Rechazar entradas fuera del contrato
+          why: El caller ya las rechaza
+          evidence: src/request.ts:12
+          alternative: Conservar el validador existente

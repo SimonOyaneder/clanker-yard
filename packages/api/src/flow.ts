@@ -133,7 +133,11 @@ const ParallelNode = z.strictObject({
       z.strictObject({ role: NodeId, mode: z.string().min(1) }),
     ])
     .optional(),
-  rerun: z.enum(["all", "not-ok"]).optional(),
+  /** En ramas fijas: además de las no-ok, reabre las pendientes del join y las sensibles al cambio entre visitas. */
+  rerun: z.union([
+    z.enum(["all", "not-ok"]),
+    z.strictObject({ pending: Ref, onChange: z.array(NodeId) }),
+  ]).optional(),
   onBranchError: z.enum(["fail", "ignore"]).optional(),
 });
 

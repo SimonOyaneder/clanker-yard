@@ -83,6 +83,7 @@ export function harness(
     resumeKeepsSession?: boolean;
     /** El worktree que tiene tomado cada corrida; por defecto todas tienen el mismo. */
     workspaceOf?: (runId: RunId) => { path: string; base: string; repoId?: RepoId; workspaceId?: string; fencingToken?: number } | undefined;
+    roundChange?: EngineDeps["roundChange"];
     /** Lo que hace el préstamo del sujeto con los worktrees (en producción, `workspaces.handOver`). */
     handOverWorkspaces?: (tx: Tx, from: RunId, to: RunId) => void;
     /** La capacidad de cada carril; sin ella ningún carril tiene tope. */
@@ -138,6 +139,7 @@ export function harness(
       return { modes: Object.fromEntries(Object.entries(role.modes).map(([name, m]) => [name, { outcomes: m.outcomes }])) };
     },
     workspaceOf: options.workspaceOf ?? (() => ({ path: "/work/tree", base: "main" })),
+    roundChange: options.roundChange,
     maxAgents: options.maxAgents,
     probeEverySec: options.probeEverySec,
     bootId: options.bootId,

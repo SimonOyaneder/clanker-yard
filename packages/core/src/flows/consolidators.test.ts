@@ -47,6 +47,24 @@ describe("flows.worst", () => {
 });
 
 describe("items.merge", () => {
+  test("open, omitir el id o el fixed de otra rama conservan la instrucción hasta el fixed de su dueño", () => {
+    const first = merge({ bugs: branch("changes", { findings: [finding("red", "transfer.rb", 10, "permite monto cero", { fix: "rechazar cero" })] }) }, { previous: null });
+    const { findings, byBranch } = first.output as { findings: { id: string }[]; byBranch: unknown };
+    const id = findings[0]!.id;
+    const fixed = { id, status: "fixed" };
+    for (const previous of [[{ id, status: "open" }], []]) {
+      const result = merge({
+        bugs: branch("ok", { findings: [], previous }),
+        tests: branch("ok", { findings: [], previous: [fixed] }),
+      }, { previous: byBranch });
+      expect(result).toEqual(first);
+    }
+    expect(merge({}, { previous: byBranch })).toEqual(first);
+    expect(merge({ bugs: branch("ok", { previous: [fixed] }) }, { previous: byBranch })).toMatchObject({
+      outcome: "ok", output: { findings: [], pending: [] },
+    });
+  });
+
   test("agrupa por path y línea con ±3 y deja el de mayor rango", () => {
     const result = merge({
       a: branch("changes", { findings: [finding("yellow", "x.ts", 10, "a-10")] }),

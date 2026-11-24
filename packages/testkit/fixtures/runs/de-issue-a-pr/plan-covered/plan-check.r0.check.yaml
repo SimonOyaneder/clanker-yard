@@ -1,0 +1,9 @@
+match: { mode: check }
+result:
+  status: success
+  structured:
+    outcome: covered
+    summary: La entrada real y su spec ya cubren todo el objetivo
+    payload:
+      doubts: [{ says: Rechazar entradas fuera del contrato, decision: alternative, why: El validador ya lo hace }]
+      corrections: []

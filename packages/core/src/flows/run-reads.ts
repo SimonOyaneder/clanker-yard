@@ -70,7 +70,7 @@ export function createRunReads({ store, defs, artifacts, workspaceOf }: { store:
     return ids;
   }
 
-  function resolveRef(run: RunRow, step: StepRow, ref: string): unknown {
+  function resolveRef(run: RunRow, step: StepRow, ref: string, inline = false): unknown {
     const [head = "", ...path] = refPath(ref);
     let root: unknown;
     switch (head) {
@@ -88,11 +88,18 @@ export function createRunReads({ store, defs, artifacts, workspaceOf }: { store:
       case "self":
         root = outputOf(lastDone(run.id, step.nodeId, step.visit));
         break;
-      default:
+      default: {
+        // Una rama fija puede leer su ledger de la visita anterior, nunca el de un flujo padre homónimo.
+        const parent = flowOf(run).nodes[head];
+        if (parent?.type === "parallel" && Array.isArray(parent.branches) && parent.branches.includes(step.nodeId)) {
+          return navigate(outputOf(lastDone(run.id, head)), path);
+        }
         // "En la corrida o en sus padres": un subflujo ve los nodos de quien lo llamó.
         root = withLiveToken(run, outputOf(lastDoneInLineage(run, head)));
+      }
     }
-    return shrink(step, navigate(root, path));
+    const value = navigate(root, path);
+    return inline ? value : shrink(step, value);
   }
 
   /** El output de `workspace.acquire` guarda el token con que se tomó el worktree: si un préstamo lo subió, el vigente es el que tiene la corrida. */

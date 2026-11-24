@@ -105,8 +105,6 @@ export function validateFlow(def: FlowDef, catalog: Catalog): Validation {
       if (!isSubflow) fail(path, `el nodo "${target}" no existe`);
     } else if (target === ctx) {
       fail(path, `"${ctx}" no puede referirse a sí mismo (para su output anterior usa $self)`);
-    } else if (branchOwner.get(ctx) === target) {
-      fail(path, `una rama no ve el output de su parallel "${target}"`);
     } else if (!ancestors(ctx).has(target)) {
       fail(path, `"${target}" no es un nodo anterior a "${ctx}"`);
     }
@@ -313,8 +311,14 @@ export function validateFlow(def: FlowDef, catalog: Catalog): Validation {
             }
           }
         }
+        if (typeof node.rerun === "object") {
+          checkRefsIn(node.rerun.pending, [...path, "rerun", "pending"], id, inline);
+          for (const [index, branch] of node.rerun.onChange.entries()) {
+            if (!Array.isArray(node.branches) || !node.branches.includes(branch)) fail([...path, "rerun", "onChange", index], `"${branch}" no es una rama fija de este parallel`);
+          }
+        }
         if (!Array.isArray(node.branches)) {
-          if (node.rerun === "not-ok") {
+          if (node.rerun === "not-ok" || typeof node.rerun === "object") {
             fail([...path, "rerun"], "rerun not-ok no aplica a un forEach: sus ramas se identifican por posición y la lista cambia entre visitas");
           }
           const branchPath = [...path, "branches", "branch"];

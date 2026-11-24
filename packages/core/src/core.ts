@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { createAgents } from "./agents/agents";
 import { createBriefs } from "./agents/brief";
 import { createStepBriefs } from "./agents/step-brief";
+import { roundChange } from "./git/tree";
 import { type AgentRuntime, createRuntimeRegistry, type RuntimeRegistry } from "./agents/runtime";
 import { describeRuntimes } from "./agents/runtime-options";
 import { createArtifacts } from "./artifacts/artifacts";
@@ -245,6 +246,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     artifacts,
     roles: roleInfoOf(defs),
     workspaceOf: workspaces.held,
+    roundChange,
     handOverWorkspaces: workspaces.handOver,
     briefFor: createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, learnings, trackers, projects }),
     bootId,

@@ -57,6 +57,8 @@ const ItemsMergeArgs = z.strictObject({
   window: z.int().nonnegative().optional().describe("Líneas de distancia para tratar dos ítems como el mismo. Por defecto 3."),
   idKeys: z.array(z.string()).min(1).optional().describe("Campos del ítem que forman su id estable. Por defecto branch, path, claim."),
   onlyIfTrivial: z.array(z.string()).optional().describe("Rangos cuyos ítems pasan solo con `trivial`. Por defecto white."),
+  previous: z.record(z.string(), z.array(z.record(z.string(), z.unknown()))).nullish()
+    .describe("Pendientes por rama del join anterior ($self.byBranch). null inicia el seguimiento."),
 });
 
 type Item = { [field: string]: unknown; branch: string };
@@ -90,9 +92,18 @@ export const itemsMerge: ConsolidatorDef<typeof ItemsMergeArgs> = {
       return index;
     };
 
+    const fresh = itemsOf(byBranch, args.items).map((item): Item => ({ ...item, id: stableId(item, idKeys) }));
+    const tracking = args.previous !== undefined;
+    const items = tracking ? reconcile(byBranch, args.previous ?? {}, fresh, rankOf) : fresh;
     const groups: { anchor: number; members: Item[] }[] = [];
-    for (const item of itemsOf(byBranch, args.items)) {
+    const byOwner: Record<string, Item[]> = Object.create(null) as Record<string, Item[]>;
+    const pending = new Set<string>();
+    for (const item of items) {
       rankOf(item);
+      if (tracking && (!gated.has(String(item[args.rank])) || item.trivial === true)) {
+        (byOwner[item.branch] ??= []).push(item);
+        if (args.changesIf.includes(String(item[args.rank]))) pending.add(item.branch);
+      }
       const line = Number(item.line);
       const group = groups.find(
         (g) =>
@@ -107,13 +118,37 @@ export const itemsMerge: ConsolidatorDef<typeof ItemsMergeArgs> = {
     const merged = groups
       .map(({ members }) => members.reduce((best, item) => (beats(item, best, rankOf) ? item : best)))
       .filter((item) => !gated.has(String(item[args.rank])) || item.trivial === true)
-      .map((item): Item => ({ ...item, id: stableId(item, idKeys) }))
       .sort((a, b) => rankOf(a) - rankOf(b));
 
     const changes = merged.some((item) => args.changesIf.includes(String(item[args.rank])));
-    return { outcome: changes ? "changes" : "ok", output: { [args.items]: merged } };
+    return { outcome: changes ? "changes" : "ok", output: { [args.items]: merged, ...(tracking && { byBranch: byOwner, pending: [...pending] }) } };
   },
 };
+
+/** Solo la rama dueña puede cerrar el id que recibió. Ni un reporte omitido ni el error de una rama lo cierran. */
+function reconcile(
+  reports: Record<string, BranchResult>,
+  previous: Record<string, Record<string, unknown>[]>,
+  fresh: Item[],
+  rankOf: (item: Item) => number,
+): Item[] {
+  const open = new Map<string, Item>();
+  const key = (branch: string, id: unknown) => JSON.stringify([branch, id]);
+  for (const [branch, prior] of Object.entries(previous)) {
+    const report = reports[branch]?.output;
+    const decisions: unknown[] = isRecord(report) && Array.isArray(report.previous) ? report.previous : [];
+    const closed = new Set(decisions.flatMap((s) => isRecord(s) && s.status === "fixed" ? [s.id] : []));
+    for (const item of prior) {
+      if (!closed.has(item.id)) open.set(key(branch, item.id), { ...item, branch });
+    }
+  }
+  for (const item of fresh) {
+    const id = key(item.branch, item.id);
+    const prior = open.get(id);
+    if (!prior || beats(item, prior, rankOf)) open.set(id, item);
+  }
+  return [...open.values()];
+}
 
 /** Mayor rango gana; a igual rango, el trivial; a igual todo, el que ya estaba (el de la rama anterior). */
 function beats(item: Item, best: Item, rankOf: (item: Item) => number): boolean {
@@ -142,5 +177,3 @@ function stableId(item: Item, keys: string[]): string {
     .digest("hex")
     .slice(0, 12);
 }
-
-

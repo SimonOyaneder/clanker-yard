@@ -203,6 +203,8 @@ export interface EngineDeps extends SubjectsDeps {
    * el brief. Sin esto el brief lleva solo el payload del nodo.
    */
   briefFor?: (request: StepBriefRequest) => Promise<Brief>;
+  /** Árbol que verán las ramas y si cambió desde su última evaluación. Sin comparador no se reutiliza un ok sensible. */
+  roundChange?: (cwd: string, previous?: string) => Promise<{ snapshot: string; changed: boolean }>;
   /**
    * Los circuit breakers por causa (`docs/design.html#d-ops`) y el runtime de cada agente (su ámbito es
    * `runtime:<id>`). Un paso cuyo ámbito está abierto no se despacha; un error de entorno abre el de su causa.
@@ -342,7 +344,7 @@ export function createEngine(deps: EngineDeps): Engine {
   const probeEveryMs = (deps.probeEverySec ?? DEFAULT_PROBE_EVERY_SEC) * 1000;
   const bootId = deps.bootId ?? newId("boot");
   const errors = deps.errors ?? createErrorReporter({ store });
-  const { flowOf, workspaceFor, lineage, resolveRef, selectStep, readArtifact, parallelStepOf, itemsOf, latestStep, getRun, listRuns } =
+  const { flowOf, workspaceFor, lineage, resolveRef, selectStep, readArtifact, parallelStepOf, itemsOf, latestStep, lastDone, getRun, listRuns } =
     createRunReads({ store, defs, artifacts, workspaceOf });
   const inFlight = new Set<Promise<void>>();
   /** Cuándo toca el próximo sondeo de cada wait de este proceso. Sin entrada (tras un reinicio), toca ya. */
@@ -1622,10 +1624,10 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /**
    * El parallel crea un paso por rama y queda waiting; el join lo evalúa la transacción que cierra
-   * la última. Con `rerun: "not-ok"`, al reentrar solo corren las ramas que no dieron ok: las demás
-   * aportan al join lo último que dejaron.
+   * la última. Con `rerun: "not-ok"` reusa las ramas ok. La política extendida invalida además las
+   * ramas pendientes y, si cambió el árbol desde la visita anterior, las de `onChange`.
    */
-  function openBranches(job: Job, node: ParallelNode): Settled {
+  async function openBranches(job: Job, node: ParallelNode): Promise<Settled> {
     const { run, step } = job;
     let items: unknown[] | undefined;
     if (!Array.isArray(node.branches)) {
@@ -1635,12 +1637,34 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       items = value;
     }
-    const inputHash = artifacts.put(JSON.stringify(items ?? node.branches), "brief", { mime: "application/json" });
+    const invalidated = new Set<string>();
+    let input: unknown = items ?? node.branches;
+    if (typeof node.rerun === "object") {
+      const pending = resolveRef(run, step, node.rerun.pending, true);
+      if (pending != null && !Array.isArray(pending)) {
+        return permanent(`${node.rerun.pending} no resolvió a una lista de ramas pendientes.`);
+      }
+      for (const id of pending ?? []) {
+        if (typeof id !== "string" || !Array.isArray(node.branches) || !node.branches.includes(id)) {
+          return permanent(`${node.rerun.pending} contiene una rama desconocida: ${JSON.stringify(id)}.`);
+        }
+        invalidated.add(id);
+      }
+      if (node.rerun.onChange.length) {
+        const previous = readArtifact(lastDone(run.id, step.nodeId, step.visit)?.inputHash);
+        const workspace = workspaceFor(run);
+        const since = isRecord(previous) && typeof previous.snapshot === "string" ? previous.snapshot : undefined;
+        const round = workspace && await deps.roundChange?.(workspace.path, since);
+        if (round?.changed !== false) for (const id of node.rerun.onChange) invalidated.add(id);
+        input = { branches: node.branches, snapshot: round?.snapshot ?? null };
+      }
+    }
+    const inputHash = artifacts.put(JSON.stringify(input), "brief", { mime: "application/json" });
     artifacts.ref(inputHash, { type: "step_run", id: step.id, role: "input" });
     markRunning(job, inputHash);
 
     const toRun = branchIds(step.nodeId, node, items?.length).filter(
-      (id) => node.rerun !== "not-ok" || !isOk(latestStep(run.id, id)),
+      (id) => !node.rerun || node.rerun === "all" || invalidated.has(id) || !isOk(latestStep(run.id, id)),
     );
     const opened = { ...step, inputHash };
     // Sin ramas que correr (una lista vacía, o todas ya dieron ok) el join se evalúa de inmediato.
@@ -1702,7 +1726,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const consolidator = consolidators.get(name);
     if (!consolidator) return { kind: "done", outcome: "error", error: `El consolidador "${name}" no está registrado.` };
     try {
-      const rawArgs = typeof join === "string" ? {} : resolveRefs(join.args ?? {}, (ref) => resolveRef(job.run, parent, ref));
+      const rawArgs = typeof join === "string" ? {} : resolveRefs(join.args ?? {}, (ref) => resolveRef(job.run, parent, ref, true));
       const args = consolidator.args ? consolidator.args.safeParse(rawArgs) : { success: true as const, data: rawArgs };
       if (!args.success) return { kind: "done", outcome: "error", error: `Los args de "${name}" no son válidos: ${issuesInline(args.error.issues)}` };
       const byBranch = Object.fromEntries(ran.map((s) => [s.key, { outcome: s.outcome ?? "", output: readArtifact(s.outputHash) }]));

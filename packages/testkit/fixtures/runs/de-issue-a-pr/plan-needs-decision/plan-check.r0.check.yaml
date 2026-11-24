@@ -1,0 +1,9 @@
+match: { mode: check }
+result:
+  status: success
+  structured:
+    outcome: needs-decision
+    summary: Falta decidir el contrato del consumidor anterior
+    payload:
+      doubts: [{ says: Rechazar entradas fuera del contrato, decision: issue, why: No está definido si el consumidor anterior queda exceptuado }]
+      corrections: []

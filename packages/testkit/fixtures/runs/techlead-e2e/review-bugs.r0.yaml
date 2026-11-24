@@ -6,5 +6,5 @@ result:
   status: success
   structured:
     outcome: ok
-    summary: "Sin hallazgos"
-    payload: { findings: [], previous: [] }
+    summary: "Verifiqué el rechazo de montos no positivos"
+    payload: { findings: [], previous: [{ id: "$brief.payload.previous.0.id", status: fixed }] }

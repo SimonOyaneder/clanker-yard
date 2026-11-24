@@ -7,6 +7,28 @@ import type { FlowDef, Node } from "@clanker/api";
 //
 // Desvío del diseño: `workspace.acquire` recibe `branch` (`$run.params.branch`, que pone el core) en lugar de `issue`.
 
+const reviewJoin = {
+  fn: "items.merge",
+  args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"], previous: "$self.byBranch" },
+};
+
+const lightReview: Node = {
+  type: "parallel",
+  branches: ["lr-bugs", "lr-tests"],
+  rerun: { pending: "$self.pending", onChange: ["lr-bugs", "lr-tests"] },
+  join: reviewJoin,
+  on: { ok: "fixups", changes: { to: "fix", maxRounds: 1, exhausted: "fixups" } },
+};
+
+function exhaustedGate(question: string, next: string): Node {
+  return {
+    type: "gate", question,
+    options: [{ id: "continue", label: "Aceptar el riesgo y continuar hacia el PR draft" }, { id: "stop", label: "Detener sin publicar" }],
+    timeoutSec: 86_400, default: "stop",
+    on: { continue: next, stop: "@blocked" },
+  };
+}
+
 /** De issue a PR delega el feedback del bot y la CI al subflujo `pr-feedback`. */
 export const DE_ISSUE_A_PR: FlowDef = {
   schema: 1,
@@ -39,7 +61,7 @@ export const DE_ISSUE_A_PR: FlowDef = {
       type: "agent",
       role: "dev",
       mode: "plan",
-      brief: { issue: "$run.subject", ws: "$ws" },
+      brief: { issue: "$run.subject", ws: "$ws", notes: "$plan-check" },
       on: { ok: "plan-check" },
     },
     "plan-check": {
@@ -48,7 +70,23 @@ export const DE_ISSUE_A_PR: FlowDef = {
       mode: "check",
       when: "$plan.issueDoubts",
       brief: { plan: "$plan" },
-      on: { ok: "implement", changes: { to: "plan", maxRounds: 2, exhausted: "implement" } },
+      on: {
+        ok: "implement",
+        changes: { to: "plan", maxRounds: 2, exhausted: "plan-decision" },
+        covered: { to: "@done", note: "Objetivo ya cubierto por el comportamiento existente; sin cambios ni PR" },
+        "needs-decision": "plan-decision",
+      },
+    },
+    "plan-decision": {
+      type: "gate",
+      question: "El plan no tiene un cambio justificado. Revisa el reporte de plan-check: ¿se aclaró la issue para volver a planificar?",
+      options: [
+        { id: "replan", label: "Ya aclaré la issue: volver a planificar" },
+        { id: "leave", label: "Dejar la corrida bloqueada sin implementar" },
+      ],
+      timeoutSec: 86_400,
+      default: "leave",
+      on: { replan: { to: "plan", maxRounds: 2, exhausted: "@blocked" }, leave: "@blocked" },
     },
     implement: {
       type: "agent",
@@ -68,46 +106,49 @@ export const DE_ISSUE_A_PR: FlowDef = {
         fail: {
           to: "fix",
           maxRounds: "$run.params.checkRounds",
-          exhausted: { to: "reviews", note: "Tests o lint siguen rojos" },
+          exhausted: "checks-exhausted",
         },
       },
     },
+    "checks-exhausted": exhaustedGate("Los checks siguen rojos tras agotar los intentos. ¿Continuar con las reviews y permitir publicar el draft con esos checks rojos?", "reviews"),
+    "reviews-exhausted": exhaustedGate("Quedan hallazgos rojos o amarillos tras agotar las rondas de review. ¿Permitir publicar el draft con esos hallazgos abiertos?", "sync"),
     fix: {
       type: "agent",
       role: "dev",
       mode: "fix",
       resumeFrom: "implement",
-      brief: { plan: "$plan", input: "$prev" },
+      // El dev recibe las instrucciones consolidadas; los pendientes por reviewer son para la ronda siguiente.
+      brief: { plan: "$plan", input: { findings: "$prev.findings", failures: "$prev.failures", checks: "$prev.checks", conflicts: "$prev.conflicts", backup: "$prev.backup" } },
       escalate: { counter: "review", from: 2, profileRole: "dev-escala" },
       on: { ok: "checks" },
     },
     reviews: {
       type: "parallel",
       branches: ["rv-bugs", "rv-tests", "rv-patterns", "rv-lore"],
-      rerun: "not-ok",
-      onBranchError: "ignore",
-      join: { fn: "items.merge", args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"] } },
+      rerun: { pending: "$self.pending", onChange: ["rv-tests", "rv-patterns"] },
+      onBranchError: "fail",
+      join: reviewJoin,
       on: {
         ok: "sync",
         changes: {
           to: "fix",
           counter: "review",
           maxRounds: "$run.params.reviewRounds",
-          exhausted: { to: "sync", note: "Quedan 🔴/🟡 tras las rondas de review" },
+          exhausted: "reviews-exhausted",
         },
       },
     },
-    "rv-bugs": { type: "agent", role: "review-bugs", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$self" } },
-    "rv-tests": { type: "agent", role: "review-tests", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$self" } },
-    "rv-patterns": { type: "agent", role: "review-patterns", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$self" } },
-    "rv-lore": { type: "agent", role: "review-lore", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$self" } },
+    "rv-bugs": { type: "agent", role: "review-bugs", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$reviews.byBranch.rv-bugs", rejected: "$fix.rejected" } },
+    "rv-tests": { type: "agent", role: "review-tests", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$reviews.byBranch.rv-tests", rejected: "$fix.rejected" } },
+    "rv-patterns": { type: "agent", role: "review-patterns", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$reviews.byBranch.rv-patterns", rejected: "$fix.rejected" } },
+    "rv-lore": { type: "agent", role: "review-lore", mode: "review", brief: { ws: "$ws", plan: "$plan", previous: "$reviews.byBranch.rv-lore", rejected: "$fix.rejected" } },
     sync: {
       type: "action",
       action: "workspace.syncBase",
       args: { ws: "$ws" },
       on: {
         same: "commit",
-        rebased: { to: "checks", maxRounds: 3, exhausted: "commit" },
+        rebased: { to: "checks", maxRounds: 3, exhausted: { to: "@blocked", note: "La base volvió a cambiar: el último rebase no pasó por checks ni reviews. No se publicó el PR." } },
         conflict: { to: "fix", maxRounds: 2, exhausted: "@failed" },
       },
     },
@@ -192,19 +233,13 @@ export const PR_FEEDBACK: FlowDef = {
       args: { ws: "$run.params.ws", scope: "changed" },
       on: { ok: "light", fail: { to: "fix", maxRounds: 2, exhausted: "light" } },
     },
-    light: {
-      type: "parallel",
-      branches: ["lr-bugs", "lr-tests"],
-      join: { fn: "items.merge", args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"] } },
-      on: { ok: "fixups", changes: { to: "fix", maxRounds: 1, exhausted: "fixups" } },
-    },
-    "lr-bugs": { type: "agent", role: "review-bugs", mode: "re-review", brief: { ws: "$run.params.ws" } },
+    light: lightReview,
+    "lr-bugs": { type: "agent", role: "review-bugs", mode: "re-review", brief: { ws: "$run.params.ws", previous: "$light.byBranch.lr-bugs" } },
     "lr-tests": {
       type: "agent",
       role: "review-tests",
       mode: "re-review",
-      when: "$checks.specsChanged",
-      brief: { ws: "$run.params.ws" },
+      brief: { ws: "$run.params.ws", previous: "$light.byBranch.lr-tests" },
     },
     fixups: {
       type: "action",
@@ -979,14 +1014,9 @@ export const COUNCIL: FlowDef = {
       brief: { input: "$prev" },
       on: { ok: "checks" },
     },
-    light: {
-      type: "parallel",
-      branches: ["lr-bugs", "lr-tests"],
-      join: { fn: "items.merge", args: { items: "findings", rank: "severity", changesIf: ["red", "yellow"] } },
-      on: { ok: "fixups", changes: { to: "fix", maxRounds: 1, exhausted: "fixups" } },
-    },
-    "lr-bugs": { type: "agent", role: "review-bugs", mode: "re-review", brief: { ws: "$ws" } },
-    "lr-tests": { type: "agent", role: "review-tests", mode: "re-review", when: "$checks.specsChanged", brief: { ws: "$ws" } },
+    light: lightReview,
+    "lr-bugs": { type: "agent", role: "review-bugs", mode: "re-review", brief: { ws: "$ws", previous: "$light.byBranch.lr-bugs" } },
+    "lr-tests": { type: "agent", role: "review-tests", mode: "re-review", brief: { ws: "$ws", previous: "$light.byBranch.lr-tests" } },
     fixups: {
       type: "action",
       action: "pr.pushFixups",

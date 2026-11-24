@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compileJsonSchema, Role, type RunId } from "@clanker/api";
+import { compileJsonSchema, isEventOf, Role, type RunId } from "@clanker/api";
 import {
   clankerLoopTemplate,
   createAgents,
@@ -28,7 +28,7 @@ import {
   type Store,
   createRuntimeRegistry,
 } from "@clanker/core";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
 import { registerFlowStubs, type FlowStubsOptions } from "./flow-stubs";
 import { tempGitRepo } from "./git";
@@ -198,7 +198,7 @@ describe("validación", () => {
 
     const saved = saveTemplates(flows);
 
-    expect(saved.map((s) => [s.version, s.warnings])).toEqual([[1, []], [1, []]]);
+    expect(saved.map((s) => [s.version, s.warnings.map((w) => w.path)])).toEqual([[1, []], [1, ["nodes.plan-decision", "nodes.checks-exhausted", "nodes.reviews-exhausted"]]]);
   });
 
   test("de-issue-a-pr pide pr-feedback: sin él no valida", async () => {
@@ -229,6 +229,20 @@ describe("validación", () => {
 });
 
 describe("de-issue-a-pr con el runtime fake", () => {
+  test.each([
+    ["covered", "done"],
+    ["needs-decision", "parked"],
+  ])("un plan %s no implementa ni publica", async (outcome, status) => {
+    const { flows, store, stubs } = await setup({ fixtures: fixtures("plan-doubt", `plan-${outcome}`) });
+    saveTemplates(flows);
+
+    const { run, nodes } = await runTechlead(flows, store);
+
+    expect(run.status).toBe(status);
+    expect(nodes).toEqual(["ws", "plan", "plan-check", ...(status === "parked" ? ["plan-decision"] : [])]);
+    expect(stubs.calls["pr.publish"]).toBeUndefined();
+  });
+
   test("camino feliz: de la issue al PR draft, con el bot en LGTM y el CI verde", async () => {
     const { flows, store, stubs, pr } = await setup({ fixtures: fixtures("base", "reviews-ok") });
     saveTemplates(flows);
@@ -284,21 +298,26 @@ describe("de-issue-a-pr con el runtime fake", () => {
     expect(stubs.calls["pr.publish"]!.map((call) => (call as { dependsOn: unknown }).dependsOn)).toEqual([[], ["api#12"]]);
   });
 
-  test("con las rondas de review agotadas sigue a sync con una nota y termina el PR", async () => {
-    const { flows, store } = await setup({ fixtures: fixtures("base", "reviews-changes") });
+  test("con reviews agotadas se publica solo si alguien acepta los hallazgos abiertos", async () => {
+    const { flows, store, stubs } = await setup({ fixtures: fixtures("base", "reviews-changes") });
     saveTemplates(flows);
 
     const { runId, run, nodes } = await runTechlead(flows, store);
 
-    expect(run).toMatchObject({ status: "done", outcome: "done", rounds: { review: 3 } });
+    expect(run).toMatchObject({ status: "parked", rounds: { review: 3 } });
     // Tres rondas de fix (cada una con sus checks y sus reviews) y la cuarta pasada de reviews se agota.
     expect(nodes).toEqual([
       "ws", "plan", "plan-check", "implement", "checks",
       ...["reviews", "fix", "checks", "reviews", "fix", "checks", "reviews", "fix", "checks", "reviews"],
-      "sync", "commit", "publish", "feedback",
+      "reviews-exhausted",
     ]);
     expect(run.steps.filter((s) => s.nodeId === "reviews").map((s) => s.outcome)).toEqual(["changes", "changes", "changes", "changes"]);
-    expect(notes(store, runId)).toEqual(["Quedan 🔴/🟡 tras las rondas de review"]);
+    expect(stubs.calls["pr.publish"]).toBeUndefined();
+    const decision = store.events.since(0, { runId }).find((e) => isEventOf(e, "decision.opened"));
+    if (!decision || !isEventOf(decision, "decision.opened")) throw new Error("No se abrió la decisión de review");
+    flows.resolveGate(decision.payload.decisionId, "continue", "ui");
+    await vi.waitFor(() => expect(flows.getRun(runId).status).toBe("done"), { timeout: 10_000 });
+    expect(stubs.calls["pr.publish"]).toHaveLength(1);
   });
 
   test("reviewRounds del proyecto pisa el default sin tocar el flujo", async () => {
@@ -307,12 +326,12 @@ describe("de-issue-a-pr con el runtime fake", () => {
 
     const { run } = await runTechlead(flows, store, { reviewRounds: 1 });
 
-    expect(run).toMatchObject({ status: "done", rounds: { review: 1 } });
+    expect(run).toMatchObject({ status: "parked", rounds: { review: 1 } });
     expect(run.steps.filter((s) => s.nodeId === "fix")).toHaveLength(1);
   });
 
-  test("con tests rojos tras las rondas de checks sigue a las reviews con una nota", async () => {
-    const { flows, store } = await setup({
+  test("los checks agotados se pueden detener sin publicar", async () => {
+    const { flows, store, stubs } = await setup({
       fixtures: fixtures("base", "reviews-ok"),
       script: { "recipe.check": ["fail", "fail", "fail", "fail"] },
     });
@@ -320,9 +339,24 @@ describe("de-issue-a-pr con el runtime fake", () => {
 
     const { runId, run, nodes } = await runTechlead(flows, store, { checkRounds: 3 });
 
-    expect(run).toMatchObject({ status: "done", outcome: "done" });
-    expect(nodes.slice(4, 12)).toEqual(["checks", "fix", "checks", "fix", "checks", "fix", "checks", "reviews"]);
-    expect(notes(store, runId)).toEqual(["Tests o lint siguen rojos"]);
+    expect(run.status).toBe("parked");
+    expect(nodes.slice(-8)).toEqual(["checks", "fix", "checks", "fix", "checks", "fix", "checks", "checks-exhausted"]);
+    const decision = store.events.since(0, { runId }).find((e) => isEventOf(e, "decision.opened"));
+    if (!decision || !isEventOf(decision, "decision.opened")) throw new Error("No se abrió la decisión de checks");
+    flows.resolveGate(decision.payload.decisionId, "stop", "ui");
+    expect(flows.getRun(runId).outcome).toBe("blocked");
+    expect(stubs.calls["pr.publish"]).toBeUndefined();
+  });
+
+  test("el último rebase sin checks no se publica al agotar sync", async () => {
+    const { flows, store, stubs } = await setup({
+      fixtures: fixtures("base", "reviews-ok"),
+      script: { "workspace.syncBase": ["rebased", "rebased", "rebased", "rebased"] },
+    });
+    saveTemplates(flows);
+    const { run } = await runTechlead(flows, store);
+    expect(run.outcome).toBe("blocked");
+    expect(stubs.calls["pr.publish"]).toBeUndefined();
   });
 
   test("un conflicto con la base tras las rondas de fix termina la corrida en failed", async () => {

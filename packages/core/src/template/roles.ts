@@ -163,13 +163,13 @@ const triage = Role.parse({
 
 const planCheck = Role.parse({
   prompt: prompts.PLAN_CHECK_PROMPT,
-  context: [native, agentsMd],
+  context: [native, agentsMd, pack("lore")],
   modes: {
     check: mode({
       instructions: prompts.PLAN_CHECK_CHECK,
       brief: PlanCheckBrief,
       report: PlanCheckReport,
-      outcomes: ["ok", "changes"],
+      outcomes: ["ok", "changes", "covered", "needs-decision"],
       session: "new",
     }),
   },
