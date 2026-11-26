@@ -176,6 +176,8 @@ Un solo módulo lee un PR de GitHub y lo entrega normalizado: `createPrs({ conne
 
 ## Watch (polling de PRs)
 
+Las solicitudes directas de review tienen su propio flujo opt-in (`incoming-review`), independiente de los PRs `owned`. Activación y borradores: [`docs/incoming-review.md`](docs/incoming-review.md); detección y acciones en `packages/core/src/github/incoming-reviews.ts`.
+
 `createWatch({ store, connections, repos, cache, remote, waitKeys, events, errors, trackers? })` (`packages/core/src/watch/`, `docs/design.html#d-ops`, "CodeHost: polling con ETags") detecta qué PRs cambiaron sin gastar cuota y se enciende con `startCore({ watch: true })` (lo que hace `runCore`; por defecto apagado, para que un test con el GitHub simulado no reciba requests que no pidió). Es código puro: sin slot ni agente. `tick()` es un despertar (cada 2 s con `start()`); los tests lo llaman a mano con un `now` inyectado.
 
 - Qué mira: las filas abiertas de `pull_requests` (las que abrió `pr.publish` y las que descubre la búsqueda `is:pr author:@me is:open` cada 5 min, solo de repos registrados con remoto) más los PRs con un wait esperando (`Engine.waitKeys` + `prOfWaitKey`). Por cuenta, en serie.

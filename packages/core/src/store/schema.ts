@@ -444,6 +444,21 @@ export const syncCursors = sqliteTable("sync_cursors", {
   rateLimit: integer("rate_limit"),
 });
 
+/** Una asignación directa de GitHub, identificada por el nodo ReviewRequest, no por el head. */
+export const incomingReviews = sqliteTable("incoming_reviews", {
+  requestId: text("request_id").primaryKey(),
+  repoId: text("repo_id").$type<RepoId>().notNull(),
+  account: text().notNull(),
+  number: integer().notNull(),
+  dueAt: integer("due_at").notNull(),
+  runId: text("run_id").$type<RunId>().unique(),
+  base: text(),
+  head: text(),
+  draftId: text("draft_id"),
+  /** Reservas antes de la escritura remota: una respuesta perdida nunca repone un comentario borrado. */
+  reserved: text({ mode: "json" }).$type<string[]>().notNull().default([]),
+});
+
 /** Contenido direccionado por su SHA-256: el mismo contenido es una sola fila. */
 export const artifacts = sqliteTable("artifacts", {
   hash: text().$type<ArtifactHash>().primaryKey(),
