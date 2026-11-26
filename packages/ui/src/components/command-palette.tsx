@@ -514,6 +514,9 @@ export function CommandPalette({ open, onOpenChange, projects, current, runs, is
             <GitPullRequest /> Ir a Stacks de PR
             <CommandShortcut>⇧⌘P</CommandShortcut>
           </CommandItem>
+          <CommandItem onSelect={run(() => actions.goModule("reviews"))}>
+            <MessageSquare /> Ir a Mis reviews <CommandShortcut>⇧⌘J</CommandShortcut>
+          </CommandItem>
           <CommandItem onSelect={run(actions.goConnections)}>
             <Plug /> Ir a Conexiones
             <CommandShortcut>G C</CommandShortcut>

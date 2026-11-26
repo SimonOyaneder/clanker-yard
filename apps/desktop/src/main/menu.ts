@@ -66,6 +66,7 @@ export function buildMenu(h: MenuHandlers): void {
         { label: "Bandeja", accelerator: "CmdOrCtrl+Shift+I", click: () => h.send("go-inbox") },
         { label: "Learnings", accelerator: "CmdOrCtrl+Shift+A", click: () => h.send("go-learnings") },
         { label: "Stacks de PR", accelerator: "CmdOrCtrl+Shift+P", click: () => h.send("go-prs") },
+        { label: "Mis reviews", accelerator: "CmdOrCtrl+Shift+J", click: () => h.send("go-reviews") },
       ],
     },
     { role: "windowMenu", label: "Ventana" },

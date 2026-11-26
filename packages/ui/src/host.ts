@@ -10,6 +10,7 @@ export type MenuAction =
   | "forward"
   | "shortcuts"
   | "go-prs"
+  | "go-reviews"
   | "go-inbox"
   | "go-learnings"
 

@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 import { RESOLVE_THREAD } from "./actions/pr-feedback";
 import { ADD_FINDING, CREATE_DRAFT, REQUESTED } from "./incoming-api";
 import { DEFAULT_BRANCH_CHECKS, MORE_CONTEXTS, MORE_THREADS, PR_QUERY } from "./pr-query";
+import { MORE_ASSIGNMENTS, SEARCH_REVIEWS, trackedReviewsQuery } from "./review-inbox";
 
 // El GitHub falso y el simulador responden por el nombre de la operación sin mirar los campos que se piden: un campo
 // mal escrito pasa la suite entera. Esto valida cada documento contra el esquema público de GitHub
@@ -13,7 +14,8 @@ import { DEFAULT_BRANCH_CHECKS, MORE_CONTEXTS, MORE_THREADS, PR_QUERY } from "./
 // `Node.id`, que no lo está), y lo que se prueba aquí son nuestras queries, no el esquema de GitHub.
 const schema = buildSchema(readFileSync(new URL("./fixtures/schema.docs.graphql", import.meta.url), "utf8"), { assumeValid: true, assumeValidSDL: true });
 
-const DOCUMENTS = { PR_QUERY, MORE_THREADS, MORE_CONTEXTS, DEFAULT_BRANCH_CHECKS, RESOLVE_THREAD, REQUESTED, CREATE_DRAFT, ADD_FINDING };
+const DOCUMENTS = { PR_QUERY, MORE_THREADS, MORE_CONTEXTS, DEFAULT_BRANCH_CHECKS, RESOLVE_THREAD, REQUESTED, CREATE_DRAFT, ADD_FINDING, SEARCH_REVIEWS,
+  MORE_ASSIGNMENTS, InboxTracked: trackedReviewsQuery(["https://github.com/example/repo/pull/1"]) };
 
 describe("las queries y mutations de GitHub cumplen su esquema público", () => {
   test.each(Object.entries(DOCUMENTS))("%s", (_name, document) => {

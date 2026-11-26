@@ -2,8 +2,8 @@ import type { CachedIssue, ClankerProject, DecisionId, Lane, RunId } from "@clan
 import { createContext, useContext } from "react"
 
 /** Los módulos de la app: cada uno es una vista de la barra lateral. */
-export type Module = "projects" | "prs" | "connections" | "inbox" | "learnings" | "flows" | "settings"
-export const MODULES: readonly Module[] = ["projects", "prs", "connections", "inbox", "learnings", "flows", "settings"]
+export type Module = "projects" | "prs" | "reviews" | "connections" | "inbox" | "learnings" | "flows" | "settings"
+export const MODULES: readonly Module[] = ["projects", "prs", "reviews", "connections", "inbox", "learnings", "flows", "settings"]
 
 // Acciones globales: las usan los menús contextuales, la paleta ⌘K, la barra lateral y los atajos.
 export interface AppActions {

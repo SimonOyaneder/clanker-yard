@@ -22,6 +22,7 @@ import { RunView, type RunTab } from "@/components/run/run-view"
 import { PrCommandsProvider } from "@/components/prs/pr-commands"
 import { type PrControls, PrView } from "@/components/prs/pr-view"
 import { PrsView } from "@/components/prs/prs-view"
+import { ReviewInbox } from "@/components/prs/review-inbox"
 import { SetupChecklist } from "@/components/setup-checklist"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
 import { StatusBanner } from "@/components/status-banner"
@@ -354,6 +355,7 @@ function Shell() {
       else if (action === "forward") goForward()
       else if (action === "shortcuts") setShortcutsOpen(true)
       else if (action === "go-prs") go({ module: "prs", prId: null })
+      else if (action === "go-reviews") go({ module: "reviews" })
       else if (action === "go-inbox") goInbox()
       else if (action === "go-learnings") goLearnings()
     },
@@ -464,6 +466,8 @@ function Shell() {
                 ) : (
                   <span className="truncate px-1.5 font-medium">Stacks de PR</span>
                 )
+              ) : module === "reviews" ? (
+                <span className="truncate px-1.5 font-medium">Mis reviews</span>
               ) : module === "connections" ? (
                 <span className="truncate px-1.5 font-medium">Conexiones</span>
               ) : module === "flows" ? (
@@ -517,6 +521,8 @@ function Shell() {
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
               {viewedPr ? <PrView key={viewedPr.id} pr={viewedPr} issue={prIssue} onBack={closePr} onControls={setPrControls} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeys} issueProjects={issueProjects} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
             </main>
+          ) : module === "reviews" ? (
+            <main className="min-h-0 flex-1 overflow-y-auto"><ReviewInbox /></main>
           ) : module === "flows" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
               <FlowsView projects={projects} />

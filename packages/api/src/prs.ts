@@ -1,6 +1,15 @@
 import * as z from "zod";
 import { IssueId, ProjectId, RunId } from "./domain";
 import { SignalTone } from "./pack";
+import { RunStatus } from "./runs";
+
+export const ReviewInboxRow = z.object({
+  isDraft: z.boolean(),
+  account: z.string(), repo: z.string(), number: z.number(), title: z.string(), url: z.string(),
+  review: z.enum(["requested", "draft", "published", "none"]),
+  scheduled: z.boolean(), run: RunStatus.nullable(), outcome: z.string().nullable(),
+});
+export type ReviewInboxRow = z.infer<typeof ReviewInboxRow>;
 
 // El estado normalizado de un PR (`docs/design.html#d-ops`, interface PrState). Es genérico: lo que
 // depende de la organización (quién es el bot de review, qué checks cuentan, qué labels son señales)

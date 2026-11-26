@@ -669,6 +669,11 @@ export function createMemoryAppData(now = Date.now()): AppData & ChatData {
       if (at !== -1) breakers.splice(at, 1)
       return null
     },
+    reviewInbox: async () => ({ connected: true, rows: [
+      { title: "Validar la fecha de cierre", number: 24, review: "draft" as const, run: "done" as const },
+      { title: "Agregar el historial de cambios", number: 19, review: "requested" as const, run: "running" as const },
+      { title: "Actualizar los filtros de búsqueda", number: 16, review: "published" as const, run: null },
+    ].map(row => ({ ...row, isDraft: row.number === 19, account: "octocat", repo: "octocat/demo", scheduled: false, outcome: null, url: `https://github.com/octocat/demo/pull/${row.number}` })) }),
     openPrs: async () => prs.map((p) => ({ ...p })),
     refreshPrs: async () => {},
     setPrHold: async ({ ref, hold }) => {

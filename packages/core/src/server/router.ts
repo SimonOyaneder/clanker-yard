@@ -2,6 +2,7 @@ import type { PrChats } from "../chats/chats";
 import { API_MAJOR, type AgentOptions, type ClientOrigin, contract, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { githubPatForm } from "../github/pat";
+import { reviewInbox } from "../github/review-inbox";
 import type { PrCache } from "../github/pr-cache";
 import { createPrCommands} from "../github/pr-commands";
 import { createPrDetails } from "../github/pr-detail";
@@ -82,6 +83,7 @@ export interface RouterDeps {
   prs: Prs;
   /** `prs.list` y `prs.refresh`: el caché del core, que avisa a los waits y a los eventos de Watch cuando un PR cambia. */
   prCache: PrCache;
+  reviewInboxRead?: () => void;
   workspaces: Pick<Workspaces, "fetch" | "fetchPr">;
   artifacts: Artifacts;
   decisions: Decisions;
@@ -297,6 +299,10 @@ export function createRouter(deps: RouterDeps) {
       apply: os.chats.apply.handler(({ input, context }) => chatsOf().apply(input, context.origin)),
     },
     prs: {
+      inbox: os.prs.inbox.handler(() => {
+        deps.reviewInboxRead?.();
+        return reviewInbox(store, deps.connections);
+      }),
       get: os.prs.get.handler(({ input }) => prs.get(input)),
       list: os.prs.list.handler(({ input }) => prCache.list(input)),
       refresh: os.prs.refresh.handler(({ input }) => prCache.refresh(input)),

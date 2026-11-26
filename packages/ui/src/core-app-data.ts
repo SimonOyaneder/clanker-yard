@@ -24,6 +24,7 @@ const LIVE_EVENTS = [
   "breaker.opened",
   "breaker.closed",
   "pr.changed",
+  "reviewInbox.refresh",
   "pr.saved_local",
   "pr.merged",
   "run.started",
@@ -88,6 +89,7 @@ export function createCoreAppData(client: CoreClient): AppData {
     },
     breakers: () => client.system.breakers(),
     retryBreaker: (scope) => client.system.retryBreaker({ scope }),
+    reviewInbox: () => client.prs.inbox({}),
     openPrs: async () => [...await client.prs.list({ state: "open" }), ...await client.prs.list({ state: "local" })],
     refreshPrs: async (refs) => {
       // El core lee de a una request: en serie y sin cortar en el primer fallo, que se reporta al final.

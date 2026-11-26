@@ -190,6 +190,17 @@ const detailReads = (requests: typeof sim.requests, number: number) =>
   requests.filter((r) => r.path === "/graphql" && (r.body as { variables?: { number?: number } }).variables?.number === number).length;
 
 describe("descubrir y detectar", () => {
+  test("pide actualizar la bandeja abierta una vez por lectura, sin sondearla cuando nadie la usa", async () => {
+    const refreshes = () => store.events.since(0, { types: ["reviewInbox.refresh"] }).length;
+    await wake(5 * MINUTE);
+    expect(refreshes()).toBe(0);
+    watch.reviewInboxRead();
+    await wake(4 * MINUTE);
+    expect(refreshes()).toBe(0);
+    await wake(MINUTE);
+    await wake(5 * MINUTE);
+    expect(refreshes()).toBe(1);
+  });
   test("la búsqueda de tus PRs los mete al caché con su detalle (solo los tuyos)", async () => {
     sim.openPr({ head: "one" });
     sim.openPr({ head: "two", author: "otra-persona" });

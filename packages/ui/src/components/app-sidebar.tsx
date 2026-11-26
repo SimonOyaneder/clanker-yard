@@ -179,6 +179,11 @@ export function AppSidebar({ projects, module, inboxBadge, learningsBadge, liveR
                   </SidebarMenuBadge>
                 ) : null}
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={module === "reviews"} onClick={go("reviews")} title="Mis reviews · ⇧⌘J" className="h-8">
+                  <BookCheck className="size-4" /><span>Mis reviews</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

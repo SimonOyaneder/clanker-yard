@@ -20,6 +20,8 @@ test("dos arranques del core real: Watch retoma la espera y completa la review s
     const base = repo.git("rev-parse", "main");
     const first = vi.fn();
     const written: string[] = [];
+    let reviewState: "draft" | "published" = "draft";
+    let prState = "OPEN";
     const connections = createConnections({ store, secrets: createFileSecrets({ dir: home.path }), github: { fetch: async (url, options) => {
       const route = new URL(String(url));
       if (route.pathname === "/search/issues") {
@@ -27,7 +29,22 @@ test("dos arranques del core real: Watch retoma la espera y completa la review s
         return Response.json({ items: incoming ? [{ number: 1 }] : [], total_count: incoming ? 1 : 0 });
       }
       if (route.pathname === "/graphql") {
-        const { query, variables } = JSON.parse(String(options?.body)) as { query: string; variables: { body?: string; review?: string } };
+        const { query, variables } = JSON.parse(String(options?.body)) as { query: string; variables: { body?: string; review?: string; q?: string; account?: string } };
+        const inboxPr = { number: 1, isDraft: true, viewerDidAuthor: false, state: prState, title: "Add file", url: `https://github.com/${remote}/pull/1`,
+          repository: { nameWithOwner: remote }, draft: { totalCount: Number(reviewState === "draft") },
+          published: { totalCount: Number(reviewState === "published") } };
+        if (query.includes("query InboxSearch")) {
+          expect(variables.account).toBe(account);
+          const match = variables.q?.includes(reviewState === "draft" ? "review-requested:" : "reviewed-by:");
+          expect(variables.q).toContain("-author:@me");
+          const unrelated = [
+            { ...inboxPr, number: 2, url: `${inboxPr.url}2`, viewerDidAuthor: true },
+            { ...inboxPr, number: 3, url: `${inboxPr.url}3`, timelineItems: { nodes: [{ requestedReviewer: {} }], pageInfo: { hasNextPage: false } } },
+          ];
+          return Response.json({ data: { search: { nodes: match && prState === "OPEN" ? [inboxPr, ...(variables.q?.includes("reviewed-by") ? unrelated : [])] : [],
+            pageInfo: { hasNextPage: false } } } });
+        }
+        if (query.includes("query InboxTracked")) return Response.json({ data: { p0: inboxPr } });
         if (query.includes("query IncomingRequest")) {
           first();
           return Response.json({ data: { repository: { pullRequest: { id: "pr", title: "Add file", body: "", state: "OPEN",
@@ -73,6 +90,10 @@ test("dos arranques del core real: Watch retoma la espera y completa la review s
       expect(detail.status, JSON.stringify(detail.steps.map((s) => [s.nodeId, s.status, s.error]))).toBe("done");
     }, { timeout: 12_000 });
     expect(written).toEqual(["comentario pendiente"]);
+    expect((await client.prs.inbox({})).rows).toMatchObject([{ review: "draft", run: "done" }]);
+    reviewState = "published";
+    expect((await client.prs.inbox({})).rows).toMatchObject([{ review: "published", run: "done" }]);
+    for (prState of ["MERGED", "CLOSED"]) expect((await client.prs.inbox({})).rows).toEqual([]);
     expect(repo.git("branch", "--show-current")).toBe("main");
   } finally {
     await core?.close();

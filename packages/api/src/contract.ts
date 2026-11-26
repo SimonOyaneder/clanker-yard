@@ -24,7 +24,7 @@ import { LegacyImportInput, LegacyImportResult } from "./import";
 import { DayMetrics, DayMetricsFilter, IssueMetrics, MetricsFilter, ModelMetrics, ProjectSummary, ProjectSummaryFilter, RoleMetrics, StepMetrics } from "./metrics";
 import { PackInfo } from "./pack";
 import { ClankerProject, NewProject, ProjectConfig, ProjectDefaults, ProjectDefaultsPatch, ProjectImportResult, ProjectUpdate } from "./projects";
-import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, LocalPrId, LocalPrMetadata, LocalPrPatch, LocalPrUpdate, PrCommitDiff, PrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress } from "./prs";
+import { CachedPr, LocalCommitDiff, LocalPrDetail, LocalPrFile, LocalPrId, LocalPrMetadata, LocalPrPatch, LocalPrUpdate, PrCommitDiff, PrDetail, PrFilter, PrRef, PrState, RepublishInput, RepublishProgress, ReviewInboxRow } from "./prs";
 import { QueueEntry } from "./queue";
 import type { ContractMeta } from "./mcp";
 import { DetectedRepo, NewRepo, RecipeTestResult, Repo, RepoConfigSync, RepoOverview } from "./repos";
@@ -521,6 +521,7 @@ const projects = {
 };
 
 const prs = {
+  inbox: base.input(z.object({})).output(z.object({ connected: z.boolean(), rows: z.array(ReviewInboxRow) })),
   /**
    * Lee el PR de GitHub (una query GraphQL de detalle) y lo entrega normalizado con las reglas del pack
    * de la org del repo. `NOT_FOUND` si el repo o el PR no existen o la cuenta no los ve; `BAD_REQUEST`

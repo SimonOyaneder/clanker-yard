@@ -39,6 +39,8 @@ const UNKNOWN_REREADS = 3;
 const SLOW_FACTOR = 2;
 
 export interface Watch {
+  /** Arm one refresh for a recently opened inbox. Only a mounted view will read and rearm it. */
+  reviewInboxRead(): void;
   /** Un despertar: mira lo que ya toca, en serie. Nunca lanza; lo que falla de un PR se anota y el siguiente sigue. */
   tick(): Promise<void>;
   /** Despierta cada `WATCH_TICK_MS`. */
@@ -90,6 +92,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
   let stopping = false;
+  let inboxReadAt: number | undefined;
 
   // --- qué mirar ---
 
@@ -333,6 +336,14 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
     }
 
     // Después de las visitas, que son las que se enteran de un merge; también cae lo que ya llegó mergeado (la importación del loop).
+    if (!stopping && inboxReadAt !== undefined && at - inboxReadAt >= SEARCH_EVERY_MS && active.size) {
+      const levels = [...active].map(account => throttle(account).level);
+      const interval = levels.includes("slow") ? SEARCH_EVERY_MS * SLOW_FACTOR : SEARCH_EVERY_MS;
+      if (at - inboxReadAt >= interval && levels.every(level => level === "normal" || level === "slow")) {
+        store.tx(tx => tx.emit({ type: "reviewInbox.refresh", origin: "watch", payload: {} }));
+        inboxReadAt = undefined;
+      }
+    }
     expireMergedReviewNotes(store);
     await events.flush(at);
     if (!stopping) await trackers?.poll(at);
@@ -350,6 +361,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
 
   return {
     tick,
+    reviewInboxRead() { inboxReadAt = now(); },
 
     start() {
       stopping = false;

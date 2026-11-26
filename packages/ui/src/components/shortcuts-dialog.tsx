@@ -20,6 +20,7 @@ const SECTIONS: { title: string; items: [string, string][] }[] = [
       ["Bandeja (también G y luego I)", "⇧⌘I"],
       ["Learnings (también G y luego A)", "⇧⌘A"],
       ["Stacks de PR", "⇧⌘P"],
+      ["Mis reviews", "⇧⌘J"],
       ["Conexiones (G y luego C)", "GC"],
       ["Ir al proyecto 1…9 de la barra", "⌘1"],
       ["Atrás (también ⌘[ y el botón de pulgar trasero)", "⌘←"],
