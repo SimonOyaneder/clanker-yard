@@ -16,12 +16,14 @@ const ClientId = z.strictObject({ clientId: z.string().trim().min(1) });
 const GitHubApp = z.strictObject({ clientId: z.string().trim().min(1), slug: z.string().trim().min(1).optional() });
 
 const ConfigFile = z.strictObject({
+  incomingReview: z.object({ repos: z.array(z.string().regex(/^[\w.-]+\/[\w.-]+$/)), references: z.string().min(1).optional() }).optional(),
   githubApp: GitHubApp.optional(),
   linear: ClientId.optional(),
 });
 
 /** La configuración del core que el usuario escribe a mano (`docs/github-app.md`). */
 export interface CoreConfig {
+  incomingReview?: { repos: string[]; references?: string };
   /** El client_id de la GitHub App; sin él no se puede iniciar el device flow. */
   githubApp?: { clientId: string; slug?: string };
   /** El client_id de la OAuth app de Linear; sin él `connections` usa el que trae incluido. */
@@ -40,6 +42,7 @@ export function readCoreConfig(dataDir: string, env: Record<string, string | und
   const slug = env[GITHUB_APP_SLUG_ENV]?.trim() || config.githubApp?.slug;
   const linear = env[LINEAR_CLIENT_ID_ENV]?.trim() || config.linear?.clientId;
   return {
+    ...(config.incomingReview && { incomingReview: config.incomingReview }),
     ...(githubApp ? { githubApp: { clientId: githubApp, ...(slug ? { slug } : {}) } } : {}),
     ...(linear ? { linear: { clientId: linear } } : {}),
   };

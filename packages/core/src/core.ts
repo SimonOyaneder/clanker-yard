@@ -1,4 +1,7 @@
 import { join } from "node:path";
+import { createIncomingReviews } from "./github/incoming-reviews";
+import { incomingTemplate } from "./github/incoming-template";
+import type { CoreConfig } from "./daemon/config";
 import { setTimeout as delay } from "node:timers/promises";
 import { Profile, Role, type PrRef, type PrState } from "@clanker/api";
 import { eq } from "drizzle-orm";
@@ -97,6 +100,7 @@ const SETTLE_MS = 5_000;
 const WATCH_SAFETY_PROBE_SEC = 600;
 
 export interface StartCoreOptions extends Pick<StartServerOptions, "coreVersion" | "onShutdown" | "allowedOrigins" | "uiKeyHash" | "dev"> {
+  incomingReview?: CoreConfig["incomingReview"];
   store: Store;
   dataDir: string;
   /** Quien arma los runtimes la comparte: `claude-sdk` pide a `claudeCredentials` su credencial en cada run. */
@@ -237,6 +241,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   );
   // El filtro de learnings pide un modelo barato de Claude: corre en `claude-sdk` salvo que `CORE_RUNTIME` fuerce otro.
   const learnings = createLearnings({ store, runtime: runtimes.forced ?? runtimes.all.find((r) => r.id === CLAUDE_RUNTIME_ID) ?? runtimes.default });
+  const incoming = createIncomingReviews({ store, connections: opts.connections, repos, workspaces, dataDir, artifacts,
+    enabled: opts.incomingReview?.repos ?? [], references: opts.incomingReview?.references,
+    prefix: (name) => packs.packFor({ githubOrg: name.split("/")[0] }).conventions.councilPrefix ?? "" });
+  const stepBrief = createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, learnings, trackers, projects });
   const flows = createFlows({
     store,
     environment: { breakers, runtimeOf: runtimes.idFor },
@@ -245,10 +253,10 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     agents,
     artifacts,
     roles: roleInfoOf(defs),
-    workspaceOf: workspaces.held,
+    workspaceOf: (id) => workspaces.held(id) ?? incoming.workspace(id),
     roundChange,
     handOverWorkspaces: workspaces.handOver,
-    briefFor: createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, learnings, trackers, projects }),
+    briefFor: async (request) => incoming.brief(request) ?? stepBrief(request),
     bootId,
     // Con Watch avisando por `signal`, el sondeo de un wait es solo la red de seguridad (cuesta GraphQL).
     ...(opts.watch && { probeEverySec: WATCH_SAFETY_PROBE_SEC }),
@@ -260,9 +268,14 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   });
   // Antes que nada pueda terminar una corrida o soltar un worktree (también `flows.recover()`, más abajo): una corrida
   // que termina no se lleva el worktree, porque el flujo puede no haberlo soltado (`@done` no lo hace).
+  const reviewsClosing = new Set<Promise<void>>();
   const stopReleasing = store.events.subscribe(
     ({ runId }) => {
-      if (runId) workspaces.releaseHeldBy(runId);
+      if (!runId) return;
+      workspaces.releaseHeldBy(runId);
+      const closing = incoming.cleanup(runId).catch((error: unknown) => reporter.report("incoming.cleanup", error));
+      reviewsClosing.add(closing);
+      void closing.finally(() => reviewsClosing.delete(closing));
     },
     { types: ["run.finished"] },
   );
@@ -287,6 +300,8 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const prCache = createPrCache({ store, repos, packs, prs, onChange: onPrChange });
   const recipes = createRecipes({ store, defs, workspaces, artifacts, slots, fake: opts.recipeResults });
   flows.registerAction(workspaceAcquireAction(workspaces));
+  flows.registerAction(incoming.snapshot);
+  flows.registerAction(incoming.draft);
   flows.registerAction(workspaceAttachAction(workspaces));
   flows.registerAction(workspaceReleaseAction(workspaces));
   flows.registerAction(workspaceDiscardAction(workspaces));
@@ -325,12 +340,13 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     return row?.headSha && row.headChangedAt != null ? { sha: row.headSha, at: row.headChangedAt } : undefined;
   };
   for (const wait of Object.values(prWaits(prs, { headSeen }))) flows.registerWait(wait);
-  installBuiltins({ defs, flows, extra: opts.builtins });
+  const extra = opts.incomingReview?.repos.length ? [...opts.builtins ?? [], incomingTemplate] : opts.builtins;
+  installBuiltins({ defs, flows, extra });
   // Los flujos de un pack citan acciones y waits, así que se cargan con todo registrado. Un pack roto no tumba el arranque.
   for (const error of (await packs.reload()).errors) reporter.report("packs.load", error);
   // Un flujo de fábrica puede no validar contra el rol que un pack guardó antes (uno viejo): con los packs ya
   // recargados se reintenta, y lo que siga sin validar queda como error, sin tumbar el arranque.
-  for (const error of installBuiltins({ defs, flows, extra: opts.builtins })) reporter.report("builtins.install", error);
+  for (const error of installBuiltins({ defs, flows, extra })) reporter.report("builtins.install", error);
 
   // Antes de aceptar trabajo, en este orden: sin procesos de un core anterior que sigan escribiendo,
   // con los worktrees de las corridas vivas todavía suyos, y recién entonces los pasos se reabren.
@@ -393,6 +409,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     cache: prCache,
     remote: gitRemote,
     waitKeys: flows.waitKeys,
+    incoming: opts.incomingReview?.repos.length ? (account, at, attempt, stopping) => incoming.poll(account, at, flows, attempt, stopping) : undefined,
     events: prEvents,
     errors: watchErrors,
     // Con el Scheduler apagado (los tests que lanzan a mano) un cambio del tracker no lanza nada.
@@ -460,6 +477,7 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
       await Promise.race([stopped, delay(SETTLE_MS, undefined, { ref: false })]);
       await server.close();
       stopReleasing();
+      await Promise.all(reviewsClosing);
       stopRereading();
       stopCleaningOnRelease();
       await cleanup.stop();

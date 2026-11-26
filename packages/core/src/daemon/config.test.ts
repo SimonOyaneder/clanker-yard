@@ -19,6 +19,11 @@ function dataDir(configJson?: string): string {
 }
 
 describe("readCoreConfig", () => {
+  test("habilita review entrante solo en los repos configurados", () => {
+    const incomingReview = { repos: ["octocat/api"], references: "~/review-rules" };
+    expect(readCoreConfig(dataDir(JSON.stringify({ incomingReview })), {})).toEqual({ incomingReview });
+    expect(() => readCoreConfig(dataDir('{"incomingReview":{"repos":["is:open"]}}'), {})).toThrow("incomingReview");
+  });
   test("el client_id de la GitHub App sale de config.json", () => {
     const dir = dataDir(JSON.stringify({ githubApp: { clientId: "Iv23liFromFile" } }));
     expect(readCoreConfig(dir, {})).toEqual({ githubApp: { clientId: "Iv23liFromFile" } });

@@ -63,6 +63,7 @@ export interface WatchDeps {
   errors: ErrorReporter;
   /** Los cambios de los trackers (Linear) que despiertan al Scheduler. Sin él Watch solo mira PRs. */
   trackers?: TrackerChanges;
+  incoming?: (account: string, at: number, attempt: (scope: string, work: () => Promise<void>) => Promise<void>, stopping: () => boolean) => Promise<void>;
   now?: () => number;
 }
 
@@ -77,7 +78,7 @@ interface Target {
 
 const keyOf = ({ repo, number }: { repo: string; number: number }) => `${repo}#${number}`;
 
-export function createWatch({ store, connections, repos, cache, remote, waitKeys, events, errors, trackers, now = Date.now }: WatchDeps): Watch {
+export function createWatch({ store, connections, repos, cache, remote, waitKeys, events, errors, trackers, incoming, now = Date.now }: WatchDeps): Watch {
   // El calendario vive en memoria: tras un reinicio todo toca ya, y los ETags guardados hacen que sea casi gratis.
   const lastVisit = new Map<string, number>();
   const lastLsRemote = new Map<string, number>();
@@ -328,6 +329,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
           await attempt(keyOf(t.ref), () => visit(t, at));
         }
       });
+      if (!stopping && incoming) await attempt(`${account} review requests`, () => incoming(account, at, attempt, () => stopping));
     }
 
     // Después de las visitas, que son las que se enteran de un merge; también cae lo que ya llegó mergeado (la importación del loop).
