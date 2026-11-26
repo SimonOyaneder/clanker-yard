@@ -80,6 +80,7 @@ function LaneColumn({
 }) {
   const words = LANE[lane]
   const full = usage.active >= usage.capacity
+  const paused = lane === "maintenance" && project.maintenancePaused
   return (
     <section aria-label={words.title} className="flex flex-col gap-2">
       <SectionTitle
@@ -98,7 +99,9 @@ function LaneColumn({
           {usage.active}/{usage.capacity}
         </Pill>
       </SectionTitle>
-      {holding.length === 0 && waiting.length === 0 ? <p className="rounded-lg border border-dashed px-3 py-4 text-muted-foreground">{words.empty}</p> : null}
+      {paused || (holding.length === 0 && waiting.length === 0) ? (
+        <p className="rounded-lg border border-dashed px-3 py-4 text-muted-foreground">{paused ? "Mantenimiento en pausa para este proyecto. Las corridas en curso siguen y las nuevas esperan en cola." : words.empty}</p>
+      ) : null}
       {holding.map((run) => {
         const lender = lenderOf(run)
         return <SlotCard key={run.id} run={run} subject={subjectOf(run)} lentBy={lender && subjectOf(lender)} project={project} />

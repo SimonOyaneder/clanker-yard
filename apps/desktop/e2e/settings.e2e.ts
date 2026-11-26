@@ -146,3 +146,19 @@ test("el mapeo de estados de un proyecto de Linear se ajusta por estado", async 
   }
   await hideToasts.evaluate((style: Element) => style.remove());
 });
+
+test("el máximo de pisos se guarda desde Apilado y gasto", async ({ window: page, home }) => {
+  const client = coreClient(home);
+  const project = (await client.projects.list()).find((p) => p.slug === "ajustes")!;
+  await sidebar(page).getByRole("button", { name: /Ajustes demo/ }).click();
+  await page.keyboard.press("Meta+Shift+3");
+  const field = page.getByLabel("Máximo de pisos sobre el PR base");
+  await field.fill("2");
+  await page.getByRole("button", { name: /Guardar cambios/ }).click();
+  await expect.poll(async () => (await client.projects.get({ id: project.id })).maxStackDepth).toBe(2);
+  await section(page, "Apilado y gasto").evaluate((el) => el.scrollIntoView({ block: "start" }));
+  for (const theme of ["light", "dark"] as const) {
+    await setTheme(page, theme);
+    await snap(page, "ajustes-pisos", theme);
+  }
+});

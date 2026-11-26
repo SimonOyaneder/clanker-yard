@@ -41,7 +41,8 @@ export function activeRuns(db: Store["db"], lane: RunRow["lane"], projectId?: Pr
  */
 export function hasRoom(db: Store["db"], capacity: LaneCapacity, run: Pick<RunRow, "lane" | "projectId">): boolean {
   if (activeRuns(db, run.lane) >= capacity[run.lane]) return false;
-  if (run.lane !== "dev" || run.projectId === null) return true;
-  const project = db.select({ parallel: projects.parallel }).from(projects).where(eq(projects.id, run.projectId)).get();
+  if (run.projectId === null) return true;
+  const project = db.select({ parallel: projects.parallel, maintenancePaused: projects.maintenancePaused }).from(projects).where(eq(projects.id, run.projectId)).get();
+  if (run.lane === "maintenance") return !project?.maintenancePaused;
   return project === undefined || activeRuns(db, "dev", run.projectId) < project.parallel;
 }

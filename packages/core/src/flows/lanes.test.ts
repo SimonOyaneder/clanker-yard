@@ -1,4 +1,4 @@
-import type { RunId, SubjectRef } from "@clanker/api";
+import { NewProject, type RunId, type SubjectRef } from "@clanker/api";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createProjects } from "../projects/projects";
 import { harness as createHarness } from "../testing/flows-harness";
@@ -51,12 +51,13 @@ function setup(initial: LaneCapacity) {
     },
     "ask",
   );
-  const project = createProjects({ store: h.store, defs: h.defs }).create({ slug: "demo", name: "Demo", tracker: "local", parallel: 1, repos: [], queueFilter: {}, conventions: {}, stackOn: "ci_green", stackMode: "remote", statusMapping: {}, flowParams: {}, maxCostUsd: null }, "cli");
+  const projects = createProjects({ store: h.store, defs: h.defs });
+  const project = projects.create(NewProject.parse({ slug: "demo", name: "Demo", tracker: "local", parallel: 1 }), "cli");
   const startDev = (flowId: string, n: number) => h.flows.start(flowId, issue(n), {}, { profile: "default", projectId: project.id });
   const status = (id: RunId) => h.flows.getRun(id).status;
   const requeued = (id: RunId) => h.store.events.since(0, { runId: id, types: ["run.requeued"] });
   const decisionOf = (id: RunId) => h.decisions.list({ runId: id, status: ["pending"] })[0]!;
-  return { ...h, capacity, work, project, startDev, status, requeued, decisionOf };
+  return { ...h, capacity, work, projects, project, startDev, status, requeued, decisionOf };
 }
 
 describe("cupos por carril", () => {
@@ -89,6 +90,29 @@ describe("cupos por carril", () => {
     h.work.release(second);
     await h.finished(second);
     expect(h.status(second)).toBe("done");
+  });
+
+  test("pausar mantenimiento solo detiene la admisión en ese proyecto; al reanudar sigue su cola aunque dev esté pausado", async () => {
+    const h = setup({ dev: 1, maintenance: 2 });
+    const projectId = h.project.id;
+    const other = h.projects.create(NewProject.parse({ slug: "otro", name: "Otro", tracker: "local" }), "ui");
+    const active = h.flows.start("rebase", pr(1), {}, { projectId });
+    await until(() => expect(h.work.started()).toContain(active));
+    h.projects.update(projectId, { maintenancePaused: true }, "ui");
+    const pending = h.flows.start("rebase", pr(2), {}, { projectId });
+    const otherRebase = h.flows.start("rebase", pr(3), {}, { projectId: other.id });
+    const dev = h.startDev("dev", 1);
+    expect([active, pending, otherRebase, dev].map(h.status)).toEqual(["running", "queued", "running", "running"]);
+    h.work.release(active);
+    await h.finished(active);
+    h.flows.wake();
+    expect(h.status(pending)).toBe("queued");
+    h.projects.pause(projectId, "ui");
+    expect(h.projects.get(projectId)?.maintenancePaused).toBe(true);
+    h.projects.update(projectId, { maintenancePaused: false }, "ui");
+    h.flows.wake();
+    await until(() => expect(h.work.started()).toContain(pending));
+    expect(h.projects.get(projectId)?.status).toBe("paused");
   });
 
   test("dev respeta el parallel del proyecto y el tope global de la máquina", async () => {

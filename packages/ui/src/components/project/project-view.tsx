@@ -26,7 +26,7 @@ import { useLiveQuery } from "@/hooks/use-live"
 
 const PROJECT_STATUS = {
   active: { label: "activo", tone: tone.green, hint: "Toma issues de su cola y lanza corridas." },
-  paused: { label: "pausado", tone: tone.amber, hint: "No lanza corridas nuevas; las que ya están siguen." },
+  paused: { label: "pausado", tone: tone.amber, hint: "No lanza issues nuevas de la cola de desarrollo. Las corridas en curso siguen." },
   archived: { label: "archivado", tone: tone.neutral, hint: "Fuera de la barra lateral. No lanza corridas." },
 } as const
 
@@ -139,7 +139,7 @@ export function ProjectView({ project, runs, issues, queue, queueError, decision
           { label: "Carril dev", value: `${usage.dev.active}/${usage.dev.capacity}`, sub: `máquina ${usage.dev.machine.active}/${usage.dev.machine.capacity}`, action: <LanesControl lanes={lanes} /> },
           {
             label: "Carril mantenimiento",
-            value: `${usage.maintenance.active}/${usage.maintenance.capacity}`,
+            value: project.maintenancePaused ? "En pausa" : `${usage.maintenance.active}/${usage.maintenance.capacity}`,
             sub: `máquina ${usage.maintenance.machine.active}/${usage.maintenance.machine.capacity}`,
             action: <LanesControl lanes={lanes} />,
           },
@@ -219,7 +219,13 @@ function ProjectActions({ project }: { project: ClankerProject }) {
       <Hint label={pausing ? "Deja de lanzar issues de este proyecto. Lo que ya corre, y los demás proyectos, siguen" : "Vuelve a lanzar las issues de la cola"} keys="⇧⌘Y">
         <Button size="sm" variant={pausing ? "outline" : "default"} onClick={() => (pausing ? commands.pauseProject(project) : commands.resumeProject(project))}>
           {pausing ? <Pause /> : <Play />}
-          {pausing ? "Pausar" : "Reanudar"}
+          {pausing ? "Pausar desarrollo" : "Reanudar desarrollo"}
+        </Button>
+      </Hint>
+      <Hint label={project.maintenancePaused ? "Vuelve a admitir las corridas de mantenimiento de este proyecto" : "Las nuevas corridas de mantenimiento de este proyecto esperan en cola. Las que ya empezaron siguen"} keys="⇧⌘U">
+        <Button size="sm" variant={project.maintenancePaused ? "default" : "outline"} onClick={() => void actions.toggleMaintenance(project)}>
+          {project.maintenancePaused ? <Play /> : <Pause />}
+          {project.maintenancePaused ? "Reanudar mantenimiento" : "Pausar mantenimiento"}
         </Button>
       </Hint>
       <DropdownMenu>

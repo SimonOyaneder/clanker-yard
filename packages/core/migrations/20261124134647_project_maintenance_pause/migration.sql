@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `maintenance_paused` integer DEFAULT false NOT NULL;

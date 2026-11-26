@@ -24,6 +24,7 @@ export interface AppActions {
   setParallel: (project: ClankerProject, parallel: number) => Promise<void>
   /** Cambia cuántas corridas caben en un carril de la máquina (`from` es la capacidad de antes, para deshacer). */
   setLanes: (lane: Lane, capacity: number, from: number) => Promise<void>
+  toggleMaintenance: (project: ClankerProject) => Promise<void>
   /** Saca la issue de la cola (`skipped`) o la devuelve; el toast permite deshacerlo. */
   skipIssue: (project: ClankerProject, issue: CachedIssue, skipped: boolean) => Promise<void>
   /** La sube al principio de la cola; el toast permite deshacerlo. */

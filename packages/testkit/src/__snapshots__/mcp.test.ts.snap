@@ -857,6 +857,18 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
             },
           ],
         },
+        "maxStackDepth": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
         "name": {
           "minLength": 1,
           "type": "string",
@@ -1155,11 +1167,26 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
           "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
           "type": "string",
         },
+        "maintenancePaused": {
+          "type": "boolean",
+        },
         "maxCostUsd": {
           "anyOf": [
             {
               "exclusiveMinimum": 0,
               "type": "number",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "maxStackDepth": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
             },
             {
               "type": "null",
@@ -1627,6 +1654,10 @@ exports[`tools > lista las tools de lectura, las de escritura y las acciones, co
           },
           "maxItems": 200,
           "type": "array",
+        },
+        "issueId": {
+          "pattern": "^iss_[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string",
         },
         "owned": {
           "type": "boolean",

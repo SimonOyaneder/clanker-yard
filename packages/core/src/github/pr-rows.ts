@@ -69,6 +69,36 @@ export function openOwnedPrsOfIssues(db: Db, issueIds: readonly IssueId[]): PrRo
     .all();
 }
 
+/** Pisos sobre el PR raíz: cada PR local o abierto suma uno al más profundo de sus padres aún abiertos. */
+export function openPrDepths(db: Db, repoIds: RepoId[]): Map<string, number> {
+  const rows = db.select({ id: pullRequests.id, repo: pullRequests.repoId, head: pullRequests.headRef, base: pullRequests.baseRef, parent: prParents.parentId })
+    .from(pullRequests).leftJoin(prParents, eq(prParents.childId, pullRequests.id))
+    .where(and(inArray(pullRequests.repoId, repoIds), inArray(pullRequests.state, ["open", "local"]))).all();
+  const byHead = new Map(rows.map((pr) => [`${pr.repo}:${pr.head}`, pr.id]));
+  const parents = new Map<string, Set<string>>();
+  for (const { id, repo, base, parent } of rows) {
+    const linked = parents.get(id) ?? new Set<string>();
+    if (parent) linked.add(parent);
+    const basePr = byHead.get(`${repo}:${base}`);
+    if (basePr) linked.add(basePr);
+    parents.set(id, linked);
+  }
+  const depths = new Map<string, number>();
+  function depth(id: string): number {
+    const known = depths.get(id);
+    if (known !== undefined) return known;
+    depths.set(id, Infinity); // Un ciclo no admite otro piso.
+    let result = 0;
+    for (const parent of parents.get(id)!) {
+      if (parents.has(parent)) result = Math.max(result, 1 + depth(parent));
+    }
+    depths.set(id, result);
+    return result;
+  }
+  for (const id of parents.keys()) depth(id);
+  return depths;
+}
+
 /** Los PRs abiertos cuyo detalle ya se leyó alguna vez. */
 export function openPrsWithDetail(db: Db): PrRow[] {
   return db

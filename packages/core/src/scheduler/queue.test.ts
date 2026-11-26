@@ -36,6 +36,7 @@ const project = (overrides: Partial<TickDevInput["project"]> = {}): TickDevInput
   id: PROJECT,
   queueFilter: {},
   stackOn: "ci_green",
+  maxStackDepth: null,
   repos: [{ repoId: REPO as ClankerProject["repos"][number]["repoId"], labels: [] }],
   ...overrides,
 });
@@ -58,6 +59,7 @@ const pr = (n: number, extra: Partial<QueuePrFact> = {}): QueuePrFact => ({
   key: `app#${100 + n}`,
   headRef: `cla-${n}`,
   baseRef: "main",
+  depth: 0,
   ci: "green",
   ...extra,
 });

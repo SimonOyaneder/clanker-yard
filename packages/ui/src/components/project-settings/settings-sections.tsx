@@ -474,6 +474,23 @@ export function LimitsSection({ draft, update, problems }: SectionProps) {
           </Select>
         </Field>
         <Field
+          id="max-stack-depth"
+          label="Máximo de pisos sobre el PR base"
+          hint="Con 0 no se apilan PRs. Con 2 caben el PR base y dos PRs más en cadena. Deja el campo vacío para apilar sin límite."
+          error={problems.maxStackDepth}
+        >
+          <Input
+            id="max-stack-depth"
+            value={draft.maxStackDepth}
+            onChange={(e) => update({ maxStackDepth: e.target.value })}
+            inputMode="numeric"
+            placeholder="Sin límite"
+            aria-invalid={!!problems.maxStackDepth}
+            aria-describedby={describedBy("max-stack-depth", true, problems.maxStackDepth)}
+            className="h-8 w-full text-[13px]"
+          />
+        </Field>
+        <Field
           id="parallel"
           label="Corridas a la vez del proyecto"
           hint="Cuántas corridas de este proyecto pueden ir a la vez. No es el carril: el carril es el tope de la máquina entera y se cambia desde Operación."

@@ -61,9 +61,9 @@ test("la corrida estacionada va aparte con su decisión y el breaker abierto dic
 });
 
 test("pausar y reanudar el proyecto con el botón y con ⇧⌘Y", async ({ window: page }) => {
-  await page.getByRole("button", { name: /^Pausar/ }).click();
+  await page.getByRole("button", { name: "Pausar desarrollo" }).click();
   await expect(page.getByText("pausado", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /^Reanudar/ }).click();
+  await page.getByRole("button", { name: "Reanudar desarrollo" }).click();
   await expect(page.getByText("activo", { exact: true })).toBeVisible();
 
   await page.keyboard.press("Meta+Shift+Y");
@@ -120,4 +120,22 @@ test("la capacidad de los carriles de la máquina se cambia desde el popover y d
   await page.getByRole("option", { name: /Cambiar capacidad de carriles/ }).click();
   await page.getByRole("option", { name: new RegExp(`^Bajar carril dev a ${before}`) }).click();
   await expect(stats).toContainText(`máquina 1/${before}`);
+});
+
+test("pausar mantenimiento desde el proyecto conserva su rebase y no pausa los otros proyectos", async ({ window: page }) => {
+  await sidebar(page).getByRole("button", { name: /Boundaries de engines/ }).click();
+  await page.getByRole("button", { name: "Pausar mantenimiento" }).click();
+  await expect(page.getByRole("button", { name: "Reanudar mantenimiento" })).toBeVisible();
+  const maintenance = lane(page, "Carril mantenimiento");
+  await expect(maintenance.getByText(/Mantenimiento en pausa/)).toBeVisible();
+  await expect(maintenance.getByText("rebase-conflicto v1")).toBeVisible();
+  await snapBoth(page, "mantenimiento-pausado");
+  await sidebar(page).getByRole("button", { name: "Demo", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Pausar mantenimiento" })).toBeVisible();
+  await sidebar(page).getByRole("button", { name: /Boundaries de engines/ }).click();
+  await expect(page.getByRole("button", { name: "Pausar desarrollo" })).toBeVisible();
+  await page.getByRole("button", { name: /Buscar o ejecutar/ }).click();
+  await page.getByRole("option", { name: /Reanudar mantenimiento/ }).click();
+  await expect(maintenance.getByText(/Mantenimiento en pausa/)).toHaveCount(0);
+  await expect(maintenance.getByText("1/2", { exact: true })).toBeVisible();
 });

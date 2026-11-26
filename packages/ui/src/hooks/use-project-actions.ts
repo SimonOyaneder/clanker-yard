@@ -12,7 +12,7 @@ import { messageOf } from "@/lib/utils"
 // Las acciones de `AppActions` no devuelven nada: el fallo ya salió en el toast.
 const reversible = async (...args: Parameters<typeof undoable>): Promise<void> => void (await undoable(...args))
 
-export type ProjectActions = Pick<AppActions, "startRun" | "setParallel" | "setLanes" | "skipIssue" | "boostIssue" | "retryBreakers">
+export type ProjectActions = Pick<AppActions, "startRun" | "setParallel" | "setLanes" | "toggleMaintenance" | "skipIssue" | "boostIssue" | "retryBreakers">
 
 /**
  * Lo que una persona le cambia a un proyecto desde la app: lanzar una issue, los cupos y la cola. Lo que se puede
@@ -45,6 +45,10 @@ export function useProjectActions(openRun: (slug: string, runId: RunId) => void)
           () => apply(capacity),
           () => apply(from),
         )
+      },
+      toggleMaintenance: (p) => {
+        const apply = (maintenancePaused: boolean) => appData.updateProject({ id: p.id, maintenancePaused }).then(live.refresh)
+        return reversible(`${p.name}: mantenimiento ${p.maintenancePaused ? "reanudado" : "en pausa"}`, () => apply(!p.maintenancePaused), () => apply(p.maintenancePaused))
       },
       skipIssue: (p, issue, skipped) =>
         reversible(

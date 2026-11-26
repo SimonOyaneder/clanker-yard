@@ -33,6 +33,7 @@ export interface ShellShortcuts {
   run: RunDetail | undefined
   caps: ReturnType<typeof runCaps> | null
   commands: RunCommands
+  toggleMaintenance(project: ClankerProject): Promise<void>
   project: ClankerProject | null
   stepNode: string | null
   closeStep(): void
@@ -137,6 +138,7 @@ export function useShellShortcuts(shortcuts: ShellShortcuts): void {
         else if (e.shiftKey && e.key === "Backspace" && run && caps?.cancel) commands.cancel(run.id)
         else if (e.shiftKey && e.code === "KeyY" && !s.runId && project?.status === "active") commands.pauseProject(project)
         else if (e.shiftKey && e.code === "KeyY" && !s.runId && project?.status === "paused") commands.resumeProject(project)
+        else if (e.shiftKey && e.code === "KeyU" && !s.runId && project && project.status !== "archived" && !e.repeat && !overlayOpen()) void s.toggleMaintenance(project)
         else return
         return true
       },

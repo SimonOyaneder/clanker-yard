@@ -20,6 +20,7 @@ const FIELD_LABEL: Record<string, string> = {
   flowParams: "Parámetros del flujo",
   parallel: "Cupo del carril dev",
   stackOn: "Cuándo apilar",
+  maxStackDepth: "Máximo de pisos sobre el PR base",
   stackMode: "Dónde se abren los PRs apilados",
   maxCostUsd: "Tope de gasto por corrida",
   conventions: "Convenciones",

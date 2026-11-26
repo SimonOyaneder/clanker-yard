@@ -26,7 +26,7 @@ export function createProjectConfigs({ projects, repos, defs }: { projects: Proj
   }
 
   /** Lo que importar puede cambiar, con los repos por nombre (el id no le dice nada a quien lee el diff). */
-  const comparable = (p: Pick<ClankerProject, "defaultFlowId" | "defaultProfileId" | "queueFilter" | "conventions" | "parallel" | "stackOn" | "stackMode" | "statusMapping" | "flowParams" | "maxCostUsd" | "repos">) => ({
+  const comparable = (p: Pick<ClankerProject, "defaultFlowId" | "defaultProfileId" | "queueFilter" | "conventions" | "parallel" | "stackOn" | "stackMode" | "maxStackDepth" | "statusMapping" | "flowParams" | "maxCostUsd" | "repos">) => ({
     defaultFlowId: p.defaultFlowId,
     defaultProfileId: p.defaultProfileId,
     repos: p.repos.map(({ repoId, labels }) => ({ repo: repos.get(repoId)?.name ?? repoId, labels })),
@@ -34,6 +34,7 @@ export function createProjectConfigs({ projects, repos, defs }: { projects: Proj
     conventions: p.conventions,
     parallel: p.parallel,
     stackOn: p.stackOn,
+    maxStackDepth: p.maxStackDepth,
     stackMode: p.stackMode,
     statusMapping: p.statusMapping,
     flowParams: p.flowParams,
@@ -59,6 +60,7 @@ export function createProjectConfigs({ projects, repos, defs }: { projects: Proj
         conventions: project.conventions,
         parallel: project.parallel,
         stackOn: project.stackOn,
+        maxStackDepth: project.maxStackDepth,
         stackMode: project.stackMode,
         statusMapping: project.statusMapping,
         flowParams: project.flowParams,
@@ -98,6 +100,7 @@ export function createProjectConfigs({ projects, repos, defs }: { projects: Proj
         conventions: config.conventions,
         parallel: config.parallel,
         stackOn: config.stackOn,
+        ...(config.maxStackDepth !== undefined && { maxStackDepth: config.maxStackDepth }),
         stackMode: config.stackMode ?? project.stackMode,
         statusMapping: config.statusMapping,
         flowParams: config.flowParams,

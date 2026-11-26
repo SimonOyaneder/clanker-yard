@@ -12,7 +12,8 @@ import type { Tracker } from "../tracker/tracker";
 import { createRepos, type Repos } from "../repos/repos";
 import { createProjectQueue, QueueUnavailableError } from "./project-queue";
 import { seedPr } from "../testing/pull-requests";
-import { runs } from "../store/schema";
+import { pullRequests, runs } from "../store/schema";
+import { eq } from "drizzle-orm";
 
 let store: Store;
 let local: LocalTracker;
@@ -165,6 +166,20 @@ describe("la cola de un proyecto", () => {
       expect(reads).toEqual([{ account: "octocat", repo: "acme/app", number: 12 }]);
     });
 
+    test("con tope 2 cuenta la cadena abierta más larga, aunque el ancestro sea local y no sea bloqueante directo", async () => {
+      const { project, repoA, parentId } = await blockedPair("any_open");
+      projects.update(project.id, { maxStackDepth: 2 }, "ui");
+      const root = seedPr(store, { repoId: repoA, number: 1 });
+      const otherRoot = seedPr(store, { repoId: repoA, number: 2 });
+      const middle = seedPr(store, { repoId: repoA, number: null, headRef: "medio", title: "PR intermedio", state: "local", baseRef: "pr-1" });
+      seedPr(store, { repoId: repoA, number: 3, issueId: parentId, baseRef: "pr-2", parents: [otherRoot, middle] });
+      const queue = queueOf();
+
+      expect(await queue.of(project.id)).toMatchObject([{ state: "waiting", reason: expect.stringContaining("app#3") }]);
+      store.db.update(pullRequests).set({ state: "merged" }).where(eq(pullRequests.id, root)).run();
+      expect(await queue.of(project.id)).toMatchObject([{ state: "ready", base: { kind: "stacked", parent: { branch: "pr-3" } } }]);
+    });
+
     test("ci_green usa el estado que Watch dejó en el caché sin leer GitHub", async () => {
       const { project, repoA, parentId } = await blockedPair("ci_green");
       openPr(parentId, repoA, 12, "cla-1-padre", prState("draft", "green"));
@@ -268,6 +283,7 @@ describe("la cola de un proyecto", () => {
 
     test("un PR de otro repo no es base: depende de repo#n", async () => {
       const { project, repoB, parentId } = await blockedPair("ci_green");
+      projects.update(project.id, { maxStackDepth: 0 }, "ui");
       openPr(parentId, repoB, 7, "cla-1-padre");
       readPr = async () => prState("draft", "red");
 
