@@ -956,7 +956,47 @@ export async function startGitHubSim(options: GitHubSimOptions): Promise<GitHubS
       if (!pr) return graphqlNotFoundAt({ node: null }, ["node"], `Could not resolve to a node with the global id of '${String(variables.id)}'.`);
       return prGraphql(node(pr), { id: pr.nodeId })(request)!;
     }
+    if (queryName === "InboxSearch") return inboxSearch(variables);
     return unsupported(`la query ${queryName ?? "(sin nombre)"}`);
+  }
+
+  /**
+   * `InboxSearch` (`core/src/github/review-inbox.ts`): `search(type: ISSUE)` con los calificadores que usa el inbox de
+   * reviews (`is:pr`, `is:open`, `-author:@me`, `user-review-requested:@me`, `reviewed-by:@me`; `sort:` no cambia nada
+   * aquí) y una sola página. Los `REVIEW_REQUESTED_EVENT` salen de los reviewers pedidos de hoy: el simulador no guarda
+   * la línea de tiempo.
+   */
+  function inboxSearch(variables: Record<string, unknown>): RecordedResponse {
+    const terms = String(variables.q ?? "").split(/\s+/).filter(Boolean);
+    const known = /^(is:pr|is:open|-author:@me|user-review-requested:@me|reviewed-by:@me|sort:.+)$/;
+    const unknown = terms.find((term) => !known.test(term));
+    if (unknown) return unsupported(`el calificador ${unknown} en InboxSearch`);
+    if (variables.account !== account) return unsupported(`InboxSearch con otra cuenta (${String(variables.account)})`);
+    const mine = (review: SimReview) => review.author.login === account;
+    const nodes = prs
+      .filter((p) => !terms.includes("is:open") || p.state === "open")
+      .filter((p) => !terms.includes("-author:@me") || p.author.login !== account)
+      .filter((p) => !terms.includes("user-review-requested:@me") || p.requested.some((r) => r.login === account))
+      .filter((p) => !terms.includes("reviewed-by:@me") || p.reviews.some((r) => mine(r) && r.state !== "PENDING"))
+      .map((p) => ({
+        id: p.nodeId,
+        state: p.merged ? "MERGED" : p.state === "open" ? "OPEN" : "CLOSED",
+        isDraft: p.draft,
+        viewerDidAuthor: p.author.login === account,
+        title: p.title,
+        url: `https://github.com/${repo}/pull/${p.number}`,
+        number: p.number,
+        repository: { nameWithOwner: repo },
+        draft: { totalCount: p.reviews.filter((r) => mine(r) && r.state === "PENDING").length },
+        published: { totalCount: p.reviews.filter((r) => mine(r) && r.state !== "PENDING").length },
+        ...(variables.history === true && {
+          timelineItems: {
+            nodes: p.requested.map((r) => ({ requestedReviewer: { isViewer: r.login === account } })),
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        }),
+      }));
+    return json(200, { data: { search: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } });
   }
 
   // --- el servidor: auth, cuota, ETags ---

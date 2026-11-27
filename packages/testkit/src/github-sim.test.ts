@@ -491,6 +491,33 @@ describe("GraphQL: lo que GitHub contesta", () => {
     expect(reply.body).toMatchObject({ data: { repository: null }, errors: [{ type: "NOT_FOUND", path: ["repository"] }] });
   });
 
+  test("InboxSearch: los PRs de otros que te pidieron revisar o que ya revisaste, con tus reviews contadas", async () => {
+    const requested = sim.openPr({ head: BRANCH, author: "ana" });
+    requested.requestReview("octocat");
+    const reviewed = sim.openPr({ head: BRANCH, author: "bruno", draft: true });
+    reviewed.review("octocat", "APPROVED");
+    sim.openPr({ head: BRANCH });
+    const search = (q: string, history = false) =>
+      graphql("query InboxSearch($q: String!, $account: String!, $history: Boolean!) { search(query: $q, type: ISSUE, first: 100) { nodes { id } } }", {
+        q,
+        account: "octocat",
+        history,
+      });
+
+    const asked = await search("is:pr is:open -author:@me user-review-requested:@me sort:updated-desc", true);
+    const done = await search("is:pr is:open -author:@me reviewed-by:@me sort:updated-desc");
+
+    expect(asked.body.data.search.nodes).toEqual([
+      expect.objectContaining({ number: requested.number, state: "OPEN", viewerDidAuthor: false, draft: { totalCount: 0 }, published: { totalCount: 0 },
+        timelineItems: { nodes: [{ requestedReviewer: { isViewer: true } }], pageInfo: { hasNextPage: false, endCursor: null } } }),
+    ]);
+    expect(done.body.data.search.nodes).toEqual([
+      expect.objectContaining({ number: reviewed.number, isDraft: true, url: `https://github.com/${REPO}/pull/${reviewed.number}`, published: { totalCount: 1 } }),
+    ]);
+    expect(done.body.data.search.nodes[0]).not.toHaveProperty("timelineItems");
+    expect((await search("is:pr involves:@me")).body.errors[0].message).toContain("no sabe responder el calificador involves:@me");
+  });
+
   test("una query que no conoce dice que es del simulador, no inventa datos", async () => {
     const reply = await graphql("query Otra { viewer { login } }");
 
