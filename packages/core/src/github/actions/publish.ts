@@ -85,6 +85,15 @@ export function prPublishAction(deps: PrPublishDeps): ActionDef<typeof PublishAr
     const bareTitle = cleanMessage(plan.pr.title).split("\n")[0]!.trim();
     if (bareTitle === "" && plan.commits.length > 0) return { outcome: "replan", output: { failures: "El plan no trae el título del PR (`pr.title`)." } };
 
+    // Fijar la decisión antes de actualizar la fila: si el core cae después, esta visita nunca
+    // aplica los ids de hunks del plan anterior, ni siquiera cuando HEAD ya calza con baseSha.
+    const moved = await ctx.once("plan-base", () => resetParent(deps, ws, row, args.expectTree !== undefined));
+    if (moved) {
+      workspaces.validate(ws);
+      store.db.update(workspacesTable).set({ baseRef: moved.branch, baseSha: moved.sha, headSha: moved.sha })
+        .where(eq(workspacesTable.id, ws.workspaceId)).run();
+      return { outcome: "replan", output: { failures: `La rama se movió a ${moved.branch}. Usa el hunks.json regenerado contra ${moved.sha.slice(0, 9)}.` } };
+    }
     const applied = await apply.run(args, ctx);
     if (applied.outcome !== "ok") return { outcome: "replan", output: applied.output };
     const { commits, tree } = z.object({ commits: z.array(z.object({ sha: z.string() })), tree: z.string() }).parse(applied.output);
@@ -281,6 +290,23 @@ async function settleBase(deps: PrPublishDeps, runId: RunId, ws: WorkspaceRef, r
     }),
   );
   return { head: tip, baseRef, parents };
+}
+
+/** Solo adopta un reset directo desde la base a la punta conocida de otro PR del repo. Un commit
+ * propio, un HEAD detached o una base combinada no autorizan reinterpretar el diff de la issue. */
+async function resetParent(deps: PrPublishDeps, ws: WorkspaceRef, row: typeof workspacesTable.$inferSelect, replay: boolean) {
+  if (replay || row.remoteSha || row.baseRef.startsWith("clanker/base/")) return null;
+  const git = (...args: string[]) => deps.workspaces.git(ws, ...args);
+  const sha = await git("rev-parse", "HEAD");
+  if (sha === row.baseSha || await tryGit(ws.path, ["symbolic-ref", "HEAD"]) !== `refs/heads/${row.branch}`) return null;
+  const history = (await git("reflog", "show", "-2", "--format=%H %gs", `refs/heads/${row.branch}`)).split("\n");
+  const prefix = `${sha} reset: moving to origin/`;
+  if (!history[0]?.startsWith(prefix) || !history[1]?.startsWith(`${row.baseSha} `)) return null;
+  const branch = history[0].slice(prefix.length);
+  if (branch === row.branch || await tryGit(ws.path, ["rev-parse", "--verify", `refs/remotes/origin/${row.branch}`])) return null;
+  const parent = deps.store.db.select({ id: pullRequests.id }).from(pullRequests)
+    .where(and(eq(pullRequests.repoId, row.repoId), eq(pullRequests.headRef, branch), eq(pullRequests.headSha, sha))).get();
+  return parent ? { branch, sha } : null;
 }
 
 /** La key de la issue de la corrida, o `undefined` si la corrida no es de una issue o su tracker no le da key. */

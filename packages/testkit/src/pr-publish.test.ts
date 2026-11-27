@@ -212,6 +212,34 @@ function openedEvents() {
 }
 
 describe("pr.publish", () => {
+  test("un reset al padre ya mergeado regenera el plan y publica solo el cambio de la hija sobre main", async () => {
+    repo.git("checkout", "-b", "parent");
+    writeFileSync(join(repo.dir, "parent.txt"), "padre\n");
+    repo.git("add", "parent.txt");
+    repo.git("commit", "-m", "feat: parent");
+    repo.git("push", "origin", "parent");
+    const sha = repo.git("rev-parse", "HEAD");
+    repo.git("checkout", "main");
+    repo.git("merge", "--squash", "parent");
+    repo.git("commit", "-m", "parent merged");
+    repo.git("push", "origin", "main");
+    github.openPr({ head: "parent" }).merge({ sha: repo.git("rev-parse", "main") });
+    repo.git("-C", lease.path, "reset", "--mixed", "origin/parent");
+    write("parent.txt", "padre\n");
+    const first = durableCtx();
+    await expect(publish.run(args(), first)).rejects.toThrow("commits.apply parte de la base");
+    seedPr(store, { repoId: "repo_00000000000000000000000001", number: 1, headRef: "parent", headSha: sha, state: "merged" });
+    const retry = durableCtx();
+    for (let i = 0; i < 2; i++) {
+      expect(await publish.run(args(), retry)).toMatchObject({ outcome: "replan" });
+      expect(posts()).toHaveLength(0);
+      expect(workspaces.baseSha(lease)).toBe(sha);
+    }
+    expect(await publish.run(args(), durableCtx())).toMatchObject({ outcome: "ok" });
+    expect(github.pulls().at(-1)?.base.ref).toBe("main");
+    expect(repo.git("diff", "--name-only", "main", remoteSha())).toBe("feature.txt");
+  });
+
   test("commitea, pushea con lease y abre el PR draft con la identidad de la cuenta", async () => {
     const result = await publish.run(args(), durableCtx());
 
