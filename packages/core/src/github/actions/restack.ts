@@ -1,12 +1,12 @@
 import { PrRef, type RepoId } from "@clanker/api";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import * as z from "zod";
 import type { Connections } from "../../connections/connections";
 import { openDecision } from "../../decisions/decisions";
 import { githubUnauthorized } from "../../breakers/breakers";
 import { PermanentActionError, type ActionCtx, type ActionDef } from "../../flows/catalog";
 import { git, GitError, isAncestor, tryGit } from "../../git/git";
-import { combinedBases, prParents, pullRequests } from "../../store/schema";
+import { combinedBases, prParents, pullRequests, watchMarks } from "../../store/schema";
 import type { Store } from "../../store/store";
 import { emitOnce, recordMarks } from "../marks";
 import { AttachError, RebaseError, StaleCombinedBaseError, type BaseConflict, type RestackResult, type Workspaces, type WorkspaceRef } from "../../workspaces/workspaces";
@@ -71,8 +71,9 @@ const MERGEABLE_WAIT_MS = 10_000;
 
 /**
  * `stack.restack { pr }` (`docs/design.html#d-ops`, restack): `pr` es un PR del sistema ya mergeado. Sus
- * hijos (`pr_parents`) quedan sobre la base donde se mergeó, uno por uno y recursivo por sus propios
- * hijos, cada etapa con `ctx.once` para que un reintento retome donde quedó:
+ * hijos (`pr_parents`) quedan sobre la base donde se mergeó, uno por uno, cada etapa con `ctx.once` para que un
+ * reintento retome donde quedó. De ahí para arriba solo se restackean los PRs locales: un PR en GitHub corre su CI
+ * con cada push, así que uno que no queda mirando a esa base espera a que se mergee el suyo (`WAITS_FOR_PARENT`):
  *
  * - Un PR que la cola de merge del pack (`merge.via: "comment"`, como bors) cerró sin mergear cuenta como mergeado en
  *   el commit de la base que ya trae su contenido (`landedCommit`).
@@ -82,8 +83,11 @@ const MERGEABLE_WAIT_MS = 10_000;
  * - Por hijo: `workspaces.attach` (crea el worktree desde la branch remota si no hay) y
  *   `workspaces.restack`: commits propios sin los merges de la base (los de release-bot[bot]), mismo
  *   patch-id, push con lease. Después, el cambio de base del PR si GitHub no lo hizo y, si su cuerpo
- *   nombra la base vieja, una nota no bloqueante ("descripción obsoleta"). Los nietos parten de la
+ *   nombra la base vieja, una nota no bloqueante ("descripción obsoleta"). Los nietos locales parten de la
  *   punta que el hijo tenía antes y de la nueva.
+ * - Los commits propios de un hijo salen de la punta del padre de la que partió (`forkPoint`): la última del padre
+ *   o, si el hijo esperó mientras el padre se restackeaba o reescribía, la base registrada de su worktree o una
+ *   punta vieja del padre (las marcas `pr.base_rewritten`).
  * - Un hijo con base combinada (`combined_bases`, ver `workspaces.restackCombined`) no usa el `from` ni el `onto`
  *   del padre: recalcula la base con los padres que siguen abiertos y el PR pasa a apuntar al primero (o a la
  *   branch por defecto si no queda ninguno). Su conflicto no dispara `pr.conflict`: queda una nota para una persona.
@@ -140,16 +144,16 @@ export function stackRestackAction(deps: StackRestackDeps): ActionDef<typeof Res
  * `stack.restackRewritten { pr, from, to }` (`docs/design.html#d-ops`, restackRewritten): la branch de `pr`
  * (un PR del sistema abierto) se reescribió y su punta pasó de `from` a `to` (el `pr.base_rewritten` de
  * Watch, que ya no espera a que alguien avise). Es `stack.restack` con la punta vieja como padre: los
- * hijos de `pr` se restackean sobre `to` con sus commits propios (los de `from..HEAD`), el mismo
- * patch-id y push con lease, y de ahí en adelante todo igual (nietos, `conflict`, `skipped`,
- * `changedDrafts`, `mergeable`). Sigue colgando de `pr`: su base no cambia, solo su punta. Es también lo que
- * restackea los hijos de un PR que `stack.restack` dejó en conflicto, cuando el flujo de rebase lo resuelve
- * y lo pushea.
+ * hijos locales de `pr` se restackean sobre `to` con sus commits propios (los de `from..HEAD`) y el mismo
+ * patch-id, y de ahí en adelante todo igual (nietos locales, `conflict`, `skipped`). Sigue
+ * colgando de `pr`: su base no cambia, solo su punta. Un hijo en GitHub no se toca (`skipped` con
+ * `WAITS_FOR_PARENT`): se restackea cuando `pr` se mergee, así un cambio en la base no corre el CI de toda la
+ * cadena.
  *
  * Idempotente: un hijo ya sobre `to` (p. ej. porque `stack.restack` lo restackeó en cadena) da `uptodate`.
  * Sin hijos abiertos no toca nada, ni siquiera hace fetch. Lanza si `pr` ya no está abierto (si se mergeó, el
  * restack de sus hijos es de `stack.restack`) o si `from` no está en el repo local (Watch no emite el
- * evento sin él). Mismos outcomes que `stack.restack`; el output no trae `merge`.
+ * evento sin él). Mismos outcomes que `stack.restack`; el output no trae `merge` y `mergeable` va vacío (nada cambió en GitHub).
  */
 export function stackRestackRewrittenAction(deps: StackRestackDeps): ActionDef<typeof RestackRewrittenArgs> {
   return {
@@ -197,6 +201,13 @@ type Found = NonNullable<ReturnType<typeof rowOf>>;
 const NOTHING = { children: [], changedDrafts: [], promotable: [], mergeable: [] };
 
 /**
+ * Por qué no se restackea un PR en GitHub cuyo padre no se mergeó: cada push corre su CI, y en una cadena serían N CI
+ * por cada cambio de la base. Queda sobre la punta vieja de su padre hasta que el padre se mergee y él pase a mirar a
+ * esa base.
+ */
+export const WAITS_FOR_PARENT = "está en GitHub y su base no se mergeó: se restackea cuando se mergee, para no correr su CI de más.";
+
+/**
  * Restackea a los hijos abiertos de `found.row` (y a los suyos) desde `start`. `mergedBranch` es la branch del
  * padre cuando se mergeó (`stack.restack`): los hijos directos cambian de base y dejan de colgar de él; sin ella,
  * la base de los hijos no cambia (`stack.restackRewritten`).
@@ -220,10 +231,14 @@ async function restackChain(
   async function restackChildren(parent: PrRow, start: Start, merged: string | undefined): Promise<void> {
     for (const child of childrenOf(store, parent.id)) {
       // Por el id de la fila: un PR local no tiene número.
-      const stage = await ctx.once(`restack:${child.id}`, () => restackChild(child, start, merged));
+      const stage = await ctx.once(`restack:${child.id}`, () => restackChild(child, parent, start, merged));
       const { report } = stage;
       if (report.status === "restacked" || report.status === "uptodate") {
         const head = report.status === "restacked" ? report.head : undefined;
+        // El push que hizo el restack ya es una reescritura atendida: Watch no la anuncia (sus hijos ya pasaron por aquí).
+        if (report.status === "restacked" && child.state !== "local") {
+          store.tx((tx) => recordMarks(tx, child.id, "pr.base_rewritten", [`${report.previousHead}>${report.head}`], Date.now()));
+        }
         await ctx.once(`retarget:${child.id}`, () => retarget(child, parent, stage.base, head, merged));
         if (child.state === "local" && stage.base === defaultBranch) promotable.push({ prId: child.id, branch: child.headRef, base: stage.base });
       }
@@ -246,11 +261,12 @@ async function restackChain(
    * Un hijo `local` vive solo en la máquina: sin `prs.get` (no hay council ni estado remoto) y con `acquire` en vez de
    * `attach` (que exige la branch en el remoto). `workspaces.restack` mueve una branch sin publicar sin pushear.
    */
-  async function restackChild(child: PrRow, start: Start, merged: string | undefined): Promise<{ report: ChildReport; next?: Start; base: string }> {
+  async function restackChild(child: PrRow, parent: PrRow, start: Start, merged: string | undefined): Promise<{ report: ChildReport; next?: Start; base: string }> {
     const local = child.state === "local";
     const childRef: PrRef | undefined = child.number === null ? undefined : { account: remote.account, repo: remote.repo, number: child.number };
     const base = { prId: child.id, ...(childRef && { pr: childRef }), branch: child.headRef };
     const skipped = (reason: string) => ({ report: { ...base, status: "skipped" as const, reason }, base: start.base });
+    if (!local && merged === undefined) return skipped(WAITS_FOR_PARENT);
 
     const state = local || !childRef ? undefined : await prs.get(childRef);
     if (state?.threads.councilEver) return skipped("tiene threads [clanker-council]: un restack reescribiría su historia y nunca se fuerza.");
@@ -266,7 +282,7 @@ async function restackChain(
       throw error;
     }
     try {
-      const { result, base: toBase, conflict, combinedBranch } = await restackAttempt(lease, child, start, merged);
+      const { result, base: toBase, conflict, combinedBranch } = await restackAttempt(lease, child, parent, start, merged);
       switch (result.outcome) {
         case "restacked":
           return {
@@ -345,9 +361,9 @@ async function restackChain(
    * La base combinada de la issue solo vale si el PR salió de ella. Una fila vieja (la issue se relanzó a mano sobre
    * otra base y el PR cuelga de un solo padre) se retira y el PR se restackea como cualquier PR apilado.
    */
-  async function restackAttempt(lease: WorkspaceRef, child: PrRow, start: Start, merged: string | undefined): Promise<Attempt> {
+  async function restackAttempt(lease: WorkspaceRef, child: PrRow, parent: PrRow, start: Start, merged: string | undefined): Promise<Attempt> {
     const combined = combinedBaseOf(child);
-    if (!combined) return restackPlain(lease, start);
+    if (!combined) return restackPlain(lease, parent, start);
     try {
       return await restackCombined(lease, child, combined, merged);
     } catch (error) {
@@ -360,13 +376,35 @@ async function restackChain(
       .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.issueId, combined.issueId), inArray(pullRequests.state, ["open", "local"]), ne(pullRequests.id, child.id)))
       .all();
     if (others.length === 0) await workspaces.dissolveBase(repoId, combined.branch);
-    return restackPlain(lease, start);
+    return restackPlain(lease, parent, start);
   }
 
-  async function restackPlain(lease: WorkspaceRef, start: Start): Promise<Attempt> {
+  async function restackPlain(lease: WorkspaceRef, parent: PrRow, start: Start): Promise<Attempt> {
     const onto = start.onto ?? (await workspaces.git(lease, "rev-parse", `refs/remotes/origin/${start.base}`));
-    const result = await workspaces.restack(lease, { council: false, onto, from: start.from, base: start.base });
-    return { result, base: start.base, conflict: { from: start.from, onto } };
+    const from = await forkPoint(lease, parent, start.from, onto);
+    const result = await workspaces.restack(lease, { council: false, onto, from, base: start.base });
+    return { result, base: start.base, conflict: { from, onto } };
+  }
+
+  /**
+   * La punta del padre de la que parte el hijo: `from` (la última del padre) si está en su historia. Un PR en GitHub
+   * que esperó a que su padre se mergeara (`WAITS_FOR_PARENT`) sigue sobre una punta anterior, porque el padre se
+   * restackeó o reescribió sin él: la base registrada de su worktree o, sin worktree, la punta vieja más reciente
+   * del padre que anotaron Watch o el restack (`pr.base_rewritten`, `vieja>nueva`). Una que `onto` ya trae no
+   * cuenta: el hijo ya está sobre la base nueva. Si ninguna sirve, `from`.
+   */
+  async function forkPoint(lease: WorkspaceRef, parent: PrRow, from: string, onto: string): Promise<string> {
+    const rewrites = store.db
+      .select({ key: watchMarks.key })
+      .from(watchMarks)
+      .where(and(eq(watchMarks.prId, parent.id), eq(watchMarks.kind, "pr.base_rewritten")))
+      .orderBy(desc(watchMarks.id))
+      .all();
+    if (await isAncestor(lease.path, from, "HEAD")) return from;
+    for (const sha of new Set([workspaces.baseSha(lease), ...rewrites.map(({ key }) => key.split(">")[0]!)])) {
+      if ((await isAncestor(lease.path, sha, "HEAD")) && !(await isAncestor(lease.path, sha, onto))) return sha;
+    }
+    return from;
   }
 
   /**
@@ -430,7 +468,8 @@ async function restackChain(
   }
 
   await restackChildren(parentRow, first, mergedBranch);
-  const mergeable = await ctx.once("mergeable", () => readMergeable(client, { owner, repo: name }, pause));
+  // Sin merge no se pushea nada en GitHub (sus PRs esperan, `WAITS_FOR_PARENT`): su `mergeable` no cambió.
+  const mergeable = mergedBranch === undefined ? [] : await ctx.once("mergeable", () => readMergeable(client, { owner, repo: name }, pause));
   const changedDrafts = children.flatMap((child) =>
     child.status === "restacked" && child.draft && child.pr ? [{ pr: child.pr, branch: child.branch, base: child.base }] : [],
   );

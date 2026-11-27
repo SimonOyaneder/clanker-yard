@@ -76,7 +76,7 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
     // Un PR que ya se cerró no espera: su punta no va a cambiar más y `flush` solo mira los abiertos.
     if (live && from !== undefined && row.headChangedAt !== null && at - row.headChangedAt < DEBOUNCE_MS) return; // `flush` vuelve a mirarlo.
 
-    const facts = factsOf(state);
+    const facts = factsOf(state, repos.config(row.repoId).defaultBranch);
     // Una cola de merge (bors) cierra el PR sin mergearlo: si su contenido ya está en la base, para el stack es un merge.
     // Solo en un repo que el pack mergea con un comando a su cola (`merge.via: "comment"`): sin cola, un PR cerrado es eso.
     let landedChecked = false;
@@ -180,8 +180,12 @@ export function createPrEvents({ store, repos, workspaces, errors, now = Date.no
   };
 }
 
-/** Lo que un PR abierto dice hoy; uno mergeado solo dice que se mergeó. */
-function factsOf(state: PrState): PrEventInput[] {
+/**
+ * Lo que un PR abierto dice hoy; uno mergeado solo dice que se mergeó. Un conflicto solo cuenta contra la branch por
+ * defecto: un PR apilado sobre otro se restackea cuando su base se mergea (`stack.restack`), y rebasearlo antes
+ * correría su CI por cada cambio de la base. Sin marcar, su conflicto sigue pendiente para cuando mire a la branch por defecto.
+ */
+function factsOf(state: PrState, defaultBranch: string): PrEventInput[] {
   if (state.state === "merged") {
     return [{ type: "pr.merged", keys: [state.key], payload: () => ({ sha: state.mergeCommitSha, headRef: state.headRef, baseRef: state.baseRef }) }];
   }
@@ -199,7 +203,7 @@ function factsOf(state: PrState): PrEventInput[] {
   if (ci.state === "green" || ci.state === "red") {
     facts.push({ type: "pr.ci", keys: [`${ci.sha}:${ci.state}`], payload: () => ({ state: ci.state, sha: ci.sha, failing: ci.failing }) });
   }
-  if (state.mergeable === "conflict") {
+  if (state.mergeable === "conflict" && state.baseRef === defaultBranch) {
     facts.push({ type: "pr.conflict", keys: [state.headSha], emitOnFirstRead: true, payload: () => ({ sha: state.headSha, base: state.baseRef }) });
   }
   if (threads.councilOpen.length > 0) {

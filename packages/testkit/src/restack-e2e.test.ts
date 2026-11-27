@@ -68,16 +68,20 @@ async function chain(draft: { second: boolean; third: boolean }) {
   const remoteSha = (branch: string) => repo.git("--git-dir", repo.remoteDir!, "rev-parse", `refs/heads/${branch}`);
   const remoteLog = (range: string) => repo.git("--git-dir", repo.remoteDir!, "log", "--format=%s", range).split("\n").filter(Boolean);
 
-  /** Lo que Watch emite para el PR 1 (`pr.merged` con el squash ya en `main`, o `pr.base_rewritten` tras un amend) y la corrida que arranca. */
-  async function emit(event: "pr.merged" | "pr.base_rewritten") {
+  /**
+   * Lo que Watch emite para el PR `number` (`pr.merged` con el squash ya en `main`, o `pr.base_rewritten` tras un
+   * amend) y la corrida que arranca.
+   */
+  async function emit(event: "pr.merged" | "pr.base_rewritten", number = 1) {
     let payload: Record<string, unknown>;
     if (event === "pr.merged") {
+      git("fetch", "--quiet", "origin");
       git("checkout", "--quiet", "-B", "main", "origin/main");
-      git("merge", "--squash", "--quiet", "origin/cla-1");
-      git("commit", "--quiet", "--message", "feat: cla-1 (#1)");
+      git("merge", "--squash", "--quiet", `origin/cla-${number}`);
+      git("commit", "--quiet", "--message", `feat: cla-${number} (#${number})`);
       git("push", "--quiet", "origin", "main");
-      github.pr(1).merge({ sha: git("rev-parse", "HEAD") });
-      payload = { repo: REPO, number: 1 };
+      github.pr(number).merge({ sha: git("rev-parse", "HEAD") });
+      payload = { repo: REPO, number };
     } else {
       const from = remoteSha("cla-1");
       git("checkout", "--quiet", "cla-1");
@@ -87,10 +91,11 @@ async function chain(draft: { second: boolean; third: boolean }) {
       git("push", "--quiet", "--force", "origin", "cla-1");
       payload = { repo: REPO, number: 1, from, to: remoteSha("cla-1") };
     }
-    store.tx((tx) => tx.emit({ type: event, origin: "watch", projectId: scenario!.project.id, subject: { type: "pr", id: rows[0]! }, payload }));
+    const subject = rows[number - 1]!;
+    store.tx((tx) => tx.emit({ type: event, origin: "watch", projectId: scenario!.project.id, subject: { type: "pr", id: subject }, payload }));
     const started = store.db.$client
-      .prepare("SELECT runs.id FROM runs JOIN defs ON defs.id = runs.flow_def_id WHERE defs.slug = ?")
-      .all(event === "pr.merged" ? "restack" : "restack-rewritten") as { id: string }[];
+      .prepare("SELECT runs.id FROM runs JOIN defs ON defs.id = runs.flow_def_id WHERE defs.slug = ? AND runs.subject_id = ?")
+      .all(event === "pr.merged" ? "restack" : "restack-rewritten", subject) as { id: string }[];
     expect(started).toHaveLength(1);
     return scenario!.finished(started[0]!.id as RunId);
   }
@@ -115,8 +120,9 @@ async function chain(draft: { second: boolean; third: boolean }) {
 }
 
 describe("restack con el core real", () => {
-  test("mergear el PR de abajo restackea la cadena y solo el draft que se pusheó pide /review", async () => {
-    const { emit, feedbackRuns, comments, remoteLog } = await chain({ second: true, third: false });
+  test("mergear el PR de abajo restackea solo al que queda sobre main y solo el draft que se pusheó pide /review", async () => {
+    const { emit, feedbackRuns, comments, remoteLog, remoteSha } = await chain({ second: true, third: false });
+    const third = remoteSha("cla-3");
 
     const run = await emit("pr.merged");
 
@@ -129,12 +135,11 @@ describe("restack con el core real", () => {
       ["feedback[0]", "done"],
     ]);
 
-    // Los dos PRs de arriba quedaron sobre el squash del de abajo, con sus commits propios; el tercero sigue sobre el segundo.
-    expect(remoteLog("main..cla-3")).toEqual(["feat: cla-3", "feat: cla-2"]);
+    // El segundo quedó sobre el squash del de abajo con su commit propio; el tercero no se pushea (su CI no corre).
+    expect(remoteLog("main..cla-2")).toEqual(["feat: cla-2"]);
+    expect(remoteSha("cla-3")).toBe(third);
     const { github } = scenario!;
     expect(github.pulls().map((p) => [p.number, p.base.ref])).toEqual([[1, "main"], [2, "main"], [3, "cla-2"]]);
-
-    // El tercero también se restackeó, pero está listo: no vuelve a pedir review. El segundo pasó por pr-feedback.
     expect(feedbackRuns()).toEqual({
       prs: [2],
       outcomes: [["restack-feedback", "done"], ["pr-feedback", "done"]],
@@ -145,20 +150,26 @@ describe("restack con el core real", () => {
     expect(github.pulls()[1]).toMatchObject({ number: 2, draft: true });
   });
 
-  test("un draft nieto toma su worktree de la branch de su padre y es el único que pide /review", async () => {
-    const { emit, feedbackRuns, comments, remoteLog } = await chain({ second: false, third: true });
+  test("un draft nieto espera a que se mergee su padre: entonces queda sobre main y es el único que pide /review", async () => {
+    const { emit, feedbackRuns, comments, remoteLog, remoteSha } = await chain({ second: false, third: true });
+    const third = remoteSha("cla-3");
 
-    const run = await emit("pr.merged");
+    expect(await emit("pr.merged")).toMatchObject({ status: "done", outcome: "done" });
+    expect(remoteSha("cla-3")).toBe(third);
+    expect(feedbackRuns().prs).toEqual([]);
+
+    const run = await emit("pr.merged", 2);
 
     expect(run).toMatchObject({ status: "done", outcome: "done" });
-    expect(remoteLog("main..cla-3")).toEqual(["feat: cla-3", "feat: cla-2"]);
+    expect(remoteLog("main..cla-3")).toEqual(["feat: cla-3"]);
+    expect(scenario!.github.pulls().map((p) => [p.number, p.base.ref])).toEqual([[1, "main"], [2, "main"], [3, "main"]]);
     expect(feedbackRuns().prs).toEqual([3]);
     expect(comments(2)).toEqual([]);
     expect(comments(3)).toEqual(["/review"]);
-    // El worktree del nieto quedó sobre la punta nueva del padre, sin un rebase detenido.
+    // El worktree del nieto quedó sobre su punta nueva, sin un rebase detenido.
     const { path } = scenario!.store.db.$client.prepare("SELECT path FROM workspaces WHERE branch = 'cla-3'").get() as { path: string };
     expect(scenario!.repo.git("-C", path, "status", "--porcelain")).toBe("");
-    expect(scenario!.repo.git("-C", path, "rev-parse", "HEAD")).toBe(scenario!.repo.git("--git-dir", scenario!.repo.remoteDir!, "rev-parse", "refs/heads/cla-3"));
+    expect(scenario!.repo.git("-C", path, "rev-parse", "HEAD")).toBe(remoteSha("cla-3"));
   });
 
   test("sin drafts que cambien el flujo termina sin ninguna rama de feedback ni agentes", async () => {
@@ -172,7 +183,7 @@ describe("restack con el core real", () => {
       ["promote", "done"],
       ["feedback", "done"],
     ]);
-    expect(remoteLog("main..cla-3")).toEqual(["feat: cla-3", "feat: cla-2"]);
+    expect(remoteLog("main..cla-2")).toEqual(["feat: cla-2"]);
     expect(feedbackRuns()).toEqual({ prs: [], outcomes: [], agentSteps: 0 });
     expect([comments(2), comments(3)]).toEqual([[], []]);
   });
@@ -248,19 +259,17 @@ describe("restack-rewritten con el core real", () => {
     expect(store.events.since(0, { types: ["pr.base_rewritten"] })).toEqual([]);
   });
 
-  test("reescribir la branch del PR de abajo restackea a los de arriba y pide /review solo al draft que se pusheó", async () => {
-    const { emit, feedbackRuns, comments, remoteLog, remoteSha, rows } = await chain({ second: true, third: false });
-    const before = remoteSha("cla-2");
+  test("reescribir la branch del PR de abajo no pushea a los de arriba ni les pide /review", async () => {
+    const { emit, feedbackRuns, comments, remoteSha, rows } = await chain({ second: true, third: false });
+    const before = [remoteSha("cla-2"), remoteSha("cla-3")];
 
     const run = await emit("pr.base_rewritten");
 
     expect(run).toMatchObject({ status: "done", outcome: "done", flow: { slug: "restack-rewritten" } });
-    expect(remoteSha("cla-2")).not.toBe(before);
-    expect(remoteLog("cla-1..cla-3")).toEqual(["feat: cla-3", "feat: cla-2"]);
-    expect(feedbackRuns().prs).toEqual([2]);
-    expect(comments(2)).toEqual(["/review"]);
-    expect(comments(3)).toEqual([]);
-    // La base de los hijos no cambia: siguen colgando del PR reescrito.
+    expect([remoteSha("cla-2"), remoteSha("cla-3")]).toEqual(before);
+    expect(feedbackRuns().prs).toEqual([]);
+    expect([comments(2), comments(3)]).toEqual([[], []]);
+    // Siguen colgando del PR reescrito: se restackean cuando se mergee.
     const parents = scenario!.store.db.$client.prepare("SELECT child_id, parent_id FROM pr_parents ORDER BY child_id").all();
     expect(parents).toHaveLength(2);
     expect(parents).toContainEqual({ child_id: rows[1], parent_id: rows[0] });

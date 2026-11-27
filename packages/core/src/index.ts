@@ -135,7 +135,7 @@ export { prPushFixupsAction } from "./github/actions/push-fixups";
 export { prPushLeaseAction, prRebaseApprovalAction, workspaceRebaseAction } from "./github/actions/rebase-pr";
 export { workspaceCommitAfterRebaseAction, workspaceRebaseAbortAction } from "./workspaces/rebase-actions";
 
-export { stackRestackAction, stackRestackRewrittenAction } from "./github/actions/restack";
+export { stackRestackAction, stackRestackRewrittenAction, WAITS_FOR_PARENT } from "./github/actions/restack";
 
 export {
   ciFailureReportAction,

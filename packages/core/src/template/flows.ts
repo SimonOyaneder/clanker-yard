@@ -888,8 +888,9 @@ export const PROMOTE_LOCAL: FlowDef = {
 };
 
 /**
- * "Restack": se mergeó un PR del sistema (`pr.merged`) y los que iban encima tienen que quedar sobre la base
- * donde se mergeó. Corre en mantenimiento. `stack.restack` rebasea la cadena sin agentes; un hijo que choca no
+ * "Restack": se mergeó un PR del sistema (`pr.merged`) y los que colgaban de él tienen que quedar sobre la base
+ * donde se mergeó. De ahí para arriba solo siguen los PRs locales: los que están en GitHub esperan a que se mergee
+ * el suyo, para no correr el CI de toda la cadena. Corre en mantenimiento. `stack.restack` rebasea sin agentes; un hijo que choca no
  * frena a los demás, anota su `pr.conflict` y lo resuelve `rebase-conflicto`, por lo que el conflicto también
  * sigue a `feedback`: los hijos que sí se restackearon lo necesitan. Los que quedaron en draft piden `/review`
  * otra vez (la regla del clanker-loop); el resto no pasa por ningún agente. Los PRs locales que quedaron sobre la
@@ -919,9 +920,10 @@ export const RESTACK: FlowDef = {
 
 /**
  * "Restack por base reescrita": la branch de un PR del sistema se reescribió (`pr.base_rewritten`, el
- * `from` y el `to` del evento son su punta vieja y la nueva) y sus hijos tienen que seguirla. Corre en
+ * `from` y el `to` del evento son su punta vieja y la nueva) y sus hijos locales tienen que seguirla; los que están
+ * en GitHub no se tocan hasta que se mergee (`WAITS_FOR_PARENT` de `stack.restackRewritten`). Corre en
  * mantenimiento. Un hijo que choca no frena a los demás: `stack.restackRewritten` anota su `pr.conflict` y
- * lo resuelve `rebase-conflicto`, por lo que aquí el conflicto también sigue a `feedback`, igual que en `restack`.
+ * lo resuelve `rebase-conflicto-local`, por lo que aquí el conflicto también sigue a `feedback`, igual que en `restack`.
  */
 export const RESTACK_REWRITTEN: FlowDef = {
   schema: 1,
@@ -1194,8 +1196,9 @@ export const REPUBLISH_PR: FlowDef = {
  * Lo que comparten `chat-aplicar` y `chat-aplicar-local` (`chats/chats.ts`): la propuesta del chat queda sin commitear
  * en el worktree del PR (`chat.applyProposal`), pasa los checks de la receta (rojos, el dev los arregla), sale como
  * `fixup!` de los commits del PR (`pr.pushFixups`, que squashea y pushea con lease, o deja los fixups visibles sin
- * forzar si el PR tuvo council, o en un PR local commitea sin push) y los hijos del PR siguen su punta nueva
- * (`restack-rewritten` como subflujo, que marca la reescritura para que Watch no la anuncie otra vez). Una propuesta
+ * forzar si el PR tuvo council, o en un PR local commitea sin push) y los hijos locales del PR siguen su punta nueva
+ * (`restack-rewritten` como subflujo, que marca la reescritura para que Watch no la anuncie otra vez; los que están en
+ * GitHub esperan a que el PR se mergee). Una propuesta
  * que no calza (`stale`) o choca (`conflict`) termina sin tocar el PR.
  */
 const CHAT_APPLY_PARAMS = {
@@ -1275,7 +1278,7 @@ export const CHAT_APLICAR: FlowDef = {
   schema: 1,
   id: "chat-aplicar",
   name: "Aplicar la propuesta del chat",
-  description: "Aplica al PR lo que propuso su chat y restackea los PRs que cuelgan de él.",
+  description: "Aplica al PR lo que propuso su chat. Los PRs locales que cuelgan de él siguen su punta; los de GitHub, al mergearlo.",
   internal: true,
   trigger: { type: "manual" },
   lane: "maintenance",

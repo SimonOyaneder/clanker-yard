@@ -26,6 +26,7 @@ import {
   landedCommit,
   stackRestackAction,
   stackRestackRewrittenAction,
+  WAITS_FOR_PARENT,
   type ActionCtx,
   type Askpass,
   type Store,
@@ -321,35 +322,45 @@ describe("stack.restack", () => {
     expect(remoteSha("cla-2")).toBe(before);
   });
 
-  test("cadena de 3: cada nieto parte de la punta vieja de su padre y de la nueva", async () => {
-    const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
-    const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
-    const oldChild = remoteSha("cla-2");
-    const squash = squashOnMain("cla-1");
-    github.pr(1).merge({ sha: squash });
+  test.each(["con su worktree", "sin worktree"] as const)(
+    "cadena de 3: el nieto espera a que se mergee su padre y entonces parte de la punta vieja de él (%s)",
+    async (worktree) => {
+      const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+      const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
+      const [oldChild, oldGrandchild] = [remoteSha("cla-2"), remoteSha("cla-3")];
+      github.pr(1).merge({ sha: squashOnMain("cla-1") });
 
-    const result = await run(1);
+      const result = await run(1);
 
-    const output = outputOf(result);
-    expect(output.children.map((c) => [c.pr.number, c.status])).toEqual([
-      [child, "restacked"],
-      [grandchild, "restacked"],
-    ]);
-    expect(output.changedDrafts).toEqual([
-      { pr: ref(child), branch: "cla-2", base: "main" },
-      { pr: ref(grandchild), branch: "cla-3", base: "cla-2" },
-    ]);
-    expect(remoteSha("cla-2")).not.toBe(oldChild);
-    expect(remoteLog(`${squash}..cla-3`)).toBe("feat: cla-3\nfeat: cla-2");
-    expect(remoteLog(`${remoteSha("cla-2")}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${remoteSha("cla-2")}`);
-    // El nieto sigue sobre la branch de su padre, que ahora cuelga de la base.
-    expect(github.pulls().find((p) => p.number === grandchild)?.base.ref).toBe("cla-2");
-    expect(sql(`SELECT child_id, parent_id FROM pr_parents`)).toHaveLength(1);
-    expect(output.mergeable.map((m) => m.number)).toEqual([child, grandchild]);
+      const output = outputOf(result);
+      expect(output.children.map((c) => [c.pr.number, c.status, c.reason])).toEqual([
+        [child, "restacked", undefined],
+        [grandchild, "skipped", WAITS_FOR_PARENT],
+      ]);
+      expect(output.changedDrafts).toEqual([{ pr: ref(child), branch: "cla-2", base: "main" }]);
+      expect(remoteSha("cla-2")).not.toBe(oldChild);
+      // El nieto no se pushea (su CI no corre) y sigue colgando de la branch de su padre.
+      expect(remoteSha("cla-3")).toBe(oldGrandchild);
+      expect(github.pulls().find((p) => p.number === grandchild)?.base.ref).toBe("cla-2");
+      expect(sql(`SELECT child_id, parent_id FROM pr_parents`)).toHaveLength(1);
+      // El push del hijo ya es una reescritura atendida: Watch no relanza un restack por él.
+      const childId = sql<{ id: string }>(`SELECT id FROM pull_requests WHERE number = ${child}`)[0]!.id;
+      expect(sql(`SELECT key FROM watch_marks WHERE pr_id = '${childId}' AND kind = 'pr.base_rewritten'`)).toEqual([{ key: `${oldChild}>${remoteSha("cla-2")}` }]);
 
-    // Una segunda corrida no encuentra hijos del PR mergeado.
-    expect(outputOf(await run(1)).children).toEqual([]);
-  });
+      // Se mergea el hijo: el nieto sale de la punta de él sobre la que quedó, no de la última.
+      if (worktree === "sin worktree") dropWorkspace("cla-3");
+      const squash = squashOnMain("cla-2");
+      github.pr(child).merge({ sha: squash });
+
+      const merged = outputOf(await run(child));
+
+      expect(merged.children).toMatchObject([{ pr: { number: grandchild }, status: "restacked", commits: 1 }]);
+      expect(remoteLog(`${squash}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${squash}`);
+      expect(patchId(remoteSha("cla-3"))).toBe(patchId(oldGrandchild));
+      expect(github.pulls().find((p) => p.number === grandchild)?.base.ref).toBe("main");
+      expect(sql(`SELECT child_id, parent_id FROM pr_parents`)).toEqual([]);
+    },
+  );
 
   test("un hijo con threads [clanker-council] no se fuerza y los demás siguen", async () => {
     const council = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
@@ -732,7 +743,7 @@ describe("stack.restackRewritten", () => {
     restackChild.mockRestore();
   });
 
-  test("padre remoto reescrito con hijo apilado y combinado: ambos siguen la nueva punta y se recalcula la base", async () => {
+  test("padre remoto reescrito con hijo apilado y combinado: ninguno se pushea ni se recalcula la base hasta que se mergee", async () => {
     const plain = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     await openPr("cla-3", "main", { "c.txt": "c1\nother parent\n" });
     const defs = createDefs({ store });
@@ -749,40 +760,31 @@ describe("stack.restackRewritten", () => {
     const child = await openPr("cla-4", branch, { "d.txt": "combined child\n" });
     store.db.$client.prepare("UPDATE pull_requests SET issue_id = ? WHERE number = ?").run(issue.id, child);
     const before = sql<{ head_sha: string }>("SELECT head_sha FROM combined_bases")[0]!.head_sha;
-    const [plainPatch, combinedPatch] = [patchId(remoteSha("cla-2")), patchId(remoteSha("cla-4"))];
+    const [plainHead, combinedHead] = [remoteSha("cla-2"), remoteSha("cla-4")];
     const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
     const parentId = sql<{ id: string }>("SELECT id FROM pull_requests WHERE number = 1")[0]!.id;
+    const writes = () => github.requests.filter((r) => r.method !== "GET" && r.path !== "/graphql").length;
+    const writesBefore = writes();
 
     const result = await restackRewritten.run(restackRewritten.args.parse({ prId: parentId, ...rewritten }), ctx());
 
     expect(result.outcome).toBe("ok");
     expect(outputOf(result).children).toMatchObject([
-      { pr: { number: plain }, status: "restacked", commits: 1 },
-      { pr: { number: child }, status: "restacked", commits: 1 },
+      { pr: { number: plain }, status: "skipped", reason: WAITS_FOR_PARENT },
+      { pr: { number: child }, status: "skipped", reason: WAITS_FOR_PARENT },
     ]);
-    expect(repo.git("rev-parse", "refs/remotes/origin/cla-1")).toBe(rewritten.to);
-    const base = sql<{ head_sha: string; parents: string; status: string }>("SELECT head_sha, parents, status FROM combined_bases")[0]!;
-    expect(base.status).toBe("active");
-    expect(base.head_sha).not.toBe(before);
-    expect(JSON.parse(base.parents)).toEqual([
-      { key: "r1#1", branch: "cla-1", sha: rewritten.to },
-      { key: "r1#3", branch: "cla-3", sha: remoteSha("cla-3") },
-    ]);
-    expect(repo.git("rev-parse", branch)).toBe(base.head_sha);
-    expect(repo.git("merge-base", "--is-ancestor", rewritten.to, base.head_sha)).toBe("");
-    expect(remoteLog(`${rewritten.to}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${rewritten.to}`);
-    expect(remoteLog(`${base.head_sha}..cla-4`, "%s|%P")).toBe(`feat: cla-4|${base.head_sha}`);
-    expect(patchId(remoteSha("cla-2"))).toBe(plainPatch);
-    expect(patchId(remoteSha("cla-4"))).toBe(combinedPatch);
+    expect(outputOf(result).mergeable).toEqual([]);
+    expect([remoteSha("cla-2"), remoteSha("cla-4")]).toEqual([plainHead, combinedHead]);
+    expect(sql<{ head_sha: string; status: string }>("SELECT head_sha, status FROM combined_bases")).toEqual([{ head_sha: before, status: "active" }]);
+    expect(writes()).toBe(writesBefore);
     expect(sql("SELECT * FROM pr_parents")).toHaveLength(3);
     expect(sql(`SELECT key FROM watch_marks WHERE pr_id = '${parentId}' AND kind = 'pr.base_rewritten'`)).toEqual([{ key: `${rewritten.from}>${rewritten.to}` }]);
     expect(store.events.since(0, { types: ["pr.base_rewritten"] })).toEqual([]);
   }, 60_000);
 
-  test("padre que avanza sin reescribirse: el hijo conserva solo sus commits from..HEAD sobre la punta nueva", async () => {
-    await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+  test("padre que avanza sin reescribirse: el hijo local conserva solo sus commits from..HEAD sobre la punta nueva", async () => {
+    await localPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
     const from = remoteSha("cla-1");
-    const before = patchId(remoteSha("cla-2"));
     elsewhere((git, dir) => {
       git("checkout", "--quiet", "cla-1");
       write(dir, { "a.txt": "a1\nparent v2\na3\n" });
@@ -796,8 +798,7 @@ describe("stack.restackRewritten", () => {
 
     expect(result.outcome).toBe("ok");
     expect(outputOf(result).children).toMatchObject([{ branch: "cla-2", status: "restacked", commits: 1 }]);
-    expect(remoteLog(`${to}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${to}`);
-    expect(patchId(remoteSha("cla-2"))).toBe(before);
+    expect(repo.git("log", "--format=%s|%P", `${to}..cla-2`)).toBe(`feat: cla-2|${to}`);
   });
 
   test.each(["closed", "merged"] as const)("padre remoto %s por prId sigue rechazado", async (state) => {
@@ -840,82 +841,51 @@ describe("stack.restackRewritten", () => {
     expect(sql("SELECT * FROM watch_marks WHERE kind = 'pr.base_rewritten'")).toEqual([]);
   });
 
-  test("padre reescrito: el hijo queda sobre la nueva punta con el mismo patch-id y sigue colgando de él", async () => {
+  test("padre reescrito: el hijo en GitHub no se pushea ni cambia de base hasta que se mergee", async () => {
     const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
+    const grandchild = await localPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
     const before = remoteSha("cla-2");
+    const grandchildHead = repo.git("rev-parse", "cla-3");
     const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
-    const patches = () => github.requests.filter((r) => r.method === "PATCH").length;
-    const patchesBefore = patches();
+    const writes = () => github.requests.filter((r) => r.method !== "GET" && r.path !== "/graphql").length;
+    const writesBefore = writes();
 
     const result = await runRewritten(1, rewritten);
 
     expect(result.outcome).toBe("ok");
     const output = outputOf(result);
-    expect(output.children).toMatchObject([{ pr: { number: child }, branch: "cla-2", status: "restacked", commits: 1 }]);
-    expect(output.changedDrafts).toEqual([{ pr: ref(child), branch: "cla-2", base: "cla-1" }]);
-    expect(output.mergeable).toEqual([{ number: 1, mergeable: true }, { number: child, mergeable: true }]);
-    // Un solo commit propio, directo sobre la punta nueva del padre y con el patch-id de antes.
-    expect(remoteLog(`${rewritten.to}..cla-2`, "%s|%P")).toBe(`feat: cla-2|${rewritten.to}`);
-    expect(patchId(remoteSha("cla-2"))).toBe(patchId(before));
-    // Su base no cambia: sigue colgando de la branch del padre.
+    expect(output.children).toEqual([{ prId: expect.any(String), pr: ref(child), branch: "cla-2", status: "skipped", reason: WAITS_FOR_PARENT }]);
+    expect(output.changedDrafts).toEqual([]);
+    expect(output.mergeable).toEqual([]);
+    expect(remoteSha("cla-2")).toBe(before);
     expect(github.pulls().find((p) => p.number === child)?.base.ref).toBe("cla-1");
-    expect(patches()).toBe(patchesBefore);
-    expect(sql(`SELECT * FROM pr_parents`)).toHaveLength(1);
-    expect(sql(`SELECT base_ref, head_sha FROM pull_requests WHERE number = ${child}`)).toEqual([{ base_ref: "cla-1", head_sha: remoteSha("cla-2") }]);
-    expect(sql<{ state: string; remote_sha: string; base_ref: string }>(`SELECT state, remote_sha, base_ref FROM workspaces WHERE branch = 'cla-2'`)).toEqual([
-      { state: "idle", remote_sha: remoteSha("cla-2"), base_ref: "cla-1" },
-    ]);
-  });
-
-  test("cadena de 3: el nieto parte de la punta vieja de su padre y de la nueva", async () => {
-    const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
-    const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
-    const [oldChild, oldGrandchild] = [remoteSha("cla-2"), remoteSha("cla-3")];
-    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
-
-    const output = outputOf(await runRewritten(1, rewritten));
-
-    expect(output.children.map((c) => [c.pr.number, c.status])).toEqual([
-      [child, "restacked"],
-      [grandchild, "restacked"],
-    ]);
-    expect(remoteLog(`${rewritten.to}..cla-3`)).toBe("feat: cla-3\nfeat: cla-2");
-    expect(remoteLog(`${remoteSha("cla-2")}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${remoteSha("cla-2")}`);
-    expect(patchId(remoteSha("cla-2"))).toBe(patchId(oldChild));
-    expect(patchId(remoteSha("cla-3"))).toBe(patchId(oldGrandchild));
-    expect(github.pulls().find((p) => p.number === grandchild)?.base.ref).toBe("cla-2");
+    expect(writes()).toBe(writesBefore);
+    // Su base no se movió: lo que cuelga de él tampoco se toca.
+    expect(repo.git("rev-parse", "cla-3")).toBe(grandchildHead);
     expect(sql(`SELECT * FROM pr_parents`)).toHaveLength(2);
+    expect(sql(`SELECT head_sha FROM pull_requests WHERE id = '${grandchild}'`)).toEqual([{ head_sha: grandchildHead }]);
+    expect(sql<{ remote_sha: string; base_ref: string }>(`SELECT remote_sha, base_ref FROM workspaces WHERE branch = 'cla-2'`)).toEqual([
+      { remote_sha: before, base_ref: "cla-1" },
+    ]);
+    expect(store.events.since(0, { types: ["pr.conflict"] })).toEqual([]);
   });
 
-  test("repetirlo no cambia nada: el hijo ya está sobre la punta nueva", async () => {
-    const child = await openPr("cla-2", "cla-1", { "b.txt": "b1\nchild\n" });
-    const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3\n" });
-    await runRewritten(1, rewritten);
-    const restacked = remoteSha("cla-2");
-
-    const again = await runRewritten(1, rewritten);
-
-    expect(outputOf(again).children).toMatchObject([{ pr: { number: child }, status: "uptodate" }]);
-    expect(outputOf(again).changedDrafts).toEqual([]);
-    expect(remoteSha("cla-2")).toBe(restacked);
-  });
-
-  test("conflicto: la branch del hijo queda como estaba y se emite el evento para el flujo de rebase", async () => {
-    const child = await openPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
-    const before = remoteSha("cla-2");
+  test("conflicto de un hijo local: su branch queda como estaba y se emite el evento para su flujo de rebase", async () => {
+    const child = await localPr("cla-2", "cla-1", { "a.txt": "a1\nparent\nchild\n" });
+    const before = repo.git("rev-parse", "cla-2");
     const rewritten = rewrite("cla-1", { "a.txt": "a1\nparent v2\na3 v2\n" });
 
     const result = await runRewritten(1, rewritten);
 
     expect(result.outcome).toBe("conflict");
-    expect(outputOf(result).children).toMatchObject([{ pr: { number: child }, status: "conflict", files: ["a.txt"] }]);
-    expect(remoteSha("cla-2")).toBe(before);
+    expect(outputOf(result).children).toMatchObject([{ prId: child, status: "conflict", files: ["a.txt"] }]);
+    expect(repo.git("rev-parse", "cla-2")).toBe(before);
     expect(store.events.since(0, { types: ["pr.conflict"] }).map((e) => e.payload)).toEqual([
-      { repo: REPO, number: child, sha: before, base: "cla-1", from: rewritten.from, onto: rewritten.to, files: ["a.txt"] },
+      { repo: REPO, prId: child, local: true, sha: before, base: "cla-1", from: rewritten.from, onto: rewritten.to, files: ["a.txt"] },
     ]);
   });
 
-  test("los hijos de un hijo que quedó en conflicto se restackean cuando alguien lo resuelve y pushea", async () => {
+  test("los hijos de un hijo que quedó en conflicto esperan a que se mergee aunque alguien lo resuelva y pushee", async () => {
     const child = await openPr("cla-2", "cla-1", { "a.txt": "a1\nchild\na3\n" });
     const grandchild = await openPr("cla-3", "cla-2", { "c.txt": "c1\ngrandchild\n" });
     const [oldChild, oldGrandchild] = [remoteSha("cla-2"), remoteSha("cla-3")];
@@ -938,9 +908,8 @@ describe("stack.restackRewritten", () => {
     const result = await runRewritten(child, rebased);
 
     expect(result.outcome).toBe("ok");
-    expect(outputOf(result).children).toMatchObject([{ pr: { number: grandchild }, status: "restacked", commits: 1 }]);
-    expect(remoteLog(`${rebased.to}..cla-3`, "%s|%P")).toBe(`feat: cla-3|${rebased.to}`);
-    expect(patchId(remoteSha("cla-3"))).toBe(patchId(oldGrandchild));
+    expect(outputOf(result).children).toMatchObject([{ pr: { number: grandchild }, status: "skipped", reason: WAITS_FOR_PARENT }]);
+    expect(remoteSha("cla-3")).toBe(oldGrandchild);
     expect(github.pulls().find((p) => p.number === grandchild)?.base.ref).toBe("cla-2");
   });
 

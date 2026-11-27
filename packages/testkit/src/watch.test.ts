@@ -702,6 +702,23 @@ describe("eventos", () => {
     expect(emitted("pr.conflict").map((e) => e.payload.sha)).toEqual([conflicted?.headSha, origin.git("--git-dir", origin.remoteDir!, "rev-parse", "one")]);
   });
 
+  test("un PR apilado sobre otro no anuncia su conflicto hasta que mira a la branch por defecto", async () => {
+    push("one", "feat: one edits a", { "a.txt": "one\n" });
+    push("two", "feat: two edits a", { "a.txt": "two\n" });
+    push("main", "feat: main edits a", { "a.txt": "main\n" });
+    const pr = sim.openPr({ head: "two", base: "one" });
+    await wake();
+    expect(cache.list()[0]?.state).toMatchObject({ baseRef: "one", mergeable: "conflict" });
+    expect(emitted("pr.conflict")).toEqual([]);
+
+    // Se mergeó su base y GitHub lo movió a main: el mismo sha sí sale, para el flujo de rebase.
+    pr.setBase("main");
+    await wake(31 * SECOND);
+    const state = cache.list()[0]?.state;
+    expect(state).toMatchObject({ baseRef: "main", mergeable: "conflict" });
+    expect(emitted("pr.conflict").map((e) => e.payload)).toEqual([{ repo: REPO, number: pr.number, sha: state?.headSha, base: "main" }]);
+  });
+
   test("varios pushes seguidos dan un solo evento, el del sha final", async () => {
     const pr = sim.openPr({ head: "one" });
     await wake();

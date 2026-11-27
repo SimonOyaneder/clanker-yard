@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createClient, type Client, type RepoId, type RunId } from "@clanker/api";
 import { hashUiKey, isolatedUiKey } from "@clanker/api/node";
-import { createConnections, createFileSecrets, createRepos, createWorkspaces, newId, openStore, type Store } from "@clanker/core";
+import { createConnections, createFileSecrets, createRepos, createWorkspaces, newId, openStore, WAITS_FOR_PARENT, type Store } from "@clanker/core";
 import { seedPr } from "@clanker/core/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { tempGitRepo, type TempGitRepo } from "./git";
@@ -142,12 +142,12 @@ async function apply(prId: string, chatId: string, rev: number) {
 }
 
 describe("aplicar la propuesta del chat", () => {
-  test("PR remoto con un hijo apilado: un fixup squasheado con push con lease, y el hijo sobre la punta nueva", async () => {
+  test("PR remoto con un hijo apilado: un fixup squasheado con push con lease, y el hijo espera a que se mergee", async () => {
     commit("cla-1", "main", { "one.txt": "uno\n" });
     commit("cla-2", "cla-1", { "two.txt": "dos\n" });
     const a = remotePr("cla-1", "main");
     const b = remotePr("cla-2", "cla-1", [a]);
-    const before = remoteSha("cla-1");
+    const [before, child] = [remoteSha("cla-1"), remoteSha("cla-2")];
     chatScript(1, { "one.txt": "uno corregido\n" }, "Corrige uno");
     await boot();
     const { chatId, rev } = await propose(a, "corrige uno");
@@ -155,13 +155,13 @@ describe("aplicar la propuesta del chat", () => {
     const { snapshot, run } = await apply(a, chatId, rev);
 
     expect(run).toMatchObject({ status: "done", flow: { slug: "chat-aplicar" }, lane: "maintenance" });
-    expect(snapshot.proposal).toMatchObject({ rev, status: "applied", result: { sha: remoteSha("cla-1"), children: [{ prId: b, status: "restacked", head: remoteSha("cla-2") }] } });
+    expect(snapshot.proposal).toMatchObject({ rev, status: "applied", result: { sha: remoteSha("cla-1"), children: [{ prId: b, status: "skipped", reason: WAITS_FOR_PARENT }] } });
     expect(remoteSha("cla-1")).not.toBe(before);
     expect(remoteLog("main..cla-1")).toEqual(["feat: cla-1"]);
     expect(repo.git("--git-dir", repo.remoteDir!, "show", "cla-1:one.txt")).toBe("uno corregido");
-    expect(remoteLog("main..cla-2")).toEqual(["feat: cla-2", "feat: cla-1"]);
-    expect(repo.git("--git-dir", repo.remoteDir!, "merge-base", "--is-ancestor", "cla-1", "cla-2") === "").toBe(true);
-    expect(snapshot.messages.at(-1)).toMatchObject({ role: "system", text: expect.stringContaining("restackeado") });
+    // El hijo no se pushea (su CI no corre): se restackea cuando se mergee el PR.
+    expect(remoteSha("cla-2")).toBe(child);
+    expect(snapshot.messages.at(-1)).toMatchObject({ role: "system", text: expect.stringContaining("no se restackeó") });
     // El restack marcó la reescritura: Watch no relanza `restack-rewritten` por ella.
     const marks = store.db.$client.prepare("SELECT key FROM watch_marks WHERE pr_id = ? AND kind = 'pr.base_rewritten'").all(a) as { key: string }[];
     expect(marks).toEqual([{ key: `${before}>${remoteSha("cla-1")}` }]);
