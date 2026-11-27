@@ -40,6 +40,7 @@ export interface Procs {
   /**
    * Registra el grupo de procesos de `child` bajo el `boot_id` de este core hasta que termine. `child`
    * debe haberse lanzado con `detached: true`: así su `pid` es también su grupo y matarlo no toca al core.
+   * Al terminar `child`, lo que dejó vivo en su grupo cae con él (`reapGroup`).
    */
   track(child: ChildProcess, meta: { kind: (typeof PROC_KINDS)[number]; stepRunId?: string }): void;
   /**
@@ -60,6 +61,31 @@ export interface ProcsOptions {
   store: Store;
   /** El `boot_id` de este core. */
   bootId: string;
+  /** Cuánto espera `reapGroup` tras SIGTERM antes de SIGKILL (`KILL_GROUP_AFTER_MS`); los tests lo acortan. */
+  killAfterMs?: number;
+}
+
+/**
+ * Lo que un proceso del core dejó vivo en su grupo al terminar: un daemon que lanzó un agente o un hook y que se
+ * quedó en el grupo (`spring server --background` de Rails). Vivo seguiría sirviendo el código de antes de que el
+ * core cambie el worktree (un rebase, un restack) y el siguiente comando que lo use falla por eso. SIGTERM al grupo
+ * y SIGKILL a los `killAfterMs` si sigue alguien. Sin nadie vivo no hace nada; mientras el grupo exista su id no se
+ * reusa, así que no toca a otro programa. Un daemon que se fue a su propio grupo o sesión no se alcanza.
+ */
+function reapGroup(pgid: number, killAfterMs: number): void {
+  try {
+    process.kill(-pgid, "SIGTERM");
+  } catch {
+    // No quedó nadie en el grupo.
+    return;
+  }
+  setTimeout(() => {
+    try {
+      process.kill(-pgid, "SIGKILL");
+    } catch {
+      // Cerraron con el SIGTERM.
+    }
+  }, killAfterMs).unref();
 }
 
 interface Live {
@@ -83,7 +109,7 @@ function signalGroup({ pid, pgid = pid, startedAt }: { pid: number; pgid?: numbe
   }
 }
 
-export function createProcs({ store, bootId }: ProcsOptions): Procs {
+export function createProcs({ store, bootId, killAfterMs = KILL_GROUP_AFTER_MS }: ProcsOptions): Procs {
   const live = new Map<number, Live>();
 
   return {
@@ -100,6 +126,7 @@ export function createProcs({ store, bootId }: ProcsOptions): Procs {
       live.set(pid, { pid, startedAt, closed });
       child.once("close", () => {
         live.delete(pid);
+        reapGroup(pid, killAfterMs);
         // Un callback de evento no lanza: la fila sobrante la limpia el próximo arranque.
         try {
           store.tx((tx) => tx.db.delete(procs).where(and(eq(procs.bootId, bootId), eq(procs.pid, pid))).run());

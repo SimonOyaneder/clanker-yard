@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { procs as procsTable } from "../store/schema";
 import { openStore, type Store } from "../store/store";
 import { createProcs } from "./procs";
@@ -34,7 +34,46 @@ const exited = (child: ChildProcess) =>
 
 const rows = () => store!.db.select().from(procsTable).all();
 
+/** Un pid sigue vivo (`kill -0`). */
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 describe("procs", () => {
+  test("al terminar un proceso, lo que dejó vivo en su grupo cae con él", async () => {
+    store = openStore({ path: ":memory:" });
+    // Como un agente que deja un daemon en segundo plano (`spring server --background`) y termina.
+    const child = spawn("sh", ["-c", "sleep 60 > /dev/null & echo $!"], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+    children.push(child);
+    let out = "";
+    child.stdout!.on("data", (chunk: Buffer) => (out += chunk.toString()));
+    createProcs({ store, bootId: "boot_1", killAfterMs: 100 }).track(child, { kind: "agent" });
+    await new Promise((resolve) => child.once("close", resolve));
+    const daemon = Number(out.trim());
+
+    await vi.waitFor(() => expect(alive(daemon)).toBe(false), { timeout: 5_000 });
+    expect(rows()).toEqual([]);
+  });
+
+  test("al terminar un proceso, un daemon que ignora SIGTERM cae con SIGKILL", async () => {
+    store = openStore({ path: ":memory:" });
+    const child = spawn("sh", ["-c", "sh -c 'trap \"\" TERM; sleep 60' > /dev/null & echo $!"], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+    children.push(child);
+    let out = "";
+    child.stdout!.on("data", (chunk: Buffer) => (out += chunk.toString()));
+    createProcs({ store, bootId: "boot_1", killAfterMs: 100 }).track(child, { kind: "agent" });
+    await new Promise((resolve) => child.once("close", resolve));
+    const daemon = Number(out.trim());
+
+    await vi.waitFor(() => expect(alive(daemon)).toBe(false), { timeout: 5_000 });
+  });
+
+
   test("un core nuevo mata el grupo de procesos que dejó el anterior y borra su fila", async () => {
     store = openStore({ path: ":memory:" });
     const child = sleeper();
