@@ -9,6 +9,8 @@ import { LaneStepper } from "@/components/project/lanes-control"
 import { Field, Section } from "@/components/settings-form/settings-fields"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
+import { useLiveQuery } from "@/hooks/use-live"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { useHost } from "@/host"
@@ -41,6 +43,32 @@ export function LanesSection({ lanes }: { lanes: Lanes }) {
 }
 
 // ───────────────────────── Packs
+
+export function ReviewSettings({ repos }: { repos: Repo[] }) {
+  const data = useAppData()
+  const settings = useLiveQuery("automatic-reviews", () => data.reviewInbox(), { on: ["reviewInbox.refresh"] })
+  const [saving, setSaving] = useState(false)
+  const gitRepos = [...new Map(repos.filter(r => r.remote).map(r => [r.remote, r])).values()]
+  async function change(repo: Repo, enabled: boolean) {
+    setSaving(true)
+    try {
+      await data.setReviewEnabled({ repoId: repo.id, enabled })
+      settings.reload()
+      toast.success(`Reviews automáticas ${enabled ? "activadas" : "desactivadas"} para ${repo.remote}`)
+    } catch (error) {
+      toast.error(messageOf(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <Section id="reviews" title="Reviews automáticas" description="Elige dónde Yard revisa los PRs que te asignan y deja comentarios en borrador. También revisa solicitudes pendientes. Tú decides qué enviar en GitHub.">
+    {settings.error && <p role="alert" className="text-sm text-destructive">{settings.error}</p>}
+    {!gitRepos.length && <p className="text-sm text-muted-foreground">Agrega un repositorio de GitHub en Conexiones para activar sus reviews.</p>}
+    <div className="divide-y">{gitRepos.map(repo => <label key={repo.id} className="flex cursor-pointer items-center justify-between gap-4 py-2 text-sm">
+      {repo.remote}<Switch aria-label={`Reviews automáticas en ${repo.remote}`} disabled={saving || !settings.data} checked={settings.data?.enabledRepos.includes(repo.remote!) ?? false} onCheckedChange={enabled => void change(repo, enabled)} />
+    </label>)}</div>
+  </Section>
+}
 
 const ORIGIN = {
   factory: { label: "Incluido", tone: tone.neutral, hint: "Viene con la app. Para actualizarlo, instala una versión más nueva desde una carpeta." },

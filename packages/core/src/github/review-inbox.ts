@@ -1,7 +1,7 @@
 import type { ReviewInboxRow } from "@clanker/api";
 import { desc, eq } from "drizzle-orm";
 import type { Connections } from "../connections/connections";
-import { incomingReviews, repos, runs } from "../store/schema";
+import { incomingReviews, repos, runs, syncCursors } from "../store/schema";
 import type { Store } from "../store/store";
 
 const fields = `fragment InboxPull on PullRequest {
@@ -35,13 +35,8 @@ interface HistoryPage {
 }
 interface SearchPage { search: { nodes: Pull[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }
 
-/** Reads GitHub on opening/refreshing the inbox. A completed run alone never implies a submitted review. */
-export async function reviewInbox(store: Store, connections: Pick<Connections, "list" | "githubClient">) {
-  const accounts = connections.list().filter((c) => c.provider === "github" && c.status === "active");
-  const rows: ReviewInboxRow[] = [];
-  for (const { account } of accounts) {
-    const client = connections.githubClient(account);
-    const assignments = store.db.select({ repo: repos.remote, number: incomingReviews.number, run: runs.status, outcome: runs.outcome, runId: incomingReviews.runId })
+function localAssignments(store: Store, account: string) {
+    const assignments = store.db.select({ repo: repos.remote, number: incomingReviews.number, dueAt: incomingReviews.dueAt, run: runs.status, outcome: runs.outcome, runId: incomingReviews.runId })
       .from(incomingReviews).innerJoin(repos, eq(repos.id, incomingReviews.repoId)).leftJoin(runs, eq(runs.id, incomingReviews.runId))
       .where(eq(incomingReviews.account, account)).orderBy(desc(incomingReviews.dueAt)).all();
     const local = new Map<string, typeof assignments[number]>();
@@ -49,15 +44,19 @@ export async function reviewInbox(store: Store, connections: Pick<Connections, "
       const key = `https://github.com/${assignment.repo}/pull/${assignment.number}`.toLowerCase();
       if (assignment.repo && !local.has(key)) local.set(key, assignment);
     }
-    const found = new Map<string, ReviewInboxRow>();
+    return local;
+}
+
+type GitHubRow = Omit<ReviewInboxRow, "runId" | "dueAt" | "run" | "scheduled" | "outcome"> & { requested: boolean };
+async function collect(client: ReturnType<Connections["githubClient"]>, account: string, local: ReturnType<typeof localAssignments>) {
+    const found = new Map<string, GitHubRow>();
     function add(pr: Pull, requested: boolean) {
       if (pr.state !== "OPEN" || pr.viewerDidAuthor) return;
       const key = pr.url.toLowerCase();
       if (found.has(key)) return;
-      const assignment = local.get(key);
       found.set(key, { account, repo: pr.repository.nameWithOwner, number: pr.number, title: pr.title, url: pr.url, isDraft: pr.isDraft,
         review: pr.draft.totalCount ? "draft" : requested ? "requested" : pr.published.totalCount ? "published" : "none",
-        scheduled: requested && !!assignment && !assignment.runId, run: assignment?.run ?? null, outcome: assignment?.outcome ?? null });
+        requested });
     }
     for (const qualifier of ["user-review-requested", "reviewed-by"]) {
       let after: string | null = null;
@@ -87,7 +86,42 @@ export async function reviewInbox(store: Store, connections: Pick<Connections, "
       const pulls = await client.graphql<Record<string, Pull | null>>(trackedReviewsQuery(missing.slice(i, i + 50)), { account });
       for (const pr of Object.values(pulls)) if (pr?.repository) add(pr, false);
     }
-    rows.push(...found.values());
+    return [...found.values()];
+}
+
+export function createReviewInbox(store: Store, connections: Pick<Connections, "list" | "githubClient">, enabledRepos: string[] = []) {
+  const inFlight = new Map<string, Promise<void>>();
+  const keyOf = (account: string) => `review-inbox:${account}`;
+  function sync(account: string) {
+    const pending = inFlight.get(account);
+    if (pending) return pending;
+    const work = collect(connections.githubClient(account), account, localAssignments(store, account)).then(rows => {
+      const values = { cursor: JSON.stringify(rows), checkedAt: Date.now() };
+      store.tx(tx => {
+        tx.db.insert(syncCursors).values({ key: keyOf(account), ...values }).onConflictDoUpdate({ target: syncCursors.key, set: values }).run();
+        tx.emit({ type: "reviewInbox.refresh", origin: "core", payload: {} });
+      });
+    }).finally(() => inFlight.delete(account));
+    inFlight.set(account, work);
+    return work;
   }
-  return { connected: accounts.length > 0, rows };
+  async function list(refresh = false) {
+    const accounts = connections.list().filter(c => c.provider === "github" && c.status === "active");
+    if (refresh) await Promise.all(accounts.map(c => sync(c.account)));
+    const rows: ReviewInboxRow[] = [];
+    let checkedAt: number | null = null;
+    for (const { account } of accounts) {
+      const snapshot = store.db.select().from(syncCursors).where(eq(syncCursors.key, keyOf(account))).get();
+      if (!snapshot?.cursor) continue;
+      checkedAt = Math.min(checkedAt ?? Infinity, snapshot.checkedAt);
+      const assignments = localAssignments(store, account);
+      for (const { requested, ...row } of JSON.parse(snapshot.cursor) as GitHubRow[]) {
+        const assignment = assignments.get(row.url.toLowerCase());
+        rows.push({ ...row, scheduled: requested && !!assignment && !assignment.runId, dueAt: assignment?.dueAt ?? null,
+          runId: assignment?.runId ?? null, run: assignment?.run ?? null, outcome: assignment?.outcome ?? null });
+      }
+    }
+    return { connected: accounts.length > 0, rows, checkedAt, enabledRepos };
+  }
+  return { list, sync };
 }

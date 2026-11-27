@@ -51,13 +51,13 @@ const save = () => fireEvent.click(screen.getByRole("button", { name: /Guardar c
 test("cada sección dice en una línea para qué sirve, y el pack se explica sin jerga", async () => {
   await setup()
 
-  for (const name of ["Carriles", "Packs", "Proyectos nuevos", "Avanzado"]) {
+  for (const name of ["Carriles", "Reviews automáticas", "Packs", "Proyectos nuevos", "Avanzado"]) {
     const section = screen.getByRole("region", { name })
     expect(within(section).getByRole("heading", { name }).nextElementSibling?.textContent?.length).toBeGreaterThan(30)
   }
   expect(within(screen.getByRole("region", { name: "Packs" })).getByText(/reglas y convenciones de tu organización: bot de review, CI, estilo de PRs/)).toBeTruthy()
   const nav = screen.getByRole("navigation", { name: "Secciones de Ajustes" })
-  expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Carriles", "Packs", "Proyectos nuevos", "Avanzado"])
+  expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Carriles", "Reviews automáticas", "Packs", "Proyectos nuevos", "Avanzado"])
 })
 
 test("los carriles usan el mismo control que Operación y cambian la capacidad al instante", async () => {

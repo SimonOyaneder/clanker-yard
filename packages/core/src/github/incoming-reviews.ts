@@ -43,7 +43,7 @@ export function createIncomingReviews({ store, connections, repos, workspaces, d
   artifacts: Pick<Artifacts, "put" | "ref" | "get">;
   prefix?: (repo: string) => string;
 }) {
-  const references = enabled.length ? councilReferences(configured) : undefined;
+  const references = councilReferences(configured);
   const byRun = (id: RunId) => store.db.select().from(requests).where(eq(requests.runId, id)).get();
   const dir = (id: RunId) => join(dataDir, "incoming-reviews", id);
 
@@ -57,7 +57,7 @@ export function createIncomingReviews({ store, connections, repos, workspaces, d
       const repoId = repo.id;
       async function observe(number: number) {
         const current = await currentRequest(client, name, number);
-        if (!current || stopping()) return;
+        if (!current || stopping() || !enabled.includes(name)) return;
         const { requestId } = current;
         store.tx((tx) => {
           tx.db.insert(requests).values({ requestId, number, repoId, account, dueAt: at + DELAY, draftId: current.draft }).onConflictDoNothing().run();

@@ -155,7 +155,8 @@ const router = os.router({
     apply: os.chats.apply.handler(() => { throw new Error("no se usa en este test"); }),
   },
   prs: {
-    inbox: os.prs.inbox.handler(() => ({ connected: false, rows: [] })),
+    setReviewEnabled: os.prs.setReviewEnabled.handler(() => null),
+    inbox: os.prs.inbox.handler(() => ({ connected: false, checkedAt: null, enabledRepos: [], rows: [] })),
     get: os.prs.get.handler(() => {
       throw new Error("no se usa en este test");
     }),

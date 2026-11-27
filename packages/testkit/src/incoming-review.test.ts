@@ -1,6 +1,7 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@clanker/api";
+import { hashUiKey, isolatedUiKey } from "@clanker/api/node";
 import { createConnections, createFileSecrets, createRepos, openStore, type Core } from "@clanker/core";
 import { expect, test, vi } from "vitest";
 import { createFakeRuntime } from "./fake-runtime";
@@ -62,7 +63,7 @@ test("dos arranques del core real: Watch retoma la espera y completa la review s
       throw new Error(`Request inesperada: ${String(url)}`);
     } } });
     await connections.connect({ provider: "github", account, scopes: [], token: "demo" }, "core");
-    createRepos({ store }).add({ name: "incoming-test", path: repo.dir, remote });
+    const repoId = createRepos({ store }).add({ name: "incoming-test", path: repo.dir, remote });
     const fixtures = join(home.path, "fixtures");
     mkdirSync(fixtures);
     for (const role of ["incoming-specialist", "incoming-lead"]) {
@@ -70,13 +71,22 @@ test("dos arranques del core real: Watch retoma la espera y completa la review s
       writeFileSync(join(fixtures, `${role}.r0.yaml`), JSON.stringify({ match: { mode: "review" }, events: [], result: { status: "success", structured: result } }));
     }
     for (const area of ["bugs", "patterns", "ops", "lead", "voz"]) writeFileSync(join(fixtures, `${area}.md`), area);
+    const configPath = join(home.path, "config.json");
+    writeFileSync(configPath, JSON.stringify({ incomingReview: { repos: [], references: fixtures }, linear: { clientId: "custom" } }));
+    const config = () => JSON.parse(readFileSync(configPath, "utf8"));
+    const uiKey = isolatedUiKey(home.path);
     const boot = () => startCore({
       store, dataDir: home.path, connections, gitUrl: () => `file://${repo.remoteDir}`, watch: true, scheduler: false,
-      incomingReview: { repos: [remote], references: fixtures }, runtimes: [createFakeRuntime({ fixtures, speed: Infinity })],
+      uiKeyHash: hashUiKey(uiKey), incomingReview: config().incomingReview, runtimes: [createFakeRuntime({ fixtures, speed: Infinity })],
       env: { CORE_RUNTIME: "fake" }, coreVersion: "0.0.0", onShutdown() {},
     });
     vi.useFakeTimers({ toFake: ["Date"] });
     core = await boot();
+    const target = { url: core.server.url, token: core.server.token };
+    await expect(createClient({ ...target, origin: "cli" }).prs.setReviewEnabled({ repoId, enabled: true })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(config().incomingReview.repos).toEqual([]);
+    await createClient({ ...target, origin: "ui", uiKey }).prs.setReviewEnabled({ repoId, enabled: true });
+    expect(config()).toEqual({ incomingReview: { repos: [remote], references: fixtures }, linear: { clientId: "custom" } });
     await vi.waitFor(() => expect(first).toHaveBeenCalled(), { timeout: 10_000 });
     await core.close();
     expect(written).toEqual([]);
@@ -90,10 +100,15 @@ test("dos arranques del core real: Watch retoma la espera y completa la review s
       expect(detail.status, JSON.stringify(detail.steps.map((s) => [s.nodeId, s.status, s.error]))).toBe("done");
     }, { timeout: 12_000 });
     expect(written).toEqual(["comentario pendiente"]);
+    const [row] = (await client.prs.inbox({})).rows;
+    expect((await client.runs.get({ id: row!.runId! })).steps).toEqual(expect.arrayContaining([expect.objectContaining({ nodeId: "draft", status: "done" })]));
+    await createClient({ url: core.server.url, token: core.server.token, origin: "ui", uiKey }).prs.setReviewEnabled({ repoId, enabled: false });
+    expect(config().incomingReview.repos).toEqual([]);
     expect((await client.prs.inbox({})).rows).toMatchObject([{ review: "draft", run: "done" }]);
     reviewState = "published";
-    expect((await client.prs.inbox({})).rows).toMatchObject([{ review: "published", run: "done" }]);
-    for (prState of ["MERGED", "CLOSED"]) expect((await client.prs.inbox({})).rows).toEqual([]);
+    expect((await client.prs.inbox({})).rows).toMatchObject([{ review: "draft", run: "done" }]);
+    expect((await client.prs.inbox({ refresh: true })).rows).toMatchObject([{ review: "published", run: "done" }]);
+    for (prState of ["MERGED", "CLOSED"]) expect((await client.prs.inbox({ refresh: true })).rows).toEqual([]);
     expect(repo.git("branch", "--show-current")).toBe("main");
   } finally {
     await core?.close();

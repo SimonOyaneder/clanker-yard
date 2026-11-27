@@ -7,7 +7,7 @@ export const ReviewInboxRow = z.object({
   isDraft: z.boolean(),
   account: z.string(), repo: z.string(), number: z.number(), title: z.string(), url: z.string(),
   review: z.enum(["requested", "draft", "published", "none"]),
-  scheduled: z.boolean(), run: RunStatus.nullable(), outcome: z.string().nullable(),
+  scheduled: z.boolean(), dueAt: z.number().nullable(), runId: RunId.nullable(), run: RunStatus.nullable(), outcome: z.string().nullable(),
 });
 export type ReviewInboxRow = z.infer<typeof ReviewInboxRow>;
 

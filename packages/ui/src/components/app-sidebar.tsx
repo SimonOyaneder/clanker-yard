@@ -35,6 +35,7 @@ interface Props {
   module: Module
   /** Decisiones pendientes; ámbar si alguna estaciona su corrida. */
   inboxBadge: { count: number; parks: boolean } | null
+  pendingReviews: number
   /** Learnings por revisar: sin número cuando no queda ninguno. */
   learningsBadge: number
   /** Las corridas vivas de todos los proyectos (cualquier estado menos terminadas). */
@@ -98,7 +99,7 @@ const DOT: Record<FooterTone, string> = {
   error: "bg-destructive",
 }
 
-export function AppSidebar({ projects, module, inboxBadge, learningsBadge, liveRuns, selected, connectionsAlert, plan, codexPlan, setup, prsBadge, connected, error, core }: Props) {
+export function AppSidebar({ projects, module, inboxBadge, pendingReviews, learningsBadge, liveRuns, selected, connectionsAlert, plan, codexPlan, setup, prsBadge, connected, error, core }: Props) {
   const actions = useAppActions()
   const go = (to: Module) => () => actions.goModule(to)
   const status = footerStatus(core, { error, connected })
@@ -180,9 +181,10 @@ export function AppSidebar({ projects, module, inboxBadge, learningsBadge, liveR
                 ) : null}
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={module === "reviews"} onClick={go("reviews")} title="Mis reviews · ⇧⌘J" className="h-8">
+                <SidebarMenuButton isActive={module === "reviews"} onClick={go("reviews")} title={`Mis reviews · ⇧⌘J · ${pendingReviews} pendientes`} className="h-8 pr-10">
                   <BookCheck className="size-4" /><span>Mis reviews</span>
                 </SidebarMenuButton>
+                {pendingReviews > 0 && <SidebarMenuBadge className="text-[11px] text-amber-600 dark:text-amber-400">{pendingReviews}</SidebarMenuBadge>}
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>

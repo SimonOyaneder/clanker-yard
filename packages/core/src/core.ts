@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { createIncomingReviews } from "./github/incoming-reviews";
 import { incomingTemplate } from "./github/incoming-template";
+import { writeReviewRepos } from "./daemon/config";
+import { createReviewInbox } from "./github/review-inbox";
 import type { CoreConfig } from "./daemon/config";
 import { setTimeout as delay } from "node:timers/promises";
 import { Profile, Role, type PrRef, type PrState } from "@clanker/api";
@@ -241,8 +243,9 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   );
   // El filtro de learnings pide un modelo barato de Claude: corre en `claude-sdk` salvo que `CORE_RUNTIME` fuerce otro.
   const learnings = createLearnings({ store, runtime: runtimes.forced ?? runtimes.all.find((r) => r.id === CLAUDE_RUNTIME_ID) ?? runtimes.default });
+  const enabledReviews = [...opts.incomingReview?.repos ?? []];
   const incoming = createIncomingReviews({ store, connections: opts.connections, repos, workspaces, dataDir, artifacts,
-    enabled: opts.incomingReview?.repos ?? [], references: opts.incomingReview?.references,
+    enabled: enabledReviews, references: opts.incomingReview?.references,
     prefix: (name) => packs.packFor({ githubOrg: name.split("/")[0] }).conventions.councilPrefix ?? "" });
   const stepBrief = createStepBriefs({ store, workspaces, briefs: createBriefs({ workspaces, artifacts }), artifacts, issues, learnings, trackers, projects });
   const flows = createFlows({
@@ -402,14 +405,16 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
   const stopRepoConfigSync = startRepoConfigSync({ syncer: repoConfigSync, repos, errors: reporter });
   const stopTriggers = startTriggers({ store, defs, projects, repos, flows, errors: watchErrors });
   const mergeReactions = startMergeReactions({ store, repos, packs, prs, connections: opts.connections, errors: watchErrors });
+  const reviewInbox = createReviewInbox(store, opts.connections, enabledReviews);
   const watch = createWatch({
+    syncInbox: reviewInbox.sync,
     store,
     connections: opts.connections,
     repos,
     cache: prCache,
     remote: gitRemote,
     waitKeys: flows.waitKeys,
-    incoming: opts.incomingReview?.repos.length ? (account, at, attempt, stopping) => incoming.poll(account, at, flows, attempt, stopping) : undefined,
+    incoming: (account, at, attempt, stopping) => enabledReviews.length ? incoming.poll(account, at, flows, attempt, stopping) : Promise.resolve(),
     events: prEvents,
     errors: watchErrors,
     // Con el Scheduler apagado (los tests que lanzan a mano) un cambio del tracker no lanza nada.
@@ -438,7 +443,18 @@ export async function startCore(opts: StartCoreOptions): Promise<Core> {
     flows,
     prs,
     prCache,
-    reviewInboxRead: watch.reviewInboxRead,
+    reviewInbox,
+    setReviewEnabled(remote, enabled) {
+      if (enabledReviews.includes(remote) === enabled) return;
+      if (enabled && !enabledReviews.length) {
+        const [error] = installBuiltins({ defs, flows, extra: [incomingTemplate] });
+        if (error) throw error;
+      }
+      const next = enabled ? [...enabledReviews, remote] : enabledReviews.filter(repo => repo !== remote);
+      writeReviewRepos(dataDir, next);
+      enabledReviews.splice(0, enabledReviews.length, ...next);
+      store.tx(tx => tx.emit({ type: "reviewInbox.refresh", origin: "ui", payload: {} }));
+    },
     workspaces,
     artifacts,
     decisions: createDecisions({ store }),

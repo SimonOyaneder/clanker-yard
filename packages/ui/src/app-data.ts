@@ -4,7 +4,6 @@ import type {
   Breaker,
   CachedIssue,
   CachedPr,
-  ReviewInboxRow,
   Client,
   ClankerProject,
   ClaudeMode,
@@ -133,7 +132,8 @@ export interface AppData extends Partial<ChatData> {
   retryBreaker(scope: string): Promise<Breaker | null>
   /** Los PRs abiertos que Watch conoce (los que abrió el sistema y los de tu búsqueda), con su estado ya leído y las señales de su pack. */
   openPrs(): Promise<CachedPr[]>
-  reviewInbox(): Promise<{ connected: boolean; rows: ReviewInboxRow[] }>
+  reviewInbox(refresh?: boolean): ReturnType<Client["prs"]["inbox"]>
+  setReviewEnabled: Client["prs"]["setReviewEnabled"]
   /** Relee cada PR de GitHub y deja el estado en el caché: los cambios llegan después por `events` como `pr.changed`. */
   refreshPrs(refs: PrRef[]): Promise<void>
   /** Marca o desmarca "no mergear nunca". */

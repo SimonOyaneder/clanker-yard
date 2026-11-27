@@ -19,6 +19,7 @@ const TRACKER_PROJECTS = [
 ]
 
 export function createMemoryAppData(now = Date.now()): AppData & ChatData {
+  const enabledReviewRepos = new Set(["octocat/demo"])
   const min = (m: number) => now - m * 60_000
   let nextId = 100
 
@@ -432,8 +433,22 @@ export function createMemoryAppData(now = Date.now()): AppData & ChatData {
     return found
   }
   const projectOf = (projectId: ProjectId) => projects.find((p) => p.id === projectId)
+  const reviewFlow = FlowDef.parse({ schema: 1, id: "incoming-review", name: "Revisar un PR asignado", lane: "maintenance",
+    trigger: { type: "manual" }, params: {}, start: "snapshot", nodes: {
+      snapshot: { type: "action", action: "incoming.snapshot", args: {}, on: { ok: "review" } },
+      review: { type: "agent", role: "incoming-lead", mode: "review", brief: {}, on: { ok: "draft" } },
+      draft: { type: "action", action: "incoming.draft", args: {}, on: { ok: "@done" } },
+    } })
+  const reviewRuns = [19, 24].map(number => {
+    const done = number === 24
+    return run(number, 1, done ? "done" : "running", 16, [
+      step(number * 10, "snapshot", "done", ran(16, 15)),
+      step(number * 10 + 1, "review", done ? "done" : "running", ran(15, done ? 5 : undefined)),
+      ...(done ? [step(number * 10 + 2, "draft", "done", ran(5, 4))] : []),
+    ], { projectId: null, flowDef: reviewFlow, flow: { slug: reviewFlow.id, version: 1 }, lane: "maintenance", workspace: null, subject: { type: "pr", id: `octocat/demo#${number}` } })
+  })
   const detailOf = (runId: string) => {
-    const found = runs.find((r) => r.id === runId)
+    const found = runs.find((r) => r.id === runId) ?? reviewRuns.find(r => r.id === runId)
     if (!found) throw new Error(`No existe la corrida ${runId}`)
     return found
   }
@@ -675,11 +690,19 @@ export function createMemoryAppData(now = Date.now()): AppData & ChatData {
       if (at !== -1) breakers.splice(at, 1)
       return null
     },
-    reviewInbox: async () => ({ connected: true, rows: [
+    setReviewEnabled: async ({ repoId, enabled }) => {
+      const remote = repoRows.find(r => r.repo.id === repoId)?.repo.remote
+      if (!remote) throw new Error("El repositorio no tiene remoto de GitHub.")
+      if (enabled) enabledReviewRepos.add(remote)
+      else enabledReviewRepos.delete(remote)
+      return null
+    },
+    reviewInbox: async () => ({ connected: true, checkedAt: now, enabledRepos: [...enabledReviewRepos], rows: [
       { title: "Validar la fecha de cierre", number: 24, review: "draft" as const, run: "done" as const },
       { title: "Agregar el historial de cambios", number: 19, review: "requested" as const, run: "running" as const },
       { title: "Actualizar los filtros de búsqueda", number: 16, review: "published" as const, run: null },
-    ].map(row => ({ ...row, isDraft: row.number === 19, account: "octocat", repo: "octocat/demo", scheduled: false, outcome: null, url: `https://github.com/octocat/demo/pull/${row.number}` })) }),
+    ].map(row => ({ ...row, isDraft: row.number === 19, account: "octocat", repo: "octocat/demo", scheduled: false, dueAt: null,
+      runId: row.run ? id("run", row.number) : null, outcome: null, url: `https://github.com/octocat/demo/pull/${row.number}` })) }),
     openPrs: async () => prs.map((p) => ({ ...p })),
     refreshPrs: async () => {},
     setPrHold: async ({ ref, hold }) => {

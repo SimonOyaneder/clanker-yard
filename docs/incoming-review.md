@@ -1,16 +1,8 @@
 # Revisar los PRs que te asignan
 
-En el `config.json` del core (macOS: `~/Library/Application Support/Clanker Yard/config.json`), agrega la clave `incomingReview` con los repos registrados donde quieres que corra el council:
+En **Ajustes → Reviews automáticas**, activa el interruptor del repositorio. El cambio se guarda al instante y no requiere reiniciar. Para detener la automatización, apaga el mismo interruptor. **Mis reviews** sigue mostrando tus asignaciones aunque la automatización esté apagada.
 
-```json
-{
-  "incomingReview": {
-    "repos": ["owner/repo"]
-  }
-}
-```
-
-Usa **Salir y detener agentes** y vuelve a abrir la app con la versión nueva. Necesitas una cuenta GitHub conectada con permiso de escritura de pull requests y un runtime para el perfil `incoming-medio` (Claude por defecto). Sin repos configurados no se buscan solicitudes. Para desactivar un repo, sácalo de la lista y reinicia el core.
+Necesitas un repositorio registrado con remoto de GitHub, una cuenta conectada con permiso de escritura de pull requests y un runtime para el perfil `incoming-medio` (Claude por defecto).
 
 - **Cuándo:** Watch busca solicitudes personales de la cuenta conectada, también las que ya estaban abiertas al activar el repo. Espera cinco minutos desde la primera detección sin ocupar un cupo; con sondeo normal la corrida empieza entre cinco y diez minutos después de la solicitud, si hay cupo de mantenimiento. Una solicitud nueva tiene otra corrida; un push conserva la anterior.
 - **Cómo revisa:** el core prepara un checkout detached del head, sin correr la receta. Los especialistas leen el diff y el código; tests y framework solo corren con cambios Ruby. El lead contrasta sus hallazgos con la conversación y las revisiones anteriores. Si está instalada `review-council`, usa sus rúbricas y su voz desde `~/.claude/skills/review-council/references` o `~/.agents/skills/review-council/references`; `incomingReview.references` permite elegir otra carpeta. Sin la skill usa las instrucciones de los roles. El pack puede aportar el lore en `conventions.context` para `incoming-specialist` y la voz para `incoming-lead`.

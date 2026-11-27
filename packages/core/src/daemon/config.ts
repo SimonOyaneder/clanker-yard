@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { messageOf } from "../errors/format";
@@ -67,4 +67,13 @@ function readConfigFile(path: string): z.infer<typeof ConfigFile> {
     throw new Error(`${path} no tiene el formato esperado ({ "githubApp": { "clientId": "..." }, "linear": { "clientId": "..." } }): ${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
+}
+
+/** Reemplaza el archivo completo de forma atómica, conservando los demás ajustes y las referencias del council. */
+export function writeReviewRepos(dataDir: string, repos: string[]) {
+  const path = join(dataDir, "config.json");
+  const config = readConfigFile(path);
+  config.incomingReview = { ...config.incomingReview, repos };
+  writeFileSync(`${path}.new`, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  renameSync(`${path}.new`, path);
 }

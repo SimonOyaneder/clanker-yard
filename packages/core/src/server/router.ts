@@ -2,7 +2,7 @@ import type { PrChats } from "../chats/chats";
 import { API_MAJOR, type AgentOptions, type ClientOrigin, contract, type ProjectId, type RunId, type StepRunId } from "@clanker/api";
 import { ORPCError, implement, withEventMeta } from "@orpc/server";
 import { githubPatForm } from "../github/pat";
-import { reviewInbox } from "../github/review-inbox";
+import { createReviewInbox } from "../github/review-inbox";
 import type { PrCache } from "../github/pr-cache";
 import { createPrCommands} from "../github/pr-commands";
 import { createPrDetails } from "../github/pr-detail";
@@ -43,7 +43,7 @@ import { type Repos } from "../repos/repos";
 import { isMergeOffer } from "../watch/merge-reactions";
 import { eventsAfter } from "./event-stream";
 import { mapApiErrors } from "./api-errors";
-import { requireUiOrigin } from "../errors/domain";
+import { BadRequestError, requireUiOrigin } from "../errors/domain";
 
 /** Lo que cada llamada trae consigo, venga por HTTP o en proceso (`createRouterClient`, MCP). */
 export interface CoreContext {
@@ -83,7 +83,8 @@ export interface RouterDeps {
   prs: Prs;
   /** `prs.list` y `prs.refresh`: el caché del core, que avisa a los waits y a los eventos de Watch cuando un PR cambia. */
   prCache: PrCache;
-  reviewInboxRead?: () => void;
+  reviewInbox?: ReturnType<typeof createReviewInbox>;
+  setReviewEnabled?: (remote: string, enabled: boolean) => void;
   workspaces: Pick<Workspaces, "fetch" | "fetchPr">;
   artifacts: Artifacts;
   decisions: Decisions;
@@ -115,6 +116,7 @@ export function createRouter(deps: RouterDeps) {
   const stepDetails = createStepDetails({ store, logDir: defaultLogDir(deps.dataDir) });
   const transcripts = createTranscripts({ store, home: deps.dataDir });
   const { prs, prCache } = deps;
+  const inbox = deps.reviewInbox ?? createReviewInbox(store, deps.connections);
   const chatsOf = () => {
     if (!deps.chats) throw new ORPCError("NOT_IMPLEMENTED", { message: "Este core no tiene el chat de PRs." });
     return deps.chats;
@@ -299,10 +301,14 @@ export function createRouter(deps: RouterDeps) {
       apply: os.chats.apply.handler(({ input, context }) => chatsOf().apply(input, context.origin)),
     },
     prs: {
-      inbox: os.prs.inbox.handler(() => {
-        deps.reviewInboxRead?.();
-        return reviewInbox(store, deps.connections);
+      setReviewEnabled: os.prs.setReviewEnabled.handler(({ input, context }) => {
+        requireUiOrigin(context.origin, "La revisión automática se configura desde la app.");
+        const remote = repos.get(input.repoId)?.remote;
+        if (!remote || !deps.setReviewEnabled) throw new BadRequestError("Elige un repositorio registrado con remoto de GitHub.");
+        deps.setReviewEnabled(remote, input.enabled);
+        return null;
       }),
+      inbox: os.prs.inbox.handler(({ input }) => inbox.list(input.refresh)),
       get: os.prs.get.handler(({ input }) => prs.get(input)),
       list: os.prs.list.handler(({ input }) => prCache.list(input)),
       refresh: os.prs.refresh.handler(({ input }) => prCache.refresh(input)),

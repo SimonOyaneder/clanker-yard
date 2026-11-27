@@ -128,6 +128,8 @@ function Shell() {
   const { undo, resolve: resolveNow } = resolver
   const inbox = useInbox(decisions, resolver.resolving, decisionId)
   const inboxBadge = inbox.pending.length ? { count: inbox.pending.length, parks: inbox.pending.some(parksRun) } : null
+  const reviews = useLiveQuery("review-inbox", () => appData.reviewInbox(), { on: ["connection.changed", "reviewInbox.refresh", "run.*"] })
+  const pendingReviews = reviews.data?.rows.filter(row => row.review === "requested" || row.review === "draft").length ?? 0
   // Los learnings: lo que espera su plazo de deshacer ya cuenta como aprobado o rechazado, en la lista y en el badge.
   const learningsQuery = useLiveQuery("learnings", () => appData.learnings(), { on: ["learning.*"] })
   const triage = useLearningTriage(learningsQuery.data, learningsQuery.reload)
@@ -298,6 +300,8 @@ function Shell() {
         toast.error(messageOf(e))
         reloadPrs()
       })
+    } else if (module === "reviews") {
+      void appData.reviewInbox(true).then(live.refresh, (e: unknown) => toast.error(messageOf(e)))
     } else {
       live.refresh()
     }
@@ -416,6 +420,7 @@ function Shell() {
           selected={project?.slug ?? null}
           module={module}
           inboxBadge={inboxBadge}
+          pendingReviews={pendingReviews}
           learningsBadge={toReview}
           connectionsAlert={connectionsAlert}
           plan={claudePlan}
@@ -523,7 +528,7 @@ function Shell() {
               {viewedPr ? <PrView key={viewedPr.id} pr={viewedPr} issue={prIssue} onBack={closePr} onControls={setPrControls} /> : <PrsView prs={openPrs} unread={unreadPrs} issueKeys={issueKeys} issueProjects={issueProjects} loaded={prsQuery.data !== undefined && reposQuery.data !== undefined} error={prsQuery.error} registered={reposQuery.data?.map((r) => r.repo) ?? NO_REPOS} notes={notesQuery.data} onOpenConnections={goConnections} onRefresh={refresh} />}
             </main>
           ) : module === "reviews" ? (
-            <main className="min-h-0 flex-1 overflow-y-auto"><ReviewInbox /></main>
+            <main className="min-h-0 flex-1 overflow-y-auto"><ReviewInbox inbox={reviews.data} error={reviews.error} reload={refresh} /></main>
           ) : module === "flows" ? (
             <main className={cn("min-h-0 flex-1 overflow-hidden transition-opacity", stale && "pointer-events-none opacity-50")}>
               <FlowsView projects={projects} />

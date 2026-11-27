@@ -39,8 +39,6 @@ const UNKNOWN_REREADS = 3;
 const SLOW_FACTOR = 2;
 
 export interface Watch {
-  /** Arm one refresh for a recently opened inbox. Only a mounted view will read and rearm it. */
-  reviewInboxRead(): void;
   /** Un despertar: mira lo que ya toca, en serie. Nunca lanza; lo que falla de un PR se anota y el siguiente sigue. */
   tick(): Promise<void>;
   /** Despierta cada `WATCH_TICK_MS`. */
@@ -65,6 +63,7 @@ export interface WatchDeps {
   errors: ErrorReporter;
   /** Los cambios de los trackers (Linear) que despiertan al Scheduler. Sin él Watch solo mira PRs. */
   trackers?: TrackerChanges;
+  syncInbox?: (account: string) => Promise<void>;
   incoming?: (account: string, at: number, attempt: (scope: string, work: () => Promise<void>) => Promise<void>, stopping: () => boolean) => Promise<void>;
   now?: () => number;
 }
@@ -80,7 +79,7 @@ interface Target {
 
 const keyOf = ({ repo, number }: { repo: string; number: number }) => `${repo}#${number}`;
 
-export function createWatch({ store, connections, repos, cache, remote, waitKeys, events, errors, trackers, incoming, now = Date.now }: WatchDeps): Watch {
+export function createWatch({ store, connections, repos, cache, remote, waitKeys, events, errors, trackers, incoming, syncInbox, now = Date.now }: WatchDeps): Watch {
   // El calendario vive en memoria: tras un reinicio todo toca ya, y los ETags guardados hacen que sea casi gratis.
   const lastVisit = new Map<string, number>();
   const lastLsRemote = new Map<string, number>();
@@ -92,7 +91,7 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
   let stopping = false;
-  let inboxReadAt: number | undefined;
+  const lastInbox = new Map<string, number>();
 
   // --- qué mirar ---
 
@@ -336,13 +335,13 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
     }
 
     // Después de las visitas, que son las que se enteran de un merge; también cae lo que ya llegó mergeado (la importación del loop).
-    if (!stopping && inboxReadAt !== undefined && at - inboxReadAt >= SEARCH_EVERY_MS && active.size) {
-      const levels = [...active].map(account => throttle(account).level);
-      const interval = levels.includes("slow") ? SEARCH_EVERY_MS * SLOW_FACTOR : SEARCH_EVERY_MS;
-      if (at - inboxReadAt >= interval && levels.every(level => level === "normal" || level === "slow")) {
-        store.tx(tx => tx.emit({ type: "reviewInbox.refresh", origin: "watch", payload: {} }));
-        inboxReadAt = undefined;
-      }
+    for (const account of active) {
+      const { level } = throttle(account);
+      if (stopping || !syncInbox || level === "exhausted" || level === "waits-only") continue;
+      const interval = SEARCH_EVERY_MS * (level === "slow" ? SLOW_FACTOR : 1);
+      if (at - (lastInbox.get(account) ?? -Infinity) < interval) continue;
+      lastInbox.set(account, at);
+      await attempt(`${account} review inbox`, () => syncInbox(account));
     }
     expireMergedReviewNotes(store);
     await events.flush(at);
@@ -361,7 +360,6 @@ export function createWatch({ store, connections, repos, cache, remote, waitKeys
 
   return {
     tick,
-    reviewInboxRead() { inboxReadAt = now(); },
 
     start() {
       stopping = false;

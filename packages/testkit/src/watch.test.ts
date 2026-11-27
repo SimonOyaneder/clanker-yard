@@ -68,6 +68,7 @@ let askpass: ReturnType<typeof createAskpass>;
 let stopTriggers: () => void;
 /** Los despertares en que Watch preguntó por los cambios de los trackers. */
 let trackerPolls: number[];
+const syncInbox = vi.fn<(account: string) => Promise<void>>().mockResolvedValue(undefined);
 let clock: number;
 
 const ref = (number: number): PrRef => ({ account: ACCOUNT, repo: REPO, number });
@@ -85,6 +86,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "clanker-watch-"));
   clock = Date.UTC(2026, 10, 15);
   trackerPolls = [];
+  syncInbox.mockClear();
   store = openStore({ path: ":memory:" });
   origin = freshRepo();
   sim = await startGitHubSim({ origin, token: TOKEN });
@@ -148,6 +150,7 @@ beforeEach(async () => {
   });
   stopTriggers = startTriggers({ store, defs, projects: { get: () => undefined }, repos, flows, errors });
   watch = createWatch({
+    syncInbox,
     store,
     connections,
     repos,
@@ -190,16 +193,13 @@ const detailReads = (requests: typeof sim.requests, number: number) =>
   requests.filter((r) => r.path === "/graphql" && (r.body as { variables?: { number?: number } }).variables?.number === number).length;
 
 describe("descubrir y detectar", () => {
-  test("pide actualizar la bandeja abierta una vez por lectura, sin sondearla cuando nadie la usa", async () => {
-    const refreshes = () => store.events.since(0, { types: ["reviewInbox.refresh"] }).length;
-    await wake(5 * MINUTE);
-    expect(refreshes()).toBe(0);
-    watch.reviewInboxRead();
+  test("sincroniza la bandeja al partir y cada cinco minutos aunque nadie la abra", async () => {
+    await wake();
+    expect(syncInbox).toHaveBeenCalledWith(ACCOUNT);
     await wake(4 * MINUTE);
-    expect(refreshes()).toBe(0);
+    expect(syncInbox).toHaveBeenCalledTimes(1);
     await wake(MINUTE);
-    await wake(5 * MINUTE);
-    expect(refreshes()).toBe(1);
+    expect(syncInbox).toHaveBeenCalledTimes(2);
   });
   test("la búsqueda de tus PRs los mete al caché con su detalle (solo los tuyos)", async () => {
     sim.openPr({ head: "one" });

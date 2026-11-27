@@ -1,7 +1,7 @@
 import type { DefRecord, Lanes, PackInfo, ProjectDefaults, Repo } from "@clanker/api"
 import { useCallback, useMemo, useState } from "react"
 import { useAppData } from "@/app-data"
-import { AdvancedSection, DefaultsSection, LanesSection, PacksSection } from "@/components/app-settings/app-settings-sections"
+import { AdvancedSection, DefaultsSection, LanesSection, PacksSection, ReviewSettings } from "@/components/app-settings/app-settings-sections"
 import { SaveBar, useSaveShortcut } from "@/components/settings-form/settings-fields"
 import { SettingsNav, type SettingsNavItem } from "@/components/settings-form/settings-nav"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -12,6 +12,7 @@ import { PageLoadError } from "@/components/page-load-error"
 
 const NAV: SettingsNavItem[] = [
   { id: "lanes", label: "Carriles" },
+  { id: "reviews", label: "Reviews automáticas" },
   { id: "packs", label: "Packs" },
   { id: "defaults", label: "Proyectos nuevos" },
   { id: "advanced", label: "Avanzado" },
@@ -96,6 +97,7 @@ function AppSettingsForm({ lanes, packs, repos, defaults, flows, profiles, info,
         <SettingsNav items={NAV} />
         <div className="@container flex max-w-[900px] min-w-0 flex-1 flex-col gap-4">
           <LanesSection lanes={lanes} />
+          <ReviewSettings repos={repos} />
           <PacksSection packs={packs} repos={repos} onChanged={onChanged} />
           <DefaultsSection draft={draft} update={update} problems={problems} flows={flows} profiles={profiles} />
           <AdvancedSection info={info} />

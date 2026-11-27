@@ -89,7 +89,8 @@ export function createCoreAppData(client: CoreClient): AppData {
     },
     breakers: () => client.system.breakers(),
     retryBreaker: (scope) => client.system.retryBreaker({ scope }),
-    reviewInbox: () => client.prs.inbox({}),
+    reviewInbox: (refresh) => client.prs.inbox({ refresh }),
+    setReviewEnabled: input => client.prs.setReviewEnabled(input),
     openPrs: async () => [...await client.prs.list({ state: "open" }), ...await client.prs.list({ state: "local" })],
     refreshPrs: async (refs) => {
       // El core lee de a una request: en serie y sin cortar en el primer fallo, que se reporta al final.

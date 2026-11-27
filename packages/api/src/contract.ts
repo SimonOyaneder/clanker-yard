@@ -521,7 +521,8 @@ const projects = {
 };
 
 const prs = {
-  inbox: base.input(z.object({})).output(z.object({ connected: z.boolean(), rows: z.array(ReviewInboxRow) })),
+  setReviewEnabled: base.input(z.object({ repoId: RepoId, enabled: z.boolean() })).output(z.null()),
+  inbox: base.input(z.object({ refresh: z.boolean().optional() })).output(z.object({ connected: z.boolean(), checkedAt: z.number().nullable(), enabledRepos: z.array(z.string()), rows: z.array(ReviewInboxRow) })),
   /**
    * Lee el PR de GitHub (una query GraphQL de detalle) y lo entrega normalizado con las reglas del pack
    * de la org del repo. `NOT_FOUND` si el repo o el PR no existen o la cuenta no los ve; `BAD_REQUEST`
